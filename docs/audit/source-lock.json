@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 1,
+  "auditPhase": "Phase 0",
+  "auditType": "read-only upstream audit",
+  "recordedAt": "2026-08-31T19:46:09+03:00",
+  "targetRepository": {
+    "path": ".",
+    "workingName": "Or-On Platform",
+    "branchUsedForAuditDocuments": "codex/phase-0-audit",
+    "baseCommit": "924411f805867ef895a575bcc05dcff85ec076cd"
+  },
+  "sources": [
+    {
+      "name": "Or-on",
+      "repositoryUrl": "https://github.com/Abssel-AI/or-on.git",
+      "remote": "origin",
+      "defaultSourceBranch": "master",
+      "currentBranch": "master",
+      "upstreamTrackingRef": "origin/master",
+      "commitSha": "cece174f4d590a1b8a283d539dd66e08cc689aa9",
+      "treeSha": "ae707687530f78f2d5a9d148c06fec88efb45137",
+      "commitDate": "2026-08-06T23:16:51+03:00",
+      "workingTreeStatus": "clean and equal to upstream tracking ref",
+      "license": {
+        "spdx": null,
+        "status": "no repository license file or package license metadata found; treat as proprietary private source",
+        "evidence": [
+          "no top-level LICENSE, LICENCE, COPYING, or NOTICE file",
+          "no license field in the root or workspace pyproject.toml files",
+          "MASTER_PROMPT.md directs the target to treat Or-on as proprietary"
+        ]
+      },
+      "importDate": "2026-08-31",
+      "sourcePath": "../or-on",
+      "intendedTargetPath": "packages/py and services/py, subject to Phase 1 ADRs"
+    },
+    {
+      "name": "WACRM",
+      "repositoryUrl": "https://github.com/ArnasDon/wacrm.git",
+      "remote": "origin",
+      "defaultSourceBranch": "main",
+      "currentBranch": "main",
+      "upstreamTrackingRef": "origin/main",
+      "commitSha": "98b5bd26e8feacacfd4b74ff58411acb8154d212",
+      "treeSha": "dd56c28443b57949685fd852ff94e973a17c692e",
+      "commitDate": "2026-08-31T15:44:03+03:00",
+      "workingTreeStatus": "clean and equal to upstream tracking ref",
+      "license": {
+        "spdx": "MIT",
+        "status": "verified",
+        "copyright": "Copyright (c) 2026 Arnas Donauskas",
+        "evidence": [
+          "LICENSE",
+          "package.json license field",
+          "mcp-server/package.json license field"
+        ]
+      },
+      "importDate": "2026-08-31",
+      "sourcePath": "../wacrm",
+      "intendedTargetPath": "apps/web, services/ts/messaging-worker, and selected packages/ts, subject to Phase 1 ADRs"
+    },
+    {
+      "name": "OpenLive",
+      "repositoryUrl": "https://github.com/katipally/openlive.git",
+      "remote": "origin",
+      "defaultSourceBranch": "main",
+      "currentBranch": "main",
+      "upstreamTrackingRef": "origin/main",
+      "commitSha": "849173cd1c8c17a95d600b17b428c301722bf5df",
+      "treeSha": "d609d193305e3dd9f6a21991d16d28e326e271be",
+      "commitDate": "2026-08-27T02:10:16-04:00",
+      "workingTreeStatus": "clean and equal to upstream tracking ref",
+      "license": {
+        "spdx": "MIT",
+        "status": "verified",
+        "copyright": "Copyright (c) 2026 Yashwanth Reddy Katipally",
+        "evidence": [
+          "LICENSE",
+          "README.md license section"
+        ]
+      },
+      "importDate": "2026-08-31",
+      "sourcePath": "../openlive",
+      "intendedTargetPath": "apps/web Live Lab, optional apps/desktop, services/ts/live-agent, and selected packages/ts, subject to Phase 1 ADRs"
+    }
+  ]
+}
