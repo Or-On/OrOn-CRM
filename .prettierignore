@@ -1,0 +1,8 @@
+.next
+.venv
+coverage
+dist
+node_modules
+pnpm-lock.yaml
+uv.lock
+packages/ts/api-client/src/generated

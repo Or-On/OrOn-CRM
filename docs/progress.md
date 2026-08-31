@@ -8,7 +8,7 @@ Last updated: 2026-08-31 (Asia/Jerusalem)
 - Branch: `codex/phase-1-foundation`
 - Phase 0 baseline: `93eb808e65f8edb1754c1940afe1949e7e18223a`
 - Active task: P1-004 — Repository hierarchy
-- Latest clean commit: `93eb808e65f8edb1754c1940afe1949e7e18223a`
+- Latest clean commit: `b859efb1da0c96f3c8372623246bb969af063751`
 - Provider safety: no real telephone call, WhatsApp message, webhook mutation, or provider provisioning performed
 
 ## Baseline verification
@@ -36,13 +36,13 @@ Status values: `pending`, `active`, `complete`, `blocked`.
 
 | ID | Task | Status | Commit | Verification | Notes / next exact task |
 | --- | --- | --- | --- | --- | --- |
-| P1-001 | Baseline verification | complete | pending Phase 1 docs commit | Clean target baseline; exact upstream SHAs and clean worktrees verified | Baseline recorded above. |
-| P1-002 | Technology baseline discovery | complete | pending Phase 1 docs commit | Official registries/docs; Node/pnpm, Python core, and Python voice/native compatibility gates | Baseline selects Node 24 LTS, pnpm 11, Python 3.14, PostgreSQL 18, patched Next/React, and a documented TypeScript 6 fallback. |
-| P1-003 | Architecture and ADR framework | complete | pending Phase 1 docs commit | Required architecture documents and ADRs 0001–0015 reviewed; relative-link and sequence checks passed | Accepted decisions distinguish implemented controls from deferred direction. |
+| P1-001 | Baseline verification | complete | `b859efb` | Clean target baseline; exact upstream SHAs and clean worktrees verified | Baseline recorded above. |
+| P1-002 | Technology baseline discovery | complete | `b859efb` | Official registries/docs; Node/pnpm, Python core, and Python voice/native compatibility gates | Baseline selects Node 24 LTS, pnpm 11, Python 3.14, PostgreSQL 18, patched Next/React, and a documented TypeScript 6 fallback. |
+| P1-003 | Architecture and ADR framework | complete | `b859efb` | Required architecture documents and ADRs 0001–0015 reviewed; relative-link and sequence checks passed | Accepted decisions distinguish implemented controls from deferred direction. |
 | P1-004 | Repository hierarchy | active | — | Layout/ownership check | Create only directories containing Phase 1 code/configuration or an ownership README. |
-| P1-005 | pnpm/TypeScript workspace | pending | — | Frozen install, build, strict typecheck | — |
-| P1-006 | uv/Python workspace | pending | — | `uv sync`, imports, Ruff, typing, pytest | — |
-| P1-007 | Typed configuration | pending | — | TS/Python validation, redaction, safety-default tests | — |
+| P1-005 | pnpm/TypeScript workspace | active | pending workspace commit | pnpm 11.24 lock/install plus initial strict build/typecheck/test passed on Node 24.20 | Add the remaining Phase 1 packages, services, and web app to the workspace. |
+| P1-006 | uv/Python workspace | active | pending workspace commit | uv 0.12.7 sync, package import, Ruff, Pyrefly, and pytest passed on Python 3.14.7 | Add the three minimal service members and re-run the workspace-wide gate. |
+| P1-007 | Typed configuration | complete | pending workspace commit | TypeScript/Python validation, PostgreSQL-only URL checks, redaction, and default-off provider tests passed | Entrypoints must inject these settings rather than reading environment variables in business code. |
 | P1-008 | PostgreSQL local infrastructure | pending | — | Container health/readiness | — |
 | P1-009 | Alembic foundation | pending | — | Upgrade/current/heads/check | — |
 | P1-010 | Contract architecture/proof | pending | — | Deterministic OpenAPI/client generation | — |
@@ -69,5 +69,5 @@ Status values: `pending`, `active`, `complete`, `blocked`.
 
 ## Next exact task
 
-Commit the P1-001 through P1-003 documentation baseline, then create the minimal
-owned repository hierarchy and workspace manifests for P1-004 through P1-006.
+Commit the pnpm/uv workspace and shared typed-configuration foundation, then add
+PostgreSQL/Alembic infrastructure and minimal service entrypoints.

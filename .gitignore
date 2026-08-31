@@ -1,0 +1,41 @@
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# JavaScript / TypeScript
+node_modules/
+.next/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Python
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.pyrefly/
+*.py[cod]
+
+# Local runtime state
+.data/
+.objects/
+.artifacts/
+postgres-data/
+
+# Tools and editors
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.log
+
+# Terraform local state and plans
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log

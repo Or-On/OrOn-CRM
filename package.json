@@ -1,0 +1,31 @@
+{
+  "name": "or-on-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Unified Or-On Platform monorepo foundation",
+  "packageManager": "pnpm@11.24.0",
+  "engines": {
+    "node": ">=24.20.0 <25",
+    "pnpm": ">=11.24.0 <12"
+  },
+  "scripts": {
+    "build": "pnpm -r --if-present run build",
+    "clean": "pnpm -r --if-present run clean",
+    "dev": "pnpm --parallel --filter @or-on/web --filter @or-on/live-agent --filter @or-on/messaging-worker run dev",
+    "format": "prettier --write --ignore-unknown package.json pnpm-workspace.yaml tsconfig.base.json eslint.config.mjs apps packages/ts services/ts",
+    "format:check": "prettier --check --ignore-unknown package.json pnpm-workspace.yaml tsconfig.base.json eslint.config.mjs apps packages/ts services/ts",
+    "lint": "eslint . --max-warnings 0",
+    "test": "pnpm -r --if-present run test",
+    "typecheck": "pnpm -r --if-present run typecheck"
+  },
+  "devDependencies": {
+    "@eslint/js": "catalog:",
+    "@types/node": "catalog:",
+    "eslint": "catalog:",
+    "globals": "catalog:",
+    "prettier": "catalog:",
+    "typescript": "catalog:",
+    "typescript-eslint": "catalog:",
+    "vitest": "catalog:"
+  }
+}
