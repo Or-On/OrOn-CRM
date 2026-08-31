@@ -13,6 +13,7 @@ services:
       - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
     volumes:
       - platform-postgres-data:/var/lib/postgresql
+      - ../../db/bootstrap/development_roles.sql:/docker-entrypoint-initdb.d/010-development-roles.sql:ro
     healthcheck:
       test:
         [
@@ -24,6 +25,71 @@ services:
       retries: 20
       start_period: 10s
     stop_grace_period: 30s
+    networks: [platform-private]
+
+  control-api:
+    profiles: ["core"]
+    build:
+      context: ../..
+      dockerfile: services/py/control-api/Dockerfile
+    restart: unless-stopped
+    environment:
+      PLATFORM_ENV: development
+      PLATFORM_SERVICE: control-api
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DATABASE_URL: postgresql://platform_web:${POSTGRES_APP_PASSWORD:-platform-web-dev-only}@postgres:5432/${POSTGRES_DB:-or_on_platform_dev}
+      ENABLE_REAL_TELEPHONY: "false"
+      ENABLE_REAL_WHATSAPP: "false"
+    ports:
+      - "127.0.0.1:${CONTROL_API_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=2)",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    stop_grace_period: 20s
+    networks: [platform-private]
+
+  web:
+    profiles: ["core"]
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    environment:
+      PLATFORM_ENV: development
+      PLATFORM_SERVICE: web
+      CONTROL_API_URL: http://control-api:8000
+      ENABLE_REAL_TELEPHONY: "false"
+      ENABLE_REAL_WHATSAPP: "false"
+    ports:
+      - "127.0.0.1:${WEB_PORT:-3000}:3000"
+    depends_on:
+      control-api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    stop_grace_period: 20s
     networks: [platform-private]
 
 networks:

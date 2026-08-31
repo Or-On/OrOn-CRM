@@ -33,6 +33,18 @@ export default tseslint.config(
         "error",
         { ignoreArrowShorthand: true },
       ],
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["**/features/*/*", "@or-on/*/src/*"],
+              message:
+                "Import through the feature or workspace package public API.",
+            },
+          ],
+        },
+      ],
     },
   },
   {

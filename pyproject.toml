@@ -43,6 +43,7 @@ ignore = ["S101"]
 addopts = "-ra --strict-config --strict-markers"
 asyncio_mode = "auto"
 testpaths = ["packages/py", "services/py", "db/tests", "scripts/tests"]
+pythonpath = ["."]
 
 [tool.pyrefly]
 project-includes = ["packages/py/*/src", "services/py/*/src"]

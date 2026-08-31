@@ -14,8 +14,8 @@
     "contracts:check": "pnpm contracts:generate && git diff --exit-code -- packages/ts/api-client/openapi.json packages/ts/api-client/src/generated packages/ts/contracts/src/generated",
     "contracts:generate": "uv run python scripts/generate_openapi.py && json2ts -i packages/ts/contracts/schemas/platform-event.v1.schema.json -o packages/ts/contracts/src/generated/platform-event-v1.ts && prettier --write packages/ts/api-client/openapi.json packages/ts/api-client/src/generated packages/ts/contracts/src/generated",
     "dev": "pnpm --parallel --filter @or-on/web --filter @or-on/live-agent --filter @or-on/messaging-worker run dev",
-    "format": "prettier --write --ignore-unknown package.json pnpm-workspace.yaml tsconfig.base.json eslint.config.mjs apps packages/ts services/ts",
-    "format:check": "prettier --check --ignore-unknown package.json pnpm-workspace.yaml tsconfig.base.json eslint.config.mjs apps packages/ts services/ts",
+    "format": "prettier --write --ignore-unknown package.json pnpm-workspace.yaml tsconfig.base.json eslint.config.mjs apps packages/ts services/ts \".github/**/*.yml\" \"infra/compose/*.yaml\"",
+    "format:check": "prettier --check --ignore-unknown package.json pnpm-workspace.yaml tsconfig.base.json eslint.config.mjs apps packages/ts services/ts \".github/**/*.yml\" \"infra/compose/*.yaml\"",
     "lint": "eslint . --max-warnings 0",
     "test": "pnpm -r --if-present run test",
     "typecheck": "pnpm -r --if-present run typecheck"

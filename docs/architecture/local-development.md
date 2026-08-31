@@ -15,9 +15,15 @@ checks health. `make dev` coordinates the implemented host processes and leaves
 provider flags false.
 
 Phase 1 favors PostgreSQL in Docker and hot-reload application processes on the
-host. The core Compose profile contains PostgreSQL. Web and control-api container
-builds prove production packaging; full container orchestration grows only as
-those processes become useful.
+host. The production-shaped `core` Compose profile also contains the unified web
+and control-api containers, but `make bootstrap` starts only PostgreSQL before
+`make dev` coordinates all currently implemented host processes. Container builds
+prove independent production packaging without degrading the edit/reload loop.
+
+`platform_migrator` is used only by explicit migration/bootstrap commands.
+Readiness and ordinary app traffic use the non-superuser `platform_web` role. The
+two DSNs still target the same PostgreSQL database; they are not separate runtime
+databases.
 
 ## Prerequisites
 
@@ -54,9 +60,11 @@ flowchart LR
   Control --> DB[(PostgreSQL :5433 loopback)]
 ```
 
-Future profiles add LiveKit/SIP/Redis, dispatcher/voice-agent, live-agent,
-messaging-worker, provider simulators, and optional observability. Profiles do not
-change the single-database rule.
+Future profiles add LiveKit/SIP/Redis, dispatcher/voice-agent, provider simulators,
+and optional observability. The live-agent and messaging-worker already run in
+host-development mode but are intentionally absent from the production-shaped
+core until their retained engines are integrated. Profiles never change the
+single-database rule.
 
 ## Command behavior
 

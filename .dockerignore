@@ -1,0 +1,15 @@
+.artifacts
+.env
+.git
+.github
+.next
+.pytest_cache
+.ruff_cache
+.venv
+**/.next
+**/dist
+**/node_modules
+**/__pycache__
+docs
+infra/terraform/.terraform
+node_modules

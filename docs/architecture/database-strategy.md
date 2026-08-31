@@ -38,9 +38,11 @@ target migration authority.
 | `platform_worker` | Bounded durable job claims/execution | Schema ownership/superuser |
 | `platform_readonly` | Audited operational read models | Writes or secret material |
 
-Phase 1 documents roles and uses the development owner for migration/bootstrap
-only. Application readiness uses the configured application DSN and never assumes
-superuser privileges in deployed environments.
+Phase 1 bootstraps the six named local roles, with only `platform_web` receiving a
+development login. The development owner is used for migration/bootstrap only.
+Application readiness uses the configured `platform_web` DSN and never assumes
+superuser or ownership privileges. Domain grants remain deferred until real target
+schemas exist.
 
 ## Tenant context and RLS
 
@@ -78,5 +80,6 @@ state.
 - Seeds are deterministic, fictional, and idempotent.
 - Migration checks assert one head, connectivity, current revision, and model
   drift where models exist.
-- Runtime code has one `DATABASE_URL`; role-specific DSNs still point to the same
-  database/cluster.
+- Runtime code receives one `DATABASE_URL`. Operator commands separately read
+  `MIGRATION_DATABASE_URL`; both point to the same database/cluster and the
+  migration DSN is never passed to application containers.

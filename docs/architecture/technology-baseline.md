@@ -196,7 +196,7 @@ merge major upgrades without those gates.
 | Python 3.14.7 voice/native import smoke | Passed; Pipecat 1.8.1 and source-relevant extras imported. |
 | PostgreSQL 18.6 registry/support validation | Passed; daemon-backed health/migration test belongs to P1-008/P1-009. |
 | TypeScript 7 ecosystem gate | Failed by design: `typescript-eslint` current peer range is `<6.1`; fallback selected. |
-| Target TypeScript build / Next production build | Pending P1-005/P1-011; must pass before Phase 1 completion. |
+| Target TypeScript build / Next production build | Passed on Node 24.20.0/pnpm 11.24.0; all workspace packages and Next 16.3.3 production output built. |
 | Container image pull/build and digest recording | Pending Docker availability and P1-008/P1-022. |
 
 No upstream dependency installation, provider call, model download, real message,
