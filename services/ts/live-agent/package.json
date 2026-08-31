@@ -1,0 +1,26 @@
+{
+  "name": "@or-on/live-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hono/node-server": "2.1.1",
+    "@or-on/config": "workspace:*",
+    "@or-on/observability": "workspace:*",
+    "@or-on/platform-integration": "workspace:*",
+    "hono": "catalog:"
+  },
+  "devDependencies": {
+    "tsx": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

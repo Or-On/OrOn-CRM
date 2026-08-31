@@ -53,7 +53,7 @@ major 18 rather than pinning an old minor indefinitely.
 | Tailwind CSS | WACRM 4.3.3; OpenLive 4.3.2 | 4.3.3 | **4.3.3** | Patch alignment; CSS-first configuration and semantic CSS variables. |
 | next-intl | WACRM 4.13.5 | 4.14.1 | **4.14.1** | Latest stable; initial shell remains locale-ready while full English/Hebrew catalogs are deferred. |
 | Zod | WACRM MCP/OpenLive 3.25.76 lock | 4.5.4 | **4.5.4 for new contracts/config** | Existing OpenLive/WACRM adapters may retain Zod 3 at their boundary until behavior tests support migration. Avoid a big-bang schema rewrite. |
-| ESLint | WACRM 9.x | 10.9.1 | **10.9.1** | Supported by current `typescript-eslint`; flat configuration. |
+| ESLint | WACRM 9.x | 10.9.1 | **10.9.1** | Use the supported flat configuration and Next's official plugin directly. The aggregate `eslint-config-next` pulls legacy peer ranges, so the monorepo composes `@next/eslint-plugin-next` with current `typescript-eslint` instead of pinning unsupported ESLint 9. |
 | Vitest | WACRM 4.1.10; OpenLive 3.2.7 | 4.1.11 | **4.1.11** | Supports Node 24; used for TS package/service tests. |
 | Prettier | WACRM 3.9.6 | 3.9.6 | **3.9.6** | Stable formatter; formatting changes remain scoped. |
 

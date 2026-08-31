@@ -1,0 +1,114 @@
+{
+  "components": {
+    "schemas": {
+      "DependencyStatus": {
+        "properties": {
+          "postgres": {
+            "enum": ["ready", "unavailable"],
+            "title": "Postgres",
+            "type": "string"
+          }
+        },
+        "required": ["postgres"],
+        "title": "DependencyStatus",
+        "type": "object"
+      },
+      "LiveStatus": {
+        "properties": {
+          "service": {
+            "title": "Service",
+            "type": "string"
+          },
+          "status": {
+            "const": "alive",
+            "default": "alive",
+            "title": "Status",
+            "type": "string"
+          },
+          "version": {
+            "default": "0.1.0",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": ["service"],
+        "title": "LiveStatus",
+        "type": "object"
+      },
+      "ReadyStatus": {
+        "properties": {
+          "dependencies": {
+            "$ref": "#/components/schemas/DependencyStatus"
+          },
+          "service": {
+            "title": "Service",
+            "type": "string"
+          },
+          "status": {
+            "enum": ["ready", "not_ready"],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": ["status", "service", "dependencies"],
+        "title": "ReadyStatus",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "Or-On Platform Control API",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/health/live": {
+      "get": {
+        "operationId": "get_liveness",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LiveStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Liveness",
+        "tags": ["system"]
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "operationId": "get_readiness",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadyStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadyStatus"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Readiness",
+        "tags": ["system"]
+      }
+    }
+  }
+}

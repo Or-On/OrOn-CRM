@@ -83,7 +83,12 @@ def create_app(
         response.headers["x-request-id"] = request_id
         return response
 
-    @app.get("/health/live", response_model=LiveStatus, tags=["system"])
+    @app.get(
+        "/health/live",
+        response_model=LiveStatus,
+        operation_id="get_liveness",
+        tags=["system"],
+    )
     async def liveness() -> LiveStatus:
         return LiveStatus(service="control-api")
 
@@ -91,6 +96,7 @@ def create_app(
         "/health/ready",
         response_model=ReadyStatus,
         responses={503: {"model": ReadyStatus}},
+        operation_id="get_readiness",
         tags=["system"],
     )
     async def readiness() -> ReadyStatus | JSONResponse:

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.or-on.local/platform-event.v1.schema.json",
+  "title": "PlatformEventV1",
+  "description": "Versioned envelope for durable cross-runtime platform events.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "event_id",
+    "event_type",
+    "occurred_at",
+    "source",
+    "data"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "event_id": { "type": "string", "format": "uuid" },
+    "event_type": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z0-9]+)+$"
+    },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "source": { "type": "string", "minLength": 1 },
+    "tenant_id": { "type": ["string", "null"], "minLength": 1 },
+    "trace_id": { "type": ["string", "null"], "minLength": 1 },
+    "data": { "type": "object" }
+  }
+}
