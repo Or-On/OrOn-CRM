@@ -34,6 +34,9 @@ No Category D replacement is approved in Phase 1.
   behavioral tests pass.
 - Lockfiles and container tags are committed. Container digests are recorded after
   a daemon-backed pull inspection.
+- pnpm applies a 24-hour publication cooling period. Exact exclusions are reviewed
+  for baseline packages that must be adopted sooner; native install scripts remain
+  separately allowlisted.
 - Prerelease channels are prohibited unless a required capability and explicit
   approval justify them.
 
@@ -54,10 +57,10 @@ Repository checks inspect manifests and imports for:
 
 - prohibited runtime database/auth clients;
 - sibling-repository path dependencies;
-- cross-package deep imports;
-- Python/TypeScript dependency direction violations;
+- cross-feature/package deep imports;
+- TypeScript workspace dependency cycles and package/app/service direction;
 - a second migration authority;
-- filesystem JSON persistence patterns in runtime modules.
+- prohibited non-PostgreSQL Compose database images.
 
 Documentation, audit evidence, static fixtures, and explicitly isolated importer
 directories are excluded by narrow path rules rather than broad string ignores.

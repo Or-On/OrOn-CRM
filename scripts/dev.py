@@ -300,6 +300,7 @@ def lint() -> None:
     _run(["uv", "run", "ruff", "check", *PYTHON_PATHS])
     _run(["uv", "run", "python", "scripts/check_repository.py"])
     _run(["uv", "run", "python", "scripts/check_secrets.py"])
+    _run(["uv", "run", "python", "scripts/check_docs.py"])
 
 
 def format_code() -> None:

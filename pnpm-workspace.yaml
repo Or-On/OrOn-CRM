@@ -35,6 +35,7 @@ catalog:
   vitest: 4.1.11
   zod: 4.5.4
 
+minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
   - "@typescript-eslint/eslint-plugin@8.69.0"
   - "@typescript-eslint/parser@8.69.0"

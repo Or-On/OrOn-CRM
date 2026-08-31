@@ -1,6 +1,10 @@
 # Source provenance and reuse map
 
-This map is a plan for preserving provenance when code is copied into the target. No source code was copied during Phase 0.
+This map is a plan for preserving provenance when code is copied into the target.
+No source code was copied during Phase 0. Phase 1 foundation code, contracts,
+configuration, UI, containers, migrations, and documentation were authored in the
+target; no upstream business artifact was copied or adapted, so no Phase 1 source
+mapping row is required.
 
 ## Provenance rules
 

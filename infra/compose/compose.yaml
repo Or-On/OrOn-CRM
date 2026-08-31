@@ -37,7 +37,7 @@ services:
       PLATFORM_ENV: development
       PLATFORM_SERVICE: control-api
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      DATABASE_URL: postgresql://platform_web:${POSTGRES_APP_PASSWORD:-platform-web-dev-only}@postgres:5432/${POSTGRES_DB:-or_on_platform_dev}
+      DATABASE_URL: postgresql://platform_web:platform-web-dev-only@postgres:5432/${POSTGRES_DB:-or_on_platform_dev}
       ENABLE_REAL_TELEPHONY: "false"
       ENABLE_REAL_WHATSAPP: "false"
     ports:

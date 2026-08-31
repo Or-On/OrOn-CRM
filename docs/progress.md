@@ -7,8 +7,8 @@ Last updated: 2026-08-31 (Asia/Jerusalem)
 - Phase: Phase 1 — Architecture and Monorepo Foundation
 - Branch: `codex/phase-1-foundation`
 - Phase 0 baseline: `93eb808e65f8edb1754c1940afe1949e7e18223a`
-- Active task: P1-017 — Security foundation
-- Latest clean commit: `a788acd1ea87a1667a6156d6ece04261e84d3d42`
+- Active task: P1-022 — Full verification
+- Latest clean commit: `5885b981427d0cacad55184d5b5840c4d70d9a1f`
 - Provider safety: no real telephone call, WhatsApp message, webhook mutation, or provider provisioning performed
 
 ## Baseline verification
@@ -39,25 +39,41 @@ Status values: `pending`, `active`, `complete`, `blocked`.
 | P1-001 | Baseline verification | complete | `b859efb` | Clean target baseline; exact upstream SHAs and clean worktrees verified | Baseline recorded above. |
 | P1-002 | Technology baseline discovery | complete | `b859efb` | Official registries/docs; Node/pnpm, Python core, and Python voice/native compatibility gates | Baseline selects Node 24 LTS, pnpm 11, Python 3.14, PostgreSQL 18, patched Next/React, and a documented TypeScript 6 fallback. |
 | P1-003 | Architecture and ADR framework | complete | `b859efb` | Required architecture documents and ADRs 0001–0015 reviewed; relative-link and sequence checks passed | Accepted decisions distinguish implemented controls from deferred direction. |
-| P1-004 | Repository hierarchy | active | pending orchestration commit | Apps, services, shared packages, database, scripts, Compose, and CI now have scoped ownership and real content | Complete security, runbook, Caddy, and Terraform-owned paths. |
-| P1-005 | pnpm/TypeScript workspace | complete | `a788acd` | Node 24.20, pnpm 11.24 frozen workspace; strict typecheck, 14 tests, all package builds, and Next production build pass | Keep pnpm as the sole target JS package manager. |
+| P1-004 | Repository hierarchy | complete | pending documentation commit | Intended roots contain real code/config or a concise ownership README; no empty enterprise scaffold was created | Future directories require real ownership and content. |
+| P1-005 | pnpm/TypeScript workspace | complete | `a788acd` | Node 24.20, pnpm 11.24 frozen workspace; strict typecheck, 15 tests, all package builds, and Next production build pass | Keep pnpm as the sole target JS package manager. |
 | P1-006 | uv/Python workspace | complete | `30635b9` | uv 0.12.7 sync, all four packages imported/built; Ruff, Pyrefly, and 8 pytest tests passed on Python 3.14.7 | Preserve this runtime boundary when Or-on packages are imported later. |
 | P1-007 | Typed configuration | complete | `e616fac` | TypeScript/Python validation, PostgreSQL-only URL checks, redaction, and default-off provider tests passed | Entrypoints inject these settings rather than reading environment variables in business code. |
-| P1-008 | PostgreSQL local infrastructure | active | `30635b9` | Compose definition and health check added; Docker CLI/daemon unavailable on this host | Complete daemon-backed PostgreSQL 18.6 health proof when Docker is installed. |
-| P1-009 | Alembic foundation | active | `30635b9` | Exactly one head and deterministic offline PostgreSQL SQL generation passed | Run upgrade/current/check against the Compose PostgreSQL instance. |
+| P1-008 | PostgreSQL local infrastructure | blocked | `5885b98` | Pinned Compose core, named volume, loopback mapping, role split, health checks, and app containers exist; Docker CLI/daemon unavailable | Install/start Docker and prove PostgreSQL 18.6 healthy without changing repository design. |
+| P1-009 | Alembic foundation | blocked | `30635b9` | Exactly one head and deterministic offline PostgreSQL SQL generation passed; no local PostgreSQL daemon exists | Run upgrade/current/`--check-heads` against the Compose database. |
 | P1-010 | Contract architecture/proof | complete | `a788acd` | Deterministic FastAPI OpenAPI, generated TypeScript client, versioned JSON Schema event contract, validation tests, and freshness workflow pass | Expand only through versioned language-neutral contracts. |
 | P1-011 | Unified web shell | complete | `a788acd` | Next 16.3 production build, render tests, and live browser QA passed; readiness UI reports PostgreSQL outage honestly | Product modules remain clearly marked planned. |
 | P1-012 | Python service foundations | complete | `30635b9` | Control API lifecycle/liveness/readiness tests pass; dispatcher and voice entrypoints import with dependency-safe/default-off lifecycle | Later phases integrate retained Or-on packages into these boundaries. |
 | P1-013 | TypeScript service foundations | complete | `a788acd` | Live-agent HTTP health/readiness and messaging-worker equivalent health lifecycle build, typecheck, and tests pass | No OpenLive/WACRM business behavior has been ported. |
 | P1-014 | Design-system foundation | complete | `a788acd` | Tokens, two themes, focus/reduced-motion rules, eight primitives, and render tests pass | Extend incrementally when real source screens are integrated. |
-| P1-015 | Makefile developer workflow | complete | pending orchestration commit | All required targets route through one cross-platform, provider-safe runner; non-Docker actions pass by direct invocation | GNU Make/Docker are absent on this host, so daemon-backed command execution remains P1-022-blocked. |
+| P1-015 | Makefile developer workflow | complete | `5885b98` | All required targets route through one cross-platform, provider-safe runner; lint/typecheck/test pass by direct invocation | GNU Make/Docker are absent on this host, so the literal acceptance invocations remain P1-022-blocked. |
 | P1-016 | Observability foundation | complete | `a788acd` | Shared structured JSON logging, recursive secret redaction, service/environment fields, and safe health logging conventions pass tests | OpenTelemetry transport/export remains deferred. |
-| P1-017 | Security foundation | pending | — | Threat model and implemented-control tests | — |
-| P1-018 | CI foundation | complete | pending orchestration commit | Target-only jobs cover frozen TS/Python installs, database migration, contracts, architecture/security, audits, production build, and containers | CI requires no sibling repository or provider/GCP credential. |
-| P1-019 | Dependency/prohibited-runtime guards | complete | pending orchestration commit | 14 Python tests plus repository and secret scans pass; package cycles/directions, runtime imports, database images, migration authorities, and sibling references are checked | Audit docs and future one-time importers are deliberately excluded from runtime-import rejection. |
-| P1-020 | GCP development architecture | pending | — | Terraform format/validate where available; no apply | — |
-| P1-021 | Documentation consolidation | pending | — | Link/content/command review | — |
-| P1-022 | Full verification | pending | — | Complete Phase 1 acceptance gate | — |
+| P1-017 | Security foundation | complete | pending documentation commit | Threat model explicitly separates implemented and planned controls; provider, config-redaction, secret-scan, DB-role, and dependency controls have tests/checks | Re-review before each deferred public/provider/auth capability ships. |
+| P1-018 | CI foundation | complete | `5885b98` | Target-only jobs cover frozen TS/Python installs, database migration, contracts, architecture/security, audits, production build, and containers | CI requires no sibling repository or provider/GCP credential. |
+| P1-019 | Dependency/prohibited-runtime guards | complete | `5885b98` | 15 Python tests plus repository, secret, and documentation scans pass; package cycles/directions, runtime imports, database images, migration authorities, and sibling references are checked | Audit docs and future one-time importers are deliberately excluded from runtime-import rejection. |
+| P1-020 | GCP development architecture | complete | pending documentation commit | One-VM resource contract, Terraform/core-provider constraints, Caddy edge direction, identity/secrets/backup design; no credentials or apply | Resource implementation and cost-bearing actions remain deferred. |
+| P1-021 | Documentation consolidation | complete | pending documentation commit | Required documents, relative links, README/runbooks, ADR index, threat model, and Phase 2 entry plan pass automated validation | Keep status claims aligned with implemented controls. |
+| P1-022 | Full verification | blocked | — | All non-daemon gates pass; `doctor` accurately fails for missing Docker/Compose/Make and incompatible global Node/pnpm | Install compatible tools/start Docker, then run the literal acceptance sequence and container/database gates. |
+
+## Latest verification snapshot
+
+- Passed on the ignored selected toolchain: Node 24.20.0, pnpm 11.24.0,
+  TypeScript strict checks, 15 TypeScript tests, package/service builds, Next.js
+  16.3.3 production build, peer check, and zero known pnpm vulnerabilities.
+- Passed on uv/Python 3.14.7: Ruff format/lint, Pyrefly, 15 pytest tests,
+  deterministic offline migration graph/SQL, and zero known audited Python
+  vulnerabilities (local workspace distributions correctly skipped by PyPI audit).
+- Passed: contract generation/freshness, browser shell/theme/command/health QA,
+  repository/prohibited-dependency scan, secret scan, documentation/link scan, and
+  sibling-independence check.
+- Blocked: PostgreSQL container health, live Alembic upgrade/current, full Compose
+  app health, Dockerfile builds, and literal `make ...` acceptance commands.
+- `doctor` detected Git 2.54 and uv/Python 3.14.7; it correctly rejected absent
+  Docker/Compose/Make, global Node 25.9.0, and global pnpm 11.19.0.
 
 ## Known blockers and risks
 
@@ -72,5 +88,6 @@ Status values: `pending`, `active`, `complete`, `blocked`.
 
 ## Next exact task
 
-Commit developer orchestration, Compose containers, guards, and CI; then create
-the threat model, Caddy/Terraform foundations, consolidated README, and runbooks.
+Provision a compatible Docker Engine/Compose, GNU Make, Node 24.20, and pnpm 11.24
+on this host; then run `make doctor`, `make bootstrap`, and the complete acceptance
+command sequence without changing provider flags or running Terraform apply.

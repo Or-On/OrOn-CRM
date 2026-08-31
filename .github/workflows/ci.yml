@@ -123,6 +123,7 @@ jobs:
       - run: uv sync --all-packages --locked
       - run: uv run python scripts/check_repository.py
       - run: uv run python scripts/check_secrets.py
+      - run: uv run python scripts/check_docs.py
       - run: pnpm peers check
       - run: pnpm audit --audit-level critical
       - run: uv run pip-audit
