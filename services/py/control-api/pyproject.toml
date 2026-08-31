@@ -1,0 +1,23 @@
+[project]
+name = "or-on-control-api"
+version = "0.1.0"
+description = "Or-On Platform control API composition boundary"
+requires-python = ">=3.14,<3.15"
+dependencies = [
+  "fastapi==0.141.1",
+  "or-on-platform-integration==0.1.0",
+  "uvicorn[standard]==0.52.4",
+]
+
+[project.scripts]
+or-on-control-api = "control_api.main:main"
+
+[build-system]
+requires = ["uv-build>=0.12.7,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+or-on-platform-integration = { workspace = true }
+
+[tool.uv.build-backend]
+module-name = "control_api"

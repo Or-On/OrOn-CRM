@@ -1,0 +1,19 @@
+[project]
+name = "or-on-voice-agent-runtime"
+version = "0.1.0"
+description = "Future host entrypoint for the retained Or-on voice agent"
+requires-python = ">=3.14,<3.15"
+dependencies = ["or-on-platform-integration==0.1.0"]
+
+[project.scripts]
+or-on-voice-agent-runtime = "voice_agent_runtime.main:main"
+
+[build-system]
+requires = ["uv-build>=0.12.7,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+or-on-platform-integration = { workspace = true }
+
+[tool.uv.build-backend]
+module-name = "voice_agent_runtime"

@@ -1,0 +1,35 @@
+name: or-on-platform
+
+services:
+  postgres:
+    image: postgres:18.6-bookworm
+    profiles: ["core"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-or_on_platform_dev}
+      POSTGRES_USER: ${POSTGRES_USER:-platform_migrator}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-platform-dev-only}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - platform-postgres-data:/var/lib/postgresql
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB} -h 127.0.0.1",
+        ]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    stop_grace_period: 30s
+    networks: [platform-private]
+
+networks:
+  platform-private:
+    driver: bridge
+
+volumes:
+  platform-postgres-data:
+    name: or-on-platform-postgres-data
