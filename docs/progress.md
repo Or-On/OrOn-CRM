@@ -8,7 +8,7 @@ Last updated: 2026-08-31 (Asia/Jerusalem)
 - Branch: `codex/phase-1-foundation`
 - Phase 0 baseline: `93eb808e65f8edb1754c1940afe1949e7e18223a`
 - Active task: P1-022 — Full verification
-- Latest clean commit: `5885b981427d0cacad55184d5b5840c4d70d9a1f`
+- Latest clean commit before this checkpoint: `d380bf8dbf09cc59bc5c559dac71d8afda077e77`
 - Provider safety: no real telephone call, WhatsApp message, webhook mutation, or provider provisioning performed
 
 ## Baseline verification
@@ -39,7 +39,7 @@ Status values: `pending`, `active`, `complete`, `blocked`.
 | P1-001 | Baseline verification | complete | `b859efb` | Clean target baseline; exact upstream SHAs and clean worktrees verified | Baseline recorded above. |
 | P1-002 | Technology baseline discovery | complete | `b859efb` | Official registries/docs; Node/pnpm, Python core, and Python voice/native compatibility gates | Baseline selects Node 24 LTS, pnpm 11, Python 3.14, PostgreSQL 18, patched Next/React, and a documented TypeScript 6 fallback. |
 | P1-003 | Architecture and ADR framework | complete | `b859efb` | Required architecture documents and ADRs 0001–0015 reviewed; relative-link and sequence checks passed | Accepted decisions distinguish implemented controls from deferred direction. |
-| P1-004 | Repository hierarchy | complete | pending documentation commit | Intended roots contain real code/config or a concise ownership README; no empty enterprise scaffold was created | Future directories require real ownership and content. |
+| P1-004 | Repository hierarchy | complete | `d380bf8` | Intended roots contain real code/config or a concise ownership README; no empty enterprise scaffold was created | Future directories require real ownership and content. |
 | P1-005 | pnpm/TypeScript workspace | complete | `a788acd` | Node 24.20, pnpm 11.24 frozen workspace; strict typecheck, 15 tests, all package builds, and Next production build pass | Keep pnpm as the sole target JS package manager. |
 | P1-006 | uv/Python workspace | complete | `30635b9` | uv 0.12.7 sync, all four packages imported/built; Ruff, Pyrefly, and 8 pytest tests passed on Python 3.14.7 | Preserve this runtime boundary when Or-on packages are imported later. |
 | P1-007 | Typed configuration | complete | `e616fac` | TypeScript/Python validation, PostgreSQL-only URL checks, redaction, and default-off provider tests passed | Entrypoints inject these settings rather than reading environment variables in business code. |
@@ -52,11 +52,11 @@ Status values: `pending`, `active`, `complete`, `blocked`.
 | P1-014 | Design-system foundation | complete | `a788acd` | Tokens, two themes, focus/reduced-motion rules, eight primitives, and render tests pass | Extend incrementally when real source screens are integrated. |
 | P1-015 | Makefile developer workflow | complete | `5885b98` | All required targets route through one cross-platform, provider-safe runner; lint/typecheck/test pass by direct invocation | GNU Make/Docker are absent on this host, so the literal acceptance invocations remain P1-022-blocked. |
 | P1-016 | Observability foundation | complete | `a788acd` | Shared structured JSON logging, recursive secret redaction, service/environment fields, and safe health logging conventions pass tests | OpenTelemetry transport/export remains deferred. |
-| P1-017 | Security foundation | complete | pending documentation commit | Threat model explicitly separates implemented and planned controls; provider, config-redaction, secret-scan, DB-role, and dependency controls have tests/checks | Re-review before each deferred public/provider/auth capability ships. |
+| P1-017 | Security foundation | complete | `d380bf8` | Threat model explicitly separates implemented and planned controls; provider, config-redaction, secret-scan, DB-role, and dependency controls have tests/checks | Re-review before each deferred public/provider/auth capability ships. |
 | P1-018 | CI foundation | complete | `5885b98` | Target-only jobs cover frozen TS/Python installs, database migration, contracts, architecture/security, audits, production build, and containers | CI requires no sibling repository or provider/GCP credential. |
 | P1-019 | Dependency/prohibited-runtime guards | complete | `5885b98` | 15 Python tests plus repository, secret, and documentation scans pass; package cycles/directions, runtime imports, database images, migration authorities, and sibling references are checked | Audit docs and future one-time importers are deliberately excluded from runtime-import rejection. |
-| P1-020 | GCP development architecture | complete | pending documentation commit | One-VM resource contract, Terraform/core-provider constraints, Caddy edge direction, identity/secrets/backup design; no credentials or apply | Resource implementation and cost-bearing actions remain deferred. |
-| P1-021 | Documentation consolidation | complete | pending documentation commit | Required documents, relative links, README/runbooks, ADR index, threat model, and Phase 2 entry plan pass automated validation | Keep status claims aligned with implemented controls. |
+| P1-020 | GCP development architecture | complete | `d380bf8` | One-VM resource contract, Terraform/core-provider constraints, Caddy edge direction, identity/secrets/backup design; no credentials or apply | Resource implementation and cost-bearing actions remain deferred. |
+| P1-021 | Documentation consolidation | complete | `d380bf8` | Required documents, relative links, README/runbooks, ADR index, threat model, and Phase 2 entry plan pass automated validation | Keep status claims aligned with implemented controls. |
 | P1-022 | Full verification | blocked | — | All non-daemon gates pass; `doctor` accurately fails for missing Docker/Compose/Make and incompatible global Node/pnpm | Install compatible tools/start Docker, then run the literal acceptance sequence and container/database gates. |
 
 ## Latest verification snapshot
@@ -72,8 +72,10 @@ Status values: `pending`, `active`, `complete`, `blocked`.
   sibling-independence check.
 - Blocked: PostgreSQL container health, live Alembic upgrade/current, full Compose
   app health, Dockerfile builds, and literal `make ...` acceptance commands.
-- `doctor` detected Git 2.54 and uv/Python 3.14.7; it correctly rejected absent
-  Docker/Compose/Make, global Node 25.9.0, and global pnpm 11.19.0.
+- With the ignored compatibility toolchain on `PATH`, `doctor` passed Git 2.54,
+  Node 24.20.0, pnpm 11.24.0, uv 0.12.7, and Python 3.14.7. It correctly failed
+  only for absent Docker/Compose/daemon and GNU Make. The ordinary global
+  Node 25.9.0/pnpm 11.19.0 pair remains outside the selected baseline.
 
 ## Known blockers and risks
 
