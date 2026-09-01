@@ -5,13 +5,13 @@ OpenLive JSON stores. Application runtimes must never import it. Stop the legacy
 OpenLive processes before planning an import so the SQLite database and WAL are
 quiescent.
 
-The Phase 2A CLI defaults to dry-run. It requires explicit source paths plus a
+The CLI defaults to dry-run. It requires explicit source paths plus a
 destination tenant and user, computes source/record checksums, maps IDs with a
 stable UUID namespace, rejects conflicting duplicates, omits plaintext secrets,
 and prints counts/digests rather than customer content. The canonical PostgreSQL
-writer and import-ledger transaction are implemented for the later live gate,
-but executing and validating an apply is **PENDING LIVE POSTGRESQL VALIDATION —
-PHASE 2B**.
+writer and import-ledger transaction are implemented. Phase 2B read JSON and a
+real SQLite fixture and proved that applying either plan twice to PostgreSQL
+creates no duplicate canonical rows.
 
 Example (dry-run only):
 
@@ -23,5 +23,6 @@ python -m db.importers.openlive_legacy.cli \
   --providers C:/explicit/source/providers.json
 ```
 
-Do not use `--apply` until Phase 2B runs the prepared writer twice against a
-disposable PostgreSQL 18.6 database and records idempotency evidence.
+`--apply` still requires an explicit PostgreSQL destination and an operator-owned
+source/tenant/user mapping review. Never point it at an unverified database or a
+live SQLite file; stop the legacy process first and retain a source backup.

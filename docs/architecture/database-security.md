@@ -16,10 +16,9 @@
   no migration invents cryptography or plaintext provider secret storage.
 - Audit metadata and durable-event payloads are documented as secret-free.
 
-## Planned/live controls
+## Phase 2B live controls
 
-All database execution claims below are **PENDING LIVE POSTGRESQL VALIDATION —
-PHASE 2B**:
+PostgreSQL 18.6 tests validate that:
 
 - roles/grants have the intended effective privileges;
 - RLS fails closed with no tenant and blocks cross-tenant SELECT/INSERT/UPDATE/DELETE;
@@ -27,7 +26,12 @@ PHASE 2B**:
 - security-sensitive functions use controlled `search_path` and correct caller checks;
 - normal roles cannot mutate audit history or execute DDL;
 - voice and messaging roles cannot read each other's restricted data;
-- encryption/backfill migrations work with real secrets supplied out of band.
+- the historical encryption/backfill migration works with explicit test-only
+  secrets supplied out of band.
+
+These tests establish the database foundation, not production authorization or
+authentication certification. Future domain operations require policy fixtures
+before they ship.
 
 ## Policy shape
 

@@ -17,6 +17,7 @@ Every runtime role is `NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION
 NOBYPASSRLS`. Passwords are provisioned outside migration SQL. Object ownership
 remains with the migration owner. Default privileges are not made public.
 
-Phase 2B must inspect `pg_roles`, schema/table/function privileges, RLS bypass,
-and attempted DDL/forbidden cross-domain reads. Until then role creation and
-grants are **PENDING LIVE POSTGRESQL VALIDATION — PHASE 2B**.
+Phase 2B inspected `pg_roles`, schema/table/function privileges, RLS bypass,
+attempted runtime DDL, and forbidden cross-domain reads on PostgreSQL 18.6. The
+prepared successor and historical roles exist, runtime roles are unprivileged,
+normal roles cannot perform DDL, and voice/messaging domain separation passed.

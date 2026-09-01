@@ -23,7 +23,7 @@ MANIFEST_PATH = ROOT / "db" / "contracts" / "schema-manifest.json"
 def postgres_url() -> str:
     value = os.environ.get("TEST_DATABASE_URL")
     if not value:
-        pytest.skip("PENDING LIVE POSTGRESQL VALIDATION — PHASE 2B")
+        pytest.skip("live PostgreSQL tests require explicit TEST_DATABASE_URL")
     normalized = value.replace("postgresql+asyncpg://", "postgresql://", 1)
     if not normalized.startswith("postgresql://"):
         pytest.fail("TEST_DATABASE_URL must point to PostgreSQL")

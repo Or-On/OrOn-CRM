@@ -8,16 +8,17 @@ rewriting proven engines for uniformity.
 ## Current status
 
 Phase 2A established the canonical PostgreSQL model while preserving the Or-on
-lineage and adapting WACRM/OpenLive persistence. The Phase 2B automated core gate
-now passes on PostgreSQL 18.6: clean migration, catalog, roles, RLS, tenant
-isolation, idempotency, durable-job concurrency, seed, OpenLive JSON import,
-production containers, and the complete core Compose health chain.
+lineage and adapting WACRM/OpenLive persistence. Phase 2B live validation is
+complete on PostgreSQL 18.6: clean migration, catalog, roles, RLS, tenant
+isolation, historical encryption backfill, supported downgrade/re-upgrade,
+constraints/delete actions, keyset pagination, idempotency, durable-job
+concurrency, seed, OpenLive JSON/SQLite import, WACRM export mapping, production
+containers, and the complete core Compose health chain all pass.
 
-Phase 2B remains in progress. Extended downgrade/re-upgrade testing, the
-non-empty historical encryption backfill, full constraint/delete coverage,
-keyset query execution, SQLite importer writes, and WACRM importer idempotency
-are not yet complete. GNU Make is also not installed, although its underlying
-cross-platform command runner passes.
+SQLite appears only as a read-only legacy OpenLive importer input; canonical
+PostgreSQL is the only destination and target runtime database. GNU Make is not
+installed on this host, although the same underlying cross-platform command
+runner used by every Make target passes.
 
 It does **not** implement CRM screens, messaging, real WhatsApp delivery,
 telephony, final authentication, the full OpenLive protocol, canonical flow

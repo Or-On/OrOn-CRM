@@ -131,7 +131,7 @@ def test_conflicting_duplicate_is_rejected_without_exposing_content(tmp_path: Pa
 def test_live_apply_requires_canonical_postgres_writer() -> None:
     plan = build_import_plan(_config())
 
-    with pytest.raises(RuntimeError, match="pending Phase 2B"):
+    with pytest.raises(RuntimeError, match="PostgreSQL writer is required"):
         execute_import(plan, dry_run=False)
 
 

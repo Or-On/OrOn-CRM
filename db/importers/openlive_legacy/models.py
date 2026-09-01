@@ -87,7 +87,5 @@ def execute_import(
     if dry_run:
         return plan.safe_summary()
     if writer is None:
-        raise RuntimeError(
-            "PostgreSQL writer is required; live writes are pending Phase 2B validation"
-        )
+        raise RuntimeError("PostgreSQL writer is required for a non-dry-run import")
     return writer.write(plan)

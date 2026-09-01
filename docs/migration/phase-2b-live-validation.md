@@ -1,27 +1,27 @@
 # Phase 2B live PostgreSQL validation
 
-The automated Phase 2B core gate ran against fresh, disposable PostgreSQL 18.6
-databases on 2026-09-01. All 18 prepared PostgreSQL tests passed. Phase 2B remains
-in progress because the extended downgrade/backfill and importer matrix below is
-not yet complete. GNU Make is still unavailable, so the repository runner was
-invoked directly; it is the same implementation used by `make db-verify-live`.
+The complete Phase 2B gate ran against fresh, disposable PostgreSQL 18.6
+databases on 2026-09-01. All 25 PostgreSQL tests passed, including the extended
+downgrade/backfill/importer/constraint matrix. GNU Make is still unavailable, so
+the repository runner was invoked directly; it is the same implementation used
+by `make db-verify-live`.
 
 | Item | Status | Evidence / remaining work |
 | --- | --- | --- |
 | 1 | passed | PostgreSQL 18.6 and required `citext` verified; pgvector and pgcrypto are not required by the base graph. |
 | 2 | passed | Empty databases upgraded through 27 revisions to sole head `f5e8b540dfeb`; expected catalog objects passed. |
-| 3 | pending | Execute supported downgrade/re-upgrade boundaries and a non-empty Or-on `0004` encryption/blind-index backfill. |
-| 4 | partial | Development seed and OpenLive JSON importer writes are idempotent; SQLite write and WACRM import paths remain. |
+| 3 | passed | Target-owned successors downgraded from `f5e8b540dfeb` to the Or-on head and re-upgraded; non-empty Or-on `0004` AES-GCM/blind-index semantics passed with test-only keys. Its data downgrade remains intentionally backup-based. |
+| 4 | passed | Development seed, OpenLive JSON/SQLite writes, and the implemented WACRM export slice are idempotent. |
 | 5 | passed | Historical/successor role existence and unprivileged runtime attributes passed. |
 | 6 | passed | Runtime DDL denial and voice/messaging domain separation passed. |
 | 7 | passed | Missing context and cross-tenant select/insert/update/delete isolation passed. |
 | 8 | passed | Membership, `SET LOCAL` clearing, forced RLS, domain separation, and audit immutability passed. |
-| 9 | partial | Representative FK/check/unique and restrict/cascade behavior passed; complete constraint/delete matrix remains. |
+| 9 | passed | All 91 unified-schema FKs declare CASCADE/RESTRICT/SET NULL; representative action families plus cross-domain check/unique constraints execute. |
 | 10 | passed | Provider event/message and E.164 deduplication passed. |
 | 11 | passed | Domain mutation plus outbox rollback atomicity passed. |
 | 12 | passed | Concurrent `SKIP LOCKED`, stale leases, bounded retry/backoff, and terminal failure passed. |
-| 13 | partial | Published flow immutability passed; execute chronological keyset pagination queries. |
-| 14 | partial | OpenLive JSON import twice passed; SQLite writes and WACRM mapping import twice remain. |
+| 13 | passed | Published flow immutability and chronological `(timestamp, UUID)` message/audit keyset pagination passed. |
+| 14 | passed | OpenLive JSON and real SQLite fixture imports plus WACRM mapping ran twice; checksums/IDs remained stable and no duplicates appeared. |
 | 15 | passed | PostgreSQL FTS passed with the schema's `simple` multilingual configuration; vector search remains optional. |
 
 ## Clean migration and catalog
@@ -60,8 +60,16 @@ invoked directly; it is the same implementation used by `make db-verify-live`.
     mapping import twice; compare checksums/ID mappings and confirm no duplicates.
 15. Verify PostgreSQL FTS and confirm semantic vector search remains optional.
 
-The status table above and `docs/progress.md` are the evidence authority. A
-`partial` or `pending` item must not be reported as passed.
+The status table above and `docs/progress.md` are the evidence authority. All
+Phase 2B database items are passed.
+
+The final consolidated gate also passed 35 repository-controlled Python tests
+(with the 25 live tests correctly skipped when no explicit URL is supplied), 15
+TypeScript tests, strict typing/lint/format, deterministic contracts, the Next.js
+production build, both production container builds, the healthy core Compose
+chain, prohibited-runtime/security guards, and dependency audits. A vulnerable
+`cryptography 49.0.0` pin discovered by `pip-audit` was replaced with patched
+50.0.0; the real non-empty historical backfill passed again afterward.
 
 ## Prepared command surface
 

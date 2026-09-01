@@ -33,6 +33,7 @@ Payloads are JSONB because event/job bodies are versioned, but tenant, type,
 status, aggregate/reference IDs, idempotency/provider IDs, and scheduling fields
 are normalized and indexed. Secrets and raw credentials are prohibited.
 
-DDL/functions and concurrency tests are prepared offline. Actual atomic claims,
-lease recovery, retry scheduling, dead-letter behavior, and transaction
-interactions are **PENDING LIVE POSTGRESQL VALIDATION — PHASE 2B**.
+Phase 2B live tests prove atomic claims, concurrent `SKIP LOCKED` workers without
+double claims, stale-lease recovery, bounded retry/backoff, terminal failure,
+provider/event deduplication, and domain-mutation/outbox rollback atomicity on
+PostgreSQL 18.6.

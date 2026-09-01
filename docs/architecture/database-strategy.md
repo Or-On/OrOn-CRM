@@ -42,7 +42,7 @@ target migration authority.
 Historical Or-on roles remain intact. Generated successor migrations add the six
 platform roles without granting `SUPERUSER`, `CREATEDB`, `CREATEROLE`, or
 `BYPASSRLS`. Application readiness uses a runtime DSN and never assumes schema
-ownership. Live role/grant validation is a Phase 2B gate.
+ownership. Phase 2B role/grant validation passed on PostgreSQL 18.6.
 
 ## Tenant context and RLS
 
@@ -62,9 +62,9 @@ Or-on `tenants.id` remains the canonical isolation key. UI language may say
 organization, but the database does not create a parallel organization owner.
 New tenant tables carry `tenant_id`, enable and force RLS, and compare it to
 `current_setting('app.current_tenant', true)`. Membership-sensitive operations
-also use `app.current_user` and canonical memberships. Static definitions and live
-tests are delivered separately: behavior is **PENDING LIVE POSTGRESQL VALIDATION
-— PHASE 2B**.
+also use `app.current_user` and canonical memberships. Phase 2B live tests prove
+missing context fails closed, cross-tenant CRUD is denied, membership context is
+enforced, and transaction-local context clears after the transaction.
 
 ## Schema ownership
 
@@ -88,11 +88,9 @@ for keyset pagination. Delete actions are explicit. See
 | `vector` / pgvector | optional | Semantic retrieval enhancement only; PostgreSQL FTS remains functional without it. |
 | `pgcrypto` | deferred | PostgreSQL 18 provides `gen_random_uuid()` in core; add the extension only if a reviewed database-owned cryptographic operation later requires it. |
 
-Availability and execution of required extensions are **PENDING LIVE POSTGRESQL
-VALIDATION — PHASE 2B**.
-
-The offline schema manifest proves the base graph creates `citext`, does not
-create pgvector, and does not silently require `pgcrypto`.
+Phase 2B proves `citext` installs and works on PostgreSQL 18.6. The base graph
+does not create or require pgvector or `pgcrypto`; PostgreSQL FTS works without
+either optional path.
 
 ## Durable work direction
 

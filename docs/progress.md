@@ -9,8 +9,8 @@ Last updated: 2026-09-01 (Asia/Jerusalem)
 - Phase 0 baseline: `93eb808e65f8edb1754c1940afe1949e7e18223a`
 - Phase 1 baseline: `20b46159078ec533a9891e6768d47595e35b7a7c`
 - Phase 2A status: **OFFLINE IMPLEMENTATION COMPLETE**
-- Live status: **PHASE 2B AUTOMATED CORE GATE PASSED — EXTENDED VALIDATION IN PROGRESS**
-- Active task: P2B-008 — extended downgrade/backfill/import/constraint validation
+- Live status: **PHASE 2B LIVE POSTGRESQL VALIDATION COMPLETE**
+- Active task: none — Phase 2B complete
 - Phase 2B clean baseline commit: `830a8371836ea7922fca5c320624bf3bd32ec229`
 - Provider safety: no real telephone call, WhatsApp message, webhook mutation, or provider provisioning performed
 
@@ -47,7 +47,7 @@ Status values: `pending`, `active`, `complete`, `blocked`.
 | P1-006 | uv/Python workspace | complete | `30635b9` | uv 0.12.7 sync, all four packages imported/built; Ruff, Pyrefly, and 8 pytest tests passed on Python 3.14.7 | Preserve this runtime boundary when Or-on packages are imported later. |
 | P1-007 | Typed configuration | complete | `e616fac` | TypeScript/Python validation, PostgreSQL-only URL checks, redaction, and default-off provider tests passed | Entrypoints inject these settings rather than reading environment variables in business code. |
 | P1-008 | PostgreSQL local infrastructure | complete | `009357e` | PostgreSQL 18.6 named volume, loopback mapping, role bootstrap, health check, control API, and web Compose chain are healthy | Preserve the named development volume; use separate disposable databases for integration tests. |
-| P1-009 | Alembic foundation | complete | `009357e` | Fresh PostgreSQL upgrade of all 27 revisions and `current --check-heads` pass at sole head `f5e8b540dfeb` | Extended downgrade and non-empty historical backfill validation remains Phase 2B work. |
+| P1-009 | Alembic foundation | complete | `4d99516` | Fresh PostgreSQL upgrade of all 27 revisions, `current --check-heads`, supported target-successor downgrade/re-upgrade, and non-empty historical backfill pass | Historical `0004` data downgrade is intentionally backup-based. |
 | P1-010 | Contract architecture/proof | complete | `a788acd` | Deterministic FastAPI OpenAPI, generated TypeScript client, versioned JSON Schema event contract, validation tests, and freshness workflow pass | Expand only through versioned language-neutral contracts. |
 | P1-011 | Unified web shell | complete | `a788acd` | Next 16.3 production build, render tests, and live browser QA passed; readiness UI reports PostgreSQL outage honestly | Product modules remain clearly marked planned. |
 | P1-012 | Python service foundations | complete | `30635b9` | Control API lifecycle/liveness/readiness tests pass; dispatcher and voice entrypoints import with dependency-safe/default-off lifecycle | Later phases integrate retained Or-on packages into these boundaries. |
@@ -193,13 +193,14 @@ used separate disposable databases.
 | ID | Task | Status | Commit | Evidence | Remaining work |
 | --- | --- | --- | --- | --- | --- |
 | P2B-001 | Docker/toolchain readiness | complete | `009357e` | Engine/daemon and ports passed; doctor now accepts the Compose v2-or-newer command surface, including installed Compose 5.5 | Install GNU Make for literal `make ...` acceptance spelling. |
-| P2B-002 | Fresh migration and catalog | complete | `009357e` | Multiple empty PostgreSQL 18.6 databases upgraded through all 27 revisions to sole head `f5e8b540dfeb`; catalog/extensions/functions/indexes checked | Downgrade and non-empty `0004` backfill remain P2B-008. |
+| P2B-002 | Fresh migration and catalog | complete | `4d99516` | Multiple empty PostgreSQL 18.6 databases upgraded through all 27 revisions to sole head `f5e8b540dfeb`; catalog/extensions/functions/indexes and target-successor downgrade/re-upgrade checked | Historical `0004` downgrade remains intentionally data-irreversible and requires a backup. |
 | P2B-003 | Seed and readiness | complete | `009357e` | JSONB seed fixed and proven idempotent; least-privilege `platform_web` readiness succeeds | None for the implemented seed. |
 | P2B-004 | Roles and RLS automated suite | complete | `009357e` | Runtime attributes, FORCE RLS, missing context, cross-tenant CRUD, membership, `SET LOCAL`, role separation, DDL denial, and audit immutability passed | Broaden policy fixtures as new domain operations arrive. |
-| P2B-005 | Integrity/concurrency/importer suite | complete | `009357e` | Provider/message/E.164 idempotency, FK restrict/cascade, outbox rollback, immutable flow versions, FTS, concurrent `SKIP LOCKED`, lease recovery/retry/dead state, seed, and OpenLive JSON import passed | SQLite write path, WACRM import, full constraint matrix, and keyset query execution remain P2B-008. |
+| P2B-005 | Integrity/concurrency/importer suite | complete | `bb5c40d` | Provider/message/E.164 idempotency, all 91 unified-schema FK delete declarations, representative CASCADE/RESTRICT/SET NULL execution, check constraints, outbox rollback, immutable flows, message/audit keysets, FTS, concurrent jobs, seed, OpenLive JSON/SQLite imports, and WACRM export mapping passed | Extend fixtures when later domain operations add constraints. |
 | P2B-006 | Full core runtime | complete | `009357e` | PostgreSQL, control API, and web containers are healthy; host API and web BFF both report PostgreSQL ready; all ports are loopback-bound | GNU Make remains a host-tool gap only. |
-| P2B-007 | Consolidated verification | complete | `009357e` | Format, lint, strict typing, 31 offline tests, 18 live PostgreSQL tests, 15 TS tests, contracts, production builds, container builds, guards, peer check, pnpm audit, and pip-audit passed | Keep CI evidence separate until the remote workflow runs. |
-| P2B-008 | Extended database acceptance | active | pending | Automated core gate is green | Execute supported downgrade/re-upgrade boundaries, non-empty encrypted `0004` backfill, complete constraint/delete matrix, keyset pagination, SQLite importer writes, and WACRM importer idempotency. |
+| P2B-007 | Consolidated verification | complete | `009357e` | Initial format, lint, strict typing, tests, contracts, production builds, container builds, guards, peer check, pnpm audit, and pip-audit passed | Superseded by the final P2B-009 rerun. |
+| P2B-008 | Extended database acceptance | complete | `4d99516`, `bb5c40d` | Non-empty encrypted `0004` backfill, supported successor downgrade/re-upgrade, complete FK delete-action catalog/family behavior, keyset pagination, SQLite importer writes, and WACRM importer idempotency all pass on disposable PostgreSQL 18.6 databases | No remaining Phase 2B database item. |
+| P2B-009 | Final verification/checkpoint | complete | final checkpoint | Fresh 25-test PostgreSQL gate; 35 offline Python tests with 25 correctly separated live skips; 15 TypeScript tests; Ruff/ESLint/Prettier/Pyrefly/strict TypeScript; contracts; one-head check; Next production build; both production images; healthy core Compose chain; peer checks; repository/secret/docs guards; and zero known pnpm/pip-audit vulnerabilities all pass | Remote CI evidence remains separate; GNU Make is still a host-tool spelling gap only. |
 
 Live validation exposed and fixed four real integration issues: the seed passed
 an invalid JSONB literal, the legacy importer passed timestamp strings instead
@@ -211,6 +212,7 @@ file precedence and provider flags remain false.
 
 ## Next exact task
 
-Complete P2B-008 against disposable PostgreSQL databases, then install GNU Make
-and execute the literal Phase 1 command surface. Do not begin Phase 3 until the
-remaining Phase 2B items are either passed or explicitly deferred with evidence.
+Install GNU Make and execute the literal Phase 1 command spelling; the
+already-validated cross-platform runner is unchanged. Then, under an explicit
+new phase request and branch, begin Phase 3 with the canonical authentication
+selection/identity adapter gate before feature UI or provider integration.
