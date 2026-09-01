@@ -25,6 +25,7 @@ state that implementation is deferred; that is not evidence the control exists.
 | [0013](0013-technology-preservation-modernization.md) | Technology preservation and modernization | Accepted |
 | [0014](0014-pnpm-workspace-strategy.md) | pnpm workspace strategy | Accepted |
 | [0015](0015-ui-design-system.md) | Unified UI design system | Accepted |
+| [0016](0016-canonical-application-authentication.md) | Canonical application authentication | Accepted |
 
 ## Template
 

@@ -4,15 +4,54 @@ Last updated: 2026-09-01 (Asia/Jerusalem)
 
 ## Current checkpoint
 
-- Phase: Phase 2B — Canonical PostgreSQL Foundation — Live Validation
-- Branch: `codex/phase-2b-postgres-live`
+- Phase: Phase 3 — Unified Identity and Application Shell
+- Branch: `codex/phase-3-identity-shell`
 - Phase 0 baseline: `93eb808e65f8edb1754c1940afe1949e7e18223a`
 - Phase 1 baseline: `20b46159078ec533a9891e6768d47595e35b7a7c`
 - Phase 2A status: **OFFLINE IMPLEMENTATION COMPLETE**
 - Live status: **PHASE 2B LIVE POSTGRESQL VALIDATION COMPLETE**
-- Active task: none — Phase 2B complete
+- Active task: P3-002/P3-003 — authentication discovery and selection ADR
 - Phase 2B clean baseline commit: `830a8371836ea7922fca5c320624bf3bd32ec229`
+- Phase 3 exact baseline commit: `9ca3a022c2fb18a5d416b39aa7d1404f7910ae1b`
 - Provider safety: no real telephone call, WhatsApp message, webhook mutation, or provider provisioning performed
+
+## Phase 3 starting state
+
+Phase 3 branched from the current clean Phase 2B HEAD
+`9ca3a022c2fb18a5d416b39aa7d1404f7910ae1b`. The target was clean, its sole
+Alembic head was `f5e8b540dfeb`, and all three upstream worktrees were clean at
+their locked commits before branching. Docker/PostgreSQL 18.6 is available;
+GNU Make remains the only missing host command-surface tool, so the canonical
+cross-platform runner remains the equivalent verification surface.
+
+## Phase 3 tasks
+
+Status values: `pending`, `active`, `complete`, `blocked`.
+
+| ID | Task | Status | Commit | Verification evidence | Next exact task |
+| --- | --- | --- | --- | --- | --- |
+| P3-001 | Baseline and upstream verification | complete | pending checkpoint | Clean target at `9ca3a02`; Or-on/WACRM/OpenLive clean at locked SHAs; instructions, architecture, ADRs, threat model, migrations, Next 16 bundled auth/security docs, and upstream identity code reviewed | Complete authentication selection evidence. |
+| P3-002 | Current authentication technology discovery | active | pending | Official docs/registries reviewed for Better Auth 1.7.2, Auth.js, Lucia, Keycloak, Argon2, and Next.js 16 | Finalize compatibility findings. |
+| P3-003 | Authentication selection ADR | active | pending | Candidate constraints include canonical Alembic schema, token hashing, canonical memberships, RLS, and single-VM operations | Record final decision before application implementation. |
+| P3-004 | Identity threat-model refinement | pending | — | — | Begin after selection ADR. |
+| P3-005 | Authentication database schema | pending | — | — | Add generated Alembic successor only. |
+| P3-006 | Password and token primitives | pending | — | — | Implement after schema contract. |
+| P3-007 | Session lifecycle implementation | pending | — | — | Implement login/resolve/rotate/revoke/expiry. |
+| P3-008 | Cookie and CSRF controls | pending | — | — | Add same-origin and unsafe-method defenses. |
+| P3-009 | BFF authentication endpoints | pending | — | — | Add versioned same-origin routes. |
+| P3-010 | Tenant switching | pending | — | — | Validate membership and rotate session. |
+| P3-011 | RBAC permission model | pending | — | — | Add deny-by-default matrix and tests. |
+| P3-012 | PostgreSQL RLS context propagation | pending | — | — | Add transaction helper and leakage tests. |
+| P3-013 | Service-to-service authentication proof | pending | — | — | Add short-lived audience-bound assertion. |
+| P3-014 | WebSocket authentication contract | pending | — | — | Add short-lived live-session grant contract. |
+| P3-015 | Unified login and authenticated shell | pending | — | — | Extend existing shell; do not rebuild it. |
+| P3-016 | Permission-aware navigation and command palette | pending | — | — | Filter real actions server-side and visually. |
+| P3-017 | Development seeds and simulators | pending | — | — | Fictional, deterministic, idempotent data only. |
+| P3-018 | Audit and observability integration | pending | — | — | Redacted auth outcomes and immutable audit records. |
+| P3-019 | Authentication security tests | pending | — | — | Unit, route, and live PostgreSQL coverage. |
+| P3-020 | CI and dependency guards | pending | — | — | Extend existing target-only CI. |
+| P3-021 | Documentation consolidation | pending | — | — | Align runbooks, README, and threat model with evidence. |
+| P3-022 | Full Phase 3 verification | pending | — | — | Run the consolidated offline/live/container gate. |
 
 ## Baseline verification
 
