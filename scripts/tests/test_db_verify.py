@@ -9,7 +9,7 @@ def test_phase_2a_graph_has_preserved_oron_root_and_one_target_head() -> None:
     report = graph_report()
 
     assert report.bases == ("0001",)
-    assert report.heads == ("f5e8b540dfeb",)
+    assert report.heads == ("3efa5431c380",)
     assert report.branch_points == ("8eda5976c920",)
     assert report.revision_count == 27
 

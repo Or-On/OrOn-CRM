@@ -1,12 +1,21 @@
 {
-  "alembic_head": "f5e8b540dfeb",
+  "alembic_head": "3efa5431c380",
   "expected_functions": [
     "automation.protect_published_flow_version",
     "messaging.adjust_broadcast_counts",
     "ops.claim_jobs",
     "ops.fail_job",
+    "platform.auth_create_session",
+    "platform.auth_login_record",
+    "platform.auth_memberships_for_user",
+    "platform.auth_record_login_failure",
+    "platform.auth_record_login_success",
+    "platform.auth_resolve_session",
+    "platform.auth_revoke_session",
+    "platform.auth_switch_session_tenant",
     "platform.current_tenant_id",
-    "platform.current_user_id"
+    "platform.current_user_id",
+    "platform.protect_last_tenant_owner"
   ],
   "expected_indexes": [
     "ix_audit_records_tenant_cursor",
@@ -90,6 +99,9 @@
       "outbox_events"
     ],
     "platform": [
+      "auth_credentials",
+      "auth_one_time_tokens",
+      "auth_sessions",
       "campaigns",
       "credential_records",
       "identity_bindings",
