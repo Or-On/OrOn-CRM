@@ -7,9 +7,8 @@ Create Date: 2026-07-16
 """
 
 import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
-
 from alembic import op
+from sqlalchemy.dialects import postgresql
 
 revision = "0001"
 down_revision = None
@@ -49,4 +48,3 @@ def downgrade() -> None:
     # The enum types outlive the table; drop them explicitly.
     direction.drop(op.get_bind())
     session_status.drop(op.get_bind())
-

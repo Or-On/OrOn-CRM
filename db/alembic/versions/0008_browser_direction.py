@@ -6,7 +6,6 @@ Create Date: 2026-07-26
 """
 
 import sqlalchemy as sa
-
 from alembic import op
 
 revision = "0008"
@@ -27,4 +26,3 @@ def downgrade() -> None:
     # the type and every column using it. Not worth it for a value whose only
     # cost is going unused.
     pass
-

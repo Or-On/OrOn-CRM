@@ -6,19 +6,19 @@ Create Date: 2026-08-04 00:04:18.930113
 
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
-from db.alembic.oron_migration_compat import DbRole
+from alembic import context, op
 from sqlalchemy.dialects import postgresql
 
-from alembic import context, op
+from db.alembic.oron_migration_compat import DbRole
 
 # revision identifiers, used by Alembic.
 revision: str = "a41d2f6c2925"
-down_revision: Union[str, Sequence[str], None] = "8aa960fd77ec"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = "8aa960fd77ec"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 DML = "SELECT, INSERT, UPDATE, DELETE"
 

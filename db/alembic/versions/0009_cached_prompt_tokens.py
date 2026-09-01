@@ -5,7 +5,6 @@ Revises: 0008
 """
 
 import sqlalchemy as sa
-
 from alembic import op
 
 revision = "0009"
@@ -30,4 +29,3 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_column("sessions", "llm_cached_prompt_tokens")
-

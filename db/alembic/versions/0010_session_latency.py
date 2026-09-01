@@ -5,7 +5,6 @@ Revises: 0009
 """
 
 import sqlalchemy as sa
-
 from alembic import op
 
 revision = "0010"
@@ -30,4 +29,3 @@ def downgrade() -> None:
     op.drop_column("sessions", "response_turns")
     for name in reversed(_COLUMNS):
         op.drop_column("sessions", name)
-

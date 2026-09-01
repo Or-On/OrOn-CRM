@@ -11,7 +11,6 @@ Create Date: 2026-08-01
 """
 
 import sqlalchemy as sa
-
 from alembic import op
 
 revision = "3b4a1c5307b4"
@@ -28,4 +27,3 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_index("ix_sessions_to_number_bidx", table_name="sessions")
     op.drop_column("sessions", "to_number_bidx")
-

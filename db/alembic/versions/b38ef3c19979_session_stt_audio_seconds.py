@@ -12,7 +12,6 @@ Revises: 8eda5976c920
 """
 
 import sqlalchemy as sa
-
 from alembic import op
 
 revision = "b38ef3c19979"
@@ -30,4 +29,3 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_column("sessions", "stt_audio_seconds")
-

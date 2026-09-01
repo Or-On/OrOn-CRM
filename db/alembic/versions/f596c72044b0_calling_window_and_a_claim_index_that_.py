@@ -6,9 +6,8 @@ Create Date: 2026-08-01
 """
 
 import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
-
 from alembic import op
+from sqlalchemy.dialects import postgresql
 
 revision = "f596c72044b0"
 down_revision = "7433e45e0d29"
@@ -66,4 +65,3 @@ def downgrade() -> None:
     op.drop_column("campaigns", "call_to_hour")
     op.drop_column("campaigns", "call_from_hour")
     op.drop_column("campaigns", "timezone")
-

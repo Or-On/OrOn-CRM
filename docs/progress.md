@@ -116,12 +116,12 @@ Status values: `pending`, `active`, `complete`, `blocked`.
 
 | ID | Task | Status | Commit | Evidence | Pending live validation / next exact task |
 | --- | --- | --- | --- | --- | --- |
-| P2A-001 | Baseline and upstream verification | complete | pending | Mandatory target, audit, architecture, ADR, target migration, Or-on lineage, WACRM SQL/runtime, and OpenLive persistence sources read; exact clean SHAs verified | No live validation needed; mechanically calculate the migration graph. |
-| P2A-002 | Inspect target + Or-on Alembic graphs | active | pending | Source metadata inventory in progress | Calculate roots, branches, merge points, and heads without inferring from filenames. |
-| P2A-003 | Reconcile Phase 1 bootstrap migration | pending | — | — | First prove from repository evidence that it was never live-applied. |
-| P2A-004 | Import/preserve complete Or-on Alembic lineage | pending | — | — | Preserve revision metadata and record every adaptation/provenance item. |
-| P2A-005 | Verify one canonical offline Alembic graph/head | pending | — | — | Graph, history, heads, branches, deterministic offline PostgreSQL SQL. |
-| P2A-006 | Canonical tenant/identity mapping | pending | — | — | Preserve tenant as the isolation key and provider-neutral identity direction. |
+| P2A-001 | Baseline and upstream verification | complete | `109bf9e` | Mandatory target, audit, architecture, ADR, target migration, Or-on lineage, WACRM SQL/runtime, and OpenLive persistence sources read; exact clean SHAs verified | No live validation needed; baseline is fixed at Phase 1 `20b4615`. |
+| P2A-002 | Inspect target + Or-on Alembic graphs | complete | `4d9a219` | Mechanical metadata: 22 revisions, root `0001`, branch `8eda5976c920`, merge `8aa960fd77ec`, head `a41d2f6c2925` | Continue successors from the preserved head. |
+| P2A-003 | Reconcile Phase 1 bootstrap migration | complete | pending | Phase 1 progress proves live upgrade/current were blocked; old revision retained outside active versions and content recreated at generated successor `34376836baf5` | Live upgrade remains pending Phase 2B. |
+| P2A-004 | Import/preserve complete Or-on Alembic lineage | complete | `4d9a219` | All 22 revisions imported; IDs/parents/branch/merge/order preserved; three import paths and one offline-only guard documented | Live historical backfill remains pending Phase 2B. |
+| P2A-005 | Verify one canonical offline Alembic graph/head | active | pending | Alembic heads/history/branches and deterministic offline SQL pass at current successor | Repeat after every generated unified revision and at final head. |
+| P2A-006 | Canonical tenant/identity mapping | complete | pending | Or-on tenant/user/membership preserved; provider-neutral identity bindings and tenant invitations created | RLS/membership execution pending Phase 2B. |
 | P2A-007 | Database schema/ownership architecture | pending | — | — | Define domain ownership without moving mature Or-on tables. |
 | P2A-008 | WACRM migration inventory | pending | — | All 39 source SQL migrations read | Account for every migration with an explicit disposition. |
 | P2A-009 | Translate WACRM identity/account semantics | pending | — | — | Map accounts/profiles/members/invitations to canonical identities and tenants. |
@@ -135,7 +135,7 @@ Status values: `pending`, `active`, `complete`, `blocked`.
 | P2A-017 | OpenLive PostgreSQL target schema | pending | — | — | Tenant/user-scoped chats, messages, preferences, providers, voices, sessions. |
 | P2A-018 | OpenLive legacy importer foundation | pending | — | — | Offline parser/dry-run/idempotency/checksum tests; writes pending Phase 2B. |
 | P2A-019 | Canonical RLS policies for new tenant data | pending | — | — | Static definitions now; behavior pending Phase 2B. |
-| P2A-020 | Unified runtime roles/grants successor migration | pending | — | — | Static definitions now; role/grant execution pending Phase 2B. |
+| P2A-020 | Unified runtime roles/grants successor migration | complete | pending | Generated successor defines six roles without privileged attributes and preserves legacy Or-on roles | **PENDING LIVE POSTGRESQL VALIDATION — PHASE 2B**. |
 | P2A-021 | Inbox/outbox/idempotency foundation | pending | — | — | Durable event schema and exact-once effects through idempotent consumers. |
 | P2A-022 | PostgreSQL durable-job foundation | pending | — | — | SKIP LOCKED design/tests prepared; concurrency pending Phase 2B. |
 | P2A-023 | Audit/object metadata foundation | pending | — | — | Immutable audit intent and metadata-only object persistence. |

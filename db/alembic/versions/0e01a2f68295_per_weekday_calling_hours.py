@@ -14,9 +14,8 @@ Create Date: 2026-08-02
 """
 
 import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
-
 from alembic import op
+from sqlalchemy.dialects import postgresql
 
 revision = "0e01a2f68295"
 down_revision = "ea9aef9b2d14"
@@ -80,4 +79,3 @@ def downgrade() -> None:
         """
     )
     op.drop_column("campaigns", "weekday_hours")
-

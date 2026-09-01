@@ -11,10 +11,10 @@ Create Date: 2026-07-29
 """
 
 import sqlalchemy as sa
-from db.alembic.oron_migration_compat import DbRole
+from alembic import context, op
 from sqlalchemy.dialects import postgresql
 
-from alembic import context, op
+from db.alembic.oron_migration_compat import DbRole
 
 revision = "46a2cce29f18"
 down_revision = "8eda5976c920"

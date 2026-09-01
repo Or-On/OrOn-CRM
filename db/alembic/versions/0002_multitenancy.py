@@ -6,7 +6,6 @@ Create Date: 2026-07-19
 """
 
 import sqlalchemy as sa
-
 from alembic import context, op
 
 revision = "0002"
@@ -135,4 +134,3 @@ def downgrade() -> None:
     op.drop_table("phone_numbers")
     op.drop_index("ix_tenants_slug", "tenants")
     op.drop_table("tenants")
-

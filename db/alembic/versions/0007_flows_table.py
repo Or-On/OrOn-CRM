@@ -6,9 +6,8 @@ Create Date: 2026-07-26
 """
 
 import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
-
 from alembic import context, op
+from sqlalchemy.dialects import postgresql
 
 revision = "0007"
 down_revision = "0006"
@@ -73,4 +72,3 @@ def downgrade() -> None:
     op.execute("ALTER TABLE flows DISABLE ROW LEVEL SECURITY")
     op.drop_index("ix_flows_tenant_id", "flows")
     op.drop_table("flows")
-

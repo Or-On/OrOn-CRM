@@ -25,4 +25,3 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_index("ix_campaign_contacts_session_id", table_name="campaign_contacts")
-

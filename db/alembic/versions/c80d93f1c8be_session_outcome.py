@@ -8,7 +8,6 @@ Create Date: 2026-08-01
 """
 
 import sqlalchemy as sa
-
 from alembic import op
 
 revision = "c80d93f1c8be"
@@ -25,4 +24,3 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_column("sessions", "outcome")
-

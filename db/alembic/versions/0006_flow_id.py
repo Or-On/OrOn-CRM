@@ -6,7 +6,6 @@ Create Date: 2026-07-25
 """
 
 import sqlalchemy as sa
-
 from alembic import op
 
 revision = "0006"
@@ -45,4 +44,3 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_column("sessions", "flow_id")
     op.drop_column("phone_numbers", "flow_id")
-

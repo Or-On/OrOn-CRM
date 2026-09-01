@@ -6,7 +6,6 @@ Create Date: 2026-07-21
 """
 
 import sqlalchemy as sa
-
 from alembic import op
 
 revision = "0003"
@@ -26,4 +25,3 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_column("phone_numbers", "dispatch_rule_id")
     op.add_column("phone_numbers", sa.Column("trunk_id", sa.String(), nullable=True))
-
