@@ -20,8 +20,13 @@ PostgreSQL is the only destination and target runtime database. GNU Make is not
 installed on this host, although the same underlying cross-platform command
 runner used by every Make target passes.
 
+Phase 3 now adds one canonical, PostgreSQL-backed identity/session boundary: an
+Alembic-owned credential and session schema, Argon2id passwords, opaque
+HMAC-digested session tokens, CSRF/origin enforcement, tenant switching, typed
+RBAC, short-lived live-agent assertions, and an authenticated Next.js shell.
+
 It does **not** implement CRM screens, messaging, real WhatsApp delivery,
-telephony, final authentication, the full OpenLive protocol, canonical flow
+telephony, public signup/OAuth/MFA, the full OpenLive protocol, canonical flow
 execution, agent-profile persistence, or production GCP infrastructure. Planned
 navigation is visibly unavailable rather than presented as finished functionality.
 
@@ -66,7 +71,7 @@ services/py/                      control-api, dispatcher, voice-agent boundarie
 services/ts/                      live-agent and messaging-worker boundaries
 packages/py/platform-integration  new cross-system Python foundation
 packages/ts/                      UI, contracts, client, config, observability, integration
-db/alembic/                       sole 27-revision migration graph/head
+db/alembic/                       sole 29-revision migration graph/head
 db/bootstrap/                     local role bootstrap, not schema migration
 db/contracts/                     consumer-only schema expectation manifest
 db/importers/                     isolated one-time legacy import tools
@@ -102,7 +107,10 @@ make dev
 `bootstrap` is idempotent and creates ignored `.env` from `.env.example` only when
 missing. It synchronizes frozen dependencies, starts PostgreSQL, creates
 least-privilege local roles, migrates the one Alembic lineage, regenerates
-contracts, applies fictional seed data, and checks real PostgreSQL readiness.
+contracts, generates local-only auth material, applies fictional seed data, and
+checks real PostgreSQL readiness. The fictional operator login is written with
+restrictive permissions to ignored `.artifacts/development-login.txt`; it is
+never printed or committed.
 
 The default host workflow keeps PostgreSQL in Compose and runs the current app
 processes with hot reload. See the
@@ -143,7 +151,7 @@ tokens, keys, or secrets; diagnostics and logs must redact sensitive values.
 
 - Docker-backed PostgreSQL health/migration and container builds require a local
   Docker daemon; the checks intentionally fail rather than report fake health.
-- Final auth, executed tenant RLS proof, provider signature/replay controls,
+- Public signup/OAuth/MFA/recovery, provider signature/replay controls,
   uploads, backups, and production telemetry remain planned or Phase 2B controls,
   not current claims.
 - Or-on has no repository license file; its preserved migration lineage is

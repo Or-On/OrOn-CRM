@@ -10,7 +10,8 @@ Last updated: 2026-09-01 (Asia/Jerusalem)
 - Phase 1 baseline: `20b46159078ec533a9891e6768d47595e35b7a7c`
 - Phase 2A status: **OFFLINE IMPLEMENTATION COMPLETE**
 - Live status: **PHASE 2B LIVE POSTGRESQL VALIDATION COMPLETE**
-- Active task: P3-002/P3-003 — authentication discovery and selection ADR
+- Phase 3 status: **COMPLETE**
+- Active task: none; await an explicit Phase 4 specification
 - Phase 2B clean baseline commit: `830a8371836ea7922fca5c320624bf3bd32ec229`
 - Phase 3 exact baseline commit: `9ca3a022c2fb18a5d416b39aa7d1404f7910ae1b`
 - Provider safety: no real telephone call, WhatsApp message, webhook mutation, or provider provisioning performed
@@ -30,28 +31,52 @@ Status values: `pending`, `active`, `complete`, `blocked`.
 
 | ID | Task | Status | Commit | Verification evidence | Next exact task |
 | --- | --- | --- | --- | --- | --- |
-| P3-001 | Baseline and upstream verification | complete | pending checkpoint | Clean target at `9ca3a02`; Or-on/WACRM/OpenLive clean at locked SHAs; instructions, architecture, ADRs, threat model, migrations, Next 16 bundled auth/security docs, and upstream identity code reviewed | Complete authentication selection evidence. |
-| P3-002 | Current authentication technology discovery | active | pending | Official docs/registries reviewed for Better Auth 1.7.2, Auth.js, Lucia, Keycloak, Argon2, and Next.js 16 | Finalize compatibility findings. |
-| P3-003 | Authentication selection ADR | active | pending | Candidate constraints include canonical Alembic schema, token hashing, canonical memberships, RLS, and single-VM operations | Record final decision before application implementation. |
-| P3-004 | Identity threat-model refinement | pending | — | — | Begin after selection ADR. |
-| P3-005 | Authentication database schema | pending | — | — | Add generated Alembic successor only. |
-| P3-006 | Password and token primitives | pending | — | — | Implement after schema contract. |
-| P3-007 | Session lifecycle implementation | pending | — | — | Implement login/resolve/rotate/revoke/expiry. |
-| P3-008 | Cookie and CSRF controls | pending | — | — | Add same-origin and unsafe-method defenses. |
-| P3-009 | BFF authentication endpoints | pending | — | — | Add versioned same-origin routes. |
-| P3-010 | Tenant switching | pending | — | — | Validate membership and rotate session. |
-| P3-011 | RBAC permission model | pending | — | — | Add deny-by-default matrix and tests. |
-| P3-012 | PostgreSQL RLS context propagation | pending | — | — | Add transaction helper and leakage tests. |
-| P3-013 | Service-to-service authentication proof | pending | — | — | Add short-lived audience-bound assertion. |
-| P3-014 | WebSocket authentication contract | pending | — | — | Add short-lived live-session grant contract. |
-| P3-015 | Unified login and authenticated shell | pending | — | — | Extend existing shell; do not rebuild it. |
-| P3-016 | Permission-aware navigation and command palette | pending | — | — | Filter real actions server-side and visually. |
-| P3-017 | Development seeds and simulators | pending | — | — | Fictional, deterministic, idempotent data only. |
-| P3-018 | Audit and observability integration | pending | — | — | Redacted auth outcomes and immutable audit records. |
-| P3-019 | Authentication security tests | pending | — | — | Unit, route, and live PostgreSQL coverage. |
-| P3-020 | CI and dependency guards | pending | — | — | Extend existing target-only CI. |
-| P3-021 | Documentation consolidation | pending | — | — | Align runbooks, README, and threat model with evidence. |
-| P3-022 | Full Phase 3 verification | pending | — | — | Run the consolidated offline/live/container gate. |
+| P3-001 | Baseline and upstream verification | complete | `523c8a2` | Clean target at `9ca3a02`; Or-on/WACRM/OpenLive clean at locked SHAs; instructions, architecture, ADRs, threat model, migrations, Next 16 bundled auth/security docs, and upstream identity code reviewed | Reverify before every later phase. |
+| P3-002 | Current authentication technology discovery | complete | `523c8a2` | Official docs/registries reviewed for Better Auth 1.7.2, Auth.js, Lucia, Keycloak, Argon2, jose, postgres, and Next.js 16 | Re-evaluate only on a material requirements/framework change. |
+| P3-003 | Authentication selection ADR | complete | `523c8a2` | ADR 0016 selects a narrow canonical PostgreSQL adapter and records candidate rejection rationale | Keep Alembic and canonical membership authority. |
+| P3-004 | Identity threat-model refinement | complete | final docs checkpoint | Implemented and deferred identity controls separated in the living threat model | Re-review before public signup, OAuth, or MFA. |
+| P3-005 | Authentication database schema | complete | `0283226` | Generated revisions `c30e1edd7c7f` and live-found hardening successor `3efa5431c380`; one head | Keep successor-only history. |
+| P3-006 | Password and token primitives | complete | `7de75c5` | Argon2id, 256-bit random tokens, HMAC-SHA-256 digests, constant-time comparison tests | Rotate policy only through compatibility review. |
+| P3-007 | Session lifecycle implementation | complete | `7de75c5` | Login/resolve/idle+absolute expiry/rotate/revoke/status enforcement implemented and live-tested | Add administrative session listing later. |
+| P3-008 | Cookie and CSRF controls | complete | `7de75c5`, `e578b91` | HttpOnly SameSite session cookie, session-bound CSRF token, external-origin/Fetch Metadata checks | Apply shared guard to every future mutation. |
+| P3-009 | BFF authentication endpoints | complete | `7de75c5`, `e578b91` | Login/session/logout/tenant/live-grant same-origin routes pass host and production-container smoke tests | No public signup/recovery claimed. |
+| P3-010 | Tenant switching | complete | `7de75c5` | Membership revalidation, atomic digest rotation, old-token invalidation, audit | Extend UI only with real tenant management. |
+| P3-011 | RBAC permission model | complete | `7de75c5` | Canonical owner/admin/agent/viewer matrix and deny tests | Domain object checks remain feature-owned. |
+| P3-012 | PostgreSQL RLS context propagation | complete | `7de75c5` | Transaction helper sets transaction-local tenant/user/role from server identity; existing live leakage/RLS suite passes | Use helper in each new TS repository. |
+| P3-013 | Service-to-service authentication proof | complete | `7de75c5` | Short-lived signed issuer/audience assertions with tamper/audience tests | Replace shared secret with workload identity in GCP phase. |
+| P3-014 | WebSocket authentication contract | complete | `7de75c5` | Capability-bound live-session grant and live-agent validation proof | Bind to real OpenLive session during protocol port. |
+| P3-015 | Unified login and authenticated shell | complete | `7de75c5` | Accessible login, server-enforced page redirects, identity/tenant shell; desktop and 390px browser QA passed | Extend only with real product modules. |
+| P3-016 | Permission-aware navigation and command palette | complete | `7de75c5` | Shell is session-aware; unavailable modules remain visibly disabled and expose no fake actions | Filter real future actions by typed permissions. |
+| P3-017 | Development seeds and simulators | complete | `7de75c5`, `e578b91` | Idempotent ignored auth material and deterministic two-tenant fictional operator seed; Compose-safe Argon2 literals | Never print or commit generated password. |
+| P3-018 | Audit and observability integration | complete | `7de75c5` | Login, tenant switch, and revocation write safe immutable audit events; route errors omit credentials | Add metrics without identity cardinality leaks. |
+| P3-019 | Authentication security tests | complete | `0283226`, `7de75c5`, `e578b91` | 19 auth unit tests plus four live PostgreSQL identity tests within the 29-test database gate | Expand with every new identity capability. |
+| P3-020 | CI and dependency guards | complete | `e578b91` | Consolidated frozen install, formatting, lint, typing, tests, migration/live DB, audits, build, and repository guards pass | Keep auth package/container build ordering explicit. |
+| P3-021 | Documentation consolidation | complete | final docs checkpoint | ADR, architecture, threat model, README, auth runbook, runtime topology updated and link-checked | Keep implemented/planned claims distinct. |
+| P3-022 | Full Phase 3 verification | complete | final docs checkpoint | Consolidated verify, offline/live database gates, production container auth smoke, responsive browser QA, audits, and final integrity all pass | Obtain an explicit Phase 4 specification before branching. |
+
+## Phase 3 final verification snapshot
+
+- Canonical migrations: sole head `3efa5431c380`, 29 revisions, deterministic
+  offline PostgreSQL SQL (111,106 bytes; SHA-256
+  `a4621691353be602eea25877f65eff4ead691f7711cd44c94c978e2d5c4f9cc3`).
+- Live PostgreSQL 18.6: upgrade/current and all 29 database tests passed,
+  including four authentication lifecycle, grant, and last-owner tests.
+- TypeScript: Prettier, ESLint, strict typechecks, 39 tests, every package/service
+  build, and the Next.js 16.3.3 production build passed. Python: Ruff, Pyrefly,
+  35 offline tests, contract freshness, and repository/security/docs guards passed.
+- Production Compose: PostgreSQL, control API, and rebuilt web image are healthy.
+  A real local BFF login/session/logout smoke test passed with two fictional tenant
+  memberships; Argon2 hashes arrive intact through Compose configuration.
+- Browser QA: semantic labels, keyboard-capable controls, centered desktop layout,
+  and a 390×844 responsive viewport without horizontal overflow passed. No secret
+  was entered into the browser automation surface.
+- Supply chain: pnpm and pip audits reported no known vulnerabilities; private
+  workspace Python distributions were correctly excluded from PyPI lookup.
+- Safety: provider flags remained false; no telephone call, WhatsApp message,
+  webhook mutation, provider provisioning, customer-data access, or
+  `terraform apply` occurred.
+- Host caveat: Docker/Compose are available and healthy; GNU Make remains absent.
+  The exact cross-platform runner behind every Make target passed.
 
 ## Baseline verification
 

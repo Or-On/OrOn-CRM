@@ -1,8 +1,8 @@
-# Phase 1 threat model
+# Platform threat model
 
 Status: living architecture threat model
 
-Last reviewed: 2026-08-31
+Last reviewed: 2026-09-01 (Phase 3 identity boundary)
 
 Scope: Phase 1 foundation and the explicitly planned unified platform
 
@@ -54,15 +54,15 @@ until their boundary validates identity, integrity, authorization, type, and siz
 | Threat | Impact / likely path | Implemented Phase 1 controls | Planned controls before affected feature ships |
 | --- | --- | --- | --- |
 | Tenant breakout | Missing context, IDOR, unsafe joins, pooled-session leakage | PostgreSQL-only direction; separate non-superuser runtime role; no tenant feature is represented as complete | Canonical memberships/permissions; `SET LOCAL` tenant/user/role; forced fail-closed RLS; cross-tenant negative and pool-reset tests |
-| Broken authorization | UI-only checks, role confusion, direct object access | Final auth and product APIs deliberately absent; public boundaries documented | Central policy checks at BFF/API/service layers; deny-by-default permissions; ownership checks; audited admin elevation |
+| Broken authorization | UI-only checks, role confusion, direct object access | Canonical membership roles, deny-by-default typed permission matrix, server-side session resolution, last-owner database guard | Object-level policies for each feature, audited admin elevation, permission fixtures for ported domains |
 | Credential leakage | Source, image layer, log, diagnostics, fixture, Terraform state | `.env*` ignored except examples; typed diagnostics and structured log redaction; tracked-file secret scan; no real credentials or service-account JSON | Secret Manager and VM identity; envelope encryption with external master key; rotation/revocation runbooks and credential access audit |
 | Webhook forgery | Fake WhatsApp/telephony events create work | No provider webhook or traffic exists in Phase 1 | Raw-body signature verification, constant-time comparison, provider/account binding, timestamp validation, narrow route limits |
 | Webhook replay | Captured valid request repeats side effects | No provider side-effect implementation | Durable inbox unique provider-event ID, replay window, idempotent transaction, duplicate metrics and quarantine |
-| CSRF | Authenticated browser tricked into mutation | No final authentication or mutation surfaces; BFF is same-origin foundation | Secure `HttpOnly`/`SameSite` cookies, origin checks, anti-CSRF token on unsafe methods, no state-changing GET |
+| CSRF | Authenticated browser tricked into mutation | `SameSite=Lax` opaque session cookie, session-bound double-submit token, Origin and Fetch Metadata checks on unsafe auth routes, no state-changing GET | Apply the same shared guard to every future mutation and add edge-level CSP/header enforcement |
 | XSS | Stored message/contact/model output executes in operator browser | React escaping and CSP-compatible architecture; no rich-text/HTML product feature | Strict renderers/sanitization, CSP with nonces, Trusted Types evaluation, URL allowlists, stored-XSS tests |
 | SSRF | Webhook/tool/media URL reaches metadata or internal services | No URL-fetching provider adapter; service boundaries documented | Central egress policy, parsed URL/IP validation after DNS, redirect revalidation, metadata/private/link-local denylist, size/time budgets |
 | Malicious uploads | Parser exploit, polyglot, oversized object, cross-tenant access | Full upload path absent; object-storage ADR separates bytes from PostgreSQL metadata | Streaming limits, MIME/signature checks, random tenant-bound keys, quarantine/scanning, checksum, safe download disposition, retention/deletion |
-| WebSocket authentication | Stolen/anonymous socket observes or controls live sessions | Live-agent exposes health only; full protocol intentionally not ported | Short-lived scoped handshake token, origin/tenant/session binding, per-message schema/authorization, expiry/revocation, rate/size limits |
+| WebSocket authentication | Stolen/anonymous socket observes or controls live sessions | 60-second issuer/audience/capability-bound signed live-session grant and live-agent validator | Bind grant to actual OpenLive session, validate browser origin, authorize every message, add rate/size limits and revocation fan-out |
 | Service-to-service trust | Compromised web/worker impersonates another runtime | Private Compose network, distinct future roles, loopback-only host ports, no shared superuser app DSN | Workload identities or rotated service credentials, audience-bound tokens/mTLS evaluation, network segmentation, per-service DB grants |
 | Prompt/tool abuse | Content induces agent to exfiltrate secrets or invoke dangerous tools | No product tool execution; explicit contract boundaries and secret references | Versioned tool allowlists, argument schemas, tenant authorization, confirmation for consequential actions, sandboxing, output filtering, audit trail |
 | Call abuse | Fraud, premium dialing, harassment, runaway retries | `ENABLE_REAL_TELEPHONY=false` default tested in both languages; no call adapter; developer runner refuses enabled flag | Explicit user approval plus flag, destination policy, budget/concurrency/rate limits, consent/legal checks, idempotency and kill switch |
@@ -89,10 +89,29 @@ until their boundary validates identity, integrity, authorization, type, and siz
 - Liveness and readiness are distinct; PostgreSQL failure produces degraded
   readiness rather than a decorative success.
 
+## Implemented Phase 3 identity controls
+
+- PostgreSQL is the sole user, membership, credential, and session authority;
+  Alembic remains its only migration authority.
+- Passwords use Argon2id. Session and CSRF tokens have 256 bits of random entropy;
+  only peppered HMAC-SHA-256 digests are stored.
+- Login returns a generic failure, performs dummy-hash work for unknown users,
+  locks credentials after bounded failures, and never logs credentials/tokens.
+- Sessions enforce idle and absolute expiry, membership/user/tenant status,
+  explicit revocation, and token rotation on tenant switch.
+- Authentication tables have no direct `platform_web` access. Narrow
+  `SECURITY DEFINER` functions pin `search_path`, revoke `PUBLIC`, and are covered
+  by live PostgreSQL privilege and lifecycle tests.
+- Authentication and tenant-switch audit records are immutable to ordinary
+  runtime roles. The final tenant owner cannot be removed or demoted accidentally.
+- Local bootstrap generates ignored secrets and a fictional operator credential;
+  real provider flags remain false and unrelated to identity activation.
+
 ## Planned controls
 
-Canonical authentication, CSRF enforcement, domain authorization, tenant RLS,
-provider signature/replay handling, WebSocket authentication, object scanning,
+Public signup, OAuth/OIDC, MFA/WebAuthn, self-service recovery, domain-specific
+object authorization, provider signature/replay handling, full WebSocket session
+binding, object scanning,
 service identities, encrypted credential persistence, backup/restore, rate limits,
 abuse controls, and production telemetry are not implemented in Phase 1. Each is
 a release gate for the feature that needs it, not a documentation-only promise.

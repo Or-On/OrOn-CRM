@@ -8,7 +8,7 @@ Phase 1.
 
 | Process | Runtime | Lifecycle reason | Phase 1 behavior |
 | --- | --- | --- | --- |
-| Unified web/BFF | Node.js / Next.js | Browser-facing UI and same-origin server APIs | Product shell, system page, control-api health consumption |
+| Unified web/BFF | Node.js / Next.js | Browser-facing UI and same-origin server APIs | Canonical login/session boundary, tenant-aware shell, system page, control-api health consumption |
 | Control API | Python / FastAPI | Preserves Or-on control/session/tenancy direction and owns Python OpenAPI | Liveness, PostgreSQL readiness, typed config, OpenAPI |
 | Dispatcher | Python | LiveKit webhooks and per-call orchestration | Safe process skeleton only; no LiveKit/provider adapter |
 | Voice agent | Python | Real-time Pipecat/LiveKit media lifecycle | Safe worker skeleton only; no call path |
@@ -54,9 +54,10 @@ sequenceDiagram
   participant W as Web/BFF
   participant C as Control API
   participant D as PostgreSQL
-  U->>W: same-origin request
-  W->>C: versioned HTTP + request ID
-  C->>D: transaction + future SET LOCAL context
+  U->>W: opaque cookie + same-origin request
+  W->>D: resolve session digest + membership
+  W->>C: short-lived audience-bound assertion + request ID
+  C->>D: transaction + SET LOCAL tenant/user/role
   D-->>C: result
   C-->>W: typed envelope
   W-->>U: UI response
