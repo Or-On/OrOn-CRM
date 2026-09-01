@@ -734,6 +734,7 @@ def upgrade() -> None:
           WITH candidates AS (
             SELECT id FROM ops.jobs
             WHERE queue = p_queue
+              AND tenant_id = platform.current_tenant_id()
               AND attempts < max_attempts
               AND (
                 (status IN ('queued', 'retry') AND available_at <= CURRENT_TIMESTAMP)
@@ -776,7 +777,14 @@ def upgrade() -> None:
               available_at = CASE
                 WHEN job.attempts >= job.max_attempts THEN job.available_at
                 ELSE CURRENT_TIMESTAMP
-                  + make_interval(secs => LEAST(GREATEST(p_retry_delay_seconds, 1), 86400))
+                  + make_interval(
+                      secs => LEAST(
+                        86400.0,
+                        GREATEST(p_retry_delay_seconds, 1)
+                          * power(2.0, LEAST(GREATEST(job.attempts - 1, 0), 16))
+                          + random() * GREATEST(p_retry_delay_seconds, 1)
+                      )
+                    )
               END,
               locked_at = NULL,
               locked_by = NULL,
@@ -786,6 +794,7 @@ def upgrade() -> None:
               END,
               updated_at = CURRENT_TIMESTAMP
           WHERE job.id = p_job_id
+            AND job.tenant_id = platform.current_tenant_id()
             AND job.status = 'running'
             AND job.locked_by = p_worker_id
           RETURNING job.*

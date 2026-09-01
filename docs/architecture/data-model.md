@@ -31,7 +31,8 @@ erDiagram
 | Entity group | Classification / provenance | Tenant scope and key | Sensitive fields and ownership | Principal indexes / deletion |
 | --- | --- | --- | --- | --- |
 | `tenants`, `users`, `user_identities`, `memberships` | **Existing preserved Or-on tables** | UUIDs; memberships join user and tenant | Identity email/provider bindings; canonical RLS context | Historical indexes/FKs preserved; membership cascades as authored upstream. |
-| `platform.identity_bindings`, `platform.tenant_invitations` | **New unified tables**, WACRM-adapted semantics | `tenant_id`, UUID | Hashed invite tokens; provider subject, never session claims | Unique provider+subject and invite token hash; explicit expiry/use state. |
+| `platform.identity_bindings` | **New unified table**, WACRM-adapted semantics | Global provider binding to canonical `users.id` | Provider subject/email, never session claims | Unique provider+subject; user deletion cascades. |
+| `platform.tenant_invitations` | **New unified table**, WACRM-adapted semantics | `tenant_id`, UUID | Hashed invite token; invitee email and intended role | Unique token hash; explicit expiry/acceptance state. |
 | `crm.contacts` | **WACRM-adapted table** | `tenant_id`, UUID | Name, email/company, assignment | Tenant/name/activity indexes; tenant deletion cascades, referenced users set null. |
 | `crm.contact_channel_identities` | **New unified table**, WACRM + Or-on privacy direction | `tenant_id`, UUID | Normalized E.164, original display, provider IDs, optional ciphertext/blind index | Unique tenant/channel/normalized value and scoped provider ID; contact cascade. |
 | CRM tags, custom fields/values, notes | **WACRM-adapted tables** | `tenant_id`, UUID | Notes/custom values can contain customer data | Tenant/name and contact/time indexes; join rows cascade, definitions restrict while referenced. |
@@ -39,7 +40,7 @@ erDiagram
 | `platform.campaigns` plus historical `campaigns` | **New canonical parent + preserved Or-on voice projection** | `tenant_id`, UUID | Channel-neutral campaign lifecycle | Tenant/status/schedule keyset index; source execution rows retain domain FKs. |
 | Messaging channels/conversations/messages/status events | **WACRM-adapted tables** | `tenant_id`, UUID | Message content/media refs/provider snapshots | Conversation activity, message `(conversation_id, created_at, id)`, unique provider IDs; message cascade only with conversation. |
 | Templates, quick replies, broadcasts/recipients | **WACRM-adapted tables** | `tenant_id`, UUID | Template variables and safe provider metadata | Provider template ID, campaign/status claim and recipient/provider message indexes. |
-| Flow definitions/versions/runs/step runs | **New unified tables**, WACRM-adapted; Or-on flows preserved | `tenant_id`, UUID | Versioned JSONB definition and safe errors | Unique version number, one immutable published version, run/status/time indexes. |
+| Flow definitions/versions/runs/step runs | **New unified tables**, WACRM-adapted; Or-on flows preserved | `tenant_id`, UUID | Versioned JSONB definition and safe errors | Unique version numbers; every published version is immutable; run/status/time indexes. |
 | Knowledge documents/chunks | **WACRM-adapted tables** | `tenant_id`, UUID | Extracted text and source metadata | PostgreSQL FTS GIN; optional vector column is not required. |
 | `live.*` chats/messages/preferences/providers/voice profiles/sessions | **OpenLive-adapted tables** | tenant/user scoped UUIDs | Transcript content, workspace paths, credential references, voice metadata | Chat recency, append sequence, user preference key, provider kind, session IDs. Audio bytes live in object storage. |
 | `objects.object_metadata` | **New unified table** | `tenant_id`, UUID | Storage key/checksum/retention metadata, no binary body | Unique backend+storage key and owner lookup; restrict deletion while referenced. |
@@ -56,8 +57,9 @@ a channel needs the same privacy boundary.
 
 ## Activity timeline
 
-The initial query layer is a view composed with `UNION ALL` and a stable cursor
-`(occurred_at, activity_id)`. It reads domain records and does not become an
-authoritative event store. If measured workloads later require a projection,
-the outbox event ID becomes its idempotency key; that is a future measured
-change, not a Phase 2A assumption.
+The planned initial query layer is a repository-owned `UNION ALL` query with a
+stable cursor `(occurred_at, activity_id)`. Phase 2A does not materialize a view
+before the retained call and automation adapters define their final columns. It
+will read domain records and will not become an authoritative event store. If
+measured workloads later require a projection, the outbox event ID becomes its
+idempotency key; that is a future measured change, not a Phase 2A assumption.

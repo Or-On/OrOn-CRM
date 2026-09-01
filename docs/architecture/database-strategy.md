@@ -84,12 +84,15 @@ for keyset pagination. Delete actions are explicit. See
 
 | Extension | Classification | Reason |
 | --- | --- | --- |
-| `pgcrypto` | required | Existing Or-on and new UUID defaults. |
 | `citext` | required | Preserved Or-on identity email semantics. |
 | `vector` / pgvector | optional | Semantic retrieval enhancement only; PostgreSQL FTS remains functional without it. |
+| `pgcrypto` | deferred | PostgreSQL 18 provides `gen_random_uuid()` in core; add the extension only if a reviewed database-owned cryptographic operation later requires it. |
 
 Availability and execution of required extensions are **PENDING LIVE POSTGRESQL
 VALIDATION — PHASE 2B**.
+
+The offline schema manifest proves the base graph creates `citext`, does not
+create pgvector, and does not silently require `pgcrypto`.
 
 ## Durable work direction
 

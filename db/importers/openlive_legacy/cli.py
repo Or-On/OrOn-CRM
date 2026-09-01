@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 from uuid import UUID
 
-from .models import PlannerConfig, execute_import
+from .models import ImportResult, PlannerConfig, execute_import
 from .planner import build_import_plan
+from .postgres_writer import PostgresCanonicalWriter
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -43,8 +45,23 @@ def main() -> None:
             voices_directory=arguments.voices_directory,
         )
     )
-    result = execute_import(plan, dry_run=not arguments.apply)
-    print(json.dumps(result, sort_keys=True, indent=2))
+    writer = None
+    if arguments.apply:
+        database_url = os.environ.get("MIGRATION_DATABASE_URL")
+        if not database_url:
+            raise RuntimeError("--apply requires MIGRATION_DATABASE_URL for canonical PostgreSQL")
+        writer = PostgresCanonicalWriter(database_url)
+    result = execute_import(plan, dry_run=not arguments.apply, writer=writer)
+    output = (
+        {
+            "import_run_id": str(result.import_run_id),
+            "imported_count": result.imported_count,
+            "skipped_count": result.skipped_count,
+        }
+        if isinstance(result, ImportResult)
+        else result
+    )
+    print(json.dumps(output, sort_keys=True, indent=2))
 
 
 if __name__ == "__main__":

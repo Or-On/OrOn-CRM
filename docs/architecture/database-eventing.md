@@ -23,6 +23,12 @@ operation using `FOR UPDATE SKIP LOCKED`; stale leases become eligible after the
 configured timeout. Retry delay is exponential backoff with bounded jitter and a
 maximum attempt count. No infinite retry exists.
 
+Claims and failures require the transaction-local tenant context even though the
+functions execute with narrowly scoped definer rights. A missing tenant claims
+nothing; a worker cannot claim a different tenant in the same transaction.
+Global/null-tenant maintenance work needs a future separately reviewed operator
+path and is not claimable through the tenant worker function.
+
 Payloads are JSONB because event/job bodies are versioned, but tenant, type,
 status, aggregate/reference IDs, idempotency/provider IDs, and scheduling fields
 are normalized and indexed. Secrets and raw credentials are prohibited.

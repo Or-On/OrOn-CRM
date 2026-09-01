@@ -6,8 +6,9 @@ GNU Make are available.
 
 ## Clean migration and catalog
 
-1. Start healthy PostgreSQL 18.6; confirm required `pgcrypto` and `citext` and
-   confirm optional pgvector is not required.
+1. Start healthy PostgreSQL 18.6; confirm required `citext`, confirm optional
+   pgvector is not required, and confirm deferred `pgcrypto` is not needed by
+   the base graph.
 2. Upgrade an empty database to the sole Alembic head; run `alembic current
    --check-heads` and inspect every expected schema/table/view/function/index.
 3. Test supported downgrade/re-upgrade boundaries and Or-on `0004` backfill with
@@ -41,3 +42,16 @@ GNU Make are available.
 
 Every item remains **PENDING LIVE POSTGRESQL VALIDATION — PHASE 2B** until its
 real server evidence is recorded in `docs/progress.md`.
+
+## Prepared command surface
+
+```text
+make db-verify-offline
+TEST_DATABASE_URL=postgresql://... make db-verify-live
+```
+
+`db-verify-live` refuses to run without an explicit PostgreSQL URL, upgrades the
+single graph, checks the current head, and runs tests marked `postgres`. The
+tests are collected during Phase 2A and skip with the Phase 2B status when the
+URL is absent. The CI database job is prepared with a disposable PostgreSQL 18.6
+service, but no CI/live result is claimed until that workflow actually runs.

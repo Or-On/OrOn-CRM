@@ -3,7 +3,7 @@
 PYTHON ?= python
 RUNNER := $(PYTHON) scripts/dev.py
 
-.PHONY: help doctor bootstrap dev stop ps logs migrate migration-check seed lint format typecheck test verify
+.PHONY: help doctor bootstrap dev stop ps logs migrate migration-check migration-graph migration-sql db-contract-check db-verify-offline db-verify-live seed lint format typecheck test verify
 
 help: ## Show the supported developer commands.
 	@$(RUNNER) help
@@ -31,6 +31,21 @@ migrate: ## Upgrade the sole Alembic lineage to head.
 
 migration-check: ## Require one Alembic head and a database at that head.
 	@$(RUNNER) migration-check
+
+migration-graph: ## Verify and print the canonical Alembic graph without PostgreSQL.
+	@$(RUNNER) migration-graph
+
+migration-sql: ## Generate deterministic PostgreSQL upgrade SQL under .artifacts/db/.
+	@$(RUNNER) migration-sql
+
+db-contract-check: ## Check the schema manifest, RLS, extensions, indexes, and SQL safety.
+	@$(RUNNER) db-contract-check
+
+db-verify-offline: ## Run all repository-controlled Phase 2A database checks.
+	@$(RUNNER) db-verify-offline
+
+db-verify-live: ## Run Phase 2B tests against an explicit isolated PostgreSQL 18.6 URL.
+	@$(RUNNER) db-verify-live
 
 seed: ## Apply the idempotent fictional Phase 1 development seed.
 	@$(RUNNER) seed

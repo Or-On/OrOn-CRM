@@ -46,3 +46,10 @@ flowchart TD
 
 Fresh upgrade, data backfill, downgrade, roles, extensions, and RLS execution are
 **PENDING LIVE POSTGRESQL VALIDATION — PHASE 2B**.
+
+The preserved revision files remain Ruff-checked. Pyrefly excludes the historical
+version directory because revision `0004` intentionally imports the retained
+`oron-sessions` package only when a live database contains plaintext rows to
+backfill; that package is not mass-copied in Phase 2A. Phase 2B must exercise the
+backfill after the retained package is integrated or made available through an
+explicit migration-only compatibility dependency.

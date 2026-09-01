@@ -9,6 +9,7 @@ import pytest
 
 from db.importers.openlive_legacy.models import PlannerConfig, execute_import
 from db.importers.openlive_legacy.planner import LegacyDataError, build_import_plan
+from db.importers.openlive_legacy.postgres_writer import PostgresCanonicalWriter
 
 TENANT_ID = UUID("10000000-0000-0000-0000-000000000001")
 USER_ID = UUID("20000000-0000-0000-0000-000000000002")
@@ -185,3 +186,8 @@ def test_live_apply_requires_canonical_postgres_writer() -> None:
 
     with pytest.raises(RuntimeError, match="pending Phase 2B"):
         execute_import(plan, dry_run=False)
+
+
+def test_live_writer_rejects_non_postgresql_destination() -> None:
+    with pytest.raises(ValueError, match="must be PostgreSQL"):
+        PostgresCanonicalWriter("sqlite:///legacy.db")

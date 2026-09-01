@@ -75,3 +75,15 @@ provider, creates a tunnel, modifies a webhook, or runs Terraform apply.
 
 The canonical port registry is maintained in
 [runtime-topology.md](runtime-topology.md).
+
+## Phase 2 database verification
+
+`make migration-graph`, `make migration-sql`, and `make db-contract-check` are
+server-free. `make db-verify-offline` combines graph/parent/one-head checks,
+deterministic PostgreSQL SQL, schema/RLS/index/extension/security guards,
+importer fixtures, the existing prohibited-runtime guard, and wire-contract
+freshness. It does not weaken `make migration-check`.
+
+`make db-verify-live` requires `TEST_DATABASE_URL` or
+`MIGRATION_DATABASE_URL` for an isolated PostgreSQL 18.6 database. It is the
+Phase 2B surface and does not fall back to SQLite, mocks, or an in-memory store.

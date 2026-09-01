@@ -44,7 +44,13 @@ addopts = "-ra --strict-config --strict-markers"
 asyncio_mode = "auto"
 testpaths = ["packages/py", "services/py", "db/tests", "db/importers", "scripts/tests"]
 pythonpath = ["."]
+markers = [
+  "integration: exercises multiple repository/database boundaries",
+  "migration: validates Alembic history or schema state",
+  "postgres: requires a real disposable PostgreSQL 18.6 database",
+  "rls: validates PostgreSQL row-level security behavior",
+]
 
 [tool.pyrefly]
 project-includes = ["packages/py/*/src", "services/py/*/src"]
-project-excludes = ["**/__pycache__", "**/.venv"]
+project-excludes = ["**/__pycache__", "**/.venv", "db/alembic/versions/**"]

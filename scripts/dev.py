@@ -16,6 +16,16 @@ ENV_FILE = ROOT / ".env"
 ENV_EXAMPLE = ROOT / ".env.example"
 COMPOSE_FILE = ROOT / "infra" / "compose" / "compose.yaml"
 PYTHON_PATHS = ("packages/py", "services/py", "db", "scripts")
+PYTHON_TYPE_PATHS = (
+    "packages/py",
+    "services/py",
+    "db/importers",
+    "db/tests",
+    "db/alembic/env.py",
+    "db/alembic/oron_migration_compat.py",
+    "db/seeds",
+    "scripts",
+)
 
 
 def _run(
@@ -231,6 +241,80 @@ def migration_check(environment: dict[str, str]) -> None:
     )
 
 
+def migration_graph() -> None:
+    _run(["uv", "run", "python", "scripts/db_verify.py", "graph"])
+
+
+def migration_sql() -> None:
+    _run(["uv", "run", "python", "scripts/db_verify.py", "sql"])
+
+
+def db_contract_check() -> None:
+    _run(["uv", "run", "python", "scripts/db_verify.py", "contract"])
+
+
+def db_verify_offline(environment: dict[str, str]) -> None:
+    _require_provider_safety(environment)
+    _run(["uv", "run", "python", "scripts/db_verify.py", "offline"], environment=environment)
+    _run(
+        [
+            "uv",
+            "run",
+            "pytest",
+            "-p",
+            "no:cacheprovider",
+            "db/tests/test_migration_graph.py",
+            "db/importers/openlive_legacy/tests",
+            "scripts/tests/test_db_verify.py",
+        ],
+        environment=environment,
+    )
+    _run(["uv", "run", "python", "scripts/check_repository.py"], environment=environment)
+    _run(["pnpm", "contracts:check"], environment=environment)
+
+
+def db_verify_live(environment: dict[str, str]) -> None:
+    _require_provider_safety(environment)
+    database_url = environment.get("TEST_DATABASE_URL") or environment.get("MIGRATION_DATABASE_URL")
+    if not database_url:
+        raise RuntimeError(
+            "db-verify-live requires TEST_DATABASE_URL or MIGRATION_DATABASE_URL "
+            "for an isolated PostgreSQL 18.6 database"
+        )
+    live_environment = dict(environment)
+    live_environment["DATABASE_URL"] = database_url
+    live_environment["TEST_DATABASE_URL"] = database_url
+    _run(
+        ["uv", "run", "alembic", "-c", "db/alembic/alembic.ini", "upgrade", "head"],
+        environment=live_environment,
+    )
+    _run(
+        [
+            "uv",
+            "run",
+            "alembic",
+            "-c",
+            "db/alembic/alembic.ini",
+            "current",
+            "--check-heads",
+        ],
+        environment=live_environment,
+    )
+    _run(
+        [
+            "uv",
+            "run",
+            "pytest",
+            "-p",
+            "no:cacheprovider",
+            "-m",
+            "postgres",
+            "db/tests/postgres",
+        ],
+        environment=live_environment,
+    )
+
+
 def seed(environment: dict[str, str]) -> None:
     _run(
         ["uv", "run", "python", "db/seeds/seed_development.py"],
@@ -310,7 +394,7 @@ def format_code() -> None:
 
 def typecheck() -> None:
     _run(["pnpm", "typecheck"])
-    _run(["uv", "run", "pyrefly", "check", *PYTHON_PATHS])
+    _run(["uv", "run", "pyrefly", "check", *PYTHON_TYPE_PATHS])
 
 
 def test() -> None:
@@ -340,6 +424,10 @@ def help_text() -> None:
   stop / ps / logs manage the local Compose stack without deleting its volume
   migrate / migration-check / seed
                    operate the sole Alembic lineage and fictional seed
+  migration-graph / migration-sql / db-contract-check
+                   inspect the canonical graph and deterministic PostgreSQL SQL offline
+  db-verify-offline verify repository-controlled database artifacts without a server
+  db-verify-live    execute the Phase 2B suite against isolated PostgreSQL 18.6
   lint / format / typecheck / test / verify
                    run target-repository quality gates
 
@@ -365,6 +453,11 @@ def main() -> None:
         "logs": lambda: _compose_action(environment, "logs", "--follow", "--tail", "200"),
         "migrate": lambda: migrate(environment),
         "migration-check": lambda: migration_check(environment),
+        "migration-graph": migration_graph,
+        "migration-sql": migration_sql,
+        "db-contract-check": db_contract_check,
+        "db-verify-offline": lambda: db_verify_offline(environment),
+        "db-verify-live": lambda: db_verify_live(environment),
         "seed": lambda: seed(environment),
         "lint": lint,
         "format": format_code,

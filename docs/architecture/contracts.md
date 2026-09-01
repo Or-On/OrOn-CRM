@@ -64,3 +64,17 @@ that raw microphone audio does not cross the socket.
 - Contract fixtures cover canonical serialization, invalid payloads, and forward
   compatibility.
 - Generated code is clearly marked and never manually edited.
+
+## Database consumer contract
+
+`db/contracts/schema-manifest.json` is a deterministic catalog expectation for
+tests and non-migration consumers. It records the sole Alembic head, required
+schemas/tables/functions/indexes, tenant RLS tables, runtime roles, and extension
+classification. `scripts/db_verify.py` compares it to Alembic metadata and
+rendered PostgreSQL SQL.
+
+The manifest does not create schema and is not an ORM migration source. No
+TypeScript database model is generated in Phase 2A because no TypeScript
+repository adapter consumes these tables yet. When one does, generated types
+will consume this Alembic-owned schema and receive a freshness check; they will
+not gain migration authority.
