@@ -36,11 +36,7 @@ export async function PATCH(
             typeof body.assignedUserId !== "string"
           )
             throw new TypeError("invalid conversation assignee");
-          return assignConversation(
-            sql,
-            id,
-            body.assignedUserId as string | null,
-          );
+          return assignConversation(sql, id, body.assignedUserId);
         }
         if (
           typeof body.status !== "string" ||

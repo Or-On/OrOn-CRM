@@ -23,7 +23,7 @@ export async function runWorker(
       "worker_ready",
     );
     let signal: string;
-    while (true) {
+    for (;;) {
       const outcome = await Promise.race([
         stop.then((value) => ({ kind: "stop" as const, value })),
         (dependencies.processAvailable?.() ?? Promise.resolve(0)).then(

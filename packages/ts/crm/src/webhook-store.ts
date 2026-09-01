@@ -37,7 +37,7 @@ export async function acceptWhatsAppWebhook(
   const envelopes = parseWhatsAppTextEnvelopes(payload);
   const sql = postgres(databaseUrl, { max: 1, prepare: false });
   try {
-    const eventIds = (await sql.begin(async (transaction) => {
+    const eventIds = await sql.begin(async (transaction) => {
       const ids: string[] = [];
       for (const envelope of envelopes) {
         const rows = await transaction<AcceptedEventRow[]>`
@@ -58,7 +58,7 @@ export async function acceptWhatsAppWebhook(
         ids.push(id);
       }
       return ids;
-    })) as string[];
+    });
     return { eventIds, envelopes: envelopes.length };
   } finally {
     await sql.end({ timeout: 2 });

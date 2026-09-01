@@ -59,6 +59,7 @@ export async function updateTenantSettings(
     throw new TypeError("currency must use a three-letter ISO code");
   const locale = input.locale.trim();
   const timezone = input.timezone.trim();
+  const displayName = input.displayName?.trim();
   if (!locale || !timezone)
     throw new TypeError("locale and timezone are required");
   const rows = await sql<
@@ -71,7 +72,7 @@ export async function updateTenantSettings(
   >`
     INSERT INTO crm.tenant_settings
       (tenant_id, display_name, default_currency, locale, timezone)
-    VALUES (platform.current_tenant_id(), ${input.displayName?.trim() || null},
+    VALUES (platform.current_tenant_id(), ${displayName === "" ? null : (displayName ?? null)},
             ${currency}, ${locale}, ${timezone})
     ON CONFLICT (tenant_id) DO UPDATE
       SET display_name = EXCLUDED.display_name,

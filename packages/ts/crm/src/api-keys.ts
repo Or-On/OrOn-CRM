@@ -129,10 +129,7 @@ export async function withApiKeyTenant<T>(
       SELECT * FROM platform.resolve_api_key(${digestApiKey(token, pepper)})
     `;
     const identity = resolved[0];
-    if (
-      identity === undefined ||
-      !identity.resolved_scopes.includes(requiredScope)
-    ) {
+    if (!identity?.resolved_scopes.includes(requiredScope)) {
       throw new TypeError("invalid API key");
     }
     return (await sql.begin(async (transaction) => {

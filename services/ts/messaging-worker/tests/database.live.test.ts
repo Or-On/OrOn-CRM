@@ -19,7 +19,7 @@ describe.skipIf(databaseUrl === undefined)("durable messaging worker", () => {
     const admin = postgres(databaseUrl, { max: 1, prepare: false });
     let broadcastId: string | undefined;
     try {
-      broadcastId = (await admin.begin(async (transaction) => {
+      broadcastId = await admin.begin(async (transaction) => {
         await transaction`
           SELECT set_config('app.current_tenant', ${tenantId}, true),
                  set_config('app.current_user', ${userId}, true),
@@ -35,7 +35,7 @@ describe.skipIf(databaseUrl === undefined)("durable messaging worker", () => {
           await enqueueSimulatorBroadcast(transaction, id),
         ).toBeGreaterThan(0);
         return id;
-      })) as string;
+      });
 
       const store = createMessagingStore(databaseUrl, "phase4-live-worker");
       try {
