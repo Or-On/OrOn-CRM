@@ -122,15 +122,15 @@ Status values: `pending`, `active`, `complete`, `blocked`.
 | P2A-004 | Import/preserve complete Or-on Alembic lineage | complete | `4d9a219` | All 22 revisions imported; IDs/parents/branch/merge/order preserved; three import paths and one offline-only guard documented | Live historical backfill remains pending Phase 2B. |
 | P2A-005 | Verify one canonical offline Alembic graph/head | active | pending | Alembic heads/history/branches and deterministic offline SQL pass at current successor | Repeat after every generated unified revision and at final head. |
 | P2A-006 | Canonical tenant/identity mapping | complete | pending | Or-on tenant/user/membership preserved; provider-neutral identity bindings and tenant invitations created | RLS/membership execution pending Phase 2B. |
-| P2A-007 | Database schema/ownership architecture | pending | — | — | Define domain ownership without moving mature Or-on tables. |
-| P2A-008 | WACRM migration inventory | pending | — | All 39 source SQL migrations read | Account for every migration with an explicit disposition. |
-| P2A-009 | Translate WACRM identity/account semantics | pending | — | — | Map accounts/profiles/members/invitations to canonical identities and tenants. |
-| P2A-010 | Translate WACRM CRM schema | pending | — | — | Contacts, channel identities, tags, fields, notes, pipelines, stages, deals. |
-| P2A-011 | Translate WACRM messaging schema | pending | — | — | Conversations, messages, delivery, templates, media, quick replies, provider IDs. |
-| P2A-012 | Translate WACRM pipeline/campaign schema | pending | — | — | Reconcile messaging broadcasts with preserved Or-on voice campaigns. |
+| P2A-007 | Database schema/ownership architecture | complete | `109bf9e` | Historical Or-on tables stay in place; bounded new schemas and owners documented | Catalog execution pending Phase 2B. |
+| P2A-008 | WACRM migration inventory | complete | `109bf9e` | All 39 source SQL migrations have explicit disposition; zero unexplained | Keep mapping aligned with generated revisions. |
+| P2A-009 | Translate WACRM identity/account semantics | complete | `d67f8f7` | Account→tenant, profile→user, member→membership, provider-neutral bindings/invitations | Membership/RLS execution pending Phase 2B. |
+| P2A-010 | Translate WACRM CRM schema | complete | pending | Generated `a929e3f55c7a`: contacts/identities/tags/fields/notes/pipelines/stages/deals with composite tenant FKs | Constraints/indexes/RLS pending Phase 2B. |
+| P2A-011 | Translate WACRM messaging schema | complete | pending | Generated `2ef8ecd10c3d`: channels/conversations/messages/delivery/reactions/templates/quick replies/broadcasts | Triggers/idempotency/RLS pending Phase 2B. |
+| P2A-012 | Translate WACRM pipeline/campaign schema | complete | pending | Canonical campaign parent coexists with preserved Or-on voice campaigns; messaging broadcast projection references parent | Live claim/aggregate behavior pending Phase 2B. |
 | P2A-013 | Translate WACRM automation/flow schema | pending | — | — | Drafts, immutable versions, runs, steps, retries; preserve both runtimes. |
 | P2A-014 | Translate WACRM AI/knowledge/database semantics | pending | — | — | PostgreSQL FTS baseline; pgvector optional only. |
-| P2A-015 | Supabase Auth/Realtime/Storage/RPC removal mapping | pending | — | — | Translate every database-specific dependency explicitly. |
+| P2A-015 | Supabase Auth/Realtime/Storage/RPC removal mapping | complete | `109bf9e` | Auth/context, Realtime, Storage, service-role, and every RPC classified | Application adapters remain later-phase work. |
 | P2A-016 | OpenLive persistence inventory | pending | — | SQLite, JSON, filesystem, server setting keys, and browser-local keys inspected | Publish complete source-to-target persistence map. |
 | P2A-017 | OpenLive PostgreSQL target schema | pending | — | — | Tenant/user-scoped chats, messages, preferences, providers, voices, sessions. |
 | P2A-018 | OpenLive legacy importer foundation | pending | — | — | Offline parser/dry-run/idempotency/checksum tests; writes pending Phase 2B. |
@@ -139,7 +139,7 @@ Status values: `pending`, `active`, `complete`, `blocked`.
 | P2A-021 | Inbox/outbox/idempotency foundation | pending | — | — | Durable event schema and exact-once effects through idempotent consumers. |
 | P2A-022 | PostgreSQL durable-job foundation | pending | — | — | SKIP LOCKED design/tests prepared; concurrency pending Phase 2B. |
 | P2A-023 | Audit/object metadata foundation | pending | — | — | Immutable audit intent and metadata-only object persistence. |
-| P2A-024 | Index/constraint/pagination review | pending | — | — | Query-driven indexes and keyset pagination support. |
+| P2A-024 | Index/constraint/pagination review | active | pending | CRM/messaging query indexes, composite tenant FKs, idempotency uniqueness, and chronological keyset keys defined | Review automation/live/ops additions and validate catalog in Phase 2B. |
 | P2A-025 | Type/contract generation updates | pending | — | — | Deterministic consumer-only contracts; no second migration authority. |
 | P2A-026 | Offline migration/security guards | pending | — | — | Precise target-SQL and prohibited-runtime dependency checks. |
 | P2A-027 | Prepare Phase 2B live PostgreSQL tests | pending | — | — | Collect tests without reporting them as passed. |

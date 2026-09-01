@@ -121,3 +121,26 @@ inferred.
 | `alembic/versions/8aa960fd77ec_campaigns_and_stt_audio_seconds.py` | `db/alembic/versions/8aa960fd77ec_campaigns_and_stt_audio_seconds.py` | copied | Preserve merge revision and parent tuple. |
 | `alembic/versions/a41d2f6c2925_users_identities_and_memberships.py` | `db/alembic/versions/a41d2f6c2925_users_identities_and_memberships.py` | adapted | Import path points to target-local identical role values; identity SQL and head metadata unchanged. |
 | `packages/oron-db/src/oron_db/roles.py` | `db/alembic/oron_migration_compat.py` | adapted/reduced | Migration-only enum preserves exactly `oron_sessions_app` and `oron_tenancy_app`; no runtime package dependency on sibling source. |
+
+The imported target copies were mechanically normalized by the target Ruff
+formatter after import. This changed whitespace/import ordering and modernized
+type-annotation syntax only; revision metadata and SQL behavior remain as mapped
+above.
+
+## Phase 2A WACRM SQL adaptations
+
+Locked source SHA for every row:
+`98b5bd26e8feacacfd4b74ff58411acb8154d212`. WACRM is MIT-licensed. No source
+SQL file is copied as a competing migration; final semantics are adapted into
+Alembic-generated target revisions. The one-by-one disposition and affected
+objects for migrations 001–039 are recorded in
+[`docs/migration/wacrm-migration-map.md`](../migration/wacrm-migration-map.md).
+
+| Source artifacts | Target artifacts | Status | License implications / reason |
+| --- | --- | --- | --- |
+| `supabase/migrations/001`, `002`, `017`, `020`–`022`, `025`, `034`, `036` | `a929e3f55c7a_add_canonical_crm_foundation.py`, `34376836baf5_establish_platform_foundation_and_.py` | adapted/re-written | MIT behavioral/schema semantics; account/auth coupling replaced by canonical tenant/user/membership, E.164 identity, and tenant composite constraints. |
+| `supabase/migrations/001`, `003`–`005`, `009`, `013`, `014`, `020`, `023`, `024`, `027`, `035`–`039` | `2ef8ecd10c3d_add_canonical_messaging_foundation.py` | adapted/re-written | MIT messaging behavior; Realtime/Storage/service role replaced by durable PostgreSQL/application delivery/object references and platform roles. |
+| `supabase/migrations/006`, `007`, `010`, `012`, `016`, `024` | generated automation/operations revisions (Phase 2A) | behaviorally adapted | MIT behavior; generated canonical versions/runs/jobs replace source-specific runtime persistence. |
+| `supabase/migrations/008`, `016`, `023`, `039` | generated object metadata revision (Phase 2A) | superseded/adapted | MIT storage intent; no Supabase Storage runtime authority. |
+| `supabase/migrations/026`, `028`–`033` | generated operations/agents/audit revisions (Phase 2A) | adapted/re-written | MIT API key/webhook/AI/knowledge behavior; no plaintext secrets and pgvector remains optional. |
+| `supabase/migrations/011`, `015`, `018`, `019`, `031` | canonical identity docs/foundation and later application transactions | superseded/partially adapted | Auth-provider-specific SQL is not copied; invitations/membership intent retained. |

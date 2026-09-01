@@ -9,7 +9,7 @@ def test_migration_graph_has_exactly_one_head() -> None:
     scripts = ScriptDirectory.from_config(Config(config_path))
 
     assert scripts.get_bases() == ["0001"]
-    assert scripts.get_heads() == ["34376836baf5"]
+    assert scripts.get_heads() == ["2ef8ecd10c3d"]
 
 
 def test_complete_oron_lineage_is_preserved() -> None:
@@ -48,3 +48,5 @@ def test_complete_oron_lineage_is_preserved() -> None:
         "b38ef3c19979",
     }
     assert revisions["34376836baf5"].down_revision == "a41d2f6c2925"
+    assert revisions["a929e3f55c7a"].down_revision == "34376836baf5"
+    assert revisions["2ef8ecd10c3d"].down_revision == "a929e3f55c7a"
