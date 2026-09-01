@@ -116,7 +116,7 @@ async def test_supported_target_successor_downgrade_and_reupgrade(
     connection = await asyncpg.connect(isolated_postgres_url)
     try:
         assert (
-            await connection.fetchval("SELECT version_num FROM alembic_version") == "3efa5431c380"
+            await connection.fetchval("SELECT version_num FROM alembic_version") == "b56eb0a0aca1"
         )
         assert await connection.fetchval(
             "SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'live')"

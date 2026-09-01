@@ -1,9 +1,14 @@
 {
-  "alembic_head": "3efa5431c380",
+  "alembic_head": "b56eb0a0aca1",
   "expected_functions": [
     "automation.protect_published_flow_version",
     "messaging.adjust_broadcast_counts",
+    "ops.accept_whatsapp_inbound",
+    "ops.claim_inbound_events",
     "ops.claim_jobs",
+    "ops.claim_jobs_all_tenants",
+    "ops.complete_inbound_event",
+    "ops.fail_inbound_event",
     "ops.fail_job",
     "platform.auth_create_session",
     "platform.auth_login_record",
@@ -15,6 +20,7 @@
     "platform.auth_switch_session_tenant",
     "platform.current_tenant_id",
     "platform.current_user_id",
+    "platform.resolve_api_key",
     "platform.protect_last_tenant_owner"
   ],
   "expected_indexes": [
@@ -54,7 +60,12 @@
       "usage_events"
     ],
     "audit": ["records"],
-    "automation": ["flow_definitions", "flow_runs", "flow_step_runs", "flow_versions"],
+    "automation": [
+      "flow_definitions",
+      "flow_runs",
+      "flow_step_runs",
+      "flow_versions"
+    ],
     "crm": [
       "contact_channel_identities",
       "contact_custom_field_values",
@@ -183,6 +194,7 @@
     "ops.outbox_events",
     "platform.campaigns",
     "platform.credential_records",
-    "platform.tenant_invitations"
+    "platform.tenant_invitations",
+    "public.api_keys"
   ]
 }
