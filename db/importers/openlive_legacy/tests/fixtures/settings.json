@@ -1,0 +1,7 @@
+{
+  "acpCommand:fixture-agent": "unsafe-command-is-not-imported",
+  "exa_api_key": "fixture-secret-never-imported",
+  "liveEffort": "auto",
+  "liveModel": "fixture-model",
+  "liveProviderId": "provider-fixture-1"
+}

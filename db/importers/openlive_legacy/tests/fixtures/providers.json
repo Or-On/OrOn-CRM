@@ -1,0 +1,10 @@
+[
+  {
+    "id": "provider-fixture-1",
+    "name": "Local fixture provider",
+    "kind": "ollama",
+    "apiKeyCiphertext": null,
+    "keyLast4": null,
+    "isDefault": true
+  }
+]

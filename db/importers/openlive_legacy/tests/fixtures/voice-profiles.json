@@ -1,0 +1,10 @@
+[
+  {
+    "id": "voice-fixture-1",
+    "name": "Fictional voice",
+    "transcript": "Fictional consented sample",
+    "wavFile": "fixture.wav",
+    "createdAt": "2026-01-02T03:06:07.000Z",
+    "seconds": 1.25
+  }
+]

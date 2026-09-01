@@ -1,0 +1,23 @@
+{
+  "chats": [
+    {
+      "id": "chat-fixture-1",
+      "title": "Fictional planning session",
+      "createdAt": "2026-01-02T03:04:05.000Z",
+      "updatedAt": "2026-01-02T03:05:06.000Z",
+      "agentId": "fixture-agent",
+      "cwd": "C:/fictional/workspace",
+      "agentSessionId": "fixture-session"
+    }
+  ],
+  "messages": [
+    {
+      "id": "message-fixture-1",
+      "chatId": "chat-fixture-1",
+      "role": "user",
+      "content": [{"type": "text", "text": "Fictional fixture content"}],
+      "live": false,
+      "createdAt": "2026-01-02T03:05:06.000Z"
+    }
+  ]
+}

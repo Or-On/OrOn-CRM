@@ -42,7 +42,7 @@ ignore = ["S101"]
 [tool.pytest.ini_options]
 addopts = "-ra --strict-config --strict-markers"
 asyncio_mode = "auto"
-testpaths = ["packages/py", "services/py", "db/tests", "scripts/tests"]
+testpaths = ["packages/py", "services/py", "db/tests", "db/importers", "scripts/tests"]
 pythonpath = ["."]
 
 [tool.pyrefly]

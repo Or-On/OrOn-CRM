@@ -8,7 +8,7 @@ Last updated: 2026-09-01 (Asia/Jerusalem)
 - Branch: `codex/phase-2a-postgres-offline`
 - Phase 0 baseline: `93eb808e65f8edb1754c1940afe1949e7e18223a`
 - Phase 1 baseline: `20b46159078ec533a9891e6768d47595e35b7a7c`
-- Active task: P2A-018 — OpenLive legacy importer foundation
+- Active task: P2A-025 — Database contract and verification surfaces
 - Latest clean commit before this checkpoint: `20b46159078ec533a9891e6768d47595e35b7a7c`
 - Provider safety: no real telephone call, WhatsApp message, webhook mutation, or provider provisioning performed
 
@@ -133,7 +133,7 @@ Status values: `pending`, `active`, `complete`, `blocked`.
 | P2A-015 | Supabase Auth/Realtime/Storage/RPC removal mapping | complete | `109bf9e` | Auth/context, Realtime, Storage, service-role, and every RPC classified | Application adapters remain later-phase work. |
 | P2A-016 | OpenLive persistence inventory | complete | pending | Actual SQLite schema/query code, legacy conversation migration, encrypted JSON stores, settings APIs, voice-profile files, browser-local keys, and ACP session references mapped | Keep map aligned with importer coverage. |
 | P2A-017 | OpenLive PostgreSQL target schema | complete | pending | Generated `f5e8b540dfeb`: tenant/user-scoped chats, ordered messages, preferences, credential-referenced providers, object-backed voice profiles, and sessions | Constraints/RLS/grants pending Phase 2B. |
-| P2A-018 | OpenLive legacy importer foundation | pending | — | — | Offline parser/dry-run/idempotency/checksum tests; writes pending Phase 2B. |
+| P2A-018 | OpenLive legacy importer foundation | complete | pending | Explicit SQLite/JSON sources; deterministic UUID mapping/checksums, duplicate/conflict handling, secret-safe dry-run, fixture tests, canonical writer protocol | Importer writes/idempotency ledger execution **PENDING LIVE POSTGRESQL VALIDATION — PHASE 2B**. |
 | P2A-019 | Canonical RLS policies for new tenant data | complete | pending | Static fail-closed FORCE RLS policies exist for identity, CRM, messaging, automation, agents, objects, ops, audit, and live tables | **PENDING LIVE POSTGRESQL VALIDATION — PHASE 2B**. |
 | P2A-020 | Unified runtime roles/grants successor migration | complete | `d67f8f7` | Generated successor defines six roles without privileged attributes and preserves legacy Or-on roles | **PENDING LIVE POSTGRESQL VALIDATION — PHASE 2B**. |
 | P2A-021 | Inbox/outbox/idempotency foundation | complete | pending | Generated `cebe5f87cf18`: inbound/outbox events and scoped idempotency keys with explicit uniqueness and schedules | Atomicity/deduplication execution pending Phase 2B. |
