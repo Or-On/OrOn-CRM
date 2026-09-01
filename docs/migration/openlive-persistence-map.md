@@ -36,8 +36,9 @@ timestamps, session, and tenancy remain normalized. Provider secrets are
 credential references, never embedded in preference JSON.
 
 The legacy importer lives under `db/importers/openlive_legacy/`, is not in any
-runtime package, and may use Python's SQLite reader only there. It supports
-explicit source paths, destination tenant/user, dry-run plans, deterministic ID
-mapping, source checksums, duplicate detection, resumable import ledgers, and
-PII-safe diagnostics. PostgreSQL writes and idempotency execution are **PENDING
-LIVE POSTGRESQL VALIDATION — PHASE 2B**.
+runtime package, and may use Python's standard-library SQLite reader only there.
+It supports explicit source paths, destination tenant/user, dry-run plans,
+deterministic ID mapping, source checksums, duplicate detection, resumable import
+ledgers, and PII-safe diagnostics. Phase 2B read both JSON fixtures and a real
+SQLite fixture, wrote their mapped records only to canonical PostgreSQL, and
+proved a second execution creates no duplicate rows.

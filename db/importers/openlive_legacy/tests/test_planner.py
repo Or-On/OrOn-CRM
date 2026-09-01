@@ -10,64 +10,11 @@ import pytest
 from db.importers.openlive_legacy.models import PlannerConfig, execute_import
 from db.importers.openlive_legacy.planner import LegacyDataError, build_import_plan
 from db.importers.openlive_legacy.postgres_writer import PostgresCanonicalWriter
+from db.importers.openlive_legacy.tests.sqlite_fixture import create_sqlite_fixture
 
 TENANT_ID = UUID("10000000-0000-0000-0000-000000000001")
 USER_ID = UUID("20000000-0000-0000-0000-000000000002")
 FIXTURES = Path(__file__).parent / "fixtures"
-
-
-def _sqlite_fixture(path: Path) -> None:
-    connection = sqlite3.connect(path)
-    try:
-        connection.executescript(
-            """
-            CREATE TABLE chats (
-              id TEXT PRIMARY KEY,
-              title TEXT NOT NULL,
-              created_at TEXT NOT NULL,
-              updated_at TEXT,
-              agent_id TEXT,
-              cwd TEXT,
-              agent_session_id TEXT
-            );
-            CREATE TABLE messages (
-              seq INTEGER PRIMARY KEY AUTOINCREMENT,
-              id TEXT NOT NULL UNIQUE,
-              chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
-              role TEXT NOT NULL,
-              content TEXT NOT NULL,
-              live INTEGER NOT NULL DEFAULT 0,
-              created_at TEXT NOT NULL
-            );
-            """
-        )
-        connection.execute(
-            "INSERT INTO chats VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (
-                "sqlite-chat-1",
-                "Fictional SQLite chat",
-                "2026-02-01T01:02:03Z",
-                None,
-                "fixture-agent",
-                "C:/fictional/sqlite",
-                "fixture-acp-session",
-            ),
-        )
-        connection.execute(
-            "INSERT INTO messages (id, chat_id, role, content, live, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (
-                "sqlite-message-1",
-                "sqlite-chat-1",
-                "assistant",
-                json.dumps([{"type": "text", "text": "Fictional reply"}]),
-                1,
-                "2026-02-01T01:02:04Z",
-            ),
-        )
-        connection.commit()
-    finally:
-        connection.close()
 
 
 def _config(**overrides: object) -> PlannerConfig:
@@ -101,7 +48,7 @@ def test_fixture_plan_is_deterministic_and_redacts_secrets() -> None:
 
 def test_sqlite_parser_preserves_append_sequence(tmp_path: Path) -> None:
     sqlite_path = tmp_path / "openlive.db"
-    _sqlite_fixture(sqlite_path)
+    create_sqlite_fixture(sqlite_path)
 
     plan = build_import_plan(
         PlannerConfig(tenant_id=TENANT_ID, user_id=USER_ID, sqlite_path=sqlite_path)

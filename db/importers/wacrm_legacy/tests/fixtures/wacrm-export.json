@@ -1,0 +1,78 @@
+{
+  "formatVersion": "wacrm-export-v1",
+  "accounts": [{"id": "10000000-0000-0000-0000-000000000001"}],
+  "users": [{"id": "20000000-0000-0000-0000-000000000002"}],
+  "contacts": [
+    {
+      "id": "30000000-0000-0000-0000-000000000003",
+      "accountId": "10000000-0000-0000-0000-000000000001",
+      "name": "Fictional WACRM Contact",
+      "email": "wacrm-contact@example.test",
+      "company": "Example Test Company"
+    }
+  ],
+  "channels": [
+    {
+      "id": "40000000-0000-0000-0000-000000000004",
+      "accountId": "10000000-0000-0000-0000-000000000001",
+      "provider": "meta",
+      "providerAccountId": "fixture-wacrm-account",
+      "displayAddress": "+15550102030"
+    }
+  ],
+  "conversations": [
+    {
+      "id": "50000000-0000-0000-0000-000000000005",
+      "accountId": "10000000-0000-0000-0000-000000000001",
+      "channelId": "40000000-0000-0000-0000-000000000004",
+      "contactId": "30000000-0000-0000-0000-000000000003",
+      "status": "open",
+      "unreadCount": 1
+    }
+  ],
+  "messages": [
+    {
+      "id": "60000000-0000-0000-0000-000000000006",
+      "accountId": "10000000-0000-0000-0000-000000000001",
+      "conversationId": "50000000-0000-0000-0000-000000000005",
+      "direction": "inbound",
+      "senderType": "contact",
+      "contentType": "text",
+      "contentText": "Fictional WACRM import message",
+      "provider": "meta",
+      "providerMessageId": "fixture-wacrm-message",
+      "status": "received"
+    }
+  ],
+  "pipelines": [
+    {
+      "id": "70000000-0000-0000-0000-000000000007",
+      "accountId": "10000000-0000-0000-0000-000000000001",
+      "name": "Fictional Pipeline",
+      "isDefault": true
+    }
+  ],
+  "pipeline_stages": [
+    {
+      "id": "80000000-0000-0000-0000-000000000008",
+      "accountId": "10000000-0000-0000-0000-000000000001",
+      "pipelineId": "70000000-0000-0000-0000-000000000007",
+      "name": "Qualified",
+      "position": 0,
+      "probability": 40
+    }
+  ],
+  "deals": [
+    {
+      "id": "90000000-0000-0000-0000-000000000009",
+      "accountId": "10000000-0000-0000-0000-000000000001",
+      "pipelineId": "70000000-0000-0000-0000-000000000007",
+      "stageId": "80000000-0000-0000-0000-000000000008",
+      "contactId": "30000000-0000-0000-0000-000000000003",
+      "title": "Fictional Opportunity",
+      "value": "1250.00",
+      "currency": "USD",
+      "status": "open"
+    }
+  ]
+}

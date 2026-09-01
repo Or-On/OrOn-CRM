@@ -145,6 +145,7 @@ objects for migrations 001–039 are recorded in
 | `supabase/migrations/008`, `016`, `023`, `039` | `cebe5f87cf18_add_automation_operations_and_audit_.py` | superseded/adapted | MIT storage intent; metadata points to mounted-object/GCS backends and Supabase Storage is not a runtime authority. |
 | `supabase/migrations/026`, `028`–`033` | `cebe5f87cf18_add_automation_operations_and_audit_.py` | adapted/re-written | MIT API-key/webhook/AI/knowledge behavior; credential references avoid plaintext secrets and PostgreSQL FTS works without requiring pgvector. |
 | `supabase/migrations/011`, `015`, `018`, `019`, `031` | canonical identity docs/foundation and later application transactions | superseded/partially adapted | Auth-provider-specific SQL is not copied; invitations/membership intent retained. |
+| Effective WACRM account/contact/inbox/pipeline schema and ID relationships | `db/importers/wacrm_legacy/` | behaviorally adapted/re-written | New provider-neutral MIT-compatible export planner/writer maps explicit account→tenant and user identities, then writes the initial contact/channel/conversation/message/pipeline/stage/deal slice through canonical PostgreSQL and its import ledger. No Supabase client or source migration runner is copied. |
 
 ## Phase 2A OpenLive persistence adaptations
 

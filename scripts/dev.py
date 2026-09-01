@@ -279,6 +279,7 @@ def db_verify_offline(environment: dict[str, str]) -> None:
             "no:cacheprovider",
             "db/tests/test_migration_graph.py",
             "db/importers/openlive_legacy/tests",
+            "db/importers/wacrm_legacy/tests",
             "scripts/tests/test_db_verify.py",
         ],
         environment=environment,

@@ -10,9 +10,25 @@ import pytest
 from db.importers.openlive_legacy.models import PlannerConfig
 from db.importers.openlive_legacy.planner import build_import_plan
 from db.importers.openlive_legacy.postgres_writer import PostgresCanonicalWriter
+from db.importers.openlive_legacy.tests.sqlite_fixture import create_sqlite_fixture
+from db.importers.wacrm_legacy.planner import (
+    build_import_plan as build_wacrm_import_plan,
+)
+from db.importers.wacrm_legacy.planner import snapshot_from_path
+from db.importers.wacrm_legacy.postgres_writer import WacrmPostgresWriter
 
 pytestmark = [pytest.mark.postgres, pytest.mark.integration]
 FIXTURES = Path(__file__).parents[2] / "importers" / "openlive_legacy" / "tests" / "fixtures"
+WACRM_FIXTURE = (
+    Path(__file__).parents[2]
+    / "importers"
+    / "wacrm_legacy"
+    / "tests"
+    / "fixtures"
+    / "wacrm-export.json"
+)
+WACRM_ACCOUNT_ID = UUID("10000000-0000-0000-0000-000000000001")
+WACRM_USER_ID = UUID("20000000-0000-0000-0000-000000000002")
 
 
 async def _insert_tenant(connection: asyncpg.Connection, label: str) -> UUID:
@@ -182,6 +198,98 @@ async def test_openlive_importer_is_idempotent(postgres_url: str) -> None:
             await check.close()
     finally:
         cleanup = await asyncpg.connect(postgres_url)
+        await cleanup.execute("DELETE FROM tenants WHERE id = $1", tenant_id)
+        await cleanup.execute("DELETE FROM users WHERE id = $1", user_id)
+        await cleanup.close()
+
+
+async def test_openlive_sqlite_source_writes_only_to_canonical_postgres(
+    postgres_url: str, tmp_path: Path
+) -> None:
+    sqlite_path = tmp_path / "legacy-openlive.db"
+    create_sqlite_fixture(sqlite_path)
+
+    admin = await asyncpg.connect(postgres_url)
+    tenant_id = await _insert_tenant(admin, "SQLite importer tenant")
+    user_id = uuid4()
+    await admin.execute(
+        "INSERT INTO users (id, email) VALUES ($1, $2)", user_id, f"{user_id}@example.test"
+    )
+    await admin.execute(
+        "INSERT INTO memberships (user_id, tenant_id, role) VALUES ($1, $2, 'owner')",
+        user_id,
+        tenant_id,
+    )
+    await admin.close()
+    plan = build_import_plan(
+        PlannerConfig(tenant_id=tenant_id, user_id=user_id, sqlite_path=sqlite_path)
+    )
+    writer = PostgresCanonicalWriter(postgres_url)
+    try:
+        first = await writer.write_async(plan)
+        second = await writer.write_async(plan)
+        assert first.import_run_id == second.import_run_id
+        assert first.imported_count == 2
+        assert second.skipped_count == 2
+    finally:
+        cleanup = await asyncpg.connect(postgres_url)
+        await cleanup.execute("DELETE FROM tenants WHERE id = $1", tenant_id)
+        await cleanup.execute("DELETE FROM users WHERE id = $1", user_id)
+        await cleanup.close()
+
+
+async def test_wacrm_export_mapping_is_idempotent(postgres_url: str) -> None:
+    admin = await asyncpg.connect(postgres_url)
+    tenant_id = await _insert_tenant(admin, "WACRM importer tenant")
+    user_id = uuid4()
+    await admin.execute(
+        "INSERT INTO users (id, email) VALUES ($1, $2)", user_id, f"{user_id}@example.test"
+    )
+    await admin.execute(
+        "INSERT INTO memberships (user_id, tenant_id, role) VALUES ($1, $2, 'owner')",
+        user_id,
+        tenant_id,
+    )
+    await admin.close()
+    plan = build_wacrm_import_plan(
+        snapshot_from_path(WACRM_FIXTURE),
+        account_to_tenant={WACRM_ACCOUNT_ID: tenant_id},
+        source_user_to_canonical_user={WACRM_USER_ID: user_id},
+    )
+    writer = WacrmPostgresWriter(postgres_url)
+    try:
+        first = await writer.write_async(plan)
+        second = await writer.write_async(plan)
+        assert first.import_run_ids == second.import_run_ids
+        assert first.imported_count == 7
+        assert second.skipped_count == 7
+
+        check = await asyncpg.connect(postgres_url)
+        try:
+            assert (
+                await check.fetchval(
+                    "SELECT count(*) FROM crm.contacts WHERE tenant_id = $1", tenant_id
+                )
+                == 1
+            )
+            assert (
+                await check.fetchval(
+                    "SELECT count(*) FROM messaging.messages WHERE tenant_id = $1", tenant_id
+                )
+                == 1
+            )
+            assert (
+                await check.fetchval(
+                    "SELECT count(*) FROM crm.deals WHERE tenant_id = $1", tenant_id
+                )
+                == 1
+            )
+        finally:
+            await check.close()
+    finally:
+        cleanup = await asyncpg.connect(postgres_url)
+        await cleanup.execute("DELETE FROM crm.deals WHERE tenant_id = $1", tenant_id)
+        await cleanup.execute("DELETE FROM messaging.conversations WHERE tenant_id = $1", tenant_id)
         await cleanup.execute("DELETE FROM tenants WHERE id = $1", tenant_id)
         await cleanup.execute("DELETE FROM users WHERE id = $1", user_id)
         await cleanup.close()

@@ -151,6 +151,25 @@ async def test_security_definer_functions_pin_search_path_and_public_has_no_exec
         assert not row["public_execute"]
 
 
+async def test_all_unified_foreign_keys_declare_delete_semantics(pg: asyncpg.Connection) -> None:
+    rows = await pg.fetch(
+        """
+        SELECT n.nspname || '.' || c.relname AS table_name, con.conname,
+               con.confdeltype::text AS confdeltype
+        FROM pg_constraint con
+        JOIN pg_class c ON c.oid = con.conrelid
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE con.contype = 'f'
+          AND n.nspname = ANY($1::text[])
+        """,
+        ["platform", "crm", "messaging", "automation", "agents", "objects", "ops", "audit", "live"],
+    )
+
+    assert rows
+    assert all(row["confdeltype"] in {"c", "n", "r"} for row in rows)
+    assert {row["confdeltype"] for row in rows} == {"c", "n", "r"}
+
+
 async def test_development_seed_is_idempotent(postgres_url: str) -> None:
     environment = dict(os.environ)
     environment["DATABASE_URL"] = postgres_url

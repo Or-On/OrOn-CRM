@@ -79,9 +79,15 @@ security-sensitive function revokes public execution and uses explicit
 
 ## Existing-data import direction
 
-A later offline importer consumes a PostgreSQL dump/export, never a live
-Supabase dependency. It records an import run, maps account→tenant and Supabase
-user ID→canonical user/identity, then maps contacts, conversations/messages,
-deals, campaigns/templates, automations/flows, AI metadata, and object references
-through deterministic source IDs/checksums. Each unit is resumable and
-idempotent; secrets require a separate approved credential migration path.
+The Phase 2B provider-neutral importer consumes an operator-produced
+`wacrm-export-v1` JSON extract from a PostgreSQL dump/export workflow, never a
+live Supabase dependency. It requires account→tenant and Supabase user
+ID→canonical user mappings before planning. The validated initial slice writes
+contacts, WhatsApp channels, conversations/messages, pipelines/stages, and deals
+through deterministic IDs, checksums, one tenant transaction, and
+`ops.import_runs/import_items`; a second execution produces no duplicates.
+
+Campaigns/templates, automations/flows, AI metadata, object references, contact
+identities, and extraction support for arbitrary historical dump layouts remain
+incremental importer work. Supabase sessions are never imported, and secrets
+require a separate approved credential migration path.
