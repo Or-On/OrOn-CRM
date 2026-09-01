@@ -220,7 +220,8 @@ export async function ingestSimulatedInbound(
     RETURNING id
   `;
   const insertedMessageId = messageRows[0]?.id;
-  if (insertedMessageId === undefined) return { conversationId, inserted: false };
+  if (insertedMessageId === undefined)
+    return { conversationId, inserted: false };
   await sql`
     INSERT INTO messaging.message_delivery_events
       (tenant_id, message_id, provider_event_id, status, occurred_at)
