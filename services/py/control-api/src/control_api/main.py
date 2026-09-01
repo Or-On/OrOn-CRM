@@ -1,13 +1,16 @@
 """Control API executable entrypoint."""
 
 import uvicorn
+from or_on_platform.config import PlatformSettings
+
+from control_api.app import create_app
 
 
 def main() -> None:
+    settings = PlatformSettings.load(require_database=True, service="control-api")
     uvicorn.run(
-        "control_api.app:create_app",
-        factory=True,
-        host="127.0.0.1",
+        create_app(settings=settings),
+        host=settings.control_api_bind_host,
         port=8000,
         log_config=None,
     )

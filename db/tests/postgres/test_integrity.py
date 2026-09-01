@@ -110,7 +110,7 @@ async def test_provider_events_and_messages_are_idempotent(pg: asyncpg.Connectio
                 tenant_id,
             )
 
-    with pytest.raises(asyncpg.ForeignKeyViolationError):
+    with pytest.raises(asyncpg.RestrictViolationError):
         async with pg.transaction():
             await pg.execute("DELETE FROM crm.contacts WHERE id = $1", contact_id)
     await pg.execute("DELETE FROM messaging.conversations WHERE id = $1", conversation_id)
@@ -178,7 +178,7 @@ async def test_published_flow_version_is_immutable(pg: asyncpg.Connection) -> No
 async def test_postgresql_full_text_search_works_without_vector(pg: asyncpg.Connection) -> None:
     tenant_id = await _tenant(pg, "Knowledge tenant")
     source_id = await pg.fetchval(
-        "INSERT INTO agents.knowledge_sources (tenant_id, name, kind) "
+        "INSERT INTO agents.knowledge_sources (tenant_id, name, source_type) "
         "VALUES ($1, 'Fixture source', 'manual') RETURNING id",
         tenant_id,
     )
@@ -200,7 +200,7 @@ async def test_postgresql_full_text_search_works_without_vector(pg: asyncpg.Conn
     assert (
         await pg.fetchval(
             "SELECT count(*) FROM agents.knowledge_chunks "
-            "WHERE tenant_id = $1 AND search_vector @@ plainto_tsquery('english', 'searchable')",
+            "WHERE tenant_id = $1 AND search_vector @@ plainto_tsquery('simple', 'searchable')",
             tenant_id,
         )
         == 1

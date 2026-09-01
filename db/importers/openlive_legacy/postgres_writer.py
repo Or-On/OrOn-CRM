@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -13,6 +14,20 @@ from .models import ImportPlan, ImportRecord, ImportResult
 
 if TYPE_CHECKING:
     from asyncpg import Connection
+
+
+def _timestamp(value: object) -> datetime:
+    """Parse a legacy timestamp into an explicit UTC-aware PostgreSQL value."""
+
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str):
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    else:
+        raise ValueError("legacy timestamp must be an ISO-8601 string or datetime")
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 class PostgresCanonicalWriter:
@@ -137,8 +152,8 @@ class PostgresCanonicalWriter:
                 payload["workspace_path"],
                 payload["external_session_id"],
                 record.source_id,
-                payload["created_at"],
-                payload["updated_at"],
+                _timestamp(payload["created_at"]),
+                _timestamp(payload["updated_at"]),
             )
         elif record.kind == "message":
             await connection.execute(
@@ -157,7 +172,7 @@ class PostgresCanonicalWriter:
                 payload["role"],
                 json.dumps(payload["content"], sort_keys=True),
                 payload["is_live"],
-                payload["created_at"],
+                _timestamp(payload["created_at"]),
             )
         elif record.kind == "provider_configuration":
             await connection.execute(
@@ -206,7 +221,7 @@ class PostgresCanonicalWriter:
                 payload["transcript"],
                 payload["duration_seconds"],
                 json.dumps(payload["metadata"], sort_keys=True),
-                payload["created_at"],
+                _timestamp(payload["created_at"]),
             )
         else:
             raise ValueError(f"unsupported canonical import record kind: {record.kind}")

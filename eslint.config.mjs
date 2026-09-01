@@ -9,6 +9,8 @@ export default tseslint.config(
       "**/.next/**",
       "**/.artifacts/**",
       "**/.venv/**",
+      "**/.pytest_cache/**",
+      "**/.ruff_cache/**",
       "**/coverage/**",
       "**/dist/**",
       "**/node_modules/**",

@@ -30,6 +30,9 @@ class PlatformSettings(BaseSettings):
     control_api_url: str = Field(
         default="http://127.0.0.1:8000", validation_alias="CONTROL_API_URL"
     )
+    control_api_bind_host: Literal["127.0.0.1", "0.0.0.0"] = Field(  # noqa: S104
+        default="127.0.0.1", validation_alias="CONTROL_API_BIND_HOST"
+    )
     log_level: Annotated[
         Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         Field(validation_alias="LOG_LEVEL"),
@@ -63,6 +66,7 @@ class PlatformSettings(BaseSettings):
             "service": self.service,
             "database_url": "unset" if self.database_url is None else "[REDACTED]",
             "control_api_url": self.control_api_url,
+            "control_api_bind_host": self.control_api_bind_host,
             "log_level": self.log_level,
             "enable_real_telephony": self.enable_real_telephony,
             "enable_real_whatsapp": self.enable_real_whatsapp,

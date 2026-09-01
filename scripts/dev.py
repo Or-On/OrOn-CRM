@@ -71,7 +71,10 @@ def _load_environment(*, create: bool = False) -> dict[str, str]:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", maxsplit=1)
-        result.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+        # A repository-local environment file is the explicit configuration for
+        # this developer command surface. It must override unrelated ambient
+        # variables so bootstrap cannot accidentally target another project.
+        result[key.strip()] = value.strip().strip('"').strip("'")
     return result
 
 
@@ -133,6 +136,12 @@ def _numeric_version(value: str | None) -> tuple[int, ...] | None:
     return tuple(int(part) for part in match.groups(default="0")) if match else None
 
 
+def _supported_compose_version(version: tuple[int, ...]) -> bool:
+    """Accept the Compose v2 plugin command surface and later compatible majors."""
+
+    return version >= (2, 0)
+
+
 def _check_tool(
     name: str,
     command: Sequence[str],
@@ -153,7 +162,12 @@ def doctor() -> None:
     checks = [
         _check_tool("Git", ["git", "--version"], "installed"),
         _check_tool("Docker", ["docker", "--version"], "Engine/Desktop available"),
-        _check_tool("Compose", ["docker", "compose", "version"], "Compose v2", lambda v: v[0] == 2),
+        _check_tool(
+            "Compose",
+            ["docker", "compose", "version"],
+            "Compose >=2",
+            _supported_compose_version,
+        ),
         _check_tool(
             "Node.js", ["node", "--version"], ">=24.20,<25", lambda v: (24, 20) <= v < (25, 0)
         ),

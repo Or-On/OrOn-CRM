@@ -8,6 +8,16 @@ def test_real_provider_actions_default_to_disabled() -> None:
 
     assert settings.enable_real_telephony is False
     assert settings.enable_real_whatsapp is False
+    assert settings.control_api_bind_host == "127.0.0.1"
+
+
+def test_container_bind_host_is_explicitly_supported() -> None:
+    settings = PlatformSettings(
+        _env_file=None,
+        CONTROL_API_BIND_HOST="0.0.0.0",  # noqa: S104 - container-only explicit opt-in
+    )
+
+    assert settings.control_api_bind_host == "0.0.0.0"  # noqa: S104
 
 
 def test_only_postgresql_urls_validate() -> None:

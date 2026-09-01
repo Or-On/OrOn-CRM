@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 import os
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import create_async_engine
 
 
@@ -20,15 +21,17 @@ async def seed() -> None:
     engine = create_async_engine(_database_url())
     try:
         async with engine.begin() as connection:
-            await connection.execute(
-                text(
-                    """
+            statement = text(
+                """
                     INSERT INTO platform.system_metadata (key, value)
-                    VALUES ('foundation_version', 'phase-1')
+                    VALUES (:key, :value)
                     ON CONFLICT (key) DO UPDATE
                     SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
                     """
-                )
+            ).bindparams(bindparam("value", type_=JSONB))
+            await connection.execute(
+                statement,
+                {"key": "foundation_version", "value": "phase-1"},
             )
     finally:
         await engine.dispose()

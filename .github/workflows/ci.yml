@@ -3,7 +3,13 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main, codex/phase-1-foundation, codex/phase-2a-postgres-offline]
+    branches:
+      [
+        main,
+        codex/phase-1-foundation,
+        codex/phase-2a-postgres-offline,
+        codex/phase-2b-postgres-live,
+      ]
 
 permissions:
   contents: read

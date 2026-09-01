@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import subprocess
 import sys
@@ -167,9 +168,10 @@ async def test_development_seed_is_idempotent(postgres_url: str) -> None:
     await asyncio.to_thread(run_seed)
     connection = await asyncpg.connect(postgres_url)
     try:
-        count = await connection.fetchval(
-            "SELECT count(*) FROM platform.system_metadata WHERE key = 'foundation_version'"
+        row = await connection.fetchrow(
+            "SELECT value FROM platform.system_metadata WHERE key = 'foundation_version'"
         )
-        assert count == 1
+        assert row is not None
+        assert json.loads(row["value"]) == "phase-1"
     finally:
         await connection.close()
