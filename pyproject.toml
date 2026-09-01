@@ -8,7 +8,7 @@ dependencies = []
 [dependency-groups]
 dev = [
   "alembic==1.19.1",
-  "cryptography==49.0.0",
+  "cryptography==50.0.0",
   "httpx==0.28.1",
   "pip-audit==2.10.1",
   "pyrefly==1.2.0",
