@@ -11,8 +11,8 @@ Last updated: 2026-09-01 (Asia/Jerusalem)
 - Phase 2A status: **OFFLINE IMPLEMENTATION COMPLETE**
 - Live status: **PHASE 2B LIVE POSTGRESQL VALIDATION COMPLETE**
 - Phase 3 status: **COMPLETE**
-- Phase 4 status: **ACTIVE**
-- Active task: P4-014 — messaging worker and PostgreSQL durable work
+- Phase 4 status: **COMPLETE**
+- Active task: Phase 4 acceptance checkpoint complete; await an explicit next-phase scope
 - Phase 2B clean baseline commit: `830a8371836ea7922fca5c320624bf3bd32ec229`
 - Phase 3 exact baseline commit: `9ca3a022c2fb18a5d416b39aa7d1404f7910ae1b`
 - Phase 4 exact baseline commit: `fdaabedfe0c6dd3586261a338f2fd82f904023d8`
@@ -44,22 +44,49 @@ Status values: `pending`, `active`, `complete`, `blocked`.
 | ID | Task | Status | Commit | Verification evidence | Next exact task |
 | --- | --- | --- | --- | --- | --- |
 | P4-001 | Baseline, instructions, and Phase 4 reconstruction | complete | `ab9100f` | Clean Phase 3 baseline; locked clean upstreams; master Phase 4 scope recovered; scoped rules and WACRM instructions read | Complete code-level behavior inventory. |
-| P4-002 | Locked WACRM behavior inventory and provenance plan | complete | pending checkpoint | Contacts, inbox, provider, webhook, pipeline, broadcast, automation, and public API source behavior inspected; behavioral provenance recorded without wholesale copying | Keep mappings aligned as later slices land. |
-| P4-003 | Canonical CRM/messaging repository package | complete | pending checkpoint | Strict `@or-on/crm` package; tenant-transaction contacts, inbox, simulator, pipelines, and metrics; unit and live PostgreSQL integration tests pass | Extend the same bounded package for remaining domains. |
-| P4-004 | Contacts, tags, notes, custom fields, and import | complete | pending checkpoint | CRUD/archive, E.164 dedupe, tags, notes, custom values, deterministic bounded CSV import, contact detail UI, and live rollback tests pass | Extend field-definition administration only when settings UX is finalized. |
-| P4-005 | Shared inbox and conversation operations | complete | pending checkpoint | Tenant-safe reads, unread/status, member-validated assignment, five-second same-origin refresh, seeded inbox, responsive two-pane UI, and authenticated routes pass | Replace polling only when a durable projection delivery transport is justified. |
-| P4-006 | WhatsApp webhook and provider simulator | complete | pending checkpoint | Simulator enforces auth/CSRF and provider-message dedupe; disabled real route verifies exact raw bytes and persists unique inbound work before acknowledgement | Real Meta activation remains explicitly deferred. |
-| P4-007 | Human reply, delivery status, reactions, and quick replies | complete | pending checkpoint | Idempotent simulator reply, canonical delivery events/history, status, reactions, and quick replies pass; no provider traffic | Real-provider error-specific manual retry is deferred until provider activation. |
-| P4-008 | Pipelines, stages, and deals | complete | pending checkpoint | Canonical board query and same-pipeline persisted stage movement API/UI pass strict and live builds | Rich deal editing is an incremental product enhancement. |
-| P4-009 | Templates, broadcasts, campaigns, and durable delivery | complete | pending checkpoint | Stable audience, per-recipient idempotent jobs, worker claims, retry/lease semantics, aggregate counts, and live worker execution pass | Meta delivery adapter remains deferred and disabled. |
-| P4-010 | Automation persistence and execution adapter | complete | pending checkpoint | Draft/publish plus a manual empty-graph adapter produces persisted succeeded run traces without replacing either mature engine | Add channel runtime adapters in their owning phases. |
-| P4-011 | Teams, settings, analytics, and notifications | complete | pending checkpoint | Tenant-aware metrics, canonical roster, workspace settings, notification read model, and safety UI are integrated | Invitations and role editing remain identity-management enhancements. |
-| P4-012 | Scoped public API and API keys | complete | pending checkpoint | One-time key issuance, keyed-HMAC storage, RLS ownership, resolver function, revocation route, and scoped contacts REST surface pass static/live checks | Expand resources only with versioned contracts. |
-| P4-013 | MCP-compatible CRM tool surface | complete | pending checkpoint | Three typed CRM tool contracts expose safe reads and require explicit confirmation before the note mutation reaches PostgreSQL | Bind descriptors to the unified MCP transport in its owning phase. |
-| P4-014 | Messaging worker and PostgreSQL durable work | complete | pending checkpoint | Cross-tenant narrow claims, `SKIP LOCKED`, leases, bounded retries, inbound completion, simulator campaign execution, and live PostgreSQL tests pass | Add operational metrics before production provider activation. |
-| P4-015 | CRM/WhatsApp UI integration and accessibility | active | pending | Authenticated shell now exposes contacts, inbox, pipeline, campaigns and automations with semantic forms and responsive layouts | Run authenticated desktop/mobile/RTL browser QA. |
-| P4-016 | Security, E2E, parity, provenance, and documentation | active | pending | Architecture/runbook, source provenance, webhook/API-key security boundaries, and live PostgreSQL tests are current | Complete browser/API E2E and final integrity review. |
-| P4-017 | Full Phase 4 verification | pending | pending | — | Run live DB, simulator E2E, build, audits, and upstream integrity. |
+| P4-002 | Locked WACRM behavior inventory and provenance plan | complete | `ab9100f` | Contacts, inbox, provider, webhook, pipeline, broadcast, automation, and public API behavior inspected; provenance recorded without wholesale copying | Keep mappings aligned as later slices land. |
+| P4-003 | Canonical CRM/messaging repository package | complete | `5d0ccea` | Strict `@or-on/crm`; tenant-transaction contacts, inbox, simulator, pipelines, metrics, unit and live tests | Extend through bounded domain modules only. |
+| P4-004 | Contacts, tags, notes, custom fields, and import | complete | `3c5e335` | CRUD/archive, E.164 dedupe, tags, notes, custom values, deterministic CSV import, detail UI, live rollback tests | Field-definition administration is incremental product work. |
+| P4-005 | Shared inbox and conversation operations | complete | `ed7acb2` | Tenant-safe reads, unread/status, member-validated assignment, same-origin refresh, seeded inbox, responsive UI, authenticated routes | Replace polling only when a durable delivery transport is justified. |
+| P4-006 | WhatsApp webhook and provider simulator | complete | `36c1674`, `e19b6dd` | Simulator auth/CSRF/dedupe; disabled real route verifies exact raw bytes and persists unique inbound work before acknowledgement | Real Meta activation remains explicitly deferred. |
+| P4-007 | Human reply, delivery status, reactions, and quick replies | complete | `e19b6dd`, `ed7acb2` | Idempotent simulator reply, canonical delivery history, status, reactions, quick replies; no provider traffic | Provider-specific manual retry waits for provider activation. |
+| P4-008 | Pipelines, stages, and deals | complete | `5d0ccea` | Canonical board and persisted same-pipeline stage movement API/UI pass strict/live builds | Rich deal editing is incremental product work. |
+| P4-009 | Templates, broadcasts, campaigns, and durable delivery | complete | `e19b6dd` | Stable audience, idempotent jobs, claims/retry/leases, aggregates, live worker execution | Meta delivery adapter remains deferred and disabled. |
+| P4-010 | Automation persistence and execution adapter | complete | `ed7acb2` | Draft/publish and manual empty-graph adapter produce persisted succeeded traces without replacing mature engines | Channel runtime adapters belong to their owning phases. |
+| P4-011 | Teams, settings, analytics, and notifications | complete | `ed7acb2` | Metrics, canonical roster, workspace settings, notifications, safety UI | Invitations/role editing remain identity enhancements. |
+| P4-012 | Scoped public API and API keys | complete | `d664781`, `e19b6dd`, `ed7acb2` | One-time issue, keyed-HMAC storage, RLS, resolver, revocation, scoped contacts REST; live/E2E checks | Expand resources only with versioned contracts. |
+| P4-013 | MCP-compatible CRM tool surface | complete | `e19b6dd` | Three typed tool contracts expose safe reads and require explicit write confirmation | Bind them to the unified MCP transport later. |
+| P4-014 | Messaging worker and PostgreSQL durable work | complete | `d664781`, `e19b6dd` | Narrow cross-tenant claims, `SKIP LOCKED`, leases, bounded retries, inbound completion, simulator delivery, live tests | Add production metrics before provider activation. |
+| P4-015 | CRM/WhatsApp UI integration and accessibility | complete | `ed7acb2` | Production render/build, semantic controls, authenticated HTTP pages, 390px visual check with zero horizontal overflow, explicit Hebrew direction unit strategy | Authenticated visual regression automation can be added without browser-held passwords. |
+| P4-016 | Security, E2E, parity, provenance, and documentation | complete | final checkpoint | Architecture/runbook/provenance current; auth/CSRF, signature, HMAC API key, live RLS/claim tests and simulator/API E2E pass | Re-review before real provider activation. |
+| P4-017 | Full Phase 4 verification | complete | final checkpoint | Live PostgreSQL, consolidated verify, production image/core health, simulator campaign, scoped API, audits, upstream integrity pass | Await explicit next-phase scope. |
+
+## Phase 4 final verification snapshot
+
+- Alembic: 31 revisions, sole root `0001`, sole head `b56eb0a0aca1`;
+  deterministic offline PostgreSQL SQL is 120,763 bytes with SHA-256
+  `ad6fdadccb189f9651016c60939a4a4ab5c7ba003a34ca2c34e13d336079f63b`.
+- PostgreSQL 18.6: all 32 live tests pass, including RLS/roles, webhook
+  idempotency, lease-safe claims, cross-tenant jobs, and scoped API-key
+  resolution. The actual TypeScript worker delivered a three-recipient simulator
+  campaign once and the fixture was removed.
+- TypeScript: strict typechecks, ESLint/Prettier, 48 regular tests, production
+  builds for every package/service and Next.js 16.3.3 pass. The two opt-in live
+  TypeScript tests also pass when their database variables are supplied.
+- Python: Ruff, Pyrefly, 35 offline tests, contract freshness, repository,
+  secret, and documentation guards pass; live tests are separated into the
+  explicit 32-test PostgreSQL gate.
+- Production Compose: PostgreSQL, control API, and rebuilt web image are healthy.
+  Authenticated HTTP acceptance passed settings, API-key issue/use/revoke,
+  contact creation/archive, revoked-key denial, inbound dedupe, reply delivery
+  history, durable campaign processing, and aggregate delivery.
+- Responsive browser: the semantic login surface at 390×844 has labels and no
+  horizontal overflow. Hebrew `rtl` and English `ltr` direction behavior remains
+  covered by the application unit contract; no password was entered into browser
+  automation.
+- Supply chain: pnpm and pip audits report no known vulnerabilities. Provider
+  flags remained false; no real WhatsApp message, call, webhook mutation,
+  provider provisioning, or `terraform apply` occurred.
 
 ## Phase 3 tasks
 
