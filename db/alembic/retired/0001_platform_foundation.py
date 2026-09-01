@@ -1,4 +1,9 @@
-"""Create the minimal platform foundation metadata.
+"""RETIRED: Phase 1 offline-only platform migration proof.
+
+This file is intentionally outside ``versions/`` and is not part of the active
+Alembic graph. It was never applied to a persistent database. Phase 2A preserved
+the Or-on lineage as the canonical base and recreated this useful schema content
+in a generated target-owned successor revision.
 
 Revision ID: 0001_platform_foundation
 Revises:
