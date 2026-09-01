@@ -1,10 +1,13 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 
 import { HealthPanel } from "../../../features/system-health";
+import { currentPublicSession } from "../../../features/auth/server";
 
 export const metadata: Metadata = { title: "System health" };
 
-export default function SystemHealthPage() {
+export default async function SystemHealthPage() {
+  if ((await currentPublicSession()) === undefined) redirect("/login");
   return (
     <main>
       <header className="page-header">

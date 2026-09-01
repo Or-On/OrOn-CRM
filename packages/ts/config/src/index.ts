@@ -26,6 +26,9 @@ const sourceSchema = z.object({
   LIVEKIT_API_SECRET: z.string().min(1).optional(),
   WHATSAPP_ACCESS_TOKEN: z.string().min(1).optional(),
   AI_API_KEY: z.string().min(1).optional(),
+  AUTH_TOKEN_PEPPER: z.string().min(32).optional(),
+  AUTH_SERVICE_SECRET: z.string().min(32).optional(),
+  AUTH_DUMMY_PASSWORD_HASH: z.string().startsWith("$argon2id$").optional(),
 });
 
 export class ConfigurationError extends Error {
@@ -37,6 +40,7 @@ export class ConfigurationError extends Error {
 
 export interface LoadConfigOptions {
   readonly requireDatabase?: boolean;
+  readonly requireAuth?: boolean;
   readonly service?: string;
 }
 
@@ -52,6 +56,9 @@ export interface PlatformConfig {
     readonly livekitApiSecret: string | undefined;
     readonly whatsappAccessToken: string | undefined;
     readonly aiApiKey: string | undefined;
+    readonly authTokenPepper: string | undefined;
+    readonly authServiceSecret: string | undefined;
+    readonly authDummyPasswordHash: string | undefined;
   };
 }
 
@@ -78,6 +85,17 @@ export function loadConfig(
     );
   }
 
+  if (
+    options.requireAuth === true &&
+    (result.data.AUTH_TOKEN_PEPPER === undefined ||
+      result.data.AUTH_SERVICE_SECRET === undefined ||
+      result.data.AUTH_DUMMY_PASSWORD_HASH === undefined)
+  ) {
+    throw new ConfigurationError(
+      "Invalid platform configuration: AUTH_TOKEN_PEPPER, AUTH_SERVICE_SECRET, and AUTH_DUMMY_PASSWORD_HASH are required for authentication",
+    );
+  }
+
   return {
     environment: result.data.PLATFORM_ENV,
     service:
@@ -91,6 +109,9 @@ export function loadConfig(
       livekitApiSecret: result.data.LIVEKIT_API_SECRET,
       whatsappAccessToken: result.data.WHATSAPP_ACCESS_TOKEN,
       aiApiKey: result.data.AI_API_KEY,
+      authTokenPepper: result.data.AUTH_TOKEN_PEPPER,
+      authServiceSecret: result.data.AUTH_SERVICE_SECRET,
+      authDummyPasswordHash: result.data.AUTH_DUMMY_PASSWORD_HASH,
     },
   };
 }
@@ -111,5 +132,13 @@ export function configDiagnostics(
     whatsappAccessToken:
       config.secrets.whatsappAccessToken === undefined ? "unset" : "[REDACTED]",
     aiApiKey: config.secrets.aiApiKey === undefined ? "unset" : "[REDACTED]",
+    authTokenPepper:
+      config.secrets.authTokenPepper === undefined ? "unset" : "[REDACTED]",
+    authServiceSecret:
+      config.secrets.authServiceSecret === undefined ? "unset" : "[REDACTED]",
+    authDummyPasswordHash:
+      config.secrets.authDummyPasswordHash === undefined
+        ? "unset"
+        : "[REDACTED]",
   };
 }

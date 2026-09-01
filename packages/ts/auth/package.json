@@ -1,26 +1,24 @@
 {
-  "name": "@or-on/live-agent",
+  "name": "@or-on/auth",
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
-    "dev": "tsx watch src/main.ts",
-    "start": "node dist/main.js",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@hono/node-server": "2.1.1",
-    "@or-on/config": "workspace:*",
-    "@or-on/auth": "workspace:*",
-    "@or-on/observability": "workspace:*",
-    "@or-on/platform-integration": "workspace:*",
-    "hono": "catalog:"
+    "@node-rs/argon2": "catalog:",
+    "jose": "catalog:",
+    "postgres": "catalog:"
   },
   "devDependencies": {
-    "tsx": "catalog:",
+    "@types/node": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }

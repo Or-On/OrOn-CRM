@@ -1,7 +1,10 @@
 import { Activity, Boxes, DatabaseZap } from "lucide-react";
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 
 import { Badge, Surface } from "@or-on/ui";
+
+import { currentPublicSession } from "../features/auth/server";
 
 export const metadata: Metadata = { title: "Foundation" };
 
@@ -23,13 +26,17 @@ const foundations = [
   },
 ] as const;
 
-export default function FoundationPage() {
+export default async function FoundationPage() {
+  const session = await currentPublicSession();
+  if (session === undefined) redirect("/login");
   return (
     <main>
       <header className="page-header">
         <div>
-          <span className="eyebrow">Phase 1 · architecture foundation</span>
-          <h1>One platform. Proven engines.</h1>
+          <span className="eyebrow">
+            {session.tenant.tenantName} · secure workspace
+          </span>
+          <h1>One identity. Tenant-safe operations.</h1>
         </div>
         <div>
           <Badge label="Foundation active" tone="positive" />

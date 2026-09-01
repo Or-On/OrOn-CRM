@@ -32,6 +32,9 @@ describe("loadConfig", () => {
       LIVEKIT_API_SECRET: "livekit-secret",
       WHATSAPP_ACCESS_TOKEN: "whatsapp-secret",
       AI_API_KEY: "ai-secret",
+      AUTH_TOKEN_PEPPER: "auth-token-pepper-with-thirty-two-characters",
+      AUTH_SERVICE_SECRET: "auth-service-secret-with-thirty-two-characters",
+      AUTH_DUMMY_PASSWORD_HASH: "$argon2id$v=19$m=65536,t=3,p=1$dummy$dummy",
     });
 
     const rendered = JSON.stringify(configDiagnostics(config));
@@ -39,6 +42,14 @@ describe("loadConfig", () => {
     expect(rendered).not.toContain("livekit-secret");
     expect(rendered).not.toContain("whatsapp-secret");
     expect(rendered).not.toContain("ai-secret");
+    expect(rendered).not.toContain("auth-token-pepper");
+    expect(rendered).not.toContain("auth-service-secret");
     expect(rendered).toContain("[REDACTED]");
+  });
+
+  it("requires complete authentication secrets when requested", () => {
+    expect(() => loadConfig({}, { requireAuth: true })).toThrow(
+      "AUTH_TOKEN_PEPPER",
+    );
   });
 });

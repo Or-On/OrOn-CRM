@@ -10,6 +10,7 @@ import {
   PhoneCall,
   Sun,
   Workflow,
+  LogOut,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import Link from "next/link";
@@ -17,6 +18,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { Button, Dialog, Input } from "@or-on/ui";
+import type { PublicSession } from "@or-on/auth";
 
 const navigation = [
   { href: "/", label: "Foundation", icon: Boxes, available: true },
@@ -38,13 +40,30 @@ const navigation = [
   { href: "/live", label: "Live agents", icon: Bot, available: false },
 ] as const;
 
-export function AppShell({ children }: { readonly children: ReactNode }) {
+function csrfToken(): string {
+  const prefix = "or_on_csrf=";
+  const value = document.cookie
+    .split("; ")
+    .find((entry) => entry.startsWith(prefix));
+  return value === undefined
+    ? ""
+    : decodeURIComponent(value.slice(prefix.length));
+}
+
+export function AppShell({
+  children,
+  session,
+}: {
+  readonly children: ReactNode;
+  readonly session: PublicSession | undefined;
+}) {
   const pathname = usePathname();
   const router = useRouter();
   const { resolvedTheme, setTheme } = useTheme();
   const [themeMounted, setThemeMounted] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [sessionPending, setSessionPending] = useState(false);
 
   useEffect(() => setThemeMounted(true), []);
 
@@ -66,6 +85,29 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
       ),
     [query],
   );
+
+  async function postSession(url: string, body?: Record<string, string>) {
+    setSessionPending(true);
+    try {
+      const init: RequestInit = {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-csrf-token": csrfToken(),
+        },
+      };
+      if (body !== undefined) init.body = JSON.stringify(body);
+      const response = await fetch(url, init);
+      if (!response.ok) throw new Error("session operation failed");
+      router.refresh();
+    } finally {
+      setSessionPending(false);
+    }
+  }
+
+  if (session === undefined) {
+    return <div className="auth-layout">{children}</div>;
+  }
 
   return (
     <div className="shell">
@@ -107,6 +149,40 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
         </nav>
 
         <div className="shell__rail-footer">
+          <label className="tenant-switcher" htmlFor="active-tenant">
+            <span>Workspace</span>
+            <select
+              disabled={sessionPending}
+              id="active-tenant"
+              onChange={(event) =>
+                void postSession("/api/auth/tenant", {
+                  tenantId: event.target.value,
+                })
+              }
+              value={session.tenant.tenantId}
+            >
+              {session.memberships.map((membership) => (
+                <option key={membership.tenantId} value={membership.tenantId}>
+                  {membership.tenantName} · {membership.role}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="identity-summary">
+            <span>{session.user.email}</span>
+            <Button
+              aria-label="Sign out"
+              disabled={sessionPending}
+              onClick={() =>
+                void postSession("/api/auth/logout").then(() =>
+                  router.replace("/login"),
+                )
+              }
+              variant="quiet"
+            >
+              <LogOut aria-hidden="true" size={15} />
+            </Button>
+          </div>
           <Button
             aria-label={
               themeMounted

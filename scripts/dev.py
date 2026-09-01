@@ -342,6 +342,8 @@ def bootstrap() -> None:
     _require_provider_safety(environment)
     _run(["uv", "sync", "--all-packages", "--locked"], environment=environment)
     _run(["pnpm", "install", "--frozen-lockfile"], environment=environment)
+    _run(["pnpm", "auth:material"], environment=environment)
+    environment = _load_environment()
     _run(_compose("up", "-d", "--wait", "postgres"), environment=environment)
     _bootstrap_roles(environment)
     migrate(environment)

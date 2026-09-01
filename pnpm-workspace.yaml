@@ -10,12 +10,14 @@ allowBuilds:
   unrs-resolver: true
 
 catalog:
+  "@node-rs/argon2": 2.2.0
   "@eslint/js": 10.0.1
   "@types/node": 24.13.3
   "@types/react": 19.2.18
   "@types/react-dom": 19.2.5
   "@types/ws": 8.18.1
   hono: 4.13.5
+  jose: 6.2.10
   lucide-react: 1.38.0
   next: 16.3.3
   next-intl: 4.14.1

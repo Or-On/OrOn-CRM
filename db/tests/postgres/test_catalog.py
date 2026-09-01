@@ -173,6 +173,11 @@ async def test_all_unified_foreign_keys_declare_delete_semantics(pg: asyncpg.Con
 async def test_development_seed_is_idempotent(postgres_url: str) -> None:
     environment = dict(os.environ)
     environment["DATABASE_URL"] = postgres_url
+    environment["DEV_AUTH_EMAIL"] = "operator@or-on.local"
+    environment["DEV_AUTH_PASSWORD_HASH"] = (
+        "$argon2id$v=19$m=65536,t=3,p=1$cGhhc2UtdGhyZWUtdGVzdA$"
+        "bm90LXVzZWQtZm9yLXZlcmlmaWNhdGlvbg"
+    )
 
     def run_seed() -> None:
         subprocess.run(  # noqa: S603
@@ -191,6 +196,12 @@ async def test_development_seed_is_idempotent(postgres_url: str) -> None:
             "SELECT value FROM platform.system_metadata WHERE key = 'foundation_version'"
         )
         assert row is not None
-        assert json.loads(row["value"]) == "phase-1"
+        assert json.loads(row["value"]) == "phase-3"
+        assert (
+            await connection.fetchval(
+                "SELECT count(*) FROM users WHERE email = 'operator@or-on.local'"
+            )
+            == 1
+        )
     finally:
         await connection.close()

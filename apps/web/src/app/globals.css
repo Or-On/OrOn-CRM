@@ -44,6 +44,44 @@ input {
   min-height: 100vh;
 }
 
+.auth-layout {
+  min-height: 100vh;
+}
+
+.login-page {
+  display: grid;
+  min-height: 100vh;
+  padding: 1.5rem;
+  place-items: center;
+}
+
+.login-card {
+  width: min(100%, 28rem);
+  padding: clamp(1.5rem, 5vw, 2.5rem);
+}
+
+.login-card h1 {
+  margin: 0.55rem 0 0.4rem;
+  font-size: 2rem;
+  letter-spacing: -0.04em;
+}
+
+.login-card > p,
+.form-error {
+  color: var(--or-text-muted);
+}
+
+.login-form {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.form-error {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
 .shell__rail {
   position: sticky;
   top: 0;
@@ -128,6 +166,38 @@ input {
   display: grid;
   gap: 0.6rem;
   margin-top: auto;
+}
+
+.tenant-switcher {
+  display: grid;
+  gap: 0.35rem;
+  color: var(--or-text-muted);
+  font-size: 0.68rem;
+}
+
+.tenant-switcher select {
+  min-width: 0;
+  padding: 0.55rem;
+  color: var(--or-text);
+  background: var(--or-bg-raised);
+  border: 1px solid var(--or-border);
+  border-radius: var(--or-radius-sm);
+}
+
+.identity-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  overflow: hidden;
+  color: var(--or-text-muted);
+  font-size: 0.68rem;
+}
+
+.identity-summary > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .shortcut {

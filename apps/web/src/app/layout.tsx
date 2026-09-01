@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 import { AppShell } from "../features/shell";
+import { currentPublicSession } from "../features/auth/server";
 import { Providers } from "./providers";
 
 export const metadata: Metadata = {
@@ -12,16 +13,17 @@ export const metadata: Metadata = {
     "Unified operator platform foundation for voice, messaging, CRM, and live agents.",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   readonly children: ReactNode;
 }) {
+  const session = await currentPublicSession();
   return (
     <html lang="en" suppressHydrationWarning>
       <body>
         <Providers>
-          <AppShell>{children}</AppShell>
+          <AppShell session={session}>{children}</AppShell>
         </Providers>
       </body>
     </html>

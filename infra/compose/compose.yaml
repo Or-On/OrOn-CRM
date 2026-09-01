@@ -71,6 +71,11 @@ services:
       PLATFORM_ENV: development
       PLATFORM_SERVICE: web
       CONTROL_API_URL: http://control-api:8000
+      DATABASE_URL: postgresql://platform_web:platform-web-dev-only@postgres:5432/${POSTGRES_DB:-or_on_platform_dev}
+      AUTH_TOKEN_PEPPER: ${AUTH_TOKEN_PEPPER:?AUTH_TOKEN_PEPPER is required}
+      AUTH_SERVICE_SECRET: ${AUTH_SERVICE_SECRET:?AUTH_SERVICE_SECRET is required}
+      AUTH_DUMMY_PASSWORD_HASH: ${AUTH_DUMMY_PASSWORD_HASH:?AUTH_DUMMY_PASSWORD_HASH is required}
+      AUTH_COOKIE_SECURE: "false"
       ENABLE_REAL_TELEPHONY: "false"
       ENABLE_REAL_WHATSAPP: "false"
     ports:
