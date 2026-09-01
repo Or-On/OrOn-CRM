@@ -195,7 +195,7 @@ async def test_development_seed_is_idempotent(postgres_url: str) -> None:
             "SELECT value FROM platform.system_metadata WHERE key = 'foundation_version'"
         )
         assert row is not None
-        assert json.loads(row["value"]) == "phase-3"
+        assert json.loads(row["value"]) == "phase-4"
         assert (
             await connection.fetchval(
                 "SELECT count(*) FROM users WHERE email = 'operator@or-on.local'"

@@ -128,6 +128,9 @@ importers:
       '@or-on/config':
         specifier: workspace:*
         version: link:../../packages/ts/config
+      '@or-on/crm':
+        specifier: workspace:*
+        version: link:../../packages/ts/crm
       '@or-on/ui':
         specifier: workspace:*
         version: link:../../packages/ts/ui
@@ -225,6 +228,22 @@ importers:
         specifier: 3.0.1
         version: 3.0.1(ajv@8.20.0)
     devDependencies:
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.11(@types/node@24.13.3)(vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13))
+
+  packages/ts/crm:
+    dependencies:
+      postgres:
+        specifier: 'catalog:'
+        version: 3.4.9
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.13.3
       typescript:
         specifier: 'catalog:'
         version: 6.0.3

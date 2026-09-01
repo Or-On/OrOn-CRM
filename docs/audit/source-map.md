@@ -160,3 +160,19 @@ semantics; source SQLite/JSON code is not a runtime dependency.
 | `packages/db/src/queries.ts`, `packages/db/src/store.ts`, `packages/db/src/crypto.ts`, web settings/provider routes | `f5e8b540dfeb_add_openlive_postgresql_persistence.py` (`live.user_preferences`, `live.provider_configurations`) | adapted/re-written | MIT semantics; encrypted-source metadata maps to canonical credential references and plaintext secret keys are rejected from provider settings. |
 | `packages/db/src/queries.ts`, live-agent session/provider state | `f5e8b540dfeb_add_openlive_postgresql_persistence.py` (`live.voice_profiles`, `live.sessions`) | adapted/re-written | MIT semantics; PostgreSQL owns metadata, object storage owns audio bytes, and external ACP sessions remain references. |
 | `packages/db/src/migrate-conversations.ts`, `sqlite.ts`, `queries.ts`, and legacy file layouts | `db/importers/openlive_legacy/` | behaviorally adapted/re-written | MIT migration semantics; isolated one-time parser only, never imported by runtime packages. Full notice is retained in `THIRD_PARTY_NOTICES.md`. |
+
+## Phase 4 WACRM behavioral adaptations
+
+Locked WACRM source SHA for every row:
+`98b5bd26e8feacacfd4b74ff58411acb8154d212`. WACRM is MIT-licensed. These
+artifacts are clean target implementations informed by source behavior; no
+source file was copied verbatim. The existing WACRM notice remains in
+`THIRD_PARTY_NOTICES.md`.
+
+| Source artifacts | Target artifacts | Status | Reason / license implications |
+| --- | --- | --- | --- |
+| `src/lib/contacts/dedupe.ts`, `parse-contact-csv.ts`, `tag-write.ts`; contact pages/components | `packages/ts/crm/src/phone.ts`, `contacts.ts`; `apps/web/src/features/contacts/` | behaviorally adapted/re-written | Preserve normalized contact identity, dedupe, search, and tag presentation while replacing Supabase calls with tenant-local canonical PostgreSQL. MIT behavioral reference. |
+| `src/lib/inbox/conversations.ts`; `src/components/inbox/*`; `src/lib/whatsapp/resolve-conversation.ts`, `send-message.ts` | `packages/ts/crm/src/messaging.ts`; `apps/web/src/features/inbox/`; same-origin messaging routes | behaviorally adapted/re-written | Preserve shared-conversation, unread, message ordering, provider-ID idempotency, and reply semantics. Phase 4 uses the local simulator only; no Meta call path is enabled. MIT behavioral reference. |
+| `src/lib/whatsapp/phone-utils.ts`; `src/app/api/whatsapp/webhook/route.ts`; `src/lib/whatsapp/webhook-signature.ts` | `packages/ts/crm/src/phone.ts`, simulator ingestion, and planned verified worker webhook adapter | partially adapted / deferred | E.164 and idempotency behavior are implemented. Raw-body Meta verification remains a later Phase 4 slice behind default-off provider configuration. MIT behavioral reference. |
+| pipeline pages/components and migration `002_pipelines_enhancements.sql` | `packages/ts/crm/src/pipelines.ts`; `apps/web/src/features/pipelines/` | behaviorally adapted/re-written | Preserve ordered pipeline stages and same-pipeline deal movement on the canonical schema created in Phase 2. MIT behavioral reference. |
+| dashboard aggregates and CRM navigation behavior | `packages/ts/crm/src/analytics.ts`; authenticated shell navigation | behaviorally adapted/re-written | Preserve operator-oriented CRM counts while using canonical identity and RLS. MIT behavioral reference. |

@@ -3,9 +3,13 @@ import { cookies } from "next/headers";
 import {
   AuthService,
   createAuthRepository,
+  hasPermission,
   issueServiceAssertion,
+  withTenantTransaction,
   type AuthSession,
+  type Permission,
   type PublicSession,
+  type TenantTransaction,
 } from "@or-on/auth";
 import { loadConfig } from "@or-on/config";
 
@@ -77,6 +81,12 @@ export async function currentPublicSession(): Promise<
   );
 }
 
+export async function requirePublicSession(): Promise<PublicSession> {
+  const session = await currentPublicSession();
+  if (session === undefined) throw new UnauthenticatedError("Unauthenticated");
+  return session;
+}
+
 export async function setSessionCookies(
   sessionToken: string,
   csrfToken: string,
@@ -117,4 +127,30 @@ export async function issueLiveAgentGrant(
     },
     secret: serviceSecret,
   });
+}
+
+export class UnauthenticatedError extends Error {}
+export class ForbiddenError extends Error {}
+
+export async function withCurrentTenant<T>(
+  permission: Permission,
+  operation: (
+    transaction: TenantTransaction,
+    session: AuthSession,
+  ) => Promise<T>,
+): Promise<T> {
+  const resolved = await currentRawSession();
+  if (resolved === undefined) throw new UnauthenticatedError("Unauthenticated");
+  if (!hasPermission(resolved.session.tenant.role, permission))
+    throw new ForbiddenError("Forbidden");
+  const { databaseUrl } = authConfig();
+  return withTenantTransaction(
+    databaseUrl,
+    {
+      tenantId: resolved.session.tenant.tenantId,
+      userId: resolved.session.userId,
+      role: resolved.session.tenant.role,
+    },
+    (transaction) => operation(transaction, resolved.session),
+  );
 }

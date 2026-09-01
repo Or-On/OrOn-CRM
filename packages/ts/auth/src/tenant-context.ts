@@ -2,6 +2,8 @@ import postgres from "postgres";
 
 import type { Role } from "./authorization.js";
 
+export type TenantTransaction = postgres.TransactionSql;
+
 export interface TenantExecutionIdentity {
   readonly tenantId: string;
   readonly userId: string;
@@ -14,7 +16,7 @@ const uuidPattern =
 export async function withTenantTransaction<T>(
   databaseUrl: string,
   identity: TenantExecutionIdentity,
-  operation: (transaction: postgres.TransactionSql) => Promise<T>,
+  operation: (transaction: TenantTransaction) => Promise<T>,
 ): Promise<T> {
   if (!/^postgres(?:ql)?:\/\//u.test(databaseUrl))
     throw new TypeError("databaseUrl must use PostgreSQL");

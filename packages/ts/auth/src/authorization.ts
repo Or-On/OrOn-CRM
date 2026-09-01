@@ -4,6 +4,8 @@ export type Role = (typeof canonicalRoles)[number];
 export const permissions = [
   "platform:read",
   "crm:read",
+  "crm:write",
+  "pipelines:manage",
   "messaging:operate",
   "campaigns:manage",
   "flows:manage",
@@ -18,6 +20,8 @@ const rolePermissions: Readonly<Record<Role, ReadonlySet<Permission>>> = {
   admin: new Set([
     "platform:read",
     "crm:read",
+    "crm:write",
+    "pipelines:manage",
     "messaging:operate",
     "campaigns:manage",
     "flows:manage",
@@ -25,7 +29,13 @@ const rolePermissions: Readonly<Record<Role, ReadonlySet<Permission>>> = {
     "members:change-role",
     "tenant:manage",
   ]),
-  agent: new Set(["platform:read", "crm:read", "messaging:operate"]),
+  agent: new Set([
+    "platform:read",
+    "crm:read",
+    "crm:write",
+    "pipelines:manage",
+    "messaging:operate",
+  ]),
   viewer: new Set(["platform:read", "crm:read"]),
 };
 

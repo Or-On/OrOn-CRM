@@ -1,4 +1,4 @@
-"""Idempotent, PII-free Phase 1 development seed."""
+"""Idempotent, fictional development seed for implemented platform surfaces."""
 
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ async def seed() -> None:
             ).bindparams(bindparam("value", type_=JSONB))
             await connection.execute(
                 statement,
-                {"key": "foundation_version", "value": "phase-3"},
+                {"key": "foundation_version", "value": "phase-4"},
             )
             primary_tenant = UUID("10000000-0000-4000-8000-000000000001")
             secondary_tenant = UUID("10000000-0000-4000-8000-000000000002")
@@ -84,6 +84,168 @@ async def seed() -> None:
                     """
                 ),
                 {"user_id": user_id, "password_hash": password_hash},
+            )
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO crm.tags (id, tenant_id, name, color)
+                    VALUES ('31000000-0000-4000-8000-000000000001', :tenant, 'Priority', '#7c9cff'),
+                           ('31000000-0000-4000-8000-000000000002', :tenant, 'Demo', '#4fd1a8')
+                    ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, color = EXCLUDED.color
+                    """
+                ),
+                {"tenant": primary_tenant},
+            )
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO crm.contacts
+                      (id, tenant_id, created_by_user_id, assigned_user_id, name,
+                       email, company, last_activity_at)
+                    VALUES ('30000000-0000-4000-8000-000000000001', :tenant,
+                            :user_id, :user_id, 'Maya Cohen',
+                            'maya@example.invalid', 'Lumen Works', CURRENT_TIMESTAMP)
+                    ON CONFLICT (id) DO UPDATE
+                    SET name = EXCLUDED.name, email = EXCLUDED.email,
+                        company = EXCLUDED.company, lifecycle_status = 'active'
+                    """
+                ),
+                {"tenant": primary_tenant, "user_id": user_id},
+            )
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO crm.contact_channel_identities
+                      (id, tenant_id, contact_id, channel, normalized_value,
+                       display_value, provider, provider_identity_id,
+                       validation_status, is_primary)
+                    VALUES ('32000000-0000-4000-8000-000000000001', :tenant,
+                            '30000000-0000-4000-8000-000000000001', 'whatsapp',
+                            '+972501234567', '+972 50 123 4567', 'simulator',
+                            '+972501234567', 'valid', true)
+                    ON CONFLICT (tenant_id, channel, normalized_value)
+                      WHERE normalized_value IS NOT NULL
+                    DO UPDATE SET display_value = EXCLUDED.display_value,
+                                  validation_status = 'valid', is_primary = true
+                    """
+                ),
+                {"tenant": primary_tenant},
+            )
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO crm.contact_tags (tenant_id, contact_id, tag_id)
+                    VALUES (:tenant, '30000000-0000-4000-8000-000000000001',
+                            '31000000-0000-4000-8000-000000000001'),
+                           (:tenant, '30000000-0000-4000-8000-000000000001',
+                            '31000000-0000-4000-8000-000000000002')
+                    ON CONFLICT DO NOTHING
+                    """
+                ),
+                {"tenant": primary_tenant},
+            )
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO crm.pipelines (id, tenant_id, name, is_default)
+                    VALUES ('40000000-0000-4000-8000-000000000001', :tenant,
+                            'Customer journey', true)
+                    ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, is_default = true
+                    """
+                ),
+                {"tenant": primary_tenant},
+            )
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO crm.pipeline_stages
+                      (id, tenant_id, pipeline_id, name, position, probability)
+                    VALUES ('41000000-0000-4000-8000-000000000001', :tenant,
+                            '40000000-0000-4000-8000-000000000001', 'New', 0, 20),
+                           ('41000000-0000-4000-8000-000000000002', :tenant,
+                            '40000000-0000-4000-8000-000000000001', 'Qualified', 1, 60),
+                           ('41000000-0000-4000-8000-000000000003', :tenant,
+                            '40000000-0000-4000-8000-000000000001', 'Won', 2, 100)
+                    ON CONFLICT (id) DO UPDATE
+                    SET name = EXCLUDED.name, position = EXCLUDED.position,
+                        probability = EXCLUDED.probability
+                    """
+                ),
+                {"tenant": primary_tenant},
+            )
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO crm.deals
+                      (id, tenant_id, pipeline_id, stage_id, contact_id,
+                       owner_user_id, title, value, currency, status)
+                    VALUES ('42000000-0000-4000-8000-000000000001', :tenant,
+                            '40000000-0000-4000-8000-000000000001',
+                            '41000000-0000-4000-8000-000000000002',
+                            '30000000-0000-4000-8000-000000000001', :user_id,
+                            'Fictional engagement pilot', 12500, 'USD', 'open')
+                    ON CONFLICT (id) DO UPDATE
+                    SET stage_id = EXCLUDED.stage_id, title = EXCLUDED.title,
+                        value = EXCLUDED.value, status = 'open'
+                    """
+                ),
+                {"tenant": primary_tenant, "user_id": user_id},
+            )
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO messaging.channels
+                      (id, tenant_id, kind, provider, provider_account_id,
+                       display_address, status, configuration)
+                    VALUES ('50000000-0000-4000-8000-000000000001',
+                            CAST(:tenant AS uuid),
+                            'whatsapp', 'simulator',
+                            'simulator:' || CAST(:tenant AS text),
+                            'WhatsApp simulator', 'active', '{"mode":"simulator"}'::jsonb)
+                    ON CONFLICT (provider, provider_account_id)
+                      WHERE provider_account_id IS NOT NULL
+                    DO UPDATE SET status = 'active', updated_at = CURRENT_TIMESTAMP
+                    """
+                ),
+                {"tenant": primary_tenant},
+            )
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO messaging.conversations
+                      (id, tenant_id, channel_id, contact_id, assigned_user_id,
+                       status, unread_count, last_message_at, last_message_preview)
+                    VALUES ('51000000-0000-4000-8000-000000000001', :tenant,
+                            '50000000-0000-4000-8000-000000000001',
+                            '30000000-0000-4000-8000-000000000001', :user_id,
+                            'open', 1, CURRENT_TIMESTAMP,
+                            'Can the simulator show our shared inbox?')
+                    ON CONFLICT (tenant_id, channel_id, contact_id)
+                    DO UPDATE SET assigned_user_id = EXCLUDED.assigned_user_id,
+                                  status = 'open'
+                    """
+                ),
+                {"tenant": primary_tenant, "user_id": user_id},
+            )
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO messaging.messages
+                      (id, tenant_id, conversation_id, direction, sender_type,
+                       sender_contact_id, content_type, content_text, provider,
+                       provider_message_id, status, provider_payload)
+                    VALUES ('52000000-0000-4000-8000-000000000001', :tenant,
+                            '51000000-0000-4000-8000-000000000001', 'inbound',
+                            'contact', '30000000-0000-4000-8000-000000000001',
+                            'text', 'Can the simulator show our shared inbox?',
+                            'simulator', 'sim_seed_message_001', 'received',
+                            CAST(:provider_payload AS jsonb))
+                    ON CONFLICT (tenant_id, provider, provider_message_id)
+                      WHERE provider IS NOT NULL AND provider_message_id IS NOT NULL
+                    DO NOTHING
+                    """
+                ),
+                {"tenant": primary_tenant, "provider_payload": '{"fictional":true}'},
             )
     finally:
         await engine.dispose()

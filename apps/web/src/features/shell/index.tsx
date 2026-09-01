@@ -5,6 +5,7 @@ import {
   Bot,
   Boxes,
   ContactRound,
+  Columns3,
   MessagesSquare,
   MoonStar,
   PhoneCall,
@@ -28,13 +29,14 @@ const navigation = [
     icon: Activity,
     available: true,
   },
-  { href: "/inbox", label: "Inbox", icon: MessagesSquare, available: false },
+  { href: "/inbox", label: "Inbox", icon: MessagesSquare, available: true },
   {
     href: "/contacts",
     label: "Contacts",
     icon: ContactRound,
-    available: false,
+    available: true,
   },
+  { href: "/pipelines", label: "Pipeline", icon: Columns3, available: true },
   { href: "/flows", label: "Flows", icon: Workflow, available: false },
   { href: "/voice", label: "Voice", icon: PhoneCall, available: false },
   { href: "/live", label: "Live agents", icon: Bot, available: false },
@@ -118,7 +120,7 @@ export function AppShell({
           </span>
           <span className="brand__copy">
             <span className="brand__name">Or-On Platform</span>
-            <span className="brand__phase">Architecture foundation</span>
+            <span className="brand__phase">CRM operations</span>
           </span>
         </Link>
 
@@ -215,7 +217,7 @@ export function AppShell({
       <div className="shell__main">{children}</div>
 
       <Dialog
-        description="Navigate implemented foundation surfaces. Planned modules remain disabled."
+        description="Navigate implemented platform surfaces. Planned modules remain disabled."
         onClose={() => setPaletteOpen(false)}
         open={paletteOpen}
         title="Command palette"

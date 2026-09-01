@@ -61,8 +61,18 @@ function normalizeComposeLiterals(source: string): string {
     .join("\n");
 }
 
+function replaceValue(source: string, key: string, value: string): string {
+  const lines = source.split(/\r?\n/u);
+  const index = lines.findIndex(
+    (line) => line.slice(0, line.indexOf("=")).trim() === key,
+  );
+  if (index < 0) lines.push(serialize(key, value));
+  else lines[index] = serialize(key, value);
+  return lines.join("\n");
+}
+
 async function main(): Promise<void> {
-  const source = await readFile(envPath, "utf8");
+  let source = await readFile(envPath, "utf8");
   const values = parse(source);
   const additions: string[] = [];
   const ensure = (key: string, value: string) => {
@@ -81,13 +91,20 @@ async function main(): Promise<void> {
   const email = values.get("DEV_AUTH_EMAIL") ?? "operator@or-on.local";
   ensure("DEV_AUTH_EMAIL", email);
   let password: string | undefined;
+  const rotatePassword = process.argv.includes("--rotate");
+  if (rotatePassword) {
+    password = token(18);
+    const passwordHash = await hashPassword(password);
+    values.set("DEV_AUTH_PASSWORD_HASH", passwordHash);
+    source = replaceValue(source, "DEV_AUTH_PASSWORD_HASH", passwordHash);
+  }
   if (!values.get("DEV_AUTH_PASSWORD_HASH")) {
     password = token(18);
     ensure("DEV_AUTH_PASSWORD_HASH", await hashPassword(password));
   }
 
   const normalizedSource = normalizeComposeLiterals(source);
-  if (additions.length > 0 || normalizedSource !== source) {
+  if (rotatePassword || additions.length > 0 || normalizedSource !== source) {
     await writeFile(
       envPath,
       additions.length > 0

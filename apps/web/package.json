@@ -15,6 +15,7 @@
     "@or-on/api-client": "workspace:*",
     "@or-on/auth": "workspace:*",
     "@or-on/config": "workspace:*",
+    "@or-on/crm": "workspace:*",
     "@or-on/ui": "workspace:*",
     "lucide-react": "catalog:",
     "next": "catalog:",

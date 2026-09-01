@@ -8,6 +8,7 @@ RUN corepack enable && corepack prepare pnpm@11.24.0 --activate
 COPY . .
 RUN pnpm install --frozen-lockfile \
     && pnpm --filter @or-on/auth build \
+    && pnpm --filter @or-on/crm build \
     && pnpm --filter @or-on/web build
 
 FROM node:24.20.0-bookworm-slim AS runtime
