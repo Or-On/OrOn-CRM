@@ -145,8 +145,8 @@ Status values: `pending`, `active`, `complete`, `blocked`.
 | P2A-025 | Type/contract generation updates | complete | `363189f` | `db/contracts/schema-manifest.json` is a checked consumer catalog at head `f5e8b540dfeb`; existing OpenAPI/event generation remains fresh; no TS migration authority added | Generate DB types only when a real TS repository consumes them. |
 | P2A-026 | Offline migration/security guards | complete | `363189f` | Graph/parent/one-head, deterministic SQL, RLS/FORCE/policy, index, extension, definer search-path, Supabase/public/privileged-role guards | Live catalog behavior pending Phase 2B. |
 | P2A-027 | Prepare Phase 2B live PostgreSQL tests | complete | `363189f` | 18 collected PostgreSQL tests cover version/head/catalog/roles/RLS/tenant CRUD/domain grants/DDL/idempotency/FK/outbox/flows/FTS/jobs/importer/seed | All 18 are **PENDING LIVE POSTGRESQL VALIDATION — PHASE 2B**. |
-| P2A-028 | Database architecture/migration documentation | complete | pending final docs | Required architecture, lineage, WACRM/OpenLive maps, schema ownership, extension inventory, notices, and Phase 2B runbook pass the documentation/link guard | Maintain claims as Phase 2B evidence arrives. |
-| P2A-029 | Full offline verification | complete | pending final docs | Dedicated offline gate, all Python/TS checks/tests/build, contracts, repository/secret/docs guards, and final upstream integrity pass | Live/database execution checks remain Phase 2B only. |
+| P2A-028 | Database architecture/migration documentation | complete | `a311371` | Required architecture, lineage, WACRM/OpenLive maps, schema ownership, extension inventory, notices, and Phase 2B runbook pass the documentation/link guard | Maintain claims as Phase 2B evidence arrives. |
+| P2A-029 | Full offline verification | complete | `a311371` | Dedicated offline gate, all Python/TS checks/tests/build, contracts, repository/secret/docs guards, and final upstream integrity pass | Live/database execution checks remain Phase 2B only. |
 
 ## Phase 2A final offline verification snapshot
 
