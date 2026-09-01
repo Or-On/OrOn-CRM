@@ -8,7 +8,7 @@ Last updated: 2026-09-01 (Asia/Jerusalem)
 - Branch: `codex/phase-2a-postgres-offline`
 - Phase 0 baseline: `93eb808e65f8edb1754c1940afe1949e7e18223a`
 - Phase 1 baseline: `20b46159078ec533a9891e6768d47595e35b7a7c`
-- Active task: P2A-016 — OpenLive persistence inventory and target schema
+- Active task: P2A-018 — OpenLive legacy importer foundation
 - Latest clean commit before this checkpoint: `20b46159078ec533a9891e6768d47595e35b7a7c`
 - Provider safety: no real telephone call, WhatsApp message, webhook mutation, or provider provisioning performed
 
@@ -120,7 +120,7 @@ Status values: `pending`, `active`, `complete`, `blocked`.
 | P2A-002 | Inspect target + Or-on Alembic graphs | complete | `4d9a219` | Mechanical metadata: 22 revisions, root `0001`, branch `8eda5976c920`, merge `8aa960fd77ec`, head `a41d2f6c2925` | Continue successors from the preserved head. |
 | P2A-003 | Reconcile Phase 1 bootstrap migration | complete | `d67f8f7` | Phase 1 progress proves live upgrade/current were blocked; old revision retained outside active versions and content recreated at generated successor `34376836baf5` | Live upgrade remains pending Phase 2B. |
 | P2A-004 | Import/preserve complete Or-on Alembic lineage | complete | `4d9a219` | All 22 revisions imported; IDs/parents/branch/merge/order preserved; three import paths and one offline-only guard documented | Live historical backfill remains pending Phase 2B. |
-| P2A-005 | Verify one canonical offline Alembic graph/head | active | pending | Alembic heads/history/branches and deterministic offline SQL pass at current successor | Repeat after every generated unified revision and at final head. |
+| P2A-005 | Verify one canonical offline Alembic graph/head | active | pending | Alembic heads/history/branches and deterministic offline SQL pass at generated head `f5e8b540dfeb` | Repeat at final head and record the final SQL digest. |
 | P2A-006 | Canonical tenant/identity mapping | complete | `d67f8f7` | Or-on tenant/user/membership preserved; provider-neutral identity bindings and tenant invitations created | RLS/membership execution pending Phase 2B. |
 | P2A-007 | Database schema/ownership architecture | complete | `109bf9e` | Historical Or-on tables stay in place; bounded new schemas and owners documented | Catalog execution pending Phase 2B. |
 | P2A-008 | WACRM migration inventory | complete | `109bf9e` | All 39 source SQL migrations have explicit disposition; zero unexplained | Keep mapping aligned with generated revisions. |
@@ -131,10 +131,10 @@ Status values: `pending`, `active`, `complete`, `blocked`.
 | P2A-013 | Translate WACRM automation/flow schema | complete | pending | Generated `cebe5f87cf18`: definitions, immutable published versions, runs, step runs, validation and retry/error metadata | Trigger and RLS execution pending Phase 2B. |
 | P2A-014 | Translate WACRM AI/knowledge/database semantics | complete | pending | Generated `cebe5f87cf18`: model metadata, sources/documents/chunks, PostgreSQL FTS GIN, usage records; pgvector is not required | FTS generation/query behavior pending Phase 2B. |
 | P2A-015 | Supabase Auth/Realtime/Storage/RPC removal mapping | complete | `109bf9e` | Auth/context, Realtime, Storage, service-role, and every RPC classified | Application adapters remain later-phase work. |
-| P2A-016 | OpenLive persistence inventory | pending | — | SQLite, JSON, filesystem, server setting keys, and browser-local keys inspected | Publish complete source-to-target persistence map. |
-| P2A-017 | OpenLive PostgreSQL target schema | pending | — | — | Tenant/user-scoped chats, messages, preferences, providers, voices, sessions. |
+| P2A-016 | OpenLive persistence inventory | complete | pending | Actual SQLite schema/query code, legacy conversation migration, encrypted JSON stores, settings APIs, voice-profile files, browser-local keys, and ACP session references mapped | Keep map aligned with importer coverage. |
+| P2A-017 | OpenLive PostgreSQL target schema | complete | pending | Generated `f5e8b540dfeb`: tenant/user-scoped chats, ordered messages, preferences, credential-referenced providers, object-backed voice profiles, and sessions | Constraints/RLS/grants pending Phase 2B. |
 | P2A-018 | OpenLive legacy importer foundation | pending | — | — | Offline parser/dry-run/idempotency/checksum tests; writes pending Phase 2B. |
-| P2A-019 | Canonical RLS policies for new tenant data | active | pending | Static fail-closed FORCE RLS policies exist for identity, CRM, messaging, automation, agents, objects, ops, and audit tables | Add live tables, then behavior remains pending Phase 2B. |
+| P2A-019 | Canonical RLS policies for new tenant data | complete | pending | Static fail-closed FORCE RLS policies exist for identity, CRM, messaging, automation, agents, objects, ops, audit, and live tables | **PENDING LIVE POSTGRESQL VALIDATION — PHASE 2B**. |
 | P2A-020 | Unified runtime roles/grants successor migration | complete | `d67f8f7` | Generated successor defines six roles without privileged attributes and preserves legacy Or-on roles | **PENDING LIVE POSTGRESQL VALIDATION — PHASE 2B**. |
 | P2A-021 | Inbox/outbox/idempotency foundation | complete | pending | Generated `cebe5f87cf18`: inbound/outbox events and scoped idempotency keys with explicit uniqueness and schedules | Atomicity/deduplication execution pending Phase 2B. |
 | P2A-022 | PostgreSQL durable-job foundation | complete | pending | Generated `cebe5f87cf18`: leases, bounded attempts, ready indexes, `SKIP LOCKED` claim, capped retry scheduling, terminal failure | Concurrency/stale lease/retry behavior pending Phase 2B. |

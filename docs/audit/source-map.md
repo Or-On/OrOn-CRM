@@ -144,3 +144,17 @@ objects for migrations 001–039 are recorded in
 | `supabase/migrations/008`, `016`, `023`, `039` | `cebe5f87cf18_add_automation_operations_and_audit_.py` | superseded/adapted | MIT storage intent; metadata points to mounted-object/GCS backends and Supabase Storage is not a runtime authority. |
 | `supabase/migrations/026`, `028`–`033` | `cebe5f87cf18_add_automation_operations_and_audit_.py` | adapted/re-written | MIT API-key/webhook/AI/knowledge behavior; credential references avoid plaintext secrets and PostgreSQL FTS works without requiring pgvector. |
 | `supabase/migrations/011`, `015`, `018`, `019`, `031` | canonical identity docs/foundation and later application transactions | superseded/partially adapted | Auth-provider-specific SQL is not copied; invitations/membership intent retained. |
+
+## Phase 2A OpenLive persistence adaptations
+
+Locked source SHA for every row:
+`849173cd1c8c17a95d600b17b428c301722bf5df`. OpenLive is MIT-licensed. The
+target migration is a clean-room schema translation from observed persistence
+semantics; source SQLite/JSON code is not a runtime dependency.
+
+| Source artifacts | Target artifact | Status | License implications / reason |
+| --- | --- | --- | --- |
+| `packages/db/src/schema.ts`, `packages/db/src/queries/chats.ts`, `packages/db/src/queries/messages.ts` | `f5e8b540dfeb_add_openlive_postgresql_persistence.py` (`live.chats`, `live.messages`) | adapted/re-written | MIT behavioral/schema semantics; stable message sequence and source IDs are preserved under canonical tenant scope. |
+| `packages/db/src/settings.ts`, web settings/provider routes | `f5e8b540dfeb_add_openlive_postgresql_persistence.py` (`live.user_preferences`, `live.provider_configurations`) | adapted/re-written | MIT semantics; encrypted-source metadata maps to canonical credential references and plaintext secret keys are rejected from provider settings. |
+| `packages/db/src/voice-profiles.ts`, live-agent session/provider state | `f5e8b540dfeb_add_openlive_postgresql_persistence.py` (`live.voice_profiles`, `live.sessions`) | adapted/re-written | MIT semantics; PostgreSQL owns metadata, object storage owns audio bytes, and external ACP sessions remain references. |
+| `packages/db/src/migrations/conversations.ts` and legacy file layouts | `db/importers/openlive_legacy/` (Phase 2A) | behaviorally adapted | MIT migration semantics; isolated one-time parser only, never imported by runtime packages. |

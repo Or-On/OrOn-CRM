@@ -196,6 +196,7 @@ def upgrade() -> None:
             "AND key_version IS NOT NULL)",
             name="ck_credential_envelope_complete",
         ),
+        sa.UniqueConstraint("tenant_id", "id", name="uq_credential_records_tenant_id_id"),
         schema="platform",
     )
     op.create_index(
@@ -240,6 +241,7 @@ def upgrade() -> None:
             "channel IN ('voice', 'whatsapp', 'multi')", name="ck_platform_campaign_channel"
         ),
         sa.ForeignKeyConstraint(["created_by_user_id"], ["users.id"], ondelete="SET NULL"),
+        sa.UniqueConstraint("tenant_id", "id", name="uq_platform_campaigns_tenant_id_id"),
         schema="platform",
     )
     op.create_index(
