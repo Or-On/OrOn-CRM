@@ -4,7 +4,7 @@ import { MessageCircle, Send, Sparkles } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, type SyntheticEvent } from "react";
 
-import type { ConversationSummary, Message } from "@or-on/crm";
+import type { ConversationSummary, Message, QuickReply } from "@or-on/crm";
 import { Badge, Button, EmptyState, Input, Surface } from "@or-on/ui";
 
 import { crmMutation } from "../crm";
@@ -12,15 +12,18 @@ import { crmMutation } from "../crm";
 export function InboxWorkspace({
   conversations,
   initialMessages,
+  quickReplies,
 }: {
   readonly conversations: readonly ConversationSummary[];
   readonly initialMessages: readonly Message[];
+  readonly quickReplies: readonly QuickReply[];
 }) {
   const router = useRouter();
   const [selectedId, setSelectedId] = useState(conversations[0]?.id);
   const [messages, setMessages] = useState(initialMessages);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
+  const [replyText, setReplyText] = useState("");
   const selected = conversations.find(
     (conversation) => conversation.id === selectedId,
   );
@@ -53,6 +56,7 @@ export function InboxWorkspace({
         { idempotencyKey: crypto.randomUUID() },
       );
       setMessages((current) => [...current, payload.message]);
+      setReplyText("");
       form.reset();
       router.refresh();
     } catch (caught) {
@@ -85,6 +89,23 @@ export function InboxWorkspace({
     } finally {
       setPending(false);
     }
+  }
+
+  async function changeStatus(status: ConversationSummary["status"]) {
+    if (selectedId === undefined) return;
+    await crmMutation(
+      `/api/messaging/conversations/${selectedId}`,
+      { status },
+      { method: "PATCH" },
+    );
+    router.refresh();
+  }
+
+  async function react(messageId: string, emoji: string) {
+    await crmMutation(`/api/messaging/messages/${messageId}/reactions`, {
+      emoji,
+    });
+    if (selectedId !== undefined) await selectConversation(selectedId);
   }
 
   return (
@@ -178,6 +199,20 @@ export function InboxWorkspace({
                 label={selected.status}
                 tone={selected.status === "open" ? "positive" : "neutral"}
               />
+              <select
+                aria-label="Conversation status"
+                onChange={(event) =>
+                  void changeStatus(
+                    event.target.value as ConversationSummary["status"],
+                  )
+                }
+                value={selected.status}
+              >
+                <option value="open">Open</option>
+                <option value="pending">Pending</option>
+                <option value="resolved">Resolved</option>
+                <option value="closed">Closed</option>
+              </select>
             </header>
             <div aria-live="polite" className="message-thread">
               {messages.map((message) => (
@@ -189,18 +224,43 @@ export function InboxWorkspace({
                   <small>
                     {message.direction} · {message.status}
                   </small>
+                  <div className="reaction-row">
+                    {message.reactions.map((reaction) => (
+                      <span key={reaction}>{reaction}</span>
+                    ))}
+                    <button
+                      aria-label="React with thumbs up"
+                      onClick={() => void react(message.id, "👍")}
+                      type="button"
+                    >
+                      ＋👍
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
             <form className="composer" onSubmit={(event) => void reply(event)}>
               <label htmlFor="reply-text">Reply through simulator</label>
+              <div className="quick-reply-row">
+                {quickReplies.map((quickReply) => (
+                  <button
+                    key={quickReply.id}
+                    onClick={() => setReplyText(quickReply.body)}
+                    type="button"
+                  >
+                    {quickReply.title}
+                  </button>
+                ))}
+              </div>
               <div>
                 <textarea
                   id="reply-text"
                   name="text"
+                  onChange={(event) => setReplyText(event.target.value)}
                   placeholder="Write a reply"
                   required
                   rows={2}
+                  value={replyText}
                 />
                 <Button
                   aria-label="Send reply"

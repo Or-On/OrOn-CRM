@@ -1,6 +1,7 @@
 "use client";
 
 import { Plus, Search, UsersRound } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type SyntheticEvent } from "react";
 
@@ -16,6 +17,7 @@ export function ContactManager({
 }) {
   const router = useRouter();
   const [creating, setCreating] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
 
@@ -42,6 +44,26 @@ export function ContactManager({
     }
   }
 
+  async function importCsv(event: SyntheticEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPending(true);
+    setError(undefined);
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    try {
+      await crmMutation("/api/crm/contacts/import", { csv: data.get("csv") });
+      form.reset();
+      setImporting(false);
+      router.refresh();
+    } catch (caught) {
+      setError(
+        caught instanceof Error ? caught.message : "Unable to import contacts",
+      );
+    } finally {
+      setPending(false);
+    }
+  }
+
   return (
     <div className="feature-stack">
       <div className="feature-toolbar">
@@ -53,10 +75,41 @@ export function ContactManager({
             placeholder="Search name, company, email or phone"
           />
         </form>
-        <Button onClick={() => setCreating((value) => !value)}>
-          <Plus aria-hidden="true" size={16} /> Add contact
-        </Button>
+        <div className="form-actions">
+          <Button
+            onClick={() => setImporting((value) => !value)}
+            variant="secondary"
+          >
+            Import CSV
+          </Button>
+          <Button onClick={() => setCreating((value) => !value)}>
+            <Plus aria-hidden="true" size={16} /> Add contact
+          </Button>
+        </div>
       </div>
+
+      {importing ? (
+        <Surface className="feature-form" level="raised">
+          <form onSubmit={(event) => void importCsv(event)}>
+            <label htmlFor="contacts-csv">
+              Paste CSV with name, phone, email, and company headers
+            </label>
+            <textarea id="contacts-csv" name="csv" required rows={7} />
+            <div className="form-actions">
+              <Button disabled={pending} type="submit">
+                Import contacts
+              </Button>
+              <Button
+                onClick={() => setImporting(false)}
+                type="button"
+                variant="quiet"
+              >
+                Cancel
+              </Button>
+            </div>
+          </form>
+        </Surface>
+      ) : null}
 
       {creating ? (
         <Surface className="feature-form" level="raised">
@@ -146,6 +199,9 @@ export function ContactManager({
                     </span>
                   ))}
                 </div>
+                <Link className="text-link" href={`/contacts/${contact.id}`}>
+                  Open contact
+                </Link>
               </Surface>
             );
           })}

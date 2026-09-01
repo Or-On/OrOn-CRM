@@ -14,7 +14,7 @@ export async function crmMutation<T>(
   url: string,
   body: Record<string, unknown>,
   options: {
-    readonly method?: "POST" | "DELETE";
+    readonly method?: "POST" | "PATCH" | "DELETE";
     readonly idempotencyKey?: string;
   } = {},
 ): Promise<T> {

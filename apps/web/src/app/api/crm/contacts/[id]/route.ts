@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 
-import { archiveContact, getContact } from "@or-on/crm";
+import { archiveContact, getContactDetail, updateContact } from "@or-on/crm";
 
-import { withCurrentTenant } from "../../../../../features/auth";
+import { jsonObject, withCurrentTenant } from "../../../../../features/auth";
 import {
   assertCrmMutation,
   crmErrorResponse,
@@ -15,7 +15,35 @@ export async function GET(
   try {
     const { id } = await context.params;
     const contact = await withCurrentTenant("crm:read", (sql) =>
-      getContact(sql, id),
+      getContactDetail(sql, id),
+    );
+    return contact === undefined
+      ? NextResponse.json({ error: "Not found" }, { status: 404 })
+      : NextResponse.json({ contact });
+  } catch (error) {
+    return crmErrorResponse(error);
+  }
+}
+
+export async function PATCH(
+  request: Request,
+  context: RouteContext<"/api/crm/contacts/[id]">,
+) {
+  try {
+    await assertCrmMutation(request);
+    const { id } = await context.params;
+    const body = await jsonObject(request);
+    const optional = (key: "name" | "email" | "company") =>
+      typeof body[key] === "string" ? body[key] : undefined;
+    const name = optional("name");
+    const email = optional("email");
+    const company = optional("company");
+    const contact = await withCurrentTenant("crm:write", (sql) =>
+      updateContact(sql, id, {
+        ...(name === undefined ? {} : { name }),
+        ...(email === undefined ? {} : { email }),
+        ...(company === undefined ? {} : { company }),
+      }),
     );
     return contact === undefined
       ? NextResponse.json({ error: "Not found" }, { status: 404 })

@@ -408,6 +408,94 @@ kbd {
   font-size: 0.78rem;
 }
 
+.feature-form textarea,
+.note-form textarea {
+  width: 100%;
+  padding: 0.75rem;
+  resize: vertical;
+  color: var(--or-text);
+  background: var(--or-bg-raised);
+  border: 1px solid var(--or-border);
+  border-radius: var(--or-radius-sm);
+  font: inherit;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.detail-grid > :first-child {
+  grid-row: span 2;
+}
+
+.detail-grid h2,
+.detail-grid h3 {
+  margin-top: 0;
+}
+
+.detail-identities,
+.note-list {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 1.25rem;
+}
+
+.note-form,
+.custom-field-row {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.note-list article {
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--or-border);
+}
+
+.note-list article p {
+  white-space: pre-wrap;
+}
+
+.text-link {
+  color: var(--or-accent);
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.text-link:hover {
+  text-decoration: underline;
+}
+
+.operations-grid,
+.operation-list {
+  display: grid;
+  gap: 1rem;
+}
+
+.operations-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.operation-list {
+  margin-top: 1rem;
+}
+
+.operation-list article {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--or-border);
+}
+
+.operation-list p {
+  margin: 0.25rem 0 0;
+  color: var(--or-text-muted);
+  font-size: 0.75rem;
+}
+
 .contact-card__heading {
   display: grid;
   grid-template-columns: auto 1fr auto;
@@ -580,6 +668,35 @@ kbd {
   margin: 0;
 }
 
+.reaction-row {
+  display: flex;
+  gap: 0.3rem;
+  margin-top: 0.35rem;
+}
+
+.reaction-row button {
+  color: var(--or-text-muted);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.quick-reply-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.5rem;
+}
+
+.quick-reply-row button {
+  padding: 0.25rem 0.5rem;
+  color: var(--or-accent);
+  background: transparent;
+  border: 1px solid var(--or-border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
 .message-bubble small {
   color: var(--or-text-muted);
   font-size: 0.65rem;
@@ -705,8 +822,14 @@ kbd {
   }
 
   .form-grid,
-  .contact-grid {
+  .contact-grid,
+  .detail-grid,
+  .operations-grid {
     grid-template-columns: 1fr;
+  }
+
+  .detail-grid > :first-child {
+    grid-row: auto;
   }
 
   .inbox-layout {

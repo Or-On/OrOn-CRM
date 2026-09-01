@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 
-import { listConversations, listMessages } from "@or-on/crm";
+import { listConversations, listMessages, listQuickReplies } from "@or-on/crm";
 
 import { UnauthenticatedError, withCurrentTenant } from "../../features/auth";
 import { InboxWorkspace } from "../../features/inbox";
@@ -12,7 +12,8 @@ export default async function InboxPage() {
       const first = conversations[0];
       const messages =
         first === undefined ? [] : await listMessages(sql, first.id);
-      return { conversations, messages };
+      const quickReplies = await listQuickReplies(sql);
+      return { conversations, messages, quickReplies };
     });
     return (
       <main className="page page--inbox">
@@ -26,6 +27,7 @@ export default async function InboxPage() {
         <InboxWorkspace
           conversations={data.conversations}
           initialMessages={data.messages}
+          quickReplies={data.quickReplies}
         />
       </main>
     );

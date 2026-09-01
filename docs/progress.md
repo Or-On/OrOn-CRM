@@ -12,7 +12,7 @@ Last updated: 2026-09-01 (Asia/Jerusalem)
 - Live status: **PHASE 2B LIVE POSTGRESQL VALIDATION COMPLETE**
 - Phase 3 status: **COMPLETE**
 - Phase 4 status: **ACTIVE**
-- Active task: P4-004 — contacts, tags, notes, custom fields, and import
+- Active task: P4-014 — messaging worker and PostgreSQL durable work
 - Phase 2B clean baseline commit: `830a8371836ea7922fca5c320624bf3bd32ec229`
 - Phase 3 exact baseline commit: `9ca3a022c2fb18a5d416b39aa7d1404f7910ae1b`
 - Phase 4 exact baseline commit: `fdaabedfe0c6dd3586261a338f2fd82f904023d8`
@@ -46,18 +46,18 @@ Status values: `pending`, `active`, `complete`, `blocked`.
 | P4-001 | Baseline, instructions, and Phase 4 reconstruction | complete | `ab9100f` | Clean Phase 3 baseline; locked clean upstreams; master Phase 4 scope recovered; scoped rules and WACRM instructions read | Complete code-level behavior inventory. |
 | P4-002 | Locked WACRM behavior inventory and provenance plan | complete | pending checkpoint | Contacts, inbox, provider, webhook, pipeline, broadcast, automation, and public API source behavior inspected; behavioral provenance recorded without wholesale copying | Keep mappings aligned as later slices land. |
 | P4-003 | Canonical CRM/messaging repository package | complete | pending checkpoint | Strict `@or-on/crm` package; tenant-transaction contacts, inbox, simulator, pipelines, and metrics; unit and live PostgreSQL integration tests pass | Extend the same bounded package for remaining domains. |
-| P4-004 | Contacts, tags, notes, custom fields, and import | active | pending | Contact list/search/create/archive and E.164 simulator identity work live; tags render from canonical PostgreSQL | Add notes, custom fields, update and deterministic CSV import. |
-| P4-005 | Shared inbox and conversation operations | active | pending | Conversation/message reads, unread state, seeded shared inbox, responsive two-pane UI, and authenticated route coverage pass | Add assignment/status operations and live refresh. |
+| P4-004 | Contacts, tags, notes, custom fields, and import | complete | pending checkpoint | CRUD/archive, E.164 dedupe, tags, notes, custom values, deterministic bounded CSV import, contact detail UI, and live rollback tests pass | Extend field-definition administration only when settings UX is finalized. |
+| P4-005 | Shared inbox and conversation operations | active | pending | Conversation/message reads, unread and status operations, seeded shared inbox, responsive two-pane UI, and authenticated routes pass | Add assignment and same-origin live refresh. |
 | P4-006 | WhatsApp webhook and provider simulator | active | pending | Default-safe development simulator enforces auth/CSRF, canonical provider-message dedupe, and never touches worker-owned `ops` privileges | Add verified raw-body Meta webhook ingestion behind disabled real-provider boundary. |
-| P4-007 | Human reply, delivery status, reactions, and quick replies | active | pending | Simulator reply is delivered/idempotent through local BFF; no real provider traffic | Add delivery timeline, reactions, and quick replies. |
-| P4-008 | Pipelines, stages, and deals | active | pending | Canonical board query and same-pipeline stage movement API/UI pass strict build | Add persisted deal editing and keyboard movement semantics. |
-| P4-009 | Templates, broadcasts, campaigns, and durable delivery | pending | pending | — | Deliver W-13/W-15/W-16. |
-| P4-010 | Automation persistence and execution adapter | pending | pending | — | Deliver the Phase 4 subset of W-17/W-18. |
-| P4-011 | Teams, settings, analytics, and notifications | pending | pending | — | Bind canonical membership/settings/query surfaces. |
+| P4-007 | Human reply, delivery status, reactions, and quick replies | active | pending | Simulator reply/idempotency, conversation status, reactions, and seeded quick replies work; no real provider traffic | Render delivery-event history and failure retry UI. |
+| P4-008 | Pipelines, stages, and deals | complete | pending checkpoint | Canonical board query and same-pipeline persisted stage movement API/UI pass strict and live builds | Rich deal editing is an incremental product enhancement. |
+| P4-009 | Templates, broadcasts, campaigns, and durable delivery | active | pending | Canonical campaign/template/broadcast/audience creation and explicit simulator delivery with aggregate trigger counts pass live rollback tests | Move delivery claiming into the messaging worker and prove retry/resume. |
+| P4-010 | Automation persistence and execution adapter | active | pending | Empty canonical WhatsApp graph drafts can be created, validated and immutably published from the operations UI | Add manual run adapter and execution trace surface without replacing mature engines. |
+| P4-011 | Teams, settings, analytics, and notifications | active | pending | Tenant-aware dashboard metrics package exists | Add management/settings/notification UI. |
 | P4-012 | Scoped public API and API keys | pending | pending | — | Deliver W-25/W-26 with OpenAPI-compatible behavior. |
 | P4-013 | MCP-compatible CRM tool surface | pending | pending | — | Deliver safe read tools and confirmed writes. |
 | P4-014 | Messaging worker and PostgreSQL durable work | pending | pending | — | Prove claim/retry/resume/idempotency. |
-| P4-015 | CRM/WhatsApp UI integration and accessibility | pending | pending | — | Complete shell navigation, responsive and RTL checks. |
+| P4-015 | CRM/WhatsApp UI integration and accessibility | active | pending | Authenticated shell now exposes contacts, inbox, pipeline, campaigns and automations with semantic forms and responsive layouts | Run authenticated desktop/mobile/RTL browser QA. |
 | P4-016 | Security, E2E, parity, provenance, and documentation | pending | pending | — | Run full acceptance and update parity evidence. |
 | P4-017 | Full Phase 4 verification | pending | pending | — | Run live DB, simulator E2E, build, audits, and upstream integrity. |
 

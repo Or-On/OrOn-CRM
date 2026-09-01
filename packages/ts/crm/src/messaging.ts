@@ -8,6 +8,7 @@ import type {
   Message,
   SimulatedInboundInput,
   SimulatedOutboundInput,
+  QuickReply,
 } from "./types.js";
 
 interface ConversationRow {
@@ -32,6 +33,7 @@ interface MessageRow {
   status: string;
   provider_message_id: string | null;
   created_at: Date;
+  reactions: unknown;
 }
 
 function mapConversation(row: ConversationRow): ConversationSummary {
@@ -59,6 +61,11 @@ function mapMessage(row: MessageRow): Message {
     status: row.status,
     providerMessageId: row.provider_message_id,
     createdAt: row.created_at.toISOString(),
+    reactions: Array.isArray(row.reactions)
+      ? row.reactions.filter(
+          (value): value is string => typeof value === "string",
+        )
+      : [],
   };
 }
 
@@ -83,10 +90,14 @@ export async function listMessages(
   conversationId: string,
 ): Promise<readonly Message[]> {
   const rows = await sql<MessageRow[]>`
-    SELECT id, conversation_id, direction, sender_type, content_type,
-           content_text, status, provider_message_id, created_at
-    FROM messaging.messages
-    WHERE conversation_id = ${conversationId}::uuid
+    SELECT message.id, message.conversation_id, message.direction,
+           message.sender_type, message.content_type, message.content_text,
+           message.status, message.provider_message_id, message.created_at,
+           COALESCE((SELECT jsonb_agg(reaction.emoji ORDER BY reaction.created_at)
+                     FROM messaging.message_reactions reaction
+                     WHERE reaction.message_id = message.id), '[]') AS reactions
+    FROM messaging.messages message
+    WHERE message.conversation_id = ${conversationId}::uuid
     ORDER BY created_at ASC, id ASC
     LIMIT 250
   `;
@@ -222,7 +233,8 @@ export async function sendSimulatedReply(
       WHERE provider IS NOT NULL AND provider_message_id IS NOT NULL
     DO UPDATE SET provider_message_id = EXCLUDED.provider_message_id
     RETURNING id, conversation_id, direction, sender_type, content_type,
-              content_text, status, provider_message_id, created_at
+              content_text, status, provider_message_id, created_at,
+              '[]'::jsonb AS reactions
   `;
   const row = messageRows[0];
   if (row === undefined) throw new Error("simulated reply insert failed");
@@ -233,6 +245,45 @@ export async function sendSimulatedReply(
     WHERE id = ${input.conversationId}::uuid
   `;
   return mapMessage(row);
+}
+
+export async function setConversationStatus(
+  sql: postgres.TransactionSql,
+  conversationId: string,
+  status: ConversationSummary["status"],
+): Promise<boolean> {
+  const rows = await sql<{ id: string }[]>`
+    UPDATE messaging.conversations SET status = ${status},
+      updated_at = CURRENT_TIMESTAMP WHERE id = ${conversationId}::uuid RETURNING id
+  `;
+  return rows.length === 1;
+}
+
+export async function listQuickReplies(
+  sql: postgres.TransactionSql,
+): Promise<readonly QuickReply[]> {
+  return sql<QuickReply[]>`
+    SELECT id, title, body, shortcut FROM messaging.quick_replies
+    ORDER BY lower(title), id
+  `;
+}
+
+export async function addMessageReaction(
+  sql: postgres.TransactionSql,
+  messageId: string,
+  actorUserId: string,
+  emoji: string,
+): Promise<void> {
+  const normalized = emoji.trim();
+  if (!normalized || normalized.length > 16)
+    throw new TypeError("reaction must be a short emoji");
+  await sql`
+    INSERT INTO messaging.message_reactions
+      (tenant_id, message_id, actor_type, actor_id, emoji)
+    VALUES (platform.current_tenant_id(), ${messageId}::uuid, 'user', ${actorUserId}::uuid, ${normalized})
+    ON CONFLICT (tenant_id, message_id, actor_type, actor_id)
+    DO UPDATE SET emoji = EXCLUDED.emoji
+  `;
 }
 
 export async function markConversationRead(

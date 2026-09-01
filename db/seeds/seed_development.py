@@ -115,6 +115,18 @@ async def seed() -> None:
             await connection.execute(
                 text(
                     """
+                    INSERT INTO crm.custom_field_definitions
+                      (id, tenant_id, key, label, field_type)
+                    VALUES ('33000000-0000-4000-8000-000000000001', :tenant,
+                            'customer_tier', 'Customer tier', 'text')
+                    ON CONFLICT (id) DO UPDATE SET label = EXCLUDED.label
+                    """
+                ),
+                {"tenant": primary_tenant},
+            )
+            await connection.execute(
+                text(
+                    """
                     INSERT INTO crm.contact_channel_identities
                       (id, tenant_id, contact_id, channel, normalized_value,
                        display_value, provider, provider_identity_id,
@@ -223,6 +235,20 @@ async def seed() -> None:
                     ON CONFLICT (tenant_id, channel_id, contact_id)
                     DO UPDATE SET assigned_user_id = EXCLUDED.assigned_user_id,
                                   status = 'open'
+                    """
+                ),
+                {"tenant": primary_tenant, "user_id": user_id},
+            )
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO messaging.quick_replies
+                      (id, tenant_id, title, body, shortcut, created_by_user_id)
+                    VALUES ('53000000-0000-4000-8000-000000000001', :tenant,
+                            'Warm greeting', 'Thanks for reaching out — how can we help?',
+                            '/hello', :user_id)
+                    ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title,
+                                                   body = EXCLUDED.body
                     """
                 ),
                 {"tenant": primary_tenant, "user_id": user_id},

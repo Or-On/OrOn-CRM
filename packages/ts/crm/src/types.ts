@@ -33,6 +33,48 @@ export interface ContactInput {
   readonly tagIds?: readonly string[];
 }
 
+export interface ContactNote {
+  readonly id: string;
+  readonly authorUserId: string | null;
+  readonly body: string;
+  readonly createdAt: string;
+}
+
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | readonly JsonValue[]
+  | { readonly [key: string]: JsonValue };
+
+export interface ContactCustomField {
+  readonly id: string;
+  readonly key: string;
+  readonly label: string;
+  readonly fieldType:
+    "text" | "number" | "date" | "boolean" | "select" | "multi_select";
+  readonly value: JsonValue | null;
+}
+
+export interface ContactDetail extends ContactSummary {
+  readonly notes: readonly ContactNote[];
+  readonly customFields: readonly ContactCustomField[];
+}
+
+export interface ContactImportRow {
+  readonly name: string;
+  readonly phone?: string;
+  readonly email?: string;
+  readonly company?: string;
+}
+
+export interface ContactImportResult {
+  readonly created: number;
+  readonly skipped: number;
+  readonly errors: readonly { readonly row: number; readonly reason: string }[];
+}
+
 export interface ConversationSummary {
   readonly id: string;
   readonly contactId: string;
@@ -55,6 +97,14 @@ export interface Message {
   readonly status: string;
   readonly providerMessageId: string | null;
   readonly createdAt: string;
+  readonly reactions: readonly string[];
+}
+
+export interface QuickReply {
+  readonly id: string;
+  readonly title: string;
+  readonly body: string;
+  readonly shortcut: string | null;
 }
 
 export interface PipelineStage {
@@ -91,6 +141,33 @@ export interface DashboardMetrics {
   readonly unreadMessages: number;
   readonly openPipelineValue: string;
   readonly messagesToday: number;
+}
+
+export interface BroadcastSummary {
+  readonly id: string;
+  readonly name: string;
+  readonly status:
+    | "draft"
+    | "scheduled"
+    | "sending"
+    | "paused"
+    | "sent"
+    | "failed"
+    | "cancelled";
+  readonly totalRecipients: number;
+  readonly deliveredCount: number;
+  readonly failedCount: number;
+  readonly createdAt: string;
+}
+
+export interface AutomationSummary {
+  readonly id: string;
+  readonly name: string;
+  readonly description: string | null;
+  readonly version: number;
+  readonly published: boolean;
+  readonly validationStatus: "pending" | "valid" | "invalid";
+  readonly createdAt: string;
 }
 
 export interface SimulatedInboundInput {

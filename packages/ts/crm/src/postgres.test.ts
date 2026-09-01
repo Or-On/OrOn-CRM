@@ -2,7 +2,23 @@ import postgres from "postgres";
 import { describe, expect, it } from "vitest";
 
 import { dashboardMetrics } from "./analytics.js";
-import { listContacts } from "./contacts.js";
+import {
+  createAutomationDraft,
+  listAutomations,
+  publishAutomation,
+} from "./automations.js";
+import {
+  createSimulatorBroadcast,
+  deliverSimulatorBroadcast,
+  listBroadcasts,
+} from "./campaigns.js";
+import {
+  addContactNote,
+  getContactDetail,
+  importContacts,
+  listContacts,
+  updateContact,
+} from "./contacts.js";
 import {
   ingestSimulatedInbound,
   listConversations,
@@ -36,9 +52,73 @@ describe.skipIf(databaseUrl === undefined)(
             expect(
               contacts.some((contact) => contact.name === "Maya Cohen"),
             ).toBe(true);
+            const imported = await importContacts(transaction, userId, [
+              {
+                name: "Fictional Imported Contact",
+                phone: "+972509999993",
+                email: "imported@example.invalid",
+              },
+              {
+                name: "Fictional Duplicate Contact",
+                phone: "+972509999993",
+              },
+            ]);
+            expect(imported).toMatchObject({
+              created: 1,
+              skipped: 1,
+              errors: [],
+            });
+            const importedContact = (
+              await listContacts(transaction, { query: "Fictional Imported" })
+            )[0];
+            expect(importedContact).toBeDefined();
+            if (importedContact === undefined)
+              throw new Error("imported contact could not be found");
+            await updateContact(transaction, importedContact.id, {
+              company: "Updated Fictional Company",
+            });
+            await addContactNote(
+              transaction,
+              importedContact.id,
+              userId,
+              "Fictional integration note",
+            );
+            expect(
+              await getContactDetail(transaction, importedContact.id),
+            ).toMatchObject({
+              company: "Updated Fictional Company",
+              notes: [{ body: "Fictional integration note" }],
+            });
             expect(
               (await listPipelineBoards(transaction))[0]?.stages,
             ).toHaveLength(3);
+
+            const broadcastId = await createSimulatorBroadcast(
+              transaction,
+              userId,
+              "Fictional integration campaign",
+              "A simulator-only campaign message",
+            );
+            expect(
+              await deliverSimulatorBroadcast(transaction, broadcastId),
+            ).toBeGreaterThan(0);
+            expect((await listBroadcasts(transaction))[0]).toMatchObject({
+              id: broadcastId,
+              status: "sent",
+            });
+
+            const automationId = await createAutomationDraft(
+              transaction,
+              userId,
+              "Fictional integration automation",
+            );
+            expect(await publishAutomation(transaction, automationId)).toBe(
+              true,
+            );
+            expect((await listAutomations(transaction))[0]).toMatchObject({
+              id: automationId,
+              published: true,
+            });
 
             const inbound = {
               providerEventId: "phase4-integration-event",

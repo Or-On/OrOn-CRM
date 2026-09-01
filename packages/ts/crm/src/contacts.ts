@@ -1,7 +1,17 @@
 import type postgres from "postgres";
 
 import { normalizeE164 } from "./phone.js";
-import type { ContactInput, ContactSummary } from "./types.js";
+import type {
+  ContactCustomField,
+  ContactDetail,
+  ContactImportResult,
+  ContactImportRow,
+  ContactInput,
+  ContactNote,
+  ContactSummary,
+  JsonValue,
+  Tag,
+} from "./types.js";
 
 interface ContactRow {
   id: string;
@@ -172,4 +182,177 @@ export async function archiveContact(
     RETURNING id
   `;
   return rows.length === 1;
+}
+
+export async function getContactDetail(
+  sql: postgres.TransactionSql,
+  contactId: string,
+): Promise<ContactDetail | undefined> {
+  const contact = await getContact(sql, contactId);
+  if (contact === undefined) return undefined;
+  const notes = await sql<
+    {
+      id: string;
+      author_user_id: string | null;
+      body: string;
+      created_at: Date;
+    }[]
+  >`
+    SELECT id, author_user_id, body, created_at FROM crm.notes
+    WHERE contact_id = ${contactId}::uuid
+    ORDER BY created_at DESC, id DESC LIMIT 100
+  `;
+  const customFields = await sql<
+    {
+      id: string;
+      key: string;
+      label: string;
+      field_type: ContactCustomField["fieldType"];
+      value: JsonValue | null;
+    }[]
+  >`
+    SELECT definition.id, definition.key, definition.label,
+           definition.field_type, value.value
+    FROM crm.custom_field_definitions definition
+    LEFT JOIN crm.contact_custom_field_values value
+      ON value.field_id = definition.id AND value.contact_id = ${contactId}::uuid
+    ORDER BY lower(definition.label), definition.id
+  `;
+  return {
+    ...contact,
+    notes: notes.map((note): ContactNote => ({
+      id: note.id,
+      authorUserId: note.author_user_id,
+      body: note.body,
+      createdAt: note.created_at.toISOString(),
+    })),
+    customFields: customFields.map((field) => ({
+      id: field.id,
+      key: field.key,
+      label: field.label,
+      fieldType: field.field_type,
+      value: field.value,
+    })),
+  };
+}
+
+export async function updateContact(
+  sql: postgres.TransactionSql,
+  contactId: string,
+  input: Partial<Pick<ContactInput, "name" | "email" | "company">>,
+): Promise<ContactSummary | undefined> {
+  const name = input.name?.trim();
+  if (input.name !== undefined && name === "")
+    throw new TypeError("contact name is required");
+  const email = input.email?.trim() ?? null;
+  const company = input.company?.trim() ?? null;
+  const rows = await sql<{ id: string }[]>`
+    UPDATE crm.contacts
+    SET name = CASE WHEN ${input.name !== undefined} THEN ${name ?? ""} ELSE name END,
+        email = CASE WHEN ${input.email !== undefined} THEN ${email === "" ? null : email} ELSE email END,
+        company = CASE WHEN ${input.company !== undefined} THEN ${company === "" ? null : company} ELSE company END,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE id = ${contactId}::uuid
+    RETURNING id
+  `;
+  return rows.length === 0 ? undefined : getContact(sql, contactId);
+}
+
+export async function addContactNote(
+  sql: postgres.TransactionSql,
+  contactId: string,
+  authorUserId: string,
+  body: string,
+): Promise<ContactNote> {
+  const normalized = body.trim();
+  if (normalized === "" || normalized.length > 10_000)
+    throw new TypeError("note must contain between 1 and 10000 characters");
+  const rows = await sql<
+    {
+      id: string;
+      author_user_id: string | null;
+      body: string;
+      created_at: Date;
+    }[]
+  >`
+    INSERT INTO crm.notes (tenant_id, contact_id, author_user_id, body)
+    VALUES (platform.current_tenant_id(), ${contactId}::uuid,
+            ${authorUserId}::uuid, ${normalized})
+    RETURNING id, author_user_id, body, created_at
+  `;
+  const note = rows[0];
+  if (note === undefined) throw new Error("note insert returned no row");
+  return {
+    id: note.id,
+    authorUserId: note.author_user_id,
+    body: note.body,
+    createdAt: note.created_at.toISOString(),
+  };
+}
+
+export async function setContactCustomField(
+  sql: postgres.TransactionSql,
+  contactId: string,
+  fieldId: string,
+  value: JsonValue,
+): Promise<void> {
+  await sql`
+    INSERT INTO crm.contact_custom_field_values
+      (tenant_id, contact_id, field_id, value)
+    VALUES (platform.current_tenant_id(), ${contactId}::uuid,
+            ${fieldId}::uuid, ${sql.json(value)})
+    ON CONFLICT (tenant_id, contact_id, field_id)
+    DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
+  `;
+}
+
+export async function listTags(
+  sql: postgres.TransactionSql,
+): Promise<readonly Tag[]> {
+  return sql<Tag[]>`
+    SELECT id, name, color FROM crm.tags ORDER BY lower(name), id
+  `;
+}
+
+export async function importContacts(
+  sql: postgres.TransactionSql,
+  actorUserId: string,
+  rows: readonly ContactImportRow[],
+): Promise<ContactImportResult> {
+  if (rows.length > 1_000)
+    throw new TypeError("contact import is limited to 1000 rows");
+  let created = 0;
+  let skipped = 0;
+  const errors: { row: number; reason: string }[] = [];
+  for (const [index, row] of rows.entries()) {
+    try {
+      const phone =
+        row.phone === undefined ? undefined : normalizeE164(row.phone);
+      if (row.phone !== undefined && phone === undefined)
+        throw new TypeError("phone must be explicit E.164");
+      const email = row.email?.trim().toLowerCase();
+      const duplicates = await sql<{ found: boolean }[]>`
+        SELECT EXISTS (
+          SELECT 1 FROM crm.contacts contact
+          WHERE (${email ?? null}::text IS NOT NULL AND lower(contact.email) = ${email ?? null})
+          UNION ALL
+          SELECT 1 FROM crm.contact_channel_identities identity
+          WHERE (${phone ?? null}::text IS NOT NULL AND identity.channel IN ('phone', 'whatsapp')
+                 AND identity.normalized_value = ${phone ?? null})
+        ) AS found
+      `;
+      if (duplicates[0]?.found === true) {
+        skipped += 1;
+        continue;
+      }
+      await createContact(sql, actorUserId, row);
+      created += 1;
+    } catch (error) {
+      errors.push({
+        row: index + 2,
+        reason: error instanceof Error ? error.message : "invalid contact",
+      });
+    }
+  }
+  return { created, skipped, errors };
 }
