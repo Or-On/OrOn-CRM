@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 
 export function requestId(request: Request): string {
-  return request.headers.get("x-request-id")?.slice(0, 128) || randomUUID();
+  const supplied = request.headers.get("x-request-id")?.trim().slice(0, 128);
+  return supplied === undefined || supplied === "" ? randomUUID() : supplied;
 }
 
 export async function jsonObject(

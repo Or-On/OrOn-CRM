@@ -11,7 +11,7 @@ def test_phase_2a_graph_has_preserved_oron_root_and_one_target_head() -> None:
     assert report.bases == ("0001",)
     assert report.heads == ("3efa5431c380",)
     assert report.branch_points == ("8eda5976c920",)
-    assert report.revision_count == 27
+    assert report.revision_count == 29
 
 
 def test_rendered_postgresql_contract_passes_static_security_checks() -> None:

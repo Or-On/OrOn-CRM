@@ -175,8 +175,7 @@ async def test_development_seed_is_idempotent(postgres_url: str) -> None:
     environment["DATABASE_URL"] = postgres_url
     environment["DEV_AUTH_EMAIL"] = "operator@or-on.local"
     environment["DEV_AUTH_PASSWORD_HASH"] = (
-        "$argon2id$v=19$m=65536,t=3,p=1$cGhhc2UtdGhyZWUtdGVzdA$"
-        "bm90LXVzZWQtZm9yLXZlcmlmaWNhdGlvbg"
+        "$argon2id$v=19$m=65536,t=3,p=1$cGhhc2UtdGhyZWUtdGVzdA$bm90LXVzZWQtZm9yLXZlcmlmaWNhdGlvbg"
     )
 
     def run_seed() -> None:

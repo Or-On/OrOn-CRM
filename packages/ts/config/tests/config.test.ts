@@ -52,4 +52,19 @@ describe("loadConfig", () => {
       "AUTH_TOKEN_PEPPER",
     );
   });
+
+  it("normalizes the shared Python-style log level", () => {
+    expect(loadConfig({ LOG_LEVEL: "INFO" }).logLevel).toBe("info");
+  });
+
+  it("treats blank optional integration secrets as unset", () => {
+    const config = loadConfig({
+      AI_API_KEY: "",
+      LIVEKIT_API_SECRET: "",
+      WHATSAPP_ACCESS_TOKEN: "",
+    });
+    expect(config.secrets.aiApiKey).toBeUndefined();
+    expect(config.secrets.livekitApiSecret).toBeUndefined();
+    expect(config.secrets.whatsappAccessToken).toBeUndefined();
+  });
 });

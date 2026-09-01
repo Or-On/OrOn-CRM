@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { useState, type SyntheticEvent } from "react";
 
 import { Button, Input } from "@or-on/ui";
 
@@ -10,7 +10,7 @@ export function LoginForm() {
   const [error, setError] = useState<string>();
   const [pending, setPending] = useState(false);
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
     setPending(true);
     setError(undefined);
@@ -39,7 +39,7 @@ export function LoginForm() {
   }
 
   return (
-    <form className="login-form" onSubmit={submit}>
+    <form className="login-form" onSubmit={(event) => void submit(event)}>
       <Input
         autoComplete="email"
         id="email"

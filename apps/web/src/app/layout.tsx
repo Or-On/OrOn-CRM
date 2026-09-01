@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 import { AppShell } from "../features/shell";
-import { currentPublicSession } from "../features/auth/server";
+import { currentPublicSession } from "../features/auth";
 import { Providers } from "./providers";
 
 export const metadata: Metadata = {

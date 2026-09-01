@@ -1,8 +1,26 @@
 export function assertTrustedUnsafeRequest(request: Request): void {
   const origin = request.headers.get("origin");
   const fetchSite = request.headers.get("sec-fetch-site");
-  const expected = new URL(request.url).origin;
-  if (origin === null || origin !== expected) {
+  const requestUrl = new URL(request.url);
+  const present = (value: string | undefined): string | undefined =>
+    value === "" ? undefined : value;
+  const expectedHost =
+    present(request.headers.get("x-forwarded-host")?.split(",")[0]?.trim()) ??
+    present(request.headers.get("host")?.trim()) ??
+    requestUrl.host;
+  const expectedProtocol =
+    present(request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim()) ??
+    requestUrl.protocol.slice(0, -1);
+  let suppliedOrigin: URL;
+  try {
+    suppliedOrigin = new URL(origin ?? "");
+  } catch {
+    throw new TypeError("unsafe request origin is not trusted");
+  }
+  if (
+    suppliedOrigin.host !== expectedHost ||
+    suppliedOrigin.protocol !== `${expectedProtocol}:`
+  ) {
     throw new TypeError("unsafe request origin is not trusted");
   }
   if (
@@ -19,5 +37,7 @@ export function clientAddress(request: Request): string | undefined {
     .get("x-forwarded-for")
     ?.split(",")[0]
     ?.trim();
-  return forwarded || request.headers.get("x-real-ip")?.trim() || undefined;
+  if (forwarded !== undefined && forwarded !== "") return forwarded;
+  const direct = request.headers.get("x-real-ip")?.trim();
+  return direct === "" ? undefined : direct;
 }

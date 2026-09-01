@@ -72,8 +72,8 @@ export async function currentPublicSession(): Promise<
 > {
   const resolved = await currentRawSession();
   if (resolved === undefined) return undefined;
-  return withAuthService(async (service) =>
-    service.toPublicSession(resolved.session),
+  return withAuthService((service) =>
+    Promise.resolve(service.toPublicSession(resolved.session)),
   );
 }
 

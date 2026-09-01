@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 
 import { Surface } from "@or-on/ui";
 
-import { currentPublicSession } from "../../features/auth/server";
+import { currentPublicSession } from "../../features/auth";
 import { LoginForm } from "./login-form";
 
 export const metadata: Metadata = { title: "Sign in" };

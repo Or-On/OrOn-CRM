@@ -17,6 +17,19 @@ describe("unsafe request protection", () => {
     expect(() => assertTrustedUnsafeRequest(request)).not.toThrow();
   });
 
+  it("uses the externally visible host behind a trusted proxy", () => {
+    const request = new Request("http://0.0.0.0:3000/api/auth/logout", {
+      method: "POST",
+      headers: {
+        host: "platform.example.test",
+        origin: "https://platform.example.test",
+        "sec-fetch-site": "same-origin",
+        "x-forwarded-proto": "https",
+      },
+    });
+    expect(() => assertTrustedUnsafeRequest(request)).not.toThrow();
+  });
+
   it("rejects a cross-origin request", () => {
     const request = new Request(
       "https://platform.example.test/api/auth/logout",

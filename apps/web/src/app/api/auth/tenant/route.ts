@@ -3,13 +3,13 @@ import { NextResponse } from "next/server";
 
 import { assertTrustedUnsafeRequest } from "@or-on/auth";
 
-import { jsonObject, requestId } from "../../../../features/auth/request";
+import { jsonObject, requestId } from "../../../../features/auth";
 import {
   CSRF_COOKIE,
   currentRawSession,
   setSessionCookies,
   withAuthService,
-} from "../../../../features/auth/server";
+} from "../../../../features/auth";
 
 export async function POST(request: Request) {
   try {

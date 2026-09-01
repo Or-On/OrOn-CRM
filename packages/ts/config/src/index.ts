@@ -5,6 +5,11 @@ const booleanFlag = z
   .default("false")
   .transform((value) => value === "true");
 
+const optionalSecret = z.preprocess(
+  (value) => (value === "" ? undefined : value),
+  z.string().min(1).optional(),
+);
+
 const sourceSchema = z.object({
   PLATFORM_ENV: z
     .enum(["development", "test", "production"])
@@ -19,16 +24,28 @@ const sourceSchema = z.object({
     .optional(),
   CONTROL_API_URL: z.url().default("http://127.0.0.1:8000"),
   LOG_LEVEL: z
-    .enum(["trace", "debug", "info", "warn", "error", "fatal"])
+    .string()
+    .trim()
+    .toLowerCase()
+    .pipe(z.enum(["trace", "debug", "info", "warn", "error", "fatal"]))
     .default("info"),
   ENABLE_REAL_TELEPHONY: booleanFlag,
   ENABLE_REAL_WHATSAPP: booleanFlag,
-  LIVEKIT_API_SECRET: z.string().min(1).optional(),
-  WHATSAPP_ACCESS_TOKEN: z.string().min(1).optional(),
-  AI_API_KEY: z.string().min(1).optional(),
-  AUTH_TOKEN_PEPPER: z.string().min(32).optional(),
-  AUTH_SERVICE_SECRET: z.string().min(32).optional(),
-  AUTH_DUMMY_PASSWORD_HASH: z.string().startsWith("$argon2id$").optional(),
+  LIVEKIT_API_SECRET: optionalSecret,
+  WHATSAPP_ACCESS_TOKEN: optionalSecret,
+  AI_API_KEY: optionalSecret,
+  AUTH_TOKEN_PEPPER: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.string().min(32).optional(),
+  ),
+  AUTH_SERVICE_SECRET: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.string().min(32).optional(),
+  ),
+  AUTH_DUMMY_PASSWORD_HASH: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.string().startsWith("$argon2id$").optional(),
+  ),
 });
 
 export class ConfigurationError extends Error {

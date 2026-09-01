@@ -32,7 +32,7 @@ export async function issueServiceAssertion(input: {
     .setSubject(input.identity.userId)
     .setJti(crypto.randomUUID())
     .setIssuedAt()
-    .setExpirationTime(`${ttl}s`)
+    .setExpirationTime(`${String(ttl)}s`)
     .sign(new TextEncoder().encode(input.secret));
 }
 

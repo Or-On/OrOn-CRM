@@ -13,7 +13,10 @@ vi.mock("../src/features/auth/server", () => ({
         tenantName: "Aurora Operations",
         tenantSlug: "aurora-operations",
       },
-      user: { id: "20000000-0000-4000-8000-000000000001", email: "operator@example.test" },
+      user: {
+        id: "20000000-0000-4000-8000-000000000001",
+        email: "operator@example.test",
+      },
     }),
 }));
 

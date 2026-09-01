@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
 import { HealthPanel } from "../../../features/system-health";
-import { currentPublicSession } from "../../../features/auth/server";
+import { currentPublicSession } from "../../../features/auth";
 
 export const metadata: Metadata = { title: "System health" };
 

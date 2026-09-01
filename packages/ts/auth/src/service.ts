@@ -66,11 +66,9 @@ export class AuthService {
     const candidateHash = record?.passwordHash ?? this.#dummyPasswordHash;
     const passwordValid = await verifyPassword(candidateHash, input.password);
     const now = this.#now();
-    const locked =
-      record?.lockedUntil !== undefined && record.lockedUntil > now;
+    const locked = (record?.lockedUntil?.getTime() ?? 0) > now.getTime();
     if (
-      record === undefined ||
-      record.passwordHash === undefined ||
+      record?.passwordHash === undefined ||
       record.status !== "active" ||
       locked ||
       !passwordValid

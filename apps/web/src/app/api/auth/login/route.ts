@@ -6,11 +6,8 @@ import {
   clientAddress,
 } from "@or-on/auth";
 
-import { jsonObject, requestId } from "../../../../features/auth/request";
-import {
-  setSessionCookies,
-  withAuthService,
-} from "../../../../features/auth/server";
+import { jsonObject, requestId } from "../../../../features/auth";
+import { setSessionCookies, withAuthService } from "../../../../features/auth";
 
 export async function POST(request: Request) {
   try {
@@ -45,6 +42,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Request rejected" }, { status: 403 });
     }
     console.error("authentication login failed", {
+      errorType: error instanceof Error ? error.name : "UnknownError",
       requestId: requestId(request),
     });
     return NextResponse.json(

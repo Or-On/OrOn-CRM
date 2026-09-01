@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 
 import { Badge, Surface } from "@or-on/ui";
 
-import { currentPublicSession } from "../features/auth/server";
+import { currentPublicSession } from "../features/auth";
 
 export const metadata: Metadata = { title: "Foundation" };
 
