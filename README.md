@@ -20,15 +20,19 @@ PostgreSQL is the only destination and target runtime database. GNU Make is not
 installed on this host, although the same underlying cross-platform command
 runner used by every Make target passes.
 
-Phase 3 now adds one canonical, PostgreSQL-backed identity/session boundary: an
+Phase 3 added one canonical, PostgreSQL-backed identity/session boundary: an
 Alembic-owned credential and session schema, Argon2id passwords, opaque
 HMAC-digested session tokens, CSRF/origin enforcement, tenant switching, typed
 RBAC, short-lived live-agent assertions, and an authenticated Next.js shell.
+Phase 4 now integrates a bounded CRM and WhatsApp simulator slice: contacts and
+deduplication, shared inbox, pipelines, durable simulator campaigns, versioned
+automation runs, team/settings, notifications, scoped API keys, and the
+PostgreSQL messaging worker.
 
-It does **not** implement CRM screens, messaging, real WhatsApp delivery,
-telephony, public signup/OAuth/MFA, the full OpenLive protocol, canonical flow
-execution, agent-profile persistence, or production GCP infrastructure. Planned
-navigation is visibly unavailable rather than presented as finished functionality.
+It does **not** enable real WhatsApp delivery, telephony, public signup/OAuth/MFA,
+the full OpenLive protocol, general canonical flow execution, agent-profile
+persistence, or production GCP infrastructure. Planned navigation is visibly
+unavailable rather than presented as finished functionality.
 
 ## Source systems
 
@@ -71,7 +75,7 @@ services/py/                      control-api, dispatcher, voice-agent boundarie
 services/ts/                      live-agent and messaging-worker boundaries
 packages/py/platform-integration  new cross-system Python foundation
 packages/ts/                      UI, contracts, client, config, observability, integration
-db/alembic/                       sole 29-revision migration graph/head
+db/alembic/                       sole 31-revision migration graph/head
 db/bootstrap/                     local role bootstrap, not schema migration
 db/contracts/                     consumer-only schema expectation manifest
 db/importers/                     isolated one-time legacy import tools
@@ -114,7 +118,8 @@ never printed or committed.
 
 The default host workflow keeps PostgreSQL in Compose and runs the current app
 processes with hot reload. See the
-[local development runbook](docs/runbooks/local-development.md).
+[local development runbook](docs/runbooks/local-development.md). CRM simulator
+details are in the [CRM/WhatsApp runbook](docs/runbooks/crm-whatsapp-local.md).
 
 ## Command surface
 

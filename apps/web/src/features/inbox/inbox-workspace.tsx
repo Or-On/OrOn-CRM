@@ -2,9 +2,14 @@
 
 import { MessageCircle, Send, Sparkles } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState, type SyntheticEvent } from "react";
+import { useEffect, useState, type SyntheticEvent } from "react";
 
-import type { ConversationSummary, Message, QuickReply } from "@or-on/crm";
+import type {
+  ConversationSummary,
+  Message,
+  QuickReply,
+  TeamMember,
+} from "@or-on/crm";
 import { Badge, Button, EmptyState, Input, Surface } from "@or-on/ui";
 
 import { crmMutation } from "../crm";
@@ -13,10 +18,12 @@ export function InboxWorkspace({
   conversations,
   initialMessages,
   quickReplies,
+  teamMembers,
 }: {
   readonly conversations: readonly ConversationSummary[];
   readonly initialMessages: readonly Message[];
   readonly quickReplies: readonly QuickReply[];
+  readonly teamMembers: readonly TeamMember[];
 }) {
   const router = useRouter();
   const [selectedId, setSelectedId] = useState(conversations[0]?.id);
@@ -27,6 +34,19 @@ export function InboxWorkspace({
   const selected = conversations.find(
     (conversation) => conversation.id === selectedId,
   );
+
+  useEffect(() => {
+    if (selectedId === undefined) return;
+    const timer = window.setInterval(() => {
+      void fetch(`/api/messaging/conversations/${selectedId}/messages`)
+        .then((response) => response.json())
+        .then((payload: { messages?: Message[] }) =>
+          setMessages(payload.messages ?? []),
+        )
+        .catch(() => undefined);
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [selectedId]);
 
   async function selectConversation(id: string) {
     setSelectedId(id);
@@ -96,6 +116,16 @@ export function InboxWorkspace({
     await crmMutation(
       `/api/messaging/conversations/${selectedId}`,
       { status },
+      { method: "PATCH" },
+    );
+    router.refresh();
+  }
+
+  async function assign(userId: string) {
+    if (selectedId === undefined) return;
+    await crmMutation(
+      `/api/messaging/conversations/${selectedId}`,
+      { assignedUserId: userId || null },
       { method: "PATCH" },
     );
     router.refresh();
@@ -213,6 +243,18 @@ export function InboxWorkspace({
                 <option value="resolved">Resolved</option>
                 <option value="closed">Closed</option>
               </select>
+              <select
+                aria-label="Conversation assignee"
+                onChange={(event) => void assign(event.target.value)}
+                value={selected.assignedUserId ?? ""}
+              >
+                <option value="">Unassigned</option>
+                {teamMembers.map((member) => (
+                  <option key={member.userId} value={member.userId}>
+                    {member.email} · {member.role}
+                  </option>
+                ))}
+              </select>
             </header>
             <div aria-live="polite" className="message-thread">
               {messages.map((message) => (
@@ -224,6 +266,13 @@ export function InboxWorkspace({
                   <small>
                     {message.direction} · {message.status}
                   </small>
+                  {message.deliveryEvents.length === 0 ? null : (
+                    <small aria-label="Delivery history">
+                      {message.deliveryEvents
+                        .map((event) => event.status)
+                        .join(" → ")}
+                    </small>
+                  )}
                   <div className="reaction-row">
                     {message.reactions.map((reaction) => (
                       <span key={reaction}>{reaction}</span>

@@ -13,6 +13,7 @@ import {
   Sun,
   Workflow,
   LogOut,
+  Settings,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import Link from "next/link";
@@ -39,6 +40,7 @@ const navigation = [
   },
   { href: "/pipelines", label: "Pipeline", icon: Columns3, available: true },
   { href: "/operations", label: "Campaigns", icon: Megaphone, available: true },
+  { href: "/settings", label: "Settings", icon: Settings, available: true },
   { href: "/flows", label: "Flows", icon: Workflow, available: false },
   { href: "/voice", label: "Voice", icon: PhoneCall, available: false },
   { href: "/live", label: "Live agents", icon: Bot, available: false },

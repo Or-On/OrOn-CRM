@@ -3,7 +3,11 @@
 import { useRouter } from "next/navigation";
 import { useState, type SyntheticEvent } from "react";
 
-import type { AutomationSummary, BroadcastSummary } from "@or-on/crm";
+import type {
+  AutomationRunSummary,
+  AutomationSummary,
+  BroadcastSummary,
+} from "@or-on/crm";
 import { Badge, Button, Input, Surface } from "@or-on/ui";
 
 import { crmMutation } from "../crm";
@@ -11,9 +15,11 @@ import { crmMutation } from "../crm";
 export function OperationsPanel({
   broadcasts,
   automations,
+  runs,
 }: {
   readonly broadcasts: readonly BroadcastSummary[];
   readonly automations: readonly AutomationSummary[];
+  readonly runs: readonly AutomationRunSummary[];
 }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
@@ -157,7 +163,35 @@ export function OperationsPanel({
                 >
                   Publish
                 </Button>
-              ) : null}
+              ) : (
+                <Button
+                  disabled={pending}
+                  onClick={() =>
+                    void run(() =>
+                      crmMutation(`/api/automations/${automation.id}/run`, {}),
+                    )
+                  }
+                  variant="quiet"
+                >
+                  Run manually
+                </Button>
+              )}
+            </article>
+          ))}
+        </div>
+        <div className="operation-list" aria-label="Recent automation runs">
+          {runs.map((automationRun) => (
+            <article key={automationRun.id}>
+              <div>
+                <strong>Manual execution</strong>
+                <p>{automationRun.id.slice(0, 8)} · trace retained</p>
+              </div>
+              <Badge
+                label={automationRun.status}
+                tone={
+                  automationRun.status === "succeeded" ? "positive" : "info"
+                }
+              />
             </article>
           ))}
         </div>

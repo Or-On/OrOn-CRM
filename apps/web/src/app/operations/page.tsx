@@ -1,14 +1,21 @@
 import { redirect } from "next/navigation";
 
-import { listAutomations, listBroadcasts } from "@or-on/crm";
+import {
+  listAutomationRuns,
+  listAutomations,
+  listBroadcasts,
+} from "@or-on/crm";
 
 import { UnauthenticatedError, withCurrentTenant } from "../../features/auth";
 import { OperationsPanel } from "../../features/operations";
 
 export default async function OperationsPage() {
   try {
-    const broadcasts = await withCurrentTenant("crm:read", listBroadcasts);
-    const automations = await withCurrentTenant("crm:read", listAutomations);
+    const data = await withCurrentTenant("crm:read", async (sql) => ({
+      broadcasts: await listBroadcasts(sql),
+      automations: await listAutomations(sql),
+      runs: await listAutomationRuns(sql),
+    }));
     return (
       <main className="page page--wide">
         <header className="page-heading">
@@ -19,7 +26,11 @@ export default async function OperationsPage() {
             PostgreSQL.
           </p>
         </header>
-        <OperationsPanel automations={automations} broadcasts={broadcasts} />
+        <OperationsPanel
+          automations={data.automations}
+          broadcasts={data.broadcasts}
+          runs={data.runs}
+        />
       </main>
     );
   } catch (error) {
