@@ -4,16 +4,18 @@ Last updated: 2026-09-01 (Asia/Jerusalem)
 
 ## Current checkpoint
 
-- Phase: Phase 3 — Unified Identity and Application Shell
+- Phase: Phase 4 — CRM and WhatsApp
 - Branch: `codex/phase-3-identity-shell`
 - Phase 0 baseline: `93eb808e65f8edb1754c1940afe1949e7e18223a`
 - Phase 1 baseline: `20b46159078ec533a9891e6768d47595e35b7a7c`
 - Phase 2A status: **OFFLINE IMPLEMENTATION COMPLETE**
 - Live status: **PHASE 2B LIVE POSTGRESQL VALIDATION COMPLETE**
 - Phase 3 status: **COMPLETE**
-- Active task: none; await an explicit Phase 4 specification
+- Phase 4 status: **ACTIVE**
+- Active task: P4-002 — locked WACRM behavior inventory
 - Phase 2B clean baseline commit: `830a8371836ea7922fca5c320624bf3bd32ec229`
 - Phase 3 exact baseline commit: `9ca3a022c2fb18a5d416b39aa7d1404f7910ae1b`
+- Phase 4 exact baseline commit: `fdaabedfe0c6dd3586261a338f2fd82f904023d8`
 - Provider safety: no real telephone call, WhatsApp message, webhook mutation, or provider provisioning performed
 
 ## Phase 3 starting state
@@ -24,6 +26,40 @@ Alembic head was `f5e8b540dfeb`, and all three upstream worktrees were clean at
 their locked commits before branching. Docker/PostgreSQL 18.6 is available;
 GNU Make remains the only missing host command-surface tool, so the canonical
 cross-platform runner remains the equivalent verification surface.
+
+## Phase 4 starting state
+
+Phase 4 branched from the clean Phase 3 head
+`fdaabedfe0c6dd3586261a338f2fd82f904023d8` onto
+`codex/phase-4-crm-whatsapp`. The target and all three locked upstreams were
+clean. PostgreSQL 18.6, the canonical identity boundary, one Alembic head, and
+the production core Compose stack were validated before Phase 4. The recovered
+authoritative scope is recorded in
+[`phase-4-crm-whatsapp.md`](plans/phase-4-crm-whatsapp.md).
+
+## Phase 4 tasks
+
+Status values: `pending`, `active`, `complete`, `blocked`.
+
+| ID | Task | Status | Commit | Verification evidence | Next exact task |
+| --- | --- | --- | --- | --- | --- |
+| P4-001 | Baseline, instructions, and Phase 4 reconstruction | complete | pending checkpoint | Clean Phase 3 baseline; locked clean upstreams; master Phase 4 scope recovered; scoped rules and WACRM instructions read | Complete code-level behavior inventory. |
+| P4-002 | Locked WACRM behavior inventory and provenance plan | active | pending | Contacts/inbox/webhook/send source paths identified; remaining domain paths under review | Map retained behavior into bounded target modules. |
+| P4-003 | Canonical CRM/messaging repository package | pending | pending | — | Implement typed tenant-context repositories. |
+| P4-004 | Contacts, tags, notes, custom fields, and import | pending | pending | — | Deliver W-06/W-07 vertical slice. |
+| P4-005 | Shared inbox and conversation operations | pending | pending | — | Deliver W-04/W-05. |
+| P4-006 | WhatsApp webhook and provider simulator | pending | pending | — | Deliver signed durable ingestion and default-safe simulation. |
+| P4-007 | Human reply, delivery status, reactions, and quick replies | pending | pending | — | Complete X-01/X-02. |
+| P4-008 | Pipelines, stages, and deals | pending | pending | — | Deliver W-08. |
+| P4-009 | Templates, broadcasts, campaigns, and durable delivery | pending | pending | — | Deliver W-13/W-15/W-16. |
+| P4-010 | Automation persistence and execution adapter | pending | pending | — | Deliver the Phase 4 subset of W-17/W-18. |
+| P4-011 | Teams, settings, analytics, and notifications | pending | pending | — | Bind canonical membership/settings/query surfaces. |
+| P4-012 | Scoped public API and API keys | pending | pending | — | Deliver W-25/W-26 with OpenAPI-compatible behavior. |
+| P4-013 | MCP-compatible CRM tool surface | pending | pending | — | Deliver safe read tools and confirmed writes. |
+| P4-014 | Messaging worker and PostgreSQL durable work | pending | pending | — | Prove claim/retry/resume/idempotency. |
+| P4-015 | CRM/WhatsApp UI integration and accessibility | pending | pending | — | Complete shell navigation, responsive and RTL checks. |
+| P4-016 | Security, E2E, parity, provenance, and documentation | pending | pending | — | Run full acceptance and update parity evidence. |
+| P4-017 | Full Phase 4 verification | pending | pending | — | Run live DB, simulator E2E, build, audits, and upstream integrity. |
 
 ## Phase 3 tasks
 
