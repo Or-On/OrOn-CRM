@@ -7,16 +7,17 @@ rewriting proven engines for uniformity.
 
 ## Current status
 
-Phase 2A offline implementation extends the Phase 1 monorepo foundation with the
-canonical PostgreSQL model. It preserves the complete Or-on migration lineage,
-translates WACRM database behavior into canonical CRM/messaging/automation
-tables, replaces OpenLive runtime persistence with PostgreSQL tables, and adds
-isolated legacy import tooling plus offline and future live database tests.
+Phase 2A established the canonical PostgreSQL model while preserving the Or-on
+lineage and adapting WACRM/OpenLive persistence. The Phase 2B automated core gate
+now passes on PostgreSQL 18.6: clean migration, catalog, roles, RLS, tenant
+isolation, idempotency, durable-job concurrency, seed, OpenLive JSON import,
+production containers, and the complete core Compose health chain.
 
-Repository-controlled Phase 2A checks pass. PostgreSQL execution, roles/grants,
-RLS behavior, constraints, functions, locking, importer writes, and downgrade
-behavior are **PENDING LIVE POSTGRESQL VALIDATION — PHASE 2B** because this host
-does not have Docker/PostgreSQL.
+Phase 2B remains in progress. Extended downgrade/re-upgrade testing, the
+non-empty historical encryption backfill, full constraint/delete coverage,
+keyset query execution, SQLite importer writes, and WACRM importer idempotency
+are not yet complete. GNU Make is also not installed, although its underlying
+cross-platform command runner passes.
 
 It does **not** implement CRM screens, messaging, real WhatsApp delivery,
 telephony, final authentication, the full OpenLive protocol, canonical flow
