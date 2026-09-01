@@ -33,6 +33,7 @@ const sourceSchema = z.object({
   ENABLE_REAL_WHATSAPP: booleanFlag,
   LIVEKIT_API_SECRET: optionalSecret,
   WHATSAPP_ACCESS_TOKEN: optionalSecret,
+  WHATSAPP_APP_SECRET: optionalSecret,
   AI_API_KEY: optionalSecret,
   AUTH_TOKEN_PEPPER: z.preprocess(
     (value) => (value === "" ? undefined : value),
@@ -72,6 +73,7 @@ export interface PlatformConfig {
   readonly secrets: {
     readonly livekitApiSecret: string | undefined;
     readonly whatsappAccessToken: string | undefined;
+    readonly whatsappAppSecret: string | undefined;
     readonly aiApiKey: string | undefined;
     readonly authTokenPepper: string | undefined;
     readonly authServiceSecret: string | undefined;
@@ -125,6 +127,7 @@ export function loadConfig(
     secrets: {
       livekitApiSecret: result.data.LIVEKIT_API_SECRET,
       whatsappAccessToken: result.data.WHATSAPP_ACCESS_TOKEN,
+      whatsappAppSecret: result.data.WHATSAPP_APP_SECRET,
       aiApiKey: result.data.AI_API_KEY,
       authTokenPepper: result.data.AUTH_TOKEN_PEPPER,
       authServiceSecret: result.data.AUTH_SERVICE_SECRET,
@@ -148,6 +151,8 @@ export function configDiagnostics(
       config.secrets.livekitApiSecret === undefined ? "unset" : "[REDACTED]",
     whatsappAccessToken:
       config.secrets.whatsappAccessToken === undefined ? "unset" : "[REDACTED]",
+    whatsappAppSecret:
+      config.secrets.whatsappAppSecret === undefined ? "unset" : "[REDACTED]",
     aiApiKey: config.secrets.aiApiKey === undefined ? "unset" : "[REDACTED]",
     authTokenPepper:
       config.secrets.authTokenPepper === undefined ? "unset" : "[REDACTED]",
