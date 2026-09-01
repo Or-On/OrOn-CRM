@@ -10,6 +10,7 @@ import type {
   SimulatedOutboundInput,
   QuickReply,
 } from "./types.js";
+import type { WhatsAppInboundEnvelope } from "./webhook.js";
 
 interface ConversationRow {
   id: string;
@@ -34,6 +35,19 @@ interface MessageRow {
   provider_message_id: string | null;
   created_at: Date;
   reactions: unknown;
+  delivery_events: unknown;
+}
+
+function deliveryEvents(value: unknown): Message["deliveryEvents"] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (entry === null || typeof entry !== "object") return [];
+    const record = entry as Readonly<Record<string, unknown>>;
+    return typeof record.status === "string" &&
+      typeof record.occurredAt === "string"
+      ? [{ status: record.status, occurredAt: record.occurredAt }]
+      : [];
+  });
 }
 
 function mapConversation(row: ConversationRow): ConversationSummary {
@@ -66,6 +80,7 @@ function mapMessage(row: MessageRow): Message {
           (value): value is string => typeof value === "string",
         )
       : [],
+    deliveryEvents: deliveryEvents(row.delivery_events),
   };
 }
 
@@ -96,6 +111,12 @@ export async function listMessages(
            COALESCE((SELECT jsonb_agg(reaction.emoji ORDER BY reaction.created_at)
                      FROM messaging.message_reactions reaction
                      WHERE reaction.message_id = message.id), '[]') AS reactions
+           , COALESCE((SELECT jsonb_agg(jsonb_build_object(
+                        'status', delivery.status,
+                        'occurredAt', delivery.occurred_at
+                      ) ORDER BY delivery.occurred_at, delivery.id)
+                     FROM messaging.message_delivery_events delivery
+                     WHERE delivery.message_id = message.id), '[]') AS delivery_events
     FROM messaging.messages message
     WHERE message.conversation_id = ${conversationId}::uuid
     ORDER BY created_at ASC, id ASC
@@ -198,13 +219,118 @@ export async function ingestSimulatedInbound(
     DO NOTHING
     RETURNING id
   `;
-  if (messageRows.length === 0) return { conversationId, inserted: false };
+  const insertedMessageId = messageRows[0]?.id;
+  if (insertedMessageId === undefined) return { conversationId, inserted: false };
+  await sql`
+    INSERT INTO messaging.message_delivery_events
+      (tenant_id, message_id, provider_event_id, status, occurred_at)
+    VALUES (platform.current_tenant_id(), ${insertedMessageId}::uuid,
+            ${`sim_status_${input.providerEventId}`}, 'received', ${occurredAt})
+    ON CONFLICT (tenant_id, provider_event_id) WHERE provider_event_id IS NOT NULL
+    DO NOTHING
+  `;
   await sql`
     UPDATE messaging.conversations
     SET unread_count = unread_count + 1,
         last_message_at = ${occurredAt},
         last_message_preview = ${input.text.trim()},
         updated_at = CURRENT_TIMESTAMP
+    WHERE id = ${conversationId}::uuid
+  `;
+  return { conversationId, inserted: true };
+}
+
+export async function ingestWhatsAppInbound(
+  sql: postgres.TransactionSql,
+  input: WhatsAppInboundEnvelope,
+): Promise<{ readonly conversationId: string; readonly inserted: boolean }> {
+  const phone = normalizeE164(input.from);
+  if (phone === undefined)
+    throw new TypeError("WhatsApp sender must use E.164");
+  const text = input.text.trim();
+  if (text === "") throw new TypeError("message text is required");
+  const channelRows = await sql<{ id: string }[]>`
+    SELECT id FROM messaging.channels
+    WHERE provider = 'meta' AND provider_account_id = ${input.providerAccountId}
+      AND status = 'active'
+    LIMIT 1
+  `;
+  const channelId = channelRows[0]?.id;
+  if (channelId === undefined)
+    throw new Error("WhatsApp provider account is unavailable");
+
+  const identityRows = await sql<{ contact_id: string }[]>`
+    SELECT contact_id FROM crm.contact_channel_identities
+    WHERE channel = 'whatsapp' AND normalized_value = ${phone}
+    LIMIT 1
+  `;
+  let contactId = identityRows[0]?.contact_id;
+  if (contactId === undefined) {
+    const contactRows = await sql<{ id: string }[]>`
+      INSERT INTO crm.contacts (tenant_id, name, last_activity_at)
+      VALUES (platform.current_tenant_id(), ${input.profileName.trim() || phone},
+              CURRENT_TIMESTAMP)
+      RETURNING id
+    `;
+    contactId = contactRows[0]?.id;
+    if (contactId === undefined)
+      throw new Error("inbound contact insert failed");
+    await sql`
+      INSERT INTO crm.contact_channel_identities
+        (tenant_id, contact_id, channel, normalized_value, display_value,
+         provider, provider_identity_id, validation_status, is_primary)
+      VALUES (platform.current_tenant_id(), ${contactId}::uuid, 'whatsapp',
+              ${phone}, ${input.from}, 'meta', ${phone}, 'valid', true)
+    `;
+  } else {
+    await sql`
+      UPDATE crm.contacts SET name = ${input.profileName.trim() || phone},
+             last_activity_at = CURRENT_TIMESTAMP,
+             updated_at = CURRENT_TIMESTAMP
+      WHERE id = ${contactId}::uuid
+    `;
+  }
+
+  const conversationRows = await sql<{ id: string }[]>`
+    INSERT INTO messaging.conversations
+      (tenant_id, channel_id, contact_id, status, unread_count)
+    VALUES (platform.current_tenant_id(), ${channelId}::uuid, ${contactId}::uuid,
+            'open', 0)
+    ON CONFLICT (tenant_id, channel_id, contact_id)
+    DO UPDATE SET status = 'open', updated_at = CURRENT_TIMESTAMP
+    RETURNING id
+  `;
+  const conversationId = conversationRows[0]?.id;
+  if (conversationId === undefined)
+    throw new Error("conversation resolution failed");
+  const messageRows = await sql<{ id: string; created_at: Date }[]>`
+    INSERT INTO messaging.messages
+      (tenant_id, conversation_id, direction, sender_type, sender_contact_id,
+       content_type, content_text, provider, provider_message_id, status,
+       provider_payload)
+    VALUES (platform.current_tenant_id(), ${conversationId}::uuid, 'inbound',
+            'contact', ${contactId}::uuid, 'text', ${text}, 'meta',
+            ${input.providerMessageId}, 'received',
+            ${sql.json({ providerEventId: input.providerEventId })})
+    ON CONFLICT (tenant_id, provider, provider_message_id)
+      WHERE provider IS NOT NULL AND provider_message_id IS NOT NULL
+    DO NOTHING
+    RETURNING id, created_at
+  `;
+  const message = messageRows[0];
+  if (message === undefined) return { conversationId, inserted: false };
+  await sql`
+    INSERT INTO messaging.message_delivery_events
+      (tenant_id, message_id, provider_event_id, status, occurred_at)
+    VALUES (platform.current_tenant_id(), ${message.id}::uuid,
+            ${input.providerEventId}, 'received', ${message.created_at})
+    ON CONFLICT (tenant_id, provider_event_id) WHERE provider_event_id IS NOT NULL
+    DO NOTHING
+  `;
+  await sql`
+    UPDATE messaging.conversations
+    SET unread_count = unread_count + 1, last_message_at = ${message.created_at},
+        last_message_preview = ${text}, updated_at = CURRENT_TIMESTAMP
     WHERE id = ${conversationId}::uuid
   `;
   return { conversationId, inserted: true };
@@ -234,17 +360,30 @@ export async function sendSimulatedReply(
     DO UPDATE SET provider_message_id = EXCLUDED.provider_message_id
     RETURNING id, conversation_id, direction, sender_type, content_type,
               content_text, status, provider_message_id, created_at,
-              '[]'::jsonb AS reactions
+              '[]'::jsonb AS reactions, '[]'::jsonb AS delivery_events
   `;
   const row = messageRows[0];
   if (row === undefined) throw new Error("simulated reply insert failed");
+  await sql`
+    INSERT INTO messaging.message_delivery_events
+      (tenant_id, message_id, provider_event_id, status, occurred_at)
+    VALUES (platform.current_tenant_id(), ${row.id}::uuid,
+            ${`sim_status_${providerMessageId}`}, 'delivered', ${row.created_at})
+    ON CONFLICT (tenant_id, provider_event_id) WHERE provider_event_id IS NOT NULL
+    DO NOTHING
+  `;
   await sql`
     UPDATE messaging.conversations
     SET unread_count = 0, last_message_at = ${row.created_at},
         last_message_preview = ${text}, updated_at = CURRENT_TIMESTAMP
     WHERE id = ${input.conversationId}::uuid
   `;
-  return mapMessage(row);
+  const refreshed = (await listMessages(sql, input.conversationId)).find(
+    (message) => message.id === row.id,
+  );
+  if (refreshed === undefined)
+    throw new Error("simulated reply could not be read");
+  return refreshed;
 }
 
 export async function setConversationStatus(
@@ -255,6 +394,29 @@ export async function setConversationStatus(
   const rows = await sql<{ id: string }[]>`
     UPDATE messaging.conversations SET status = ${status},
       updated_at = CURRENT_TIMESTAMP WHERE id = ${conversationId}::uuid RETURNING id
+  `;
+  return rows.length === 1;
+}
+
+export async function assignConversation(
+  sql: postgres.TransactionSql,
+  conversationId: string,
+  userId: string | null,
+): Promise<boolean> {
+  if (userId !== null) {
+    const memberships = await sql<{ present: boolean }[]>`
+      SELECT EXISTS(
+        SELECT 1 FROM memberships
+        WHERE tenant_id = platform.current_tenant_id() AND user_id = ${userId}::uuid
+      ) AS present
+    `;
+    if (memberships[0]?.present !== true)
+      throw new TypeError("assignee must be a current tenant member");
+  }
+  const rows = await sql<{ id: string }[]>`
+    UPDATE messaging.conversations SET assigned_user_id = ${userId}::uuid,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = ${conversationId}::uuid RETURNING id
   `;
   return rows.length === 1;
 }

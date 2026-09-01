@@ -128,7 +128,7 @@ export async function getContact(
 
 export async function createContact(
   sql: postgres.TransactionSql,
-  actorUserId: string,
+  actorUserId: string | null,
   input: ContactInput,
 ): Promise<ContactSummary> {
   const name = input.name.trim();

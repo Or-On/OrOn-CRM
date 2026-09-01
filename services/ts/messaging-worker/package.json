@@ -8,14 +8,16 @@
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "dev": "tsx watch src/main.ts",
     "start": "node dist/main.js",
-    "test": "vitest run",
+    "test": "pnpm --filter @or-on/crm build && vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@or-on/config": "workspace:*",
+    "@or-on/crm": "workspace:*",
     "@or-on/observability": "workspace:*",
     "@or-on/platform-integration": "workspace:*",
-    "pino": "catalog:"
+    "pino": "catalog:",
+    "postgres": "catalog:"
   },
   "devDependencies": {
     "tsx": "catalog:",

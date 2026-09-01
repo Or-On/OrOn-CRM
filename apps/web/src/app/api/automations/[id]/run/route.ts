@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { enqueueSimulatorBroadcast } from "@or-on/crm";
+import { runManualAutomation } from "@or-on/crm";
 
 import { withCurrentTenant } from "../../../../../features/auth";
 import {
@@ -10,18 +10,15 @@ import {
 
 export async function POST(
   request: Request,
-  context: RouteContext<"/api/campaigns/[id]/deliver">,
+  context: RouteContext<"/api/automations/[id]/run">,
 ) {
   try {
     await assertCrmMutation(request);
     const { id } = await context.params;
-    const queued = await withCurrentTenant("campaigns:manage", (sql) =>
-      enqueueSimulatorBroadcast(sql, id),
+    const runId = await withCurrentTenant("flows:manage", (sql) =>
+      runManualAutomation(sql, id),
     );
-    return NextResponse.json(
-      { queued, provider: "simulator" },
-      { status: 202 },
-    );
+    return NextResponse.json({ runId }, { status: 201 });
   } catch (error) {
     return crmErrorResponse(error);
   }

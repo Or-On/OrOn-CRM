@@ -2,8 +2,9 @@ import { once } from "node:events";
 
 import { loadConfig } from "@or-on/config";
 import { createLogger } from "@or-on/observability";
-import { createPostgresProbe } from "@or-on/platform-integration";
+import { randomUUID } from "node:crypto";
 
+import { createMessagingStore } from "./database.js";
 import { runWorker } from "./worker.js";
 
 async function main(): Promise<void> {
@@ -14,7 +15,10 @@ async function main(): Promise<void> {
   if (config.databaseUrl === undefined) {
     throw new Error("messaging-worker requires DATABASE_URL");
   }
-  const probe = createPostgresProbe(config.databaseUrl);
+  const store = createMessagingStore(
+    config.databaseUrl,
+    `messaging-${randomUUID()}`,
+  );
   const logger = createLogger({
     service: config.service,
     environment: config.environment,
@@ -32,9 +36,10 @@ async function main(): Promise<void> {
 
   await runWorker(
     {
-      closeDatabase: () => probe.close(),
-      isDatabaseReady: () => probe.isReady(),
+      closeDatabase: () => store.close(),
+      isDatabaseReady: () => store.isReady(),
       logger,
+      processAvailable: () => store.processAvailable(),
     },
     stop,
   );

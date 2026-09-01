@@ -1,0 +1,66 @@
+import postgres from "postgres";
+
+import {
+  parseWhatsAppTextEnvelopes,
+  verifyWhatsAppSignature,
+} from "./webhook.js";
+
+interface AcceptedEventRow {
+  id: string;
+}
+
+export interface AcceptedWhatsAppWebhook {
+  readonly eventIds: readonly string[];
+  readonly envelopes: number;
+}
+
+export class InvalidWhatsAppSignatureError extends Error {}
+export class InvalidWhatsAppPayloadError extends Error {}
+
+export async function acceptWhatsAppWebhook(
+  databaseUrl: string,
+  rawBody: Uint8Array,
+  signatureHeader: string | null,
+  appSecret: string,
+): Promise<AcceptedWhatsAppWebhook> {
+  if (!verifyWhatsAppSignature(rawBody, signatureHeader, appSecret)) {
+    throw new InvalidWhatsAppSignatureError("Invalid WhatsApp signature");
+  }
+  let payload: unknown;
+  try {
+    payload = JSON.parse(new TextDecoder().decode(rawBody)) as unknown;
+  } catch (error) {
+    throw new InvalidWhatsAppPayloadError("Invalid WhatsApp JSON payload", {
+      cause: error,
+    });
+  }
+  const envelopes = parseWhatsAppTextEnvelopes(payload);
+  const sql = postgres(databaseUrl, { max: 1, prepare: false });
+  try {
+    const eventIds = (await sql.begin(async (transaction) => {
+      const ids: string[] = [];
+      for (const envelope of envelopes) {
+        const rows = await transaction<AcceptedEventRow[]>`
+          SELECT (ops.accept_whatsapp_inbound(
+            ${envelope.providerAccountId}, ${envelope.providerEventId},
+            'whatsapp.message.text', ${transaction.json({
+              providerAccountId: envelope.providerAccountId,
+              providerEventId: envelope.providerEventId,
+              providerMessageId: envelope.providerMessageId,
+              from: envelope.from,
+              profileName: envelope.profileName,
+              text: envelope.text,
+            })}
+          )).id
+        `;
+        const id = rows[0]?.id;
+        if (id === undefined) throw new Error("webhook event insert failed");
+        ids.push(id);
+      }
+      return ids;
+    })) as string[];
+    return { eventIds, envelopes: envelopes.length };
+  } finally {
+    await sql.end({ timeout: 2 });
+  }
+}

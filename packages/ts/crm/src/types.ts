@@ -98,6 +98,33 @@ export interface Message {
   readonly providerMessageId: string | null;
   readonly createdAt: string;
   readonly reactions: readonly string[];
+  readonly deliveryEvents: readonly MessageDeliveryEvent[];
+}
+
+export interface MessageDeliveryEvent {
+  readonly status: string;
+  readonly occurredAt: string;
+}
+
+export interface TeamMember {
+  readonly userId: string;
+  readonly email: string;
+  readonly role: "owner" | "admin" | "agent" | "viewer";
+}
+
+export interface TenantSettings {
+  readonly displayName: string | null;
+  readonly defaultCurrency: string;
+  readonly locale: string;
+  readonly timezone: string;
+}
+
+export interface NotificationSummary {
+  readonly id: string;
+  readonly title: string;
+  readonly body: string | null;
+  readonly read: boolean;
+  readonly createdAt: string;
 }
 
 export interface QuickReply {
@@ -168,6 +195,14 @@ export interface AutomationSummary {
   readonly published: boolean;
   readonly validationStatus: "pending" | "valid" | "invalid";
   readonly createdAt: string;
+}
+
+export interface AutomationRunSummary {
+  readonly id: string;
+  readonly definitionId: string;
+  readonly status: string;
+  readonly startedAt: string | null;
+  readonly completedAt: string | null;
 }
 
 export interface SimulatedInboundInput {

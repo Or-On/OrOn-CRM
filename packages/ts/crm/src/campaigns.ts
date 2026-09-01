@@ -94,6 +94,14 @@ export async function createSimulatorBroadcast(
                   WHERE identity.contact_id = contact.id AND identity.channel = 'whatsapp')
     ON CONFLICT DO NOTHING
   `;
+  await sql`
+    UPDATE messaging.broadcasts broadcast
+    SET total_recipients = (
+      SELECT count(*)::integer FROM messaging.broadcast_recipients recipient
+      WHERE recipient.broadcast_id = broadcast.id
+    ), updated_at = CURRENT_TIMESTAMP
+    WHERE broadcast.id = ${broadcastId}::uuid
+  `;
   return broadcastId;
 }
 
@@ -114,6 +122,72 @@ export async function deliverSimulatorBroadcast(
     WHERE id = ${broadcastId}::uuid
   `;
   return recipients.length;
+}
+
+export async function enqueueSimulatorBroadcast(
+  sql: postgres.TransactionSql,
+  broadcastId: string,
+): Promise<number> {
+  const rows = await sql<{ id: string }[]>`
+    INSERT INTO ops.jobs
+      (tenant_id, queue, job_type, reference_type, reference_id, payload,
+       idempotency_key, max_attempts)
+    SELECT recipient.tenant_id, 'messaging', 'simulator.broadcast.recipient',
+           'broadcast_recipient', recipient.id,
+           jsonb_build_object('broadcastId', recipient.broadcast_id,
+                              'recipientId', recipient.id),
+           'broadcast-recipient:' || recipient.id::text, 5
+    FROM messaging.broadcast_recipients recipient
+    JOIN messaging.broadcasts broadcast ON broadcast.id = recipient.broadcast_id
+    JOIN messaging.channels channel ON channel.id = broadcast.channel_id
+    WHERE recipient.broadcast_id = ${broadcastId}::uuid
+      AND recipient.status IN ('pending', 'failed')
+      AND channel.provider = 'simulator'
+    ON CONFLICT DO NOTHING
+    RETURNING id
+  `;
+  await sql`
+    UPDATE messaging.broadcasts
+    SET status = CASE WHEN total_recipients = 0 THEN 'sent' ELSE 'scheduled' END,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE id = ${broadcastId}::uuid AND status IN ('draft', 'paused', 'failed')
+  `;
+  return rows.length;
+}
+
+export async function deliverSimulatorBroadcastRecipient(
+  sql: postgres.TransactionSql,
+  recipientId: string,
+): Promise<boolean> {
+  const digest = createHash("sha256").update(recipientId).digest("hex");
+  const rows = await sql<{ broadcast_id: string }[]>`
+    UPDATE messaging.broadcast_recipients recipient
+    SET status = 'delivered', attempts = attempts + 1,
+        sent_at = COALESCE(sent_at, CURRENT_TIMESTAMP),
+        delivered_at = COALESCE(delivered_at, CURRENT_TIMESTAMP),
+        provider_message_id = COALESCE(provider_message_id, ${`sim_broadcast_${digest.slice(0, 24)}`}),
+        last_error_safe = NULL
+    FROM messaging.broadcasts broadcast, messaging.channels channel
+    WHERE recipient.id = ${recipientId}::uuid
+      AND broadcast.id = recipient.broadcast_id
+      AND channel.id = broadcast.channel_id
+      AND channel.provider = 'simulator'
+      AND recipient.status IN ('pending', 'failed')
+    RETURNING recipient.broadcast_id
+  `;
+  const broadcastId = rows[0]?.broadcast_id;
+  if (broadcastId === undefined) return false;
+  await sql`
+    UPDATE messaging.broadcasts broadcast SET status = 'sent',
+      updated_at = CURRENT_TIMESTAMP
+    WHERE broadcast.id = ${broadcastId}::uuid
+      AND NOT EXISTS (
+        SELECT 1 FROM messaging.broadcast_recipients recipient
+        WHERE recipient.broadcast_id = broadcast.id
+          AND recipient.status IN ('pending', 'failed')
+      )
+  `;
+  return true;
 }
 
 export function broadcastIdempotencyKey(

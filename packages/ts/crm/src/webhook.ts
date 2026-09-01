@@ -36,6 +36,30 @@ export interface WhatsAppInboundEnvelope {
   readonly text: string;
 }
 
+export function parseStoredWhatsAppEnvelope(
+  value: unknown,
+): WhatsAppInboundEnvelope | undefined {
+  const envelope = record(value);
+  if (
+    typeof envelope?.providerAccountId !== "string" ||
+    typeof envelope.providerEventId !== "string" ||
+    typeof envelope.providerMessageId !== "string" ||
+    typeof envelope.from !== "string" ||
+    typeof envelope.profileName !== "string" ||
+    typeof envelope.text !== "string"
+  ) {
+    return undefined;
+  }
+  return {
+    providerAccountId: envelope.providerAccountId,
+    providerEventId: envelope.providerEventId,
+    providerMessageId: envelope.providerMessageId,
+    from: envelope.from,
+    profileName: envelope.profileName,
+    text: envelope.text,
+  };
+}
+
 export function parseWhatsAppTextEnvelopes(
   payload: unknown,
 ): readonly WhatsAppInboundEnvelope[] {

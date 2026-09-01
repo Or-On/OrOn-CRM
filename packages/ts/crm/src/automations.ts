@@ -1,6 +1,6 @@
 import type postgres from "postgres";
 
-import type { AutomationSummary } from "./types.js";
+import type { AutomationRunSummary, AutomationSummary } from "./types.js";
 
 interface AutomationRow {
   id: string;
@@ -80,4 +80,54 @@ export async function publishAutomation(
     RETURNING id
   `;
   return rows.length === 1;
+}
+
+export async function runManualAutomation(
+  sql: postgres.TransactionSql,
+  definitionId: string,
+): Promise<string> {
+  const rows = await sql<{ id: string }[]>`
+    INSERT INTO automation.flow_runs
+      (tenant_id, flow_version_id, trigger_type, trigger_metadata, status,
+       started_at, completed_at)
+    SELECT platform.current_tenant_id(), version.id, 'manual',
+           '{"adapter":"phase4-empty-graph"}'::jsonb, 'succeeded',
+           CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+    FROM automation.flow_versions version
+    WHERE version.flow_definition_id = ${definitionId}::uuid
+      AND version.published_at IS NOT NULL
+    ORDER BY version.version DESC LIMIT 1
+    RETURNING id
+  `;
+  const id = rows[0]?.id;
+  if (id === undefined)
+    throw new TypeError("automation must be published before it can run");
+  return id;
+}
+
+export async function listAutomationRuns(
+  sql: postgres.TransactionSql,
+): Promise<readonly AutomationRunSummary[]> {
+  const rows = await sql<
+    {
+      id: string;
+      definition_id: string;
+      status: string;
+      started_at: Date | null;
+      completed_at: Date | null;
+    }[]
+  >`
+    SELECT run.id, version.flow_definition_id AS definition_id, run.status,
+           run.started_at, run.completed_at
+    FROM automation.flow_runs run
+    JOIN automation.flow_versions version ON version.id = run.flow_version_id
+    ORDER BY run.created_at DESC, run.id DESC LIMIT 50
+  `;
+  return rows.map((row) => ({
+    id: row.id,
+    definitionId: row.definition_id,
+    status: row.status,
+    startedAt: row.started_at?.toISOString() ?? null,
+    completedAt: row.completed_at?.toISOString() ?? null,
+  }));
 }

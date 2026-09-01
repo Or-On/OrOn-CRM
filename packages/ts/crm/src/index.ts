@@ -1,10 +1,14 @@
 export * from "./analytics.js";
+export * from "./api-keys.js";
 export * from "./automations.js";
 export * from "./campaigns.js";
 export * from "./contacts.js";
 export * from "./csv.js";
 export * from "./messaging.js";
+export * from "./management.js";
 export * from "./phone.js";
 export * from "./pipelines.js";
+export * from "./tools.js";
 export * from "./webhook.js";
+export * from "./webhook-store.js";
 export type * from "./types.js";

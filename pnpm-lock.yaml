@@ -335,6 +335,9 @@ importers:
       '@or-on/config':
         specifier: workspace:*
         version: link:../../../packages/ts/config
+      '@or-on/crm':
+        specifier: workspace:*
+        version: link:../../../packages/ts/crm
       '@or-on/observability':
         specifier: workspace:*
         version: link:../../../packages/ts/observability
@@ -344,6 +347,9 @@ importers:
       pino:
         specifier: 'catalog:'
         version: 10.3.1
+      postgres:
+        specifier: 'catalog:'
+        version: 3.4.9
     devDependencies:
       tsx:
         specifier: 'catalog:'
