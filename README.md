@@ -7,10 +7,16 @@ rewriting proven engines for uniformity.
 
 ## Current status
 
-Phase 1 builds the architecture and monorepo foundation. It includes the unified
-web shell, health/readiness surfaces, TypeScript and Python service boundaries,
-typed configuration, design tokens/primitives, explicit contracts, PostgreSQL and
-Alembic foundations, containers, CI, security controls, and documentation.
+Phase 2A offline implementation extends the Phase 1 monorepo foundation with the
+canonical PostgreSQL model. It preserves the complete Or-on migration lineage,
+translates WACRM database behavior into canonical CRM/messaging/automation
+tables, replaces OpenLive runtime persistence with PostgreSQL tables, and adds
+isolated legacy import tooling plus offline and future live database tests.
+
+Repository-controlled Phase 2A checks pass. PostgreSQL execution, roles/grants,
+RLS behavior, constraints, functions, locking, importer writes, and downgrade
+behavior are **PENDING LIVE POSTGRESQL VALIDATION — PHASE 2B** because this host
+does not have Docker/PostgreSQL.
 
 It does **not** implement CRM screens, messaging, real WhatsApp delivery,
 telephony, final authentication, the full OpenLive protocol, canonical flow
@@ -58,8 +64,10 @@ services/py/                      control-api, dispatcher, voice-agent boundarie
 services/ts/                      live-agent and messaging-worker boundaries
 packages/py/platform-integration  new cross-system Python foundation
 packages/ts/                      UI, contracts, client, config, observability, integration
-db/alembic/                       sole migration lineage
+db/alembic/                       sole 27-revision migration graph/head
 db/bootstrap/                     local role bootstrap, not schema migration
+db/contracts/                     consumer-only schema expectation manifest
+db/importers/                     isolated one-time legacy import tools
 db/seeds/                         deterministic fictional seed
 infra/compose/                    localhost core
 infra/caddy/                      future single-origin edge foundation
@@ -107,6 +115,10 @@ processes with hot reload. See the
 | `make dev` | Run all current Phase 1 host processes with provider flags disabled |
 | `make stop` / `make ps` / `make logs` | Operate the non-destructive local Compose stack |
 | `make migrate` / `make migration-check` | Upgrade/check the sole Alembic lineage |
+| `make migration-graph` / `make migration-sql` | Inspect the graph and deterministic PostgreSQL SQL offline |
+| `make db-contract-check` | Check RLS, indexes, extensions, SQL safety, and the schema manifest |
+| `make db-verify-offline` | Run the repository-controlled Phase 2A database gate without a server |
+| `make db-verify-live` | Run Phase 2B against an explicit disposable PostgreSQL 18.6 URL |
 | `make seed` | Apply idempotent PII-free development metadata |
 | `make lint` / `make format` | Check/apply repository formatting and policy |
 | `make typecheck` / `make test` | Run strict typing and tests in both workspaces |
@@ -121,7 +133,7 @@ ENABLE_REAL_TELEPHONY=false
 ENABLE_REAL_WHATSAPP=false
 ```
 
-The developer runner refuses non-false values. Phase 1 contains no send/call or
+The developer runner refuses non-false values. Phase 2A contains no send/call or
 webhook-configuration path. Never commit `.env`, service-account JSON, provider
 tokens, keys, or secrets; diagnostics and logs must redact sensitive values.
 
@@ -129,13 +141,15 @@ tokens, keys, or secrets; diagnostics and logs must redact sensitive values.
 
 - Docker-backed PostgreSQL health/migration and container builds require a local
   Docker daemon; the checks intentionally fail rather than report fake health.
-- Final auth, tenant RLS policies, provider signature/replay controls, uploads,
-  backups, and production telemetry are planned controls, not current claims.
-- Or-on has no repository license file; the target remains private and Phase 1
-  imports no upstream source. Some future voice/model assets need separate license
-  review.
+- Final auth, executed tenant RLS proof, provider signature/replay controls,
+  uploads, backups, and production telemetry remain planned or Phase 2B controls,
+  not current claims.
+- Or-on has no repository license file; its preserved migration lineage is
+  treated as private/proprietary project code. WACRM/OpenLive adaptations retain
+  MIT notices in `THIRD_PARTY_NOTICES.md`. Future voice/model assets still need
+  separate license review.
 - Terraform declares constraints/documentation only. No resource is provisioned
-  and `terraform apply` is prohibited in Phase 1.
+  and `terraform apply` remains prohibited in Phase 2A.
 
 Current task status and exact blockers are recorded in
 [docs/progress.md](docs/progress.md). The full security posture is in the

@@ -8,8 +8,10 @@ Last updated: 2026-09-01 (Asia/Jerusalem)
 - Branch: `codex/phase-2a-postgres-offline`
 - Phase 0 baseline: `93eb808e65f8edb1754c1940afe1949e7e18223a`
 - Phase 1 baseline: `20b46159078ec533a9891e6768d47595e35b7a7c`
-- Active task: P2A-028 — Database documentation and final offline verification
-- Latest clean commit before this checkpoint: `20b46159078ec533a9891e6768d47595e35b7a7c`
+- Status: **PHASE 2A — OFFLINE IMPLEMENTATION COMPLETE**
+- Live status: **PHASE 2B — LIVE POSTGRESQL VALIDATION PENDING**
+- Active task: none; Phase 2A repository-controlled work is complete
+- Phase 2A clean baseline commit: `20b46159078ec533a9891e6768d47595e35b7a7c`
 - Provider safety: no real telephone call, WhatsApp message, webhook mutation, or provider provisioning performed
 
 ## Baseline verification
@@ -89,7 +91,7 @@ Status values: `pending`, `active`, `complete`, `blocked`.
   repository-local compatibility runs use ignored pinned toolchains.
 - Real provider operations remain prohibited and default-off.
 
-## Next exact task
+## Phase 1 handoff completed by Phase 2A
 
 Mechanically inspect the target and complete locked Or-on Alembic graphs, prove
 that the Phase 1 bootstrap revision was never live-applied, and reconcile them
@@ -120,7 +122,7 @@ Status values: `pending`, `active`, `complete`, `blocked`.
 | P2A-002 | Inspect target + Or-on Alembic graphs | complete | `4d9a219` | Mechanical metadata: 22 revisions, root `0001`, branch `8eda5976c920`, merge `8aa960fd77ec`, head `a41d2f6c2925` | Continue successors from the preserved head. |
 | P2A-003 | Reconcile Phase 1 bootstrap migration | complete | `d67f8f7` | Phase 1 progress proves live upgrade/current were blocked; old revision retained outside active versions and content recreated at generated successor `34376836baf5` | Live upgrade remains pending Phase 2B. |
 | P2A-004 | Import/preserve complete Or-on Alembic lineage | complete | `4d9a219` | All 22 revisions imported; IDs/parents/branch/merge/order preserved; three import paths and one offline-only guard documented | Live historical backfill remains pending Phase 2B. |
-| P2A-005 | Verify one canonical offline Alembic graph/head | complete | pending | 27 revisions; sole root `0001`, branch point `8eda5976c920`, sole head `f5e8b540dfeb`; deterministic SQL/static contract pass | Fresh live upgrade/current **PENDING LIVE POSTGRESQL VALIDATION — PHASE 2B**. |
+| P2A-005 | Verify one canonical offline Alembic graph/head | complete | `363189f` | 27 revisions; sole root `0001`, branch point `8eda5976c920`, sole head `f5e8b540dfeb`; deterministic SQL/static contract pass | Fresh live upgrade/current **PENDING LIVE POSTGRESQL VALIDATION — PHASE 2B**. |
 | P2A-006 | Canonical tenant/identity mapping | complete | `d67f8f7` | Or-on tenant/user/membership preserved; provider-neutral identity bindings and tenant invitations created | RLS/membership execution pending Phase 2B. |
 | P2A-007 | Database schema/ownership architecture | complete | `109bf9e` | Historical Or-on tables stay in place; bounded new schemas and owners documented | Catalog execution pending Phase 2B. |
 | P2A-008 | WACRM migration inventory | complete | `109bf9e` | All 39 source SQL migrations have explicit disposition; zero unexplained | Keep mapping aligned with generated revisions. |
@@ -137,11 +139,48 @@ Status values: `pending`, `active`, `complete`, `blocked`.
 | P2A-019 | Canonical RLS policies for new tenant data | complete | `75aa1a2` | Static fail-closed FORCE RLS policies exist for identity, CRM, messaging, automation, agents, objects, ops, audit, and live tables | **PENDING LIVE POSTGRESQL VALIDATION — PHASE 2B**. |
 | P2A-020 | Unified runtime roles/grants successor migration | complete | `d67f8f7` | Generated successor defines six roles without privileged attributes and preserves legacy Or-on roles | **PENDING LIVE POSTGRESQL VALIDATION — PHASE 2B**. |
 | P2A-021 | Inbox/outbox/idempotency foundation | complete | `42c21ad` | Generated `cebe5f87cf18`: inbound/outbox events and scoped idempotency keys with explicit uniqueness and schedules | Atomicity/deduplication execution pending Phase 2B. |
-| P2A-022 | PostgreSQL durable-job foundation | complete | pending | Generated `cebe5f87cf18`: tenant-bound SECURITY DEFINER claims, leases, bounded attempts, `SKIP LOCKED`, exponential backoff+jitter, terminal failure | Concurrency/stale lease/retry behavior pending Phase 2B. |
+| P2A-022 | PostgreSQL durable-job foundation | complete | `363189f` | Generated `cebe5f87cf18`: tenant-bound SECURITY DEFINER claims, leases, bounded attempts, `SKIP LOCKED`, exponential backoff+jitter, terminal failure | Concurrency/stale lease/retry behavior pending Phase 2B. |
 | P2A-023 | Audit/object metadata foundation | complete | `42c21ad` | Generated `cebe5f87cf18`: metadata-only object records and append-oriented audit records without runtime update/delete grants | Privilege/immutability behavior pending Phase 2B. |
-| P2A-024 | Index/constraint/pagination review | complete | pending | Manifest checks 14 critical indexes; migrations define composite tenant FKs, E.164/provider/idempotency uniqueness, explicit deletes, and chronological keyset indexes | Constraint/index catalog and query-plan behavior pending Phase 2B. |
-| P2A-025 | Type/contract generation updates | complete | pending | `db/contracts/schema-manifest.json` is a checked consumer catalog at head `f5e8b540dfeb`; existing OpenAPI/event generation remains fresh; no TS migration authority added | Generate DB types only when a real TS repository consumes them. |
-| P2A-026 | Offline migration/security guards | complete | pending | Graph/parent/one-head, deterministic SQL, RLS/FORCE/policy, index, extension, definer search-path, Supabase/public/privileged-role guards | Live catalog behavior pending Phase 2B. |
-| P2A-027 | Prepare Phase 2B live PostgreSQL tests | complete | pending | 18 collected PostgreSQL tests cover version/head/catalog/roles/RLS/tenant CRUD/domain grants/DDL/idempotency/FK/outbox/flows/FTS/jobs/importer/seed | All 18 are **PENDING LIVE POSTGRESQL VALIDATION — PHASE 2B**. |
-| P2A-028 | Database architecture/migration documentation | active | pending | Required architecture, lineage, WACRM/OpenLive maps, schema ownership, extension inventory, notices, and Phase 2B runbook exist | Final consistency/link review and commit backfill. |
-| P2A-029 | Full offline verification | pending | — | — | Run every repository-controlled check and re-verify upstream integrity. |
+| P2A-024 | Index/constraint/pagination review | complete | `363189f` | Manifest checks 14 critical indexes; migrations define composite tenant FKs, E.164/provider/idempotency uniqueness, explicit deletes, and chronological keyset indexes | Constraint/index catalog and query-plan behavior pending Phase 2B. |
+| P2A-025 | Type/contract generation updates | complete | `363189f` | `db/contracts/schema-manifest.json` is a checked consumer catalog at head `f5e8b540dfeb`; existing OpenAPI/event generation remains fresh; no TS migration authority added | Generate DB types only when a real TS repository consumes them. |
+| P2A-026 | Offline migration/security guards | complete | `363189f` | Graph/parent/one-head, deterministic SQL, RLS/FORCE/policy, index, extension, definer search-path, Supabase/public/privileged-role guards | Live catalog behavior pending Phase 2B. |
+| P2A-027 | Prepare Phase 2B live PostgreSQL tests | complete | `363189f` | 18 collected PostgreSQL tests cover version/head/catalog/roles/RLS/tenant CRUD/domain grants/DDL/idempotency/FK/outbox/flows/FTS/jobs/importer/seed | All 18 are **PENDING LIVE POSTGRESQL VALIDATION — PHASE 2B**. |
+| P2A-028 | Database architecture/migration documentation | complete | pending final docs | Required architecture, lineage, WACRM/OpenLive maps, schema ownership, extension inventory, notices, and Phase 2B runbook pass the documentation/link guard | Maintain claims as Phase 2B evidence arrives. |
+| P2A-029 | Full offline verification | complete | pending final docs | Dedicated offline gate, all Python/TS checks/tests/build, contracts, repository/secret/docs guards, and final upstream integrity pass | Live/database execution checks remain Phase 2B only. |
+
+## Phase 2A final offline verification snapshot
+
+- Alembic: 27 active revisions, sole root `0001`, preserved Or-on branch point
+  `8eda5976c920`, merge `8aa960fd77ec`, sole head `f5e8b540dfeb`.
+- Deterministic PostgreSQL SQL: 93,287 UTF-8 bytes, SHA-256
+  `3d20637313b3471050fe5818949f349a65e97297bc8f380a3a3ead2c22574778`.
+- Dedicated `db-verify-offline`: 15/15 focused graph/importer/static-contract
+  tests passed, repository dependency guard passed, wire contracts fresh.
+- Full Python: Ruff format/lint passed; Pyrefly passed for current packages,
+  services, importers, tests, Alembic environment/compatibility code, seeds, and
+  scripts; 29 tests passed and 18 PostgreSQL tests were correctly skipped with
+  the Phase 2B status.
+- Full TypeScript: format/lint/strict typecheck passed; 15 tests passed; all
+  packages/services and the Next.js 16.3.3 production application built.
+- Security/architecture: tracked-file secret scan, prohibited runtime database
+  scan, sibling-independence scan, documentation/link scan, and peer dependency
+  check passed.
+- Vulnerability registry refresh: npm and PyPI advisory endpoints were blocked by
+  this sandbox. Phase 2A changed no dependency manifest or lock version; the last
+  Phase 1 scans were clean. CI retains both scans, so no fresh clean result is
+  claimed for this run.
+- Provider/cloud safety: no WhatsApp message, telephone call, provider webhook
+  mutation, provider provisioning, customer-data access, or `terraform apply`.
+- Final upstream check: Or-on, WACRM, and OpenLive remained clean at their locked
+  SHAs.
+
+Every server-executed item in
+[`docs/migration/phase-2b-live-validation.md`](migration/phase-2b-live-validation.md)
+remains **PENDING LIVE POSTGRESQL VALIDATION — PHASE 2B**.
+
+## Next exact task
+
+Install/start Docker with Compose and GNU Make, create an isolated PostgreSQL
+18.6 database, then run `make db-verify-live` and the full Phase 1 runtime
+acceptance-unblock sequence. Record real catalog/RLS/role/constraint/function/
+locking/importer evidence before beginning Phase 3.
