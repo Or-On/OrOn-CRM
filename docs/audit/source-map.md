@@ -88,3 +88,36 @@ Do not import as runtime: SQLite state, JSON business stores, auto-generated fil
 ## Evidence path convention
 
 Audit documents use source paths such as `../or-on/...` relative to the target repository root. After integration, a provenance manifest should map each copied target path to source repository, locked SHA, source path, transformation method, and applicable notices.
+
+## Phase 2A imported Or-on migration artifacts
+
+Locked source SHA for every row:
+`cece174f4d590a1b8a283d539dd66e08cc689aa9`. Or-on has no repository license
+file and is treated as private/proprietary project code. No public license is
+inferred.
+
+| Source path | Target path | Status | Reason / exact adaptation |
+| --- | --- | --- | --- |
+| `alembic/versions/0001_create_sessions.py` | `db/alembic/versions/0001_create_sessions.py` | copied | Preserve historical root and SQL semantics. |
+| `alembic/versions/0002_multitenancy.py` | `db/alembic/versions/0002_multitenancy.py` | copied | Preserve tenancy, role, RLS, and seed lineage. |
+| `alembic/versions/0003_phone_dispatch_rule.py` | `db/alembic/versions/0003_phone_dispatch_rule.py` | copied | Preserve historical schema change. |
+| `alembic/versions/0004_backfill_caller_number_encryption.py` | `db/alembic/versions/0004_backfill_caller_number_encryption.py` | adapted | Live behavior unchanged; after emitting schema SQL, offline mode skips the row-reading encryption backfill that Alembic's mock connection cannot execute. |
+| `alembic/versions/0005_session_usage.py` | `db/alembic/versions/0005_session_usage.py` | copied | Preserve usage lineage. |
+| `alembic/versions/0006_flow_id.py` | `db/alembic/versions/0006_flow_id.py` | copied | Preserve flow relationship. |
+| `alembic/versions/0007_flows_table.py` | `db/alembic/versions/0007_flows_table.py` | copied | Preserve flow/RLS behavior. |
+| `alembic/versions/0008_browser_direction.py` | `db/alembic/versions/0008_browser_direction.py` | copied | Preserve call direction behavior. |
+| `alembic/versions/0009_cached_prompt_tokens.py` | `db/alembic/versions/0009_cached_prompt_tokens.py` | copied | Preserve usage field. |
+| `alembic/versions/0010_session_latency.py` | `db/alembic/versions/0010_session_latency.py` | copied | Preserve historical upgrade/downgrade. |
+| `alembic/versions/0011_split_app_roles.py` | `db/alembic/versions/0011_split_app_roles.py` | adapted | Import path points to target-local compatibility enum with identical role string values; SQL unchanged. |
+| `alembic/versions/8eda5976c920_drop_session_response_latency.py` | `db/alembic/versions/8eda5976c920_drop_session_response_latency.py` | copied | Preserve branch ancestor. |
+| `alembic/versions/46a2cce29f18_campaigns_and_campaign_contacts.py` | `db/alembic/versions/46a2cce29f18_campaigns_and_campaign_contacts.py` | adapted | Import path points to target-local identical role values; SQL unchanged. |
+| `alembic/versions/7433e45e0d29_answered_no_answer_and_retry_scheduling.py` | `db/alembic/versions/7433e45e0d29_answered_no_answer_and_retry_scheduling.py` | copied | Preserve campaign retry semantics. |
+| `alembic/versions/f596c72044b0_calling_window_and_a_claim_index_that_.py` | `db/alembic/versions/f596c72044b0_calling_window_and_a_claim_index_that_.py` | copied | Preserve calling window and claim index. |
+| `alembic/versions/c80d93f1c8be_session_outcome.py` | `db/alembic/versions/c80d93f1c8be_session_outcome.py` | copied | Preserve outcome semantics. |
+| `alembic/versions/3b4a1c5307b4_to_number_blind_index.py` | `db/alembic/versions/3b4a1c5307b4_to_number_blind_index.py` | copied | Preserve privacy index. |
+| `alembic/versions/ea9aef9b2d14_index_campaign_contacts_session_id.py` | `db/alembic/versions/ea9aef9b2d14_index_campaign_contacts_session_id.py` | copied | Preserve query index. |
+| `alembic/versions/0e01a2f68295_per_weekday_calling_hours.py` | `db/alembic/versions/0e01a2f68295_per_weekday_calling_hours.py` | copied | Preserve calling-hour semantics. |
+| `alembic/versions/b38ef3c19979_session_stt_audio_seconds.py` | `db/alembic/versions/b38ef3c19979_session_stt_audio_seconds.py` | copied | Preserve parallel STT branch. |
+| `alembic/versions/8aa960fd77ec_campaigns_and_stt_audio_seconds.py` | `db/alembic/versions/8aa960fd77ec_campaigns_and_stt_audio_seconds.py` | copied | Preserve merge revision and parent tuple. |
+| `alembic/versions/a41d2f6c2925_users_identities_and_memberships.py` | `db/alembic/versions/a41d2f6c2925_users_identities_and_memberships.py` | adapted | Import path points to target-local identical role values; identity SQL and head metadata unchanged. |
+| `packages/oron-db/src/oron_db/roles.py` | `db/alembic/oron_migration_compat.py` | adapted/reduced | Migration-only enum preserves exactly `oron_sessions_app` and `oron_tenancy_app`; no runtime package dependency on sibling source. |

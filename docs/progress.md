@@ -1,14 +1,15 @@
 # Or-On Platform progress
 
-Last updated: 2026-08-31 (Asia/Jerusalem)
+Last updated: 2026-09-01 (Asia/Jerusalem)
 
 ## Current checkpoint
 
-- Phase: Phase 1 — Architecture and Monorepo Foundation
-- Branch: `codex/phase-1-foundation`
+- Phase: Phase 2A — Canonical PostgreSQL Foundation — Offline Implementation
+- Branch: `codex/phase-2a-postgres-offline`
 - Phase 0 baseline: `93eb808e65f8edb1754c1940afe1949e7e18223a`
-- Active task: P1-022 — Full verification
-- Latest clean commit before this checkpoint: `d380bf8dbf09cc59bc5c559dac71d8afda077e77`
+- Phase 1 baseline: `20b46159078ec533a9891e6768d47595e35b7a7c`
+- Active task: P2A-002 — Target and Or-on Alembic graph analysis
+- Latest clean commit before this checkpoint: `20b46159078ec533a9891e6768d47595e35b7a7c`
 - Provider safety: no real telephone call, WhatsApp message, webhook mutation, or provider provisioning performed
 
 ## Baseline verification
@@ -90,6 +91,57 @@ Status values: `pending`, `active`, `complete`, `blocked`.
 
 ## Next exact task
 
-Provision a compatible Docker Engine/Compose, GNU Make, Node 24.20, and pnpm 11.24
-on this host; then run `make doctor`, `make bootstrap`, and the complete acceptance
-command sequence without changing provider flags or running Terraform apply.
+Mechanically inspect the target and complete locked Or-on Alembic graphs, prove
+that the Phase 1 bootstrap revision was never live-applied, and reconcile them
+into one canonical lineage before adding any WACRM- or OpenLive-derived schema.
+
+## Phase 2A starting state
+
+Phase 2A began from the current clean Phase 1 HEAD, not from a remembered short
+SHA. Docker Engine, Docker Compose, GNU Make, and a live PostgreSQL 18.6 server
+remain unavailable. Repository-controlled checks will run offline; all execution
+claims that require PostgreSQL remain **PENDING LIVE POSTGRESQL VALIDATION — PHASE
+2B**.
+
+| Repository | Expected commit | Verified branch | Result |
+| --- | --- | --- | --- |
+| Target baseline | `20b46159078ec533a9891e6768d47595e35b7a7c` | `codex/phase-1-foundation` | Clean before branching; Phase 2A branch created from this exact commit. |
+| Or-on | `cece174f4d590a1b8a283d539dd66e08cc689aa9` | `master` | Commit matched; worktree clean. |
+| WACRM | `98b5bd26e8feacacfd4b74ff58411acb8154d212` | `main` | Commit matched; worktree clean. |
+| OpenLive | `849173cd1c8c17a95d600b17b428c301722bf5df` | `main` | Commit matched; worktree clean. |
+
+## Phase 2A tasks
+
+Status values: `pending`, `active`, `complete`, `blocked`.
+
+| ID | Task | Status | Commit | Evidence | Pending live validation / next exact task |
+| --- | --- | --- | --- | --- | --- |
+| P2A-001 | Baseline and upstream verification | complete | pending | Mandatory target, audit, architecture, ADR, target migration, Or-on lineage, WACRM SQL/runtime, and OpenLive persistence sources read; exact clean SHAs verified | No live validation needed; mechanically calculate the migration graph. |
+| P2A-002 | Inspect target + Or-on Alembic graphs | active | pending | Source metadata inventory in progress | Calculate roots, branches, merge points, and heads without inferring from filenames. |
+| P2A-003 | Reconcile Phase 1 bootstrap migration | pending | — | — | First prove from repository evidence that it was never live-applied. |
+| P2A-004 | Import/preserve complete Or-on Alembic lineage | pending | — | — | Preserve revision metadata and record every adaptation/provenance item. |
+| P2A-005 | Verify one canonical offline Alembic graph/head | pending | — | — | Graph, history, heads, branches, deterministic offline PostgreSQL SQL. |
+| P2A-006 | Canonical tenant/identity mapping | pending | — | — | Preserve tenant as the isolation key and provider-neutral identity direction. |
+| P2A-007 | Database schema/ownership architecture | pending | — | — | Define domain ownership without moving mature Or-on tables. |
+| P2A-008 | WACRM migration inventory | pending | — | All 39 source SQL migrations read | Account for every migration with an explicit disposition. |
+| P2A-009 | Translate WACRM identity/account semantics | pending | — | — | Map accounts/profiles/members/invitations to canonical identities and tenants. |
+| P2A-010 | Translate WACRM CRM schema | pending | — | — | Contacts, channel identities, tags, fields, notes, pipelines, stages, deals. |
+| P2A-011 | Translate WACRM messaging schema | pending | — | — | Conversations, messages, delivery, templates, media, quick replies, provider IDs. |
+| P2A-012 | Translate WACRM pipeline/campaign schema | pending | — | — | Reconcile messaging broadcasts with preserved Or-on voice campaigns. |
+| P2A-013 | Translate WACRM automation/flow schema | pending | — | — | Drafts, immutable versions, runs, steps, retries; preserve both runtimes. |
+| P2A-014 | Translate WACRM AI/knowledge/database semantics | pending | — | — | PostgreSQL FTS baseline; pgvector optional only. |
+| P2A-015 | Supabase Auth/Realtime/Storage/RPC removal mapping | pending | — | — | Translate every database-specific dependency explicitly. |
+| P2A-016 | OpenLive persistence inventory | pending | — | SQLite, JSON, filesystem, server setting keys, and browser-local keys inspected | Publish complete source-to-target persistence map. |
+| P2A-017 | OpenLive PostgreSQL target schema | pending | — | — | Tenant/user-scoped chats, messages, preferences, providers, voices, sessions. |
+| P2A-018 | OpenLive legacy importer foundation | pending | — | — | Offline parser/dry-run/idempotency/checksum tests; writes pending Phase 2B. |
+| P2A-019 | Canonical RLS policies for new tenant data | pending | — | — | Static definitions now; behavior pending Phase 2B. |
+| P2A-020 | Unified runtime roles/grants successor migration | pending | — | — | Static definitions now; role/grant execution pending Phase 2B. |
+| P2A-021 | Inbox/outbox/idempotency foundation | pending | — | — | Durable event schema and exact-once effects through idempotent consumers. |
+| P2A-022 | PostgreSQL durable-job foundation | pending | — | — | SKIP LOCKED design/tests prepared; concurrency pending Phase 2B. |
+| P2A-023 | Audit/object metadata foundation | pending | — | — | Immutable audit intent and metadata-only object persistence. |
+| P2A-024 | Index/constraint/pagination review | pending | — | — | Query-driven indexes and keyset pagination support. |
+| P2A-025 | Type/contract generation updates | pending | — | — | Deterministic consumer-only contracts; no second migration authority. |
+| P2A-026 | Offline migration/security guards | pending | — | — | Precise target-SQL and prohibited-runtime dependency checks. |
+| P2A-027 | Prepare Phase 2B live PostgreSQL tests | pending | — | — | Collect tests without reporting them as passed. |
+| P2A-028 | Database architecture/migration documentation | pending | — | — | Complete data, security, roles, eventing, lineage, and migration maps. |
+| P2A-029 | Full offline verification | pending | — | — | Run every repository-controlled check and re-verify upstream integrity. |

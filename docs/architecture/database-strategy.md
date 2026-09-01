@@ -2,15 +2,16 @@
 
 ## One database, one migration authority
 
-`or_on_platform_dev` on PostgreSQL 18 is the only Phase 1 runtime database.
+`or_on_platform_dev` on PostgreSQL 18.6 is the only target runtime database.
 Alembic owns every schema change. TypeScript database types are consumers; no
 Prisma, Drizzle, TypeORM, Supabase, or framework migration runner is permitted.
 
-Phase 1 creates a minimal platform metadata revision to prove connectivity and
-deterministic state. It does not fabricate the integrated CRM, messaging, voice,
-flow, or agent schema. Or-on's existing 22-revision history will be imported
-without squashing in Phase 2, after the target migration bootstrap is reconciled
-through an explicit preservation plan.
+Phase 2A preserves the complete 22-revision Or-on history and continues from its
+head. The Phase 1 metadata proof was never applied to a persistent database, is
+retired outside the active version location, and is recreated by a generated
+successor revision. WACRM SQL is translated into coherent canonical migrations;
+OpenLive SQLite/JSON/file state is represented by PostgreSQL tables and a
+one-time importer. Exactly one Alembic graph and head remain active.
 
 ## Future source conversion
 
@@ -38,11 +39,10 @@ target migration authority.
 | `platform_worker` | Bounded durable job claims/execution | Schema ownership/superuser |
 | `platform_readonly` | Audited operational read models | Writes or secret material |
 
-Phase 1 bootstraps the six named local roles, with only `platform_web` receiving a
-development login. The development owner is used for migration/bootstrap only.
-Application readiness uses the configured `platform_web` DSN and never assumes
-superuser or ownership privileges. Domain grants remain deferred until real target
-schemas exist.
+Historical Or-on roles remain intact. Generated successor migrations add the six
+platform roles without granting `SUPERUSER`, `CREATEDB`, `CREATEROLE`, or
+`BYPASSRLS`. Application readiness uses a runtime DSN and never assumes schema
+ownership. Live role/grant validation is a Phase 2B gate.
 
 ## Tenant context and RLS
 
@@ -58,8 +58,38 @@ Tenant tables use forced RLS and fail closed when context is missing. Applicatio
 `WHERE tenant_id = ...` clauses may improve query clarity/performance but never
 replace RLS. Pool tests must prove context cannot leak after commit/rollback.
 
-Phase 1 creates no fake tenant table merely to demonstrate RLS; the RLS primitives
-and negative tests arrive with canonical identity tables in Phase 2.
+Or-on `tenants.id` remains the canonical isolation key. UI language may say
+organization, but the database does not create a parallel organization owner.
+New tenant tables carry `tenant_id`, enable and force RLS, and compare it to
+`current_setting('app.current_tenant', true)`. Membership-sensitive operations
+also use `app.current_user` and canonical memberships. Static definitions and live
+tests are delivered separately: behavior is **PENDING LIVE POSTGRESQL VALIDATION
+— PHASE 2B**.
+
+## Schema ownership
+
+Mature Or-on tables remain in their historical location. New tables use bounded
+schemas only where ownership is clearer: `platform`, `crm`, `messaging`,
+`automation`, `agents`, `live`, `objects`, `ops`, and `audit`. Cross-schema
+foreign keys are intentional. Query-critical ownership, status, time,
+idempotency, and scheduling fields are columns; flexible provider snapshots and
+versioned definitions use JSONB.
+
+New globally referenced entities use UUIDs and application instants use
+`TIMESTAMPTZ`. High-volume chronological indexes include a stable ID tiebreaker
+for keyset pagination. Delete actions are explicit. See
+[data-model.md](data-model.md) and [schema ownership](../migration/schema-ownership.md).
+
+## Extensions
+
+| Extension | Classification | Reason |
+| --- | --- | --- |
+| `pgcrypto` | required | Existing Or-on and new UUID defaults. |
+| `citext` | required | Preserved Or-on identity email semantics. |
+| `vector` / pgvector | optional | Semantic retrieval enhancement only; PostgreSQL FTS remains functional without it. |
+
+Availability and execution of required extensions are **PENDING LIVE POSTGRESQL
+VALIDATION — PHASE 2B**.
 
 ## Durable work direction
 
