@@ -101,7 +101,7 @@ inferred.
 | `alembic/versions/0001_create_sessions.py` | `db/alembic/versions/0001_create_sessions.py` | copied | Preserve historical root and SQL semantics. |
 | `alembic/versions/0002_multitenancy.py` | `db/alembic/versions/0002_multitenancy.py` | copied | Preserve tenancy, role, RLS, and seed lineage. |
 | `alembic/versions/0003_phone_dispatch_rule.py` | `db/alembic/versions/0003_phone_dispatch_rule.py` | copied | Preserve historical schema change. |
-| `alembic/versions/0004_backfill_caller_number_encryption.py` | `db/alembic/versions/0004_backfill_caller_number_encryption.py` | adapted | Live behavior unchanged; after emitting schema SQL, offline mode skips the row-reading encryption backfill that Alembic's mock connection cannot execute. |
+| `alembic/versions/0004_backfill_caller_number_encryption.py` | `db/alembic/versions/0004_backfill_caller_number_encryption.py` | adapted | Live encryption/blind-index behavior and revision metadata are preserved. Offline mode skips the row-reading backfill that Alembic's mock connection cannot execute; live imports use the target-local compatibility surface below. |
 | `alembic/versions/0005_session_usage.py` | `db/alembic/versions/0005_session_usage.py` | copied | Preserve usage lineage. |
 | `alembic/versions/0006_flow_id.py` | `db/alembic/versions/0006_flow_id.py` | copied | Preserve flow relationship. |
 | `alembic/versions/0007_flows_table.py` | `db/alembic/versions/0007_flows_table.py` | copied | Preserve flow/RLS behavior. |
@@ -121,6 +121,7 @@ inferred.
 | `alembic/versions/8aa960fd77ec_campaigns_and_stt_audio_seconds.py` | `db/alembic/versions/8aa960fd77ec_campaigns_and_stt_audio_seconds.py` | copied | Preserve merge revision and parent tuple. |
 | `alembic/versions/a41d2f6c2925_users_identities_and_memberships.py` | `db/alembic/versions/a41d2f6c2925_users_identities_and_memberships.py` | adapted | Import path points to target-local identical role values; identity SQL and head metadata unchanged. |
 | `packages/oron-db/src/oron_db/roles.py` | `db/alembic/oron_migration_compat.py` | adapted/reduced | Migration-only enum preserves exactly `oron_sessions_app` and `oron_tenancy_app`; no runtime package dependency on sibling source. |
+| `packages/oron-sessions/src/oron_sessions/crypto.py`, `config.py` | `db/alembic/oron_migration_compat.py` | adapted/reduced | Migration-only AES-256-GCM `v1:` format, tenant AAD, E.164 HMAC-SHA256 blind index, explicit LOCAL/KMS selection, and direct/`SECRET__` environment aliases preserve the historical non-empty `0004` backfill without importing the sibling runtime package. `cryptography==49.0.0` matches the locked source dependency; no key is generated or persisted. |
 
 The imported target copies were mechanically normalized by the target Ruff
 formatter after import. This changed whitespace/import ordering and modernized

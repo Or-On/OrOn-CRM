@@ -43,7 +43,7 @@ def _backfill_rows(conn, rows, cipher, blind_key) -> None:
     the other — a mixed row's already-set `from_number_bidx` must never be
     clobbered back to NULL just because this run only touched `to_number`.
     """
-    from oron_sessions.crypto import blind_index
+    from db.alembic.oron_migration_compat import blind_index
 
     for row in rows:
         from_ct = (
@@ -94,10 +94,12 @@ def upgrade() -> None:
     if not rows:
         return
 
-    from oron_sessions.config import load_settings
-    from oron_sessions.crypto import build_field_cipher
+    from db.alembic.oron_migration_compat import (
+        build_field_cipher,
+        load_migration_cipher_settings,
+    )
 
-    settings = load_settings()
+    settings = load_migration_cipher_settings()
     local_key = (
         base64.b64decode(settings.field_cipher_local_key)
         if settings.field_cipher_local_key

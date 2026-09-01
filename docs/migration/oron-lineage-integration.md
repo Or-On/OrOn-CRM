@@ -44,12 +44,22 @@ flowchart TD
   R[retired Phase 1 proof] -. never live-applied .-> P
 ```
 
-Fresh upgrade, data backfill, downgrade, roles, extensions, and RLS execution are
-**PENDING LIVE POSTGRESQL VALIDATION — PHASE 2B**.
+Fresh upgrade, roles, extensions, and RLS execution passed against PostgreSQL
+18.6 in Phase 2B. A non-empty revision `0004` backfill also passed with explicit
+test-only LOCAL keys: ciphertext decrypted to the original value, the E.164
+blind index matched, empty values remained untouched, and existing ciphertext
+was not double-encrypted.
 
 The preserved revision files remain Ruff-checked. Pyrefly excludes the historical
-version directory because revision `0004` intentionally imports the retained
-`oron-sessions` package only when a live database contains plaintext rows to
-backfill; that package is not mass-copied in Phase 2A. Phase 2B must exercise the
-backfill after the retained package is integrated or made available through an
-explicit migration-only compatibility dependency.
+version directory. Revision `0004` now imports a narrow target-local migration
+compatibility module that preserves Or-on's AES-256-GCM `v1:` format, tenant UUID
+additional authenticated data, E.164 HMAC-SHA256 blind index, LOCAL/KMS selection,
+and direct/`SECRET__` environment aliases. It neither mass-copies
+`oron_sessions` nor depends on `../or-on`.
+
+Revision `0004`'s downgrade remains intentionally data-irreversible: it drops
+the blind-index column but does not recreate plaintext. An operational rollback
+across that boundary requires a pre-migration backup. Phase 2B separately
+validated downgrade/re-upgrade across all target-owned successors
+(`f5e8b540dfeb` down to `a41d2f6c2925` and back to head) on a disposable
+database.
