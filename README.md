@@ -48,10 +48,15 @@ real sends are explicitly selected and confirmed, durably queued in PostgreSQL,
 processed outside database transactions, and updated by raw-body-verified,
 deduplicated status webhooks.
 
-Phase 6 remains in progress: the call-outcome follow-up worker now delivers
-simulated messages, but the WhatsApp-triggered voice-job consumer and executable
-parity of both retained-engine adapters are still pending. Queued work or a
-compiled artifact alone must not be treated as completed runtime execution.
+Phase 6 is simulator-complete for the accepted six-node graph subset. Both
+cross-channel workers execute durable work, and published canonical flows run
+ordered CRM/message/voice/handoff actions with persisted wait/resume and failure
+states. Voice actions reference frozen retained Or-on versions; provider-free
+tests verify their native Pipecat binding. Messaging preserves the supported
+WACRM interpolation and template-order semantics. Advanced source branching,
+waits and external actions are not claimed as ported. See the
+[simulator runbook](docs/runbooks/cross-channel-simulator.md) for restart and
+verification instructions; Phase 7 UI/UX polish has not begun.
 
 It does **not** enable real WhatsApp by default or any real telephony, public signup/OAuth/MFA,
 OpenLive/Live Lab/visual-agent execution, or production GCP infrastructure.

@@ -1,6 +1,6 @@
 # Phase 6 — Cross-channel platform
 
-Status: in progress — worker completion and retained-runtime parity verification
+Status: complete — accepted six-node simulator scope; final acceptance passed
 
 Baseline: Phase 5 clean head `946b08a1c418567f56df87cbe17a97b143596a01`
 
@@ -35,7 +35,7 @@ must not import or implement them. Schema/contracts may reserve a disabled
 
 ## Work plan
 
-| ID | Deliverable | Initial status |
+| ID | Deliverable | Status |
 | --- | --- | --- |
 | P6-001 | Baseline, instruction, upstream-integrity, and scope verification | complete |
 | P6-002 | Canonical agent/profile and flow source-parity inventory | complete |
@@ -54,10 +54,10 @@ must not import or implement them. Schema/contracts may reserve a disabled
 | P6-015 | Control API and generated TypeScript contracts | complete |
 | P6-016 | Unified agent/flow/activity web surfaces | complete |
 | P6-017 | Accessibility, Hebrew/RTL, responsive, and keyboard verification | complete |
-| P6-018 | PostgreSQL, RLS, idempotency, concurrency, and adapter tests | complete; final consolidated rerun pending |
+| P6-018 | PostgreSQL, RLS, idempotency, concurrency, and adapter tests | complete: 58 live PostgreSQL/retained-RLS tests and 14 isolated TS worker tests pass |
 | P6-019 | Simulator cross-channel end-to-end acceptance | complete: both provider-free paths and failure cases pass |
 | P6-020 | Architecture, provenance, threat model, and runbooks | complete |
-| P6-021 | Full verification and clean checkpoint | final acceptance reopened |
+| P6-021 | Full verification and clean checkpoint | complete; evidence in docs/progress.md final acceptance section |
 | P6-022 | Real Meta WhatsApp adapter, durable admission, and kill switches | complete |
 | P6-023 | Signed verification/status webhooks and delivery persistence | complete |
 | P6-024 | Real-delivery UI, smoke command, security tests, and runbook | complete |
