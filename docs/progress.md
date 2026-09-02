@@ -13,7 +13,7 @@ Last updated: 2026-09-02 (Asia/Jerusalem)
 - Phase 3 status: **COMPLETE**
 - Phase 4 status: **COMPLETE**
 - Phase 5 status: **IMPLEMENTATION IN PROGRESS**
-- Active task: P5-010 — import/adapt Hebrew and Pipecat voice-agent packages
+- Active task: P5-011 — LiveKit/SIP/Redis opt-in Compose voice profile
 - Phase 2B clean baseline commit: `830a8371836ea7922fca5c320624bf3bd32ec229`
 - Phase 3 exact baseline commit: `9ca3a022c2fb18a5d416b39aa7d1404f7910ae1b`
 - Phase 4 exact baseline commit: `fdaabedfe0c6dd3586261a338f2fd82f904023d8`
@@ -107,6 +107,17 @@ Node 24.19.0/pnpm 11.19.0 while the recorded baseline requires Node
 24.20+/pnpm 11.24+; requirements were not weakened and no TypeScript source was
 changed in this checkpoint.
 
+The P5-010 implementation checkpoint imports the retained `oron-hebrew` and
+`oron-agent` packages, preserves their Pipecat/LiveKit/media/flow behavior, and
+injects a task-owned launcher into dispatcher composition. Voice providers and
+model loading remain independently default-off. Renikud and ECAPA accept only
+checksum-verified local assets and have no download fallback. Heavy/native
+packages are isolated in the opt-in uv `voice` group; ordinary workspace sync
+and dispatcher imports stay lightweight. The focused retained suite passes 349
+tests with three P5-011 deployment-wiring skips; Ruff, strict Pyrefly,
+repository-policy, and secret checks pass. No provider or model network action
+occurred.
+
 The authoritative implementation scope and acceptance gate is
 [`phase-5-telephony.md`](plans/phase-5-telephony.md). It preserves the Or-on
 engine and package identities, makes the existing `sessions` table the canonical
@@ -128,8 +139,8 @@ Status values: `pending`, `active`, `complete`, `blocked`.
 | P5-007 | Control API voice routes and generated TypeScript client | complete | `8d903a6` | Authenticated `GET /api/v1/voice/sessions`; canonical RBAC and tenant assertion; `platform_voice` RLS query; deterministic OpenAPI/client; container and same-origin login/BFF proof; full verification clean | Preserve this read-only contract while adding mutations through the simulator-first command boundary. |
 | P5-008 | Telephony simulator and real-provider denial boundary | complete | `7a56c78` | CSRF/RBAC/service-auth command; deterministic PostgreSQL lifecycle/outbox/audit; replay idempotency and contact-conflict test; 39-test live gate; production-container E2E; both real-action gates tested | Keep the simulator as the default adapter and never add a fallback to real transport. |
 | P5-009 | Import/adapt dispatcher and LiveKit webhook contracts | complete | `49c1d6d` | Signed fixture/tamper/replay tests; canonical assertion/capability tests; DID/persistence/trunk/default-off tests; sole head `315710614ae5`; 41 live PostgreSQL tests; no provider call | Keep runtime not-ready until the retained P5-010 agent launcher is injected. |
-| P5-010 | Import/adapt Hebrew and Pipecat voice-agent packages | active | — | P5-002 Python 3.14 compatibility and model-license gate remains authoritative | Import in dependency order, preserve media/flow behavior, and keep provider/model downloads opt-in. |
-| P5-011 | LiveKit/SIP/Redis opt-in Compose voice profile | pending | — | — | Validate control plane only; never place a call. |
+| P5-010 | Import/adapt Hebrew and Pipecat voice-agent packages | complete | implementation checkpoint | 349 passed/3 explicit P5-011 skips; Ruff and strict Pyrefly pass; model path/hash, secret redaction, default-off provider gate, launcher injection, base/voice dependency isolation, repository and secret guards verified | Keep all real provider execution denied while building the opt-in control-plane profile. |
+| P5-011 | LiveKit/SIP/Redis opt-in Compose voice profile | active | — | P5-010 deployment-wiring cases remain explicitly skipped until this profile exists | Add pinned private-network services and validate control-plane health only; never place a call. |
 | P5-012 | Phone-number/DID admission and reconciliation | pending | — | — | Preserve non-empty ACL and explicit drift behavior. |
 | P5-013 | Voice flow catalog, validation, publishing, and adapter UI | pending | — | — | Do not claim the Phase 7 canonical compiler. |
 | P5-014 | Canonical voice campaigns and CRM audience integration | pending | — | — | Enforce consent, calling windows, retries, and concurrency. |

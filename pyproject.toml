@@ -16,6 +16,7 @@ dev = [
   "pytest-asyncio==1.4.0",
   "ruff==0.16.5",
 ]
+voice = ["oron-agent==0.1.0"]
 
 [tool.uv]
 package = false
@@ -35,6 +36,9 @@ members = [
   "services/py/voice-agent",
 ]
 
+[tool.uv.sources]
+oron-agent = { path = "packages/py/oron-agent", editable = true }
+
 [tool.ruff]
 target-version = "py314"
 line-length = 100
@@ -46,6 +50,8 @@ ignore = ["S101"]
 
 [tool.ruff.lint.per-file-ignores]
 "**/tests/**" = ["S101", "S105", "S106"]
+"packages/py/oron-agent/tests/**" = ["S108", "B017", "ASYNC240"]
+"packages/py/oron-hebrew/src/oron_hebrew/ecapa_model.py" = ["SIM108"]
 # FastAPI intentionally declares dependency markers in parameter defaults.
 "packages/py/oron-sessions/src/oron_sessions/api.py" = ["B008", "B904"]
 "packages/py/oron-sessions/src/oron_sessions/deps.py" = ["B008"]

@@ -2,13 +2,52 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from livekit import api
 from or_on_platform.config import PlatformSettings
 from or_on_platform.service_auth import ServiceAssertionVerifier
 from oron_dispatcher.config import DispatcherSettings
-from oron_dispatcher.dispatcher import Dispatcher
+from oron_dispatcher.dispatcher import (
+    Dispatcher,
+    HangupRoom,
+    MintToken,
+    ResolvePhone,
+    SessionPersistence,
+)
+from oron_dispatcher.sip_client import SipClient
 from oron_dispatcher.webhook import create_app
 from oron_dispatcher.webhook_ledger import PostgresWebhookLedger
+
+if TYPE_CHECKING:
+    from oron_agent.config import Settings as AgentSettings
+    from renikud_onnx import G2P
+
+
+def compose_dispatcher(
+    *,
+    dispatcher_settings: DispatcherSettings,
+    agent_settings: AgentSettings,
+    sessions: SessionPersistence,
+    sip_client: SipClient,
+    resolve_phone: ResolvePhone,
+    hangup_room: HangupRoom,
+    mint_token: MintToken,
+    g2p: G2P | None = None,
+) -> Dispatcher:
+    """Inject the retained agent launcher while keeping all I/O ports explicit."""
+
+    from oron_agent.launcher import make_launch_bot
+
+    return Dispatcher(
+        settings=dispatcher_settings,
+        sessions=sessions,
+        sip_client=sip_client,
+        launch_bot=make_launch_bot(agent_settings, g2p=g2p),
+        resolve_phone=resolve_phone,
+        hangup_room=hangup_room,
+        mint_token=mint_token,
+    )
 
 
 def build(
@@ -17,7 +56,7 @@ def build(
     dispatcher_settings: DispatcherSettings | None = None,
     dispatcher: Dispatcher | None = None,
 ):
-    """Build without globals; P5-010 injects the retained voice-agent launcher."""
+    """Build without globals; full I/O composition remains explicit at the edge."""
 
     platform = platform_settings or PlatformSettings.load(service="dispatcher")
     configured = dispatcher_settings or DispatcherSettings()

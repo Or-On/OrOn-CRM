@@ -21,6 +21,7 @@ concurrency:
 env:
   ENABLE_REAL_TELEPHONY: "false"
   ENABLE_REAL_WHATSAPP: "false"
+  ENABLE_REAL_VOICE_PROVIDERS: "false"
 
 jobs:
   typescript:
@@ -52,12 +53,13 @@ jobs:
           version: 0.12.7
           python-version: 3.14.7
           enable-cache: true
-      - run: uv sync --all-packages --locked
+      - run: uv sync --all-packages --locked --group voice
       - run: uv run ruff format --check packages/py services/py db scripts
       - run: uv run ruff check packages/py services/py db scripts
       - run: >-
           uv run pyrefly check packages/py/oron-common/src packages/py/oron-db/src
-          packages/py/oron-flows/src packages/py/oron-secrets/src
+          packages/py/oron-flows/src packages/py/oron-hebrew/src
+          packages/py/oron-agent/src packages/py/oron-secrets/src
           packages/py/oron-sessions/src packages/py/oron-tenancy/src
           packages/py/platform-integration/src services/py/control-api/src
           services/py/dispatcher/src services/py/voice-agent/src db/importers

@@ -19,7 +19,13 @@ Phase 5 retains these low-level Or-on packages under their original identities:
   behavior.
 - `oron-dispatcher`: signed LiveKit webhook, fail-closed DID admission,
   one-agent-per-room lifecycle, and guarded SIP orchestration behavior.
+- `oron-hebrew`: Hebrew normalization, number/niqqud filters, and explicitly
+  checksum-pinned local speech-model adapters with no download fallback.
+- `oron-agent`: the retained Pipecat/LiveKit media pipeline, flow runtime, and a
+  task-based launcher injected into the dispatcher behind provider safety gates.
 
 They are proprietary project code imported from the locked Or-on revision. The
-target manifests pin verified Python 3.14-compatible dependency versions; source
-behavior and behavioral assertions are preserved.
+target manifests pin verified Python 3.14-compatible dependency versions;
+source behavior and behavioral assertions are preserved. The heavy agent,
+PyTorch, ONNX, and audio stack is isolated in the root uv `voice` dependency
+group so ordinary control/CRM synchronization remains small.

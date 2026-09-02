@@ -209,6 +209,7 @@ async def test_voice_contract_exists_but_unconfigured_runtime_fails_closed() -> 
         PLATFORM_ENV="test",
         PLATFORM_SERVICE="control-api",
         AUTH_SERVICE_SECRET=SECRET,
+        VOICE_DATABASE_URL=None,
     )
     app = create_app(settings=settings, database_probe=FakeProbe())
     async with (
@@ -226,6 +227,7 @@ def test_voice_database_requires_service_assertion_secret() -> None:
         _env_file=None,
         PLATFORM_ENV="test",
         PLATFORM_SERVICE="control-api",
+        AUTH_SERVICE_SECRET=None,
         VOICE_DATABASE_URL="postgresql://voice:test@localhost/platform",
     )
 

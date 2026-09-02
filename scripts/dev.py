@@ -88,7 +88,11 @@ def _load_environment(*, create: bool = False) -> dict[str, str]:
 def _require_provider_safety(environment: dict[str, str]) -> None:
     enabled = {
         key
-        for key in ("ENABLE_REAL_TELEPHONY", "ENABLE_REAL_WHATSAPP")
+        for key in (
+            "ENABLE_REAL_TELEPHONY",
+            "ENABLE_REAL_WHATSAPP",
+            "ENABLE_REAL_VOICE_PROVIDERS",
+        )
         if environment.get(key, "false").strip().lower() != "false"
     }
     if enabled:
@@ -361,6 +365,16 @@ def bootstrap() -> None:
     print("Bootstrap complete. Run `make dev` for host hot reload.")
 
 
+def voice_bootstrap() -> None:
+    environment = _load_environment()
+    _require_provider_safety(environment)
+    _run(
+        ["uv", "sync", "--all-packages", "--locked", "--group", "voice"],
+        environment=environment,
+    )
+    print("Voice dependencies installed; all real provider flags remain disabled.")
+
+
 def dev() -> None:
     environment = _load_environment()
     _require_provider_safety(environment)
@@ -417,11 +431,13 @@ def format_code() -> None:
 
 
 def typecheck() -> None:
+    voice_bootstrap()
     _run(["pnpm", "typecheck"])
     _run(["uv", "run", "pyrefly", "check", *PYTHON_TYPE_PATHS])
 
 
 def test() -> None:
+    voice_bootstrap()
     _run(["pnpm", "test"])
     _run(["uv", "run", "pytest", "-p", "no:cacheprovider"])
 
@@ -443,7 +459,8 @@ def help_text() -> None:
     print(
         """Or-On Platform commands
   doctor           check required local tools and ports
-  bootstrap        sync, start PostgreSQL, migrate, generate, seed, and health-check
+  bootstrap        sync core dependencies, start PostgreSQL, migrate, seed, and health-check
+  voice-bootstrap  install the opt-in heavy Pipecat/audio development group
   dev              run web, control API, live-agent, and messaging-worker on the host
   stop / ps / logs manage the local Compose stack without deleting its volume
   migrate / migration-check / seed
@@ -471,6 +488,7 @@ def main() -> None:
         "help": help_text,
         "doctor": doctor,
         "bootstrap": bootstrap,
+        "voice-bootstrap": voice_bootstrap,
         "dev": dev,
         "stop": lambda: _compose_action(environment, "stop"),
         "ps": lambda: _compose_action(environment, "ps"),

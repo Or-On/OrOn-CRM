@@ -9,6 +9,9 @@ dependencies = [
   "uvicorn[standard]==0.52.4",
 ]
 
+[project.optional-dependencies]
+voice = ["oron-agent==0.1.0"]
+
 [project.scripts]
 or-on-dispatcher-runtime = "dispatcher_runtime.main:main"
 
@@ -18,6 +21,7 @@ build-backend = "uv_build"
 
 [tool.uv.sources]
 or-on-platform-integration = { workspace = true }
+oron-agent = { path = "../../../packages/py/oron-agent", editable = true }
 oron-dispatcher = { workspace = true }
 
 [tool.uv.build-backend]

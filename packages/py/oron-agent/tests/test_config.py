@@ -1,0 +1,246 @@
+import os
+
+import pytest
+from oron_agent.audio import AudioInFilter, TurnStart
+from oron_agent.config import AgentOverrides, Settings, load_settings, settings_with
+from pydantic import ValidationError
+
+
+def test_loads_required_from_env(monkeypatch):
+    monkeypatch.setenv("LIVEKIT_URL", "ws://localhost:7880")
+    monkeypatch.setenv("LIVEKIT_API_KEY", "devkey")
+    monkeypatch.setenv("LIVEKIT_API_SECRET", "secret")
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "jpost-english-avatar-dev")
+    monkeypatch.setenv("SONIOX_API_KEY", "sx")
+    st = load_settings()
+    assert st.livekit_url == "ws://localhost:7880"
+    assert st.google_cloud_project == "jpost-english-avatar-dev"
+    assert st.livekit_room  # has a default
+    assert st.tts_voice_default  # fallback when CallContext sets no voice
+    assert st.vertex_location == "global"  # overridable per deployment region
+    assert st.vertex_llm_model == "gemini-2.5-flash"
+    assert st.vertex_thinking_budget == 0
+    assert st.user_idle_secs == 7.0
+
+
+def test_the_shipped_endpointing_defaults_are_the_evaluated_ones():
+    """Read off the field defaults, not a loaded Settings: these two are the
+    turn-latency knobs a developer tunes in their own .env, and asserting the
+    instance makes the suite fail on their machine instead of on a real change."""
+    defaults = Settings.model_fields
+    assert defaults["vad_stop_secs"].default == 0.2  # what pipecat's STT p99s assume
+    assert defaults["user_speech_timeout"].default == 0.3  # was pipecat's 0.6
+
+
+def test_vertex_location_and_model_are_overridable(monkeypatch):
+    for k, v in (
+        ("LIVEKIT_URL", "ws://x"),
+        ("LIVEKIT_API_KEY", "k"),
+        ("LIVEKIT_API_SECRET", "s"),
+        ("GOOGLE_CLOUD_PROJECT", "p"),
+        ("SONIOX_API_KEY", "sx"),
+        ("VERTEX_LOCATION", "us-central1"),
+        ("VERTEX_LLM_MODEL", "gemini-2.5-pro"),
+    ):
+        monkeypatch.setenv(k, v)
+    st = load_settings()
+    assert st.vertex_location == "us-central1"
+    assert st.vertex_llm_model == "gemini-2.5-pro"
+
+
+def test_missing_google_project_raises(monkeypatch):
+    # A Google Cloud project is mandatory (LLM + TTS run on it).
+    for k in ("LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"):
+        monkeypatch.setenv(k, "x")
+    monkeypatch.setenv("ENABLE_REAL_VOICE_PROVIDERS", "true")
+    monkeypatch.setenv("SONIOX_API_KEY", "x")
+    monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
+
+
+def test_sessions_api_url_is_built_from_host_and_port(monkeypatch):
+    for k, v in (
+        ("LIVEKIT_URL", "ws://x"),
+        ("LIVEKIT_API_KEY", "k"),
+        ("LIVEKIT_API_SECRET", "s"),
+        ("GOOGLE_CLOUD_PROJECT", "p"),
+        ("SONIOX_API_KEY", "sx"),
+        ("SESSIONS_API_HOST", "oron-sessions"),
+        ("SESSIONS_API_PORT", "9000"),
+    ):
+        monkeypatch.setenv(k, v)
+    st = load_settings()
+    assert st.sessions_api_host == "oron-sessions"
+    assert st.sessions_api_port == 9000
+    assert st.sessions_api_url == "http://oron-sessions:9000"
+
+
+def test_flow_store_backend_defaults_to_file(monkeypatch):
+    for k, v in (
+        ("LIVEKIT_URL", "ws://x"),
+        ("LIVEKIT_API_KEY", "k"),
+        ("LIVEKIT_API_SECRET", "s"),
+        ("GOOGLE_CLOUD_PROJECT", "p"),
+        ("SONIOX_API_KEY", "sx"),
+    ):
+        monkeypatch.setenv(k, v)
+    from oron_flows import FlowStoreBackend
+
+    assert load_settings().flow_store_backend == FlowStoreBackend.FILE
+
+
+def test_sessions_api_key_is_configurable(monkeypatch):
+    """Without it the sessions API 401s every write, and the best-effort client
+    swallows it — so this being unset is a silent data-loss bug."""
+    for k, v in (
+        ("LIVEKIT_URL", "ws://x"),
+        ("LIVEKIT_API_KEY", "k"),
+        ("LIVEKIT_API_SECRET", "s"),
+        ("GOOGLE_CLOUD_PROJECT", "p"),
+        ("SONIOX_API_KEY", "sx"),
+        ("SESSIONS_API_KEY", "oron_secret123"),
+    ):
+        monkeypatch.setenv(k, v)
+    assert load_settings().sessions_api_key.get_secret_value() == "oron_secret123"
+
+
+def test_google_cloud_project_actually_governs_quota(monkeypatch):
+    """GOOGLE_CLOUD_PROJECT must decide where Vertex/TTS bill.
+
+    Without this, google-auth takes the quota project from the ADC file, so a
+    developer whose gcloud happens to point elsewhere runs the agent against
+    their configured project for everything except billing — which surfaces as a
+    403 "API not enabled in <some other project>" mid-call, after the greeting
+    has already been generated.
+    """
+    monkeypatch.delenv("GOOGLE_CLOUD_QUOTA_PROJECT", raising=False)
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "the-configured-one")
+    monkeypatch.setenv("LIVEKIT_URL", "ws://lk")
+    monkeypatch.setenv("LIVEKIT_API_KEY", "k")
+    monkeypatch.setenv("LIVEKIT_API_SECRET", "s")
+    monkeypatch.setenv("SONIOX_API_KEY", "x")
+
+    load_settings()
+
+    assert os.environ["GOOGLE_CLOUD_QUOTA_PROJECT"] == "the-configured-one"
+
+
+def test_an_explicit_quota_project_is_left_alone(monkeypatch):
+    """Someone deliberately splitting billing from the resource project keeps it."""
+    monkeypatch.setenv("GOOGLE_CLOUD_QUOTA_PROJECT", "billing-project")
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "resource-project")
+    monkeypatch.setenv("LIVEKIT_URL", "ws://lk")
+    monkeypatch.setenv("LIVEKIT_API_KEY", "k")
+    monkeypatch.setenv("LIVEKIT_API_SECRET", "s")
+    monkeypatch.setenv("SONIOX_API_KEY", "x")
+
+    load_settings()
+
+    assert os.environ["GOOGLE_CLOUD_QUOTA_PROJECT"] == "billing-project"
+
+
+def test_the_word_gate_ships_live_not_dormant(monkeypatch):
+    """It shipped dormant for three deploys — TURN_START was plumbed nowhere and
+    INTERRUPT_MIN_WORDS was documented as the switch, so the value was read and
+    discarded while re-triggered VAD killed generations mid-stream."""
+    for k, v in [
+        ("LIVEKIT_URL", "ws://x"),
+        ("LIVEKIT_API_KEY", "k"),
+        ("LIVEKIT_API_SECRET", "s"),
+        ("GOOGLE_CLOUD_PROJECT", "p"),
+        ("SONIOX_API_KEY", "sx"),
+    ]:
+        monkeypatch.setenv(k, v)
+    from oron_agent.config import Settings
+
+    st = Settings()
+    assert st.turn_start is TurnStart.MIN_WORDS
+    assert st.interrupt_min_words == 1
+    assert st.vad_confidence == 0.35
+    assert st.vad_min_volume == 0.35
+    assert st.audio_in_filter is AudioInFilter.RNNOISE
+
+
+def test_a_word_gate_of_zero_is_refused_rather_than_silently_being_vad(monkeypatch):
+    """`min_words=0` starts a turn on any speech — VAD wearing the name of a gate,
+    and it reads as enabled everywhere an operator would look."""
+    for k, v in [
+        ("LIVEKIT_URL", "ws://x"),
+        ("LIVEKIT_API_KEY", "k"),
+        ("LIVEKIT_API_SECRET", "s"),
+        ("GOOGLE_CLOUD_PROJECT", "p"),
+        ("SONIOX_API_KEY", "sx"),
+        ("TURN_START", "min_words"),
+        ("INTERRUPT_MIN_WORDS", "0"),
+    ]:
+        monkeypatch.setenv(k, v)
+    with pytest.raises(ValidationError, match="INTERRUPT_MIN_WORDS"):
+        Settings()
+
+
+def test_audio_front_end_knobs_are_per_call_overridable(monkeypatch):
+    for k, v in [
+        ("LIVEKIT_URL", "ws://x"),
+        ("LIVEKIT_API_KEY", "k"),
+        ("LIVEKIT_API_SECRET", "s"),
+        ("GOOGLE_CLOUD_PROJECT", "p"),
+        ("SONIOX_API_KEY", "sx"),
+    ]:
+        monkeypatch.setenv(k, v)
+    from oron_agent.config import Settings
+
+    st = Settings()
+    tuned = settings_with(
+        st, AgentOverrides(interrupt_min_words=2, audio_in_filter=AudioInFilter.NONE)
+    )
+    assert tuned.interrupt_min_words == 2
+    assert tuned.audio_in_filter is AudioInFilter.NONE
+    assert st.interrupt_min_words == 1  # original untouched
+
+
+@pytest.mark.parametrize(
+    "env_var, out_of_range",
+    [("VAD_CONFIDENCE", "5"), ("VAD_CONFIDENCE", "-0.1"), ("VAD_MIN_VOLUME", "1.5")],
+)
+def test_settings_rejects_out_of_range_vad_probability(monkeypatch, env_var, out_of_range):
+    """A probability outside [0,1] would never fire, leaving VAD deaf all deploy."""
+    for k, v in [
+        ("LIVEKIT_URL", "ws://x"),
+        ("LIVEKIT_API_KEY", "k"),
+        ("LIVEKIT_API_SECRET", "s"),
+        ("GOOGLE_CLOUD_PROJECT", "p"),
+        ("SONIOX_API_KEY", "sx"),
+    ]:
+        monkeypatch.setenv(k, v)
+    monkeypatch.setenv(env_var, out_of_range)
+    with pytest.raises(ValidationError):
+        Settings()
+
+
+def test_settings_rejects_negative_interrupt_min_words(monkeypatch):
+    for k, v in [
+        ("LIVEKIT_URL", "ws://x"),
+        ("LIVEKIT_API_KEY", "k"),
+        ("LIVEKIT_API_SECRET", "s"),
+        ("GOOGLE_CLOUD_PROJECT", "p"),
+        ("SONIOX_API_KEY", "sx"),
+    ]:
+        monkeypatch.setenv(k, v)
+    monkeypatch.setenv("INTERRUPT_MIN_WORDS", "-1")
+    with pytest.raises(ValidationError):
+        Settings()
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"vad_confidence": 5},
+        {"vad_confidence": -0.1},
+        {"vad_min_volume": 1.5},
+        {"interrupt_min_words": -1},
+    ],
+)
+def test_agent_overrides_rejects_out_of_range_values(kwargs):
+    with pytest.raises(ValidationError):
+        AgentOverrides(**kwargs)

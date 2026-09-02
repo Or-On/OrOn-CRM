@@ -1,0 +1,42 @@
+[project]
+name = "oron-agent"
+version = "0.1.0"
+description = "Retained Or-on Pipecat and LiveKit voice agent"
+requires-python = ">=3.14,<3.15"
+dependencies = [
+  # audiolab 0.5.2 removed the Graph(rate=...) API still used by pyrnnoise
+  # 0.4.3; 0.5.1 is the newest compatible stable release verified on Windows.
+  "audiolab==0.5.1",
+  "arize-phoenix-otel==0.17.1",
+  "google-cloud-storage==3.13.1",
+  "httpx==0.28.1",
+  "livekit-api==1.2.1",
+  "loguru==0.7.3",
+  "openinference-instrumentation-pipecat==2.0.3",
+  "opentelemetry-exporter-otlp-proto-grpc==1.44.0",
+  "oron-common==0.1.0",
+  "oron-flows==0.1.0",
+  "oron-hebrew==0.1.0",
+  "oron-secrets==0.1.0",
+  "oron-sessions==0.1.0",
+  "pipecat-ai[google,livekit,rnnoise,runner,silero,soniox,tracing]==1.8.1",
+  "pydantic-settings==2.15.0",
+  "python-dotenv==1.2.2",
+]
+
+[project.scripts]
+oron-agent = "oron_agent.bot:main"
+
+[build-system]
+requires = ["uv-build>=0.12.7,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+oron-common = { path = "../oron-common", editable = true }
+oron-flows = { path = "../oron-flows", editable = true }
+oron-hebrew = { path = "../oron-hebrew", editable = true }
+oron-secrets = { path = "../oron-secrets", editable = true }
+oron-sessions = { path = "../oron-sessions", editable = true }
+
+[tool.uv.build-backend]
+module-name = "oron_agent"

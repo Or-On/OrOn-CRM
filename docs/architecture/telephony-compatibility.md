@@ -22,6 +22,7 @@ starts no provider service, downloads no model, and changes no upstream file.
 | Loguru | 0.7.3 | 0.7.3 | **0.7.3** | Preserve source boundary; adapt output to structured/redacted logging. |
 | LiveKit API | 1.2.0 | 1.2.1 | **1.2.1** | Isolated Python 3.14 import passed with Pipecat's LiveKit extra. |
 | Pipecat | 1.7.0 | 1.8.1 | **1.8.1** | Latest stable declares Python >=3.11; source-relevant extras imported. Full retained agent tests remain P5-010. |
+| audiolab | transitive | 0.5.2 | **0.5.1** | Required compatibility fallback: 0.5.2 removed the `Graph(rate=...)` API used by Pipecat's pinned `pyrnnoise==0.4.3`; the retained RNNoise test failed on Windows with 0.5.2 and passed with 0.5.1. |
 | Renikud Plus | 0.3.0 | 0.5.0 | **0.5.0 with `cpu` extra** | Import passed without constructing `G2P` or downloading a model. Version 0.5 makes ONNX Runtime explicit through the CPU extra. |
 | ONNX Runtime | 1.24.4 | 1.29.0 | **1.24.4** | Pipecat 1.8.1 requires `~=1.24.3`; 1.24.4 is the newest compatible patch and imported on Python 3.14. |
 | PyTorch | 2.13.0 | 2.13.0 | **2.13.0** | CPU import passed on Python 3.14. |
@@ -57,6 +58,14 @@ environment prematurely.
 - Low-level retained package suite: 115 passed, one real-PostgreSQL test skipped
   in the ordinary run, and one external LLM evaluation skipped. The PostgreSQL
   RLS helper test then passed separately against the configured local server.
+- The completed P5-010 retained Hebrew/agent/dispatcher/voice-service suite
+  passes 349 tests. Three deployment-wiring assertions are explicitly skipped
+  until the P5-011 LiveKit/SIP/Redis Compose profile exists. Strict Pyrefly,
+  Ruff, repository-policy, and secret checks pass for the imported slice.
+- Base `uv sync --all-packages --locked` removes the heavy voice/media packages
+  and the dispatcher still imports. The explicit `voice-bootstrap` action
+  installs the locked uv `voice` group while all real provider flags remain
+  false.
 
 The imported RLS test is the only test-harness adaptation in this slice. It now
 uses the repository's `postgres`/`rls` markers, skips cleanly when no live DSN is
@@ -95,6 +104,11 @@ Package licensing and model licensing remain separate:
 - Krisp remains an optional separately licensed SDK/model and is not installed,
   bundled, or selected by this gate.
 
-Therefore P5-002 approves dependency compatibility and low-level package import,
-but model download/bundling remains blocked until P5-010 records immutable model
-revisions, hashes, notices, and redistribution decisions.
+P5-010 therefore preserves model-dependent behavior behind an operator-owned
+local-asset boundary rather than accepting or distributing a model. Renikud and
+ECAPA load only when both a local path and exact SHA-256 are configured; ECAPA
+also uses `local_files_only=True`. An absent or invalid asset disables the
+processor, and there is no network fallback. Model-enabled behavioral parity and
+any redistribution decision remain deferred until an exact approved asset has a
+recorded immutable revision, checksum, license, and notice. This does not block
+provider-free P5-010 integration and prevents accidental downloads.

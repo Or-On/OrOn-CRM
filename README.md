@@ -29,6 +29,12 @@ deduplication, shared inbox, pipelines, durable simulator campaigns, versioned
 automation runs, team/settings, notifications, scoped API keys, and the
 PostgreSQL messaging worker.
 
+Phase 5 is in progress. The retained Or-on dispatcher, Hebrew processing, and
+Pipecat voice-agent packages are now target-local. The dispatcher receives the
+retained task launcher through dependency injection, while provider execution
+and model loading remain default-off and require explicit configuration. No
+real call path is enabled by this checkpoint.
+
 It does **not** enable real WhatsApp delivery, telephony, public signup/OAuth/MFA,
 the full OpenLive protocol, general canonical flow execution, agent-profile
 persistence, or production GCP infrastructure. Planned navigation is visibly
@@ -116,6 +122,11 @@ checks real PostgreSQL readiness. The fictional operator login is written with
 restrictive permissions to ignored `.artifacts/development-login.txt`; it is
 never printed or committed.
 
+The retained Pipecat, PyTorch, Torchaudio, ONNX, and Hebrew voice stack is kept
+in the opt-in uv `voice` group so ordinary CRM/control development stays small.
+Install it with `make voice-bootstrap`; this does not download model weights or
+enable LiveKit, speech, LLM, or telephony providers.
+
 The default host workflow keeps PostgreSQL in Compose and runs the current app
 processes with hot reload. See the
 [local development runbook](docs/runbooks/local-development.md). CRM simulator
@@ -127,6 +138,7 @@ details are in the [CRM/WhatsApp runbook](docs/runbooks/crm-whatsapp-local.md).
 | --- | --- |
 | `make doctor` | Report required tools, selected versions, daemon state, and ports |
 | `make bootstrap` | Sync, start PostgreSQL, migrate, generate, seed, and health-check |
+| `make voice-bootstrap` | Install the heavy retained voice dependency group with providers disabled |
 | `make dev` | Run all current Phase 1 host processes with provider flags disabled |
 | `make stop` / `make ps` / `make logs` | Operate the non-destructive local Compose stack |
 | `make migrate` / `make migration-check` | Upgrade/check the sole Alembic lineage |
@@ -146,6 +158,7 @@ details are in the [CRM/WhatsApp runbook](docs/runbooks/crm-whatsapp-local.md).
 ```dotenv
 ENABLE_REAL_TELEPHONY=false
 ENABLE_REAL_WHATSAPP=false
+ENABLE_REAL_VOICE_PROVIDERS=false
 ```
 
 The developer runner refuses non-false values. Phase 2A contains no send/call or

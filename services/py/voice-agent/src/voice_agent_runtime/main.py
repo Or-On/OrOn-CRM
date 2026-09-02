@@ -1,45 +1,42 @@
-"""Dependency-safe placeholder lifecycle; no call behavior is implemented."""
+"""Provider-gated standalone entrypoint for the retained Or-on voice agent."""
 
 from __future__ import annotations
 
 import asyncio
-import signal
+from typing import TYPE_CHECKING
 
 from or_on_platform.config import PlatformSettings
-from or_on_platform.database import create_database_probe
 from or_on_platform.logging import configure_logging
 
+if TYPE_CHECKING:
+    from oron_agent.config import Settings
 
-async def run() -> None:
-    settings = PlatformSettings.load(require_database=True, service="voice-agent")
-    assert settings.database_url is not None
-    logger = configure_logging(
-        service="voice-agent", environment=settings.environment, level=settings.log_level
-    )
-    probe = create_database_probe(str(settings.database_url))
-    stop = asyncio.Event()
-    loop = asyncio.get_running_loop()
-    for signal_name in (signal.SIGINT, signal.SIGTERM):
-        try:
-            loop.add_signal_handler(signal_name, stop.set)
-        except NotImplementedError:
-            signal.signal(signal_name, lambda *_: loop.call_soon_threadsafe(stop.set))
+
+async def run(
+    *,
+    platform_settings: PlatformSettings | None = None,
+    agent_settings: Settings | None = None,
+) -> None:
     try:
-        if not await probe.is_ready():
-            raise RuntimeError("voice-agent is not ready: PostgreSQL is unavailable")
-        logger.info(
-            "worker_ready",
-            extra={
-                "fields": {
-                    "telephony_enabled": settings.enable_real_telephony,
-                    "calls_placed": 0,
-                }
-            },
-        )
-        await stop.wait()
-    finally:
-        await probe.close()
-        logger.info("worker_stopped")
+        from oron_agent.bot import bot, require_real_voice_providers
+        from oron_agent.config import Settings
+        from oron_hebrew import build_g2p
+    except ModuleNotFoundError as error:
+        raise RuntimeError(
+            "voice dependencies are not installed; run `uv sync --group voice`"
+        ) from error
+    platform = platform_settings or PlatformSettings.load(service="voice-agent")
+    agent = agent_settings or Settings()
+    require_real_voice_providers(agent)
+    logger = configure_logging(
+        service="voice-agent", environment=platform.environment, level=platform.log_level
+    )
+    logger.info("voice_agent_starting", extra={"fields": agent.diagnostics()})
+    g2p = build_g2p(
+        agent.renikud_model_path,
+        expected_sha256=agent.renikud_model_sha256,
+    )
+    await bot(g2p=g2p)
 
 
 def main() -> None:

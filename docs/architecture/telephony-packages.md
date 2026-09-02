@@ -6,8 +6,14 @@ no build or runtime import reaches `../or-on`.
 
 ```mermaid
 flowchart TD
-  X[oron-dispatcher] --> S[oron-sessions]
+  X[oron-dispatcher] --> A[oron-agent]
+  X --> S[oron-sessions]
   X --> C
+  A --> H[oron-hebrew]
+  A --> S
+  A --> F
+  A --> K
+  H --> C
   S[oron-sessions] --> T[oron-tenancy]
   S --> K[oron-secrets]
   S --> F[oron-flows]
@@ -31,6 +37,12 @@ flowchart TD
 - `oron-dispatcher` retains signed LiveKit webhook handling, fail-closed DID
   admission, one-agent-per-room coordination, browser rooms, active-call
   diagnostics, hangup/finalization, and the outbound LiveKit SIP adapter.
+- `oron-hebrew` retains Hebrew normalization, niqqud, number handling, audio
+  gender classification, and G2P adapters without retaining automatic model
+  downloads.
+- `oron-agent` retains the Pipecat/LiveKit media pipeline, STT/TTS/LLM
+  composition, barge-in/turn behavior, flow handlers, lifecycle persistence,
+  usage collection, and audio filtering.
 - Alembic remains the only schema authority. No package calls `create_all` or
   introduces a second migration runner.
 
@@ -65,6 +77,17 @@ flowchart TD
   key. Session persistence must succeed before bot launch, and both provider
   authorization gates plus a configured trunk are checked before lifecycle
   work; the SIP adapter repeats the gate at its lowest boundary.
+- Voice-model adapters accept only existing local assets whose bytes match an
+  explicitly configured SHA-256. Missing or invalid assets disable the optional
+  processor and never trigger a remote fetch.
+- `ENABLE_REAL_VOICE_PROVIDERS=false` is a separate default-off boundary for
+  LiveKit media, STT, TTS, and LLM construction. Provider credentials are
+  secret-typed and diagnostics expose only redacted configured/unconfigured
+  states.
+- Heavy media/native dependencies are isolated in the uv `voice` group. Base
+  workspace synchronization and dispatcher imports remain usable without that
+  group; `voice-bootstrap` installs it without enabling providers or fetching
+  models.
 
 ## Verification
 
@@ -111,3 +134,13 @@ trunk, and default-off tests run without contacting LiveKit or SIP. Alembic head
 `315710614ae5` grants `platform_voice` only the select/insert/update privileges
 needed on the existing webhook ledger; it receives no job authority or delete
 privilege.
+
+P5-010 imports the retained Hebrew and Pipecat agent packages and supplies a
+target launcher adapter. The launcher owns exactly one asyncio task per call,
+validates overrides, supports cancellation, and performs the provider preflight
+before it creates a task. Dispatcher composition injects it explicitly; the
+default-off integration test proves an admitted call is recorded as failed
+without creating provider work. The provider-free retained suite passes 349
+tests with three deployment-wiring cases explicitly deferred to P5-011. No
+model asset was downloaded, bundled, or executed, and no real provider was
+contacted.

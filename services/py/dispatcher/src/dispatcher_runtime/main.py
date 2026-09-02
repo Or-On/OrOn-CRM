@@ -21,7 +21,8 @@ def main() -> None:
         extra={
             "fields": {
                 **dispatcher_settings.diagnostics(),
-                "voice_agent_adapter": "pending-p5-010",
+                "voice_agent_adapter": "retained-launcher-available",
+                "full_runtime_composition": "pending-p5-012",
             }
         },
     )

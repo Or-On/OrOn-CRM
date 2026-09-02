@@ -3,7 +3,7 @@
 PYTHON ?= python
 RUNNER := $(PYTHON) scripts/dev.py
 
-.PHONY: help doctor bootstrap dev stop ps logs migrate migration-check migration-graph migration-sql db-contract-check db-verify-offline db-verify-live seed lint format typecheck test verify
+.PHONY: help doctor bootstrap voice-bootstrap dev stop ps logs migrate migration-check migration-graph migration-sql db-contract-check db-verify-offline db-verify-live seed lint format typecheck test verify
 
 help: ## Show the supported developer commands.
 	@$(RUNNER) help
@@ -13,6 +13,9 @@ doctor: ## Check local tool versions, Docker, and required ports.
 
 bootstrap: ## Idempotently sync dependencies, start PostgreSQL, migrate, seed, and verify health.
 	@$(RUNNER) bootstrap
+
+voice-bootstrap: ## Install the heavy retained Pipecat/audio group with providers disabled.
+	@$(RUNNER) voice-bootstrap
 
 dev: ## Run the current host-development processes with real providers disabled.
 	@$(RUNNER) dev
