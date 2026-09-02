@@ -118,7 +118,7 @@ tests with three P5-011 deployment-wiring skips; Ruff, strict Pyrefly,
 repository-policy, and secret checks pass. No provider or model network action
 occurred.
 
-The P5-011 implementation checkpoint adds a digest-pinned, opt-in Compose voice
+Checkpoint `5eef886` completed P5-011 with a digest-pinned, opt-in Compose voice
 profile: Redis 8.10.1, LiveKit Server v1.13.6, and LiveKit SIP v1.13.0. All
 containers become healthy; a read-only SDK probe successfully lists inbound
 trunks, outbound trunks, and dispatch rules, with a verified empty initial
@@ -151,7 +151,7 @@ Status values: `pending`, `active`, `complete`, `blocked`.
 | P5-008 | Telephony simulator and real-provider denial boundary | complete | `7a56c78` | CSRF/RBAC/service-auth command; deterministic PostgreSQL lifecycle/outbox/audit; replay idempotency and contact-conflict test; 39-test live gate; production-container E2E; both real-action gates tested | Keep the simulator as the default adapter and never add a fallback to real transport. |
 | P5-009 | Import/adapt dispatcher and LiveKit webhook contracts | complete | `49c1d6d` | Signed fixture/tamper/replay tests; canonical assertion/capability tests; DID/persistence/trunk/default-off tests; sole head `315710614ae5`; 41 live PostgreSQL tests; no provider call | Keep runtime not-ready until the retained P5-010 agent launcher is injected. |
 | P5-010 | Import/adapt Hebrew and Pipecat voice-agent packages | complete | `34a62e2` | 349 passed/3 explicit P5-011 skips; full Python suite 622 passed/45 intentional skips; Ruff and strict Pyrefly pass; model path/hash, secret redaction, default-off provider gate, launcher injection, base/voice dependency isolation, repository and secret guards verified | Keep all real provider execution denied while building the opt-in control-plane profile. |
-| P5-011 | LiveKit/SIP/Redis opt-in Compose voice profile | complete | implementation checkpoint | Digest pins verified; Redis/LiveKit/SIP healthy; read-only SIP lists returned 0 inbound, 0 outbound, 0 rules; Redis/SIP have no host bindings; 63 focused and 632 full Python tests pass; TypeScript strict/test/build gate passes | Keep this profile mutation-free while adding canonical DID admission APIs. |
+| P5-011 | LiveKit/SIP/Redis opt-in Compose voice profile | complete | `5eef886` | Digest pins verified; Redis/LiveKit/SIP healthy; read-only SIP lists returned 0 inbound, 0 outbound, 0 rules; Redis/SIP have no host bindings; 63 focused and 632 full Python tests pass; TypeScript strict/test/build gate passes | Keep this profile mutation-free while adding canonical DID admission APIs. |
 | P5-012 | Phone-number/DID admission and reconciliation | active | — | P5-011 proves the Redis-backed SIP API is reachable without provider mutation | Mount canonical registration/reconciliation behind RBAC, enforce non-empty ACL, and use fakes until a separately approved provider mutation. |
 | P5-013 | Voice flow catalog, validation, publishing, and adapter UI | pending | — | — | Do not claim the Phase 7 canonical compiler. |
 | P5-014 | Canonical voice campaigns and CRM audience integration | pending | — | — | Enforce consent, calling windows, retries, and concurrency. |
