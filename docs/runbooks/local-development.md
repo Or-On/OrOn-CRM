@@ -26,8 +26,11 @@ messaging-worker with host hot reload. Stop foreground processes with Ctrl+C; us
 - `MIGRATION_DATABASE_URL` uses `platform_migrator` only for operator commands
 - all published ports bind to `127.0.0.1`
 
-The runner refuses non-false provider flags. Do not add real secrets to `.env` for
-Phase 1 verification.
+Bootstrap, verification, tests, and CI refuse non-false provider flags. `make dev`
+may accept an explicitly enabled real WhatsApp flag for the gated Phase 6 path;
+telephony and AI provider flags remain refused. Follow the
+[real WhatsApp runbook](whatsapp-cloud-api.md) and keep provider secrets only in
+the ignored `.env`.
 
 ## Useful commands
 

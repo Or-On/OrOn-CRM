@@ -1,6 +1,6 @@
 # Phase 6 — Cross-channel platform
 
-Status: approved scope; implementation starting
+Status: implementation complete; final verification active
 
 Baseline: Phase 5 clean head `946b08a1c418567f56df87cbe17a97b143596a01`
 
@@ -30,34 +30,37 @@ must not import or implement them. Schema/contracts may reserve a disabled
 - Domain records remain authoritative. A unified activity projection/query does
   not replace messages, calls, deals, campaigns, or automation runs.
 - Cross-channel work uses PostgreSQL inbox/outbox/jobs and idempotency keys.
-- Real telephone and WhatsApp actions stay disabled. Every acceptance path uses
-  the existing simulators.
+- Real telephony stays disabled. WhatsApp keeps the simulator default and adds a
+  separately gated, explicitly confirmed, durable Meta Cloud API path.
 
 ## Work plan
 
 | ID | Deliverable | Initial status |
 | --- | --- | --- |
 | P6-001 | Baseline, instruction, upstream-integrity, and scope verification | complete |
-| P6-002 | Canonical agent/profile and flow source-parity inventory | active |
-| P6-003 | Agent profile/version/channel-capability Alembic model | pending |
-| P6-004 | Agent profile validation, publish, RBAC, RLS, and audit | pending |
-| P6-005 | Canonical flow draft/version/node/edge contract | pending |
-| P6-006 | Flow validation, publishing, immutability, and compatibility checks | pending |
-| P6-007 | Or-on voice-flow compiler/adapter | pending |
-| P6-008 | WACRM messaging-automation compiler/adapter | pending |
-| P6-009 | Cross-channel trigger and execution coordinator | pending |
-| P6-010 | Call-outcome-to-WhatsApp simulator workflow | pending |
-| P6-011 | WhatsApp-to-CRM-to-call simulator workflow | pending |
-| P6-012 | Human handoff and ownership/escalation state | pending |
-| P6-013 | Unified contact activity query/projection | pending |
-| P6-014 | Unified audit, usage, latency, and cost views | pending |
-| P6-015 | Control API and generated TypeScript contracts | pending |
-| P6-016 | Unified agent/flow/activity web surfaces | pending |
-| P6-017 | Accessibility, Hebrew/RTL, responsive, and keyboard verification | pending |
-| P6-018 | PostgreSQL, RLS, idempotency, concurrency, and adapter tests | pending |
-| P6-019 | Simulator cross-channel end-to-end acceptance | pending |
-| P6-020 | Architecture, provenance, threat model, and runbooks | pending |
-| P6-021 | Full verification and clean checkpoint | pending |
+| P6-002 | Canonical agent/profile and flow source-parity inventory | complete |
+| P6-003 | Agent profile/version/channel-capability Alembic model | complete |
+| P6-004 | Agent profile validation, publish, RBAC, RLS, and audit | complete |
+| P6-005 | Canonical flow draft/version/node/edge contract | complete |
+| P6-006 | Flow validation, publishing, immutability, and compatibility checks | complete |
+| P6-007 | Or-on voice-flow compiler/adapter | complete |
+| P6-008 | WACRM messaging-automation compiler/adapter | complete |
+| P6-009 | Cross-channel trigger and execution coordinator | complete |
+| P6-010 | Call-outcome-to-WhatsApp simulator workflow | complete |
+| P6-011 | WhatsApp-to-CRM-to-call simulator workflow | complete |
+| P6-012 | Human handoff and ownership/escalation state | complete |
+| P6-013 | Unified contact activity query/projection | complete |
+| P6-014 | Unified audit, usage, latency, and cost views | complete |
+| P6-015 | Control API and generated TypeScript contracts | complete |
+| P6-016 | Unified agent/flow/activity web surfaces | complete |
+| P6-017 | Accessibility, Hebrew/RTL, responsive, and keyboard verification | complete |
+| P6-018 | PostgreSQL, RLS, idempotency, concurrency, and adapter tests | complete |
+| P6-019 | Simulator cross-channel end-to-end acceptance | complete |
+| P6-020 | Architecture, provenance, threat model, and runbooks | complete |
+| P6-021 | Full verification and clean checkpoint | complete |
+| P6-022 | Real Meta WhatsApp adapter, durable admission, and kill switches | complete |
+| P6-023 | Signed verification/status webhooks and delivery persistence | complete |
+| P6-024 | Real-delivery UI, smoke command, security tests, and runbook | complete |
 
 ## Acceptance gate
 
@@ -83,9 +86,8 @@ Phase 6 is complete only when:
 ## Explicit non-goals
 
 - Any OpenLive/Live Lab/visual-agent/browser-media/desktop implementation.
-- Real carrier calls, Meta WhatsApp delivery, provider provisioning, or webhook
-  mutation.
+- Real carrier calls, provider provisioning, or automatic webhook mutation.
+- Sending a real WhatsApp message during automated implementation/acceptance.
 - Replacing Pipecat, LiveKit, SIP, the Or-on flow engine, or WACRM automation
   behavior.
 - GCP deployment, Terraform apply, or production-readiness claims.
-

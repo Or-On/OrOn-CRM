@@ -13,8 +13,8 @@ Last updated: 2026-09-02 (Asia/Jerusalem)
 - Phase 3 status: **COMPLETE**
 - Phase 4 status: **COMPLETE**
 - Phase 5 status: **COMPLETE — SIMULATOR-FIRST ACCEPTANCE PASSED**
-- Phase 6 status: **IMPLEMENTATION STARTING — OPENLIVE DEFERRED**
-- Active task: P6-002 — canonical agent/profile and flow parity inventory
+- Phase 6 status: **COMPLETE — CROSS-CHANNEL + REAL WHATSAPP GATES PASSED; OPENLIVE DEFERRED**
+- Active task: Phase 6 complete; manually configure/authorize the Meta development account before the first real send
 - Phase 2B clean baseline commit: `830a8371836ea7922fca5c320624bf3bd32ec229`
 - Phase 3 exact baseline commit: `9ca3a022c2fb18a5d416b39aa7d1404f7910ae1b`
 - Phase 4 exact baseline commit: `fdaabedfe0c6dd3586261a338f2fd82f904023d8`
@@ -35,8 +35,15 @@ messaging agent/flow adapters. The authoritative scope is
 | ID | Task | Status | Commit | Verification evidence | Next exact task |
 | --- | --- | --- | --- | --- | --- |
 | P6-001 | Baseline, instruction, upstream-integrity, and scope verification | complete | preparation checkpoint | Clean Phase 5 baseline `946b08a`; all locked upstreams clean; roadmap reordered by explicit user direction | Inventory retained voice and messaging profile/flow semantics. |
-| P6-002 | Canonical agent/profile and flow source-parity inventory | active | — | Phase 5 voice and Phase 4 messaging contracts identified; detailed compatibility matrix pending | Inspect actual retained models, adapters, migrations, and fixtures before schema design. |
-| P6-003–P6-021 | Canonical schema, adapters, workflows, UI, tests, documentation, and full gate | pending | — | See authoritative Phase 6 plan | Begin only after P6-002 fixes the compatibility contract. |
+| P6-002 | Canonical agent/profile and flow source-parity inventory | complete | `7fb1b74` | Retained Or-on voice and WACRM messaging semantics mapped to one versioned contract; OpenLive excluded | Complete. |
+| P6-003–P6-006 | Canonical agent/flow schema, validation, publishing, immutability, RBAC, RLS, and audit | complete | `a6aa0c1`, `7fb1b74` | Two generated Alembic revisions; one head; live PostgreSQL catalog/RLS/immutability tests pass | Complete. |
+| P6-007–P6-009 | Retained voice/messaging adapters and cross-channel coordinator | complete | `7fb1b74` | Deterministic channel-filtered adapters and durable orchestration commands pass TypeScript/Python tests | Complete. |
+| P6-010–P6-014 | Cross-channel simulator workflows, handoff, activity, usage, latency, and cost | complete | `7fb1b74` | PostgreSQL replay/tenant/concurrency tests and simulator UI/API tests pass | Complete. |
+| P6-015–P6-017 | Control API contracts and accessible responsive operator surfaces | complete | `7fb1b74`, `10ae55f` | Generated OpenAPI/client, strict typecheck, UI tests, and Next.js 16.3.3 production build pass | Complete. |
+| P6-018–P6-021 | Database/end-to-end verification, architecture, provenance, and clean checkpoint | complete | Phase 6 checkpoint | 44 live PostgreSQL tests, 636 offline Python tests, all TypeScript suites, lint/type/build/guards pass; OpenLive stays deferred | Preserve the checkpoint and use the documented real-provider runbook. |
+| P6-022 | Real Meta adapter, durable admission, consent/window/idempotency, and dual kill switches | complete | `956cf75` | Mocked 400/401/403/429/5xx/timeout/success tests; no network call; worker persists provider IDs outside request transactions | Complete. |
+| P6-023 | GET verification, exact-raw-body POST signature, status ingestion, and deduplication | complete | `956cf75` | API/parser tests and live durable worker test prove signed duplicate delivery updates once | Complete. |
+| P6-024 | Real-delivery UI, explicit confirmation, protected smoke command, and runbook | complete | `10ae55f`, Phase 6 docs checkpoint | Simulator remains default; REAL path is unmistakable and double-confirmed; smoke command is manual-only | User must finish Meta Dashboard configuration before the first authorized send. |
 
 ## Phase 5 implementation state
 

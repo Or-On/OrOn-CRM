@@ -1,6 +1,6 @@
 # ADR 0008: Unified agent profile
 
-- Status: Accepted architectural direction; implementation deferred
+- Status: Accepted; Phase 6 foundation implemented
 - Date: 2026-08-31
 - Owners: Product architecture
 
@@ -33,5 +33,6 @@ profile whose requested behavior is unsupported by a channel.
 
 ## Verification
 
-Future schema-version, immutability, capability-validation, secret-reference, and
-adapter parity tests.
+Phase 6 live PostgreSQL tests cover tenant RLS, channel constraints, and
+published-version immutability. Cross-channel compiler tests prove the voice and
+messaging adapter shapes. OpenLive capability and execution remain deferred.

@@ -37,10 +37,21 @@ transcript/outcome/artifact/usage/latency views, and a contact call action backe
 by canonical PostgreSQL. Provider execution and model loading remain default-off;
 no real call path is enabled.
 
-It does **not** enable real WhatsApp delivery or telephony, public signup/OAuth/MFA,
-the full OpenLive protocol, general canonical flow execution, agent-profile
-persistence, or production GCP infrastructure. Planned navigation is visibly
-unavailable rather than presented as finished functionality.
+Phase 6 now provides the cross-channel control plane: tenant-scoped immutable
+agent versions, one canonical voice/WhatsApp flow contract with deterministic
+retained-engine adapters, idempotent PostgreSQL simulator jobs, consent-aware
+channel transitions, race-safe human handoff, safe contact activity, and honest
+usage/latency/unpriced-cost reporting. The unified shell exposes these under
+**Agents & flows**, and FastAPI OpenAPI generates the cross-language validation
+client. WhatsApp additionally has a simulator-default Meta Cloud API adapter:
+real sends are explicitly selected and confirmed, durably queued in PostgreSQL,
+processed outside database transactions, and updated by raw-body-verified,
+deduplicated status webhooks.
+
+It does **not** enable real WhatsApp by default or any real telephony, public signup/OAuth/MFA,
+OpenLive/Live Lab/visual-agent execution, or production GCP infrastructure.
+OpenLive is deliberately reserved for the final integration phase. Planned
+navigation is visibly unavailable rather than presented as finished functionality.
 
 ## Source systems
 
@@ -83,7 +94,7 @@ services/py/                      control-api, dispatcher, voice-agent boundarie
 services/ts/                      live-agent and messaging-worker boundaries
 packages/py/platform-integration  new cross-system Python foundation
 packages/ts/                      UI, contracts, client, config, observability, integration
-db/alembic/                       sole 31-revision migration graph/head
+db/alembic/                       sole 36-revision migration graph/head
 db/bootstrap/                     local role bootstrap, not schema migration
 db/contracts/                     consumer-only schema expectation manifest
 db/importers/                     isolated one-time legacy import tools
@@ -133,6 +144,8 @@ The default host workflow keeps PostgreSQL in Compose and runs the current app
 processes with hot reload. See the
 [local development runbook](docs/runbooks/local-development.md). CRM simulator
 details are in the [CRM/WhatsApp runbook](docs/runbooks/crm-whatsapp-local.md).
+Real Meta setup and the protected smoke command are documented in the
+[Meta WhatsApp runbook](docs/runbooks/whatsapp-cloud-api.md).
 The opt-in, no-call LiveKit/SIP setup is in the
 [voice control-plane runbook](docs/runbooks/voice-control-plane.md).
 
@@ -145,7 +158,7 @@ The opt-in, no-call LiveKit/SIP setup is in the
 | `make voice-bootstrap` | Install the heavy retained voice dependency group with providers disabled |
 | `make voice-up` / `make voice-down` | Start/stop the private Redis/LiveKit/SIP control plane without enabling a carrier path |
 | `make voice-check` | Read-only list SIP control-plane resources; never creates or mutates provider state |
-| `make dev` | Run all current Phase 1 host processes with provider flags disabled |
+| `make dev` | Run host processes; simulator-default, with only explicitly configured gated WhatsApp allowed |
 | `make stop` / `make ps` / `make logs` | Operate the non-destructive local Compose stack |
 | `make migrate` / `make migration-check` | Upgrade/check the sole Alembic lineage |
 | `make migration-graph` / `make migration-sql` | Inspect the graph and deterministic PostgreSQL SQL offline |
@@ -167,8 +180,10 @@ ENABLE_REAL_WHATSAPP=false
 ENABLE_REAL_VOICE_PROVIDERS=false
 ```
 
-The developer runner refuses non-false values. Phase 2A contains no send/call or
-webhook-configuration path. Never commit `.env`, service-account JSON, provider
+Verification/bootstrap refuse non-false values. Host `make dev` accepts real
+WhatsApp only when explicitly configured; each UI send still requires consent,
+selection, acknowledgement, and confirmation, while the worker checks the flag
+again. Never commit `.env`, service-account JSON, provider
 tokens, keys, or secrets; diagnostics and logs must redact sensitive values.
 
 ## Known limitations

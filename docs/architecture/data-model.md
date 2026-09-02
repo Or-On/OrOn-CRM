@@ -81,3 +81,32 @@ may keep a null flow; new control-API campaigns require an existing visible
 published flow. Audience queries require active contacts, explicit `granted`
 consent, and a usable E.164 phone/WhatsApp identity. High-volume call lists keep
 the existing `(tenant_id, created_at, session_id)` cursor index.
+# Phase 6 cross-channel additions
+
+`agents.agent_profiles` is the tenant-owned stable identity. Its
+`agent_profile_versions` children contain prompt, locale, model reference,
+channel capabilities, tool/knowledge/channel/escalation configuration, validation,
+and publication state. Published versions are trigger-protected from update and
+delete. Both tables use forced tenant RLS.
+
+`automation.flow_versions.agent_profile_version_id` links a flow execution to an
+immutable agent release. `compiled_adapters` stores deterministic retained-engine
+artifacts, while `idempotency_key` on `flow_runs` prevents replay duplication.
+
+`automation.handoffs` records a contact-scoped human escalation with optional
+flow, conversation, and voice-session references. Tenant/key uniqueness and
+conditional state transitions make request and assignment replay safe.
+
+`platform.contact_activity` is a `security_invoker` union view over domain-owned
+messages, calls, deals, automation runs, campaign recipients, and handoffs. It is
+not an authoritative event table and contains no customer content or secrets.
+## Phase 6 real WhatsApp delivery additions
+
+Alembic `a1a71d1f7a03` adds WhatsApp consent/opt-out state to canonical contacts,
+a server-owned customer-service-window expiry to conversations, and
+`messaging.outbound_requests`. The request references the existing message,
+conversation, channel, recipient identity, actor, tenant, and durable job rather
+than duplicating the phone or body into a queue payload. Meta channel JSON stores
+only non-secret resource identifiers and the selected Graph version. Forced RLS,
+explicit foreign keys, tenant idempotency, real-confirmation checks, and provider
+message uniqueness apply.

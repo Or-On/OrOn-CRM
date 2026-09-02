@@ -1,6 +1,6 @@
 # ADR 0007: Canonical flow graph
 
-- Status: Accepted architectural direction; implementation deferred
+- Status: Accepted; Phase 6 foundation implemented
 - Date: 2026-08-31
 - Owners: Product architecture
 
@@ -22,9 +22,13 @@ contract covers its supported behavior.
 
 ## Consequences
 
-Phase 1 defines direction only. Phase 6 owns the complete model/adapters. UI editor
-selection remains evidence-based and can reuse both source component sets.
+Phase 6 persists the canonical contract and deterministic compiled adapters in
+the existing Alembic-owned `automation.flow_*` lineage. The retained engines
+remain execution authorities. A richer visual editor is deferred; Phase 6 ships
+a bounded authoring template and validation API rather than rewriting either
+source editor.
 
 ## Verification
 
-Future source fixture compilers, graph validation tests, and cross-channel E2E.
+TypeScript and Python contract fixtures, immutable PostgreSQL versions, replay
+tests, simulator workflows, and the generated OpenAPI client are required gates.

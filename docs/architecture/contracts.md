@@ -43,6 +43,14 @@ read-only reconciliation, the typed component catalog, flow list/validation/
 immutable publishing, campaign list/create/simulator run, and session detail.
 All browser mutations remain same-origin and all control routes require a
 short-lived `voice:read` or `voice:write` service assertion.
+
+Phase 6 adds `POST /api/v1/orchestration/flows/validate`. It accepts the
+canonical `1.0` graph, requires an `orchestration:write` service assertion, and
+returns deterministic `oron-flow.v1` and `wacrm-automation.v1` adapter payloads.
+Its Pydantic/OpenAPI representation generates the TypeScript client and is
+freshness-checked. Tenant state mutations use the authenticated same-origin BFF
+and Alembic-owned PostgreSQL records; this contract endpoint performs no provider
+action.
 request returns `created=true`; a replay returns the same deterministic session
 with `created=false`. Reusing the key for another contact is a conflict.
 
@@ -99,3 +107,13 @@ TypeScript database model is generated in Phase 2A because no TypeScript
 repository adapter consumes these tables yet. When one does, generated types
 will consume this Alembic-owned schema and receive a freshness check; they will
 not gain migration authority.
+## Phase 6 Meta WhatsApp boundary
+
+The same-origin Inbox POST accepts an explicit `provider` (`simulator` default or
+`meta`) and `kind` (`text` or `template`). Meta admission additionally requires
+`confirmReal=true`; it returns a durable request/message identifier and never
+waits on Meta. The Cloud API adapter posts only to the configured
+`/{WHATSAPP_PHONE_NUMBER_ID}/messages` edge. Webhook GET uses the configured
+verify token; webhook POST authenticates the exact raw body before converting
+text/status envelopes into durable events. These provider payloads are adapter
+contracts, not a second database schema authority.

@@ -2,7 +2,7 @@
 
 Status: living architecture threat model
 
-Last reviewed: 2026-09-02 (Phase 5 simulator boundary)
+Last reviewed: 2026-09-02 (Phase 6 WhatsApp provider boundary)
 
 Scope: Phase 1 foundation and the explicitly planned unified platform
 
@@ -138,10 +138,53 @@ until their boundary validates identity, integrity, authorization, type, and siz
   trusted feature flag and explicit per-action approval are present. No real
   provider adapter is connected to the simulator route.
 
+## Implemented Phase 6 cross-channel controls
+
+- Agent and flow records use forced tenant RLS; published versions are immutable.
+- Only `voice` and `whatsapp` are executable capabilities. OpenLive is rejected
+  and remains a final-phase integration.
+- Same-origin mutations require the existing authenticated session, RBAC,
+  Origin/Fetch-Metadata checks, and CSRF token.
+- Cross-channel demonstrations write literal simulator jobs. The separate Inbox
+  Meta path requires an explicit provider selection and cannot be selected as a
+  fallback.
+- Call follow-up requires a terminal contact-linked retained session. A
+  WhatsApp-triggered call derives its contact from the tenant-scoped conversation
+  and requires explicit voice consent.
+- Handoff requests are idempotent and status transitions are compare-and-set;
+  concurrent accept tests prove one winner.
+- The activity view invokes source-table RLS and exposes only safe identifiers,
+  statuses, timing, and aggregate metadata—not bodies, transcripts, prompts,
+  phone numbers, or credentials.
+- Audit records cover agent/flow create and publish, simulator queueing, and
+  handoff state changes without storing customer content or secrets.
+- Monetary cost is never inferred from incomplete price data; unpriced usage is
+  shown explicitly.
+- Real WhatsApp admission and the lowest Meta adapter independently enforce the
+  default-off kill switch. Admission also requires RBAC, CSRF/origin checks,
+  explicit UI plus browser confirmation, tenant idempotency, active contact,
+  granted consent, no opt-out, and strict E.164.
+- Free-form text fails closed outside the server-maintained 24-hour customer
+  service window. Templates are sent through Meta's template payload; Meta's
+  approval policy is not bypassed.
+- Meta calls run after the durable job/load transaction ends. Timeout and
+  transient retries are bounded; errors expose only safe codes. Logs/audit/job
+  payloads omit tokens, app secrets, bodies, and phone numbers.
+- GET webhook verification uses an env-only token. POST signatures cover exact
+  raw bytes, and provider events are persisted/deduplicated before acknowledgement.
+  Status application is tenant-scoped and monotonic.
+
 ## Planned controls
 
-Public signup, OAuth/OIDC, MFA/WebAuthn, self-service recovery, domain-specific
-object authorization, provider signature/replay handling, full WebSocket session
+The 2026-09-02 dependency scan reports high-severity
+`GHSA-8mgp-746c-j5xp` in transitive `nltk==3.10.3`, with no patched release
+available. The affected model-artifact APIs are not called by the platform and
+no caller-controlled NLTK model path is accepted. This is a time-bounded
+non-exploitability exception, not a clean scan: review weekly and upgrade as
+soon as an upstream patched stable release is compatible. Next review:
+2026-09-09; exception owner: platform security.
+
+Public signup, OAuth/OIDC, MFA/WebAuthn, self-service recovery, full WebSocket session
 binding, object scanning,
 service identities, encrypted credential persistence, backup/restore, rate limits,
 abuse controls, and production telemetry are not implemented in Phase 1. Each is
