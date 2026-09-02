@@ -45,6 +45,8 @@ export function parseCanonicalFlow(value: unknown): CanonicalFlow {
     !Array.isArray(record.edges)
   )
     throw new TypeError("flow must use canonical schema version 1.0");
+  if (record.nodes.length > 100 || record.edges.length > 200)
+    throw new TypeError("flow exceeds the supported size");
   const channels = record.channels.map((channel) => {
     if (
       typeof channel !== "string" ||
@@ -59,6 +61,7 @@ export function parseCanonicalFlow(value: unknown): CanonicalFlow {
     const candidate = node as Readonly<Record<string, unknown>>;
     if (
       typeof candidate.id !== "string" ||
+      !/^[\w-]{1,64}$/u.test(candidate.id) ||
       typeof candidate.type !== "string" ||
       !flowNodeTypes.includes(candidate.type as FlowNodeType)
     )
@@ -75,6 +78,15 @@ export function parseCanonicalFlow(value: unknown): CanonicalFlow {
     const encoded = JSON.stringify(configuration ?? {});
     if (encoded.length > 64_000)
       throw new TypeError("node configuration is too large");
+    JSON.parse(encoded, (key: string, entry: unknown) => {
+      if (
+        /^(?:access_?token|api_?key|app_?secret|password|private_?key|secret)$/iu.test(
+          key,
+        )
+      )
+        throw new TypeError("credentials must never be embedded in flows");
+      return entry;
+    });
     return {
       id: candidate.id,
       type: candidate.type as FlowNodeType,
@@ -360,6 +372,7 @@ export async function createCanonicalFlowDraft(
   agentProfileVersionId: string,
   flow: CanonicalFlow,
 ): Promise<string> {
+  flow = parseCanonicalFlow(flow);
   const validation = validateCanonicalFlow(flow);
   if (!validation.valid)
     throw new TypeError(
@@ -551,6 +564,7 @@ export async function queueWhatsAppTriggeredCall(
   actorUserId: string,
   conversationId: string,
   idempotencyKey: string,
+  voiceFlow?: { readonly flowId: string; readonly flowVersion: number },
 ): Promise<SimulatedCommand> {
   const eligible = await sql<{ contact_id: string; eligible: boolean }[]>`
     SELECT conversation.contact_id, (contact.voice_consent = 'granted'
@@ -570,7 +584,12 @@ export async function queueWhatsAppTriggeredCall(
     "cross_channel.voice_call.simulated",
     candidate.contact_id,
     idempotencyKey,
-    { contactId: candidate.contact_id, conversationId, actorUserId },
+    {
+      contactId: candidate.contact_id,
+      conversationId,
+      actorUserId,
+      ...voiceFlow,
+    },
   );
 }
 

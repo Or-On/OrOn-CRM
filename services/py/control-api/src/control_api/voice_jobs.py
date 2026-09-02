@@ -16,6 +16,7 @@ from sqlalchemy import text
 
 from control_api.auth import ServicePrincipal
 from control_api.voice import PostgresVoiceRepository, SimulatedCallRequest
+from control_api.voice_flow_adapter import adapt_retained_voice_flow
 
 
 class VoiceSimulationPayload(BaseModel):
@@ -25,6 +26,8 @@ class VoiceSimulationPayload(BaseModel):
     contactId: UUID
     conversationId: UUID
     actorUserId: UUID
+    flowId: UUID | None = None
+    flowVersion: int | None = None
 
 
 class IneligibleSimulation(ValueError):
@@ -75,6 +78,21 @@ async def consume_voice_simulation(repository: PostgresVoiceRepository, worker_i
                 )
                 if not eligible:
                     raise IneligibleSimulation
+                retained_flow = None
+                if payload.flowId is not None or payload.flowVersion is not None:
+                    if payload.flowId is None or payload.flowVersion is None:
+                        raise IneligibleSimulation
+                    spec = await database.scalar(
+                        text(
+                            "SELECT spec FROM public.flows WHERE flow_id=:id AND version=:version"
+                        ),
+                        {"id": payload.flowId, "version": payload.flowVersion},
+                    )
+                    if spec is None:
+                        raise IneligibleSimulation
+                    retained_flow = adapt_retained_voice_flow(
+                        payload.flowId, payload.flowVersion, spec
+                    )
                 principal = ServicePrincipal(
                     user_id=payload.actorUserId,
                     tenant_id=tenant_id,
@@ -89,6 +107,7 @@ async def consume_voice_simulation(repository: PostgresVoiceRepository, worker_i
                         idempotency_key=f"cross-channel:{job_id}",
                     ),
                     transaction=database,
+                    retained_flow=retained_flow,
                 )
         except ValidationError, IneligibleSimulation:
             permanent = True

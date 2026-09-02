@@ -3,6 +3,7 @@ import postgres, { type Sql } from "postgres";
 import {
   deliverSimulatorBroadcastRecipient,
   deliverSimulatedCallFollowup,
+  advanceCanonicalSimulation,
   ingestWhatsAppInbound,
   ingestWhatsAppStatus,
   parseStoredWhatsAppEnvelope,
@@ -105,7 +106,25 @@ async function processJob(
         FOR UPDATE
       `;
       if (owned[0] === undefined) return;
-      if (job.job_type === "cross_channel.whatsapp_followup.simulated") {
+      if (
+        job.job_type === "cross_channel.flow.simulated" &&
+        job.reference_id !== null
+      ) {
+        if (JSON.stringify(job.payload) !== '{"mode":"simulator"}')
+          throw new TypeError("invalid flow simulator mode");
+        const completed = await advanceCanonicalSimulation(
+          transaction,
+          job.reference_id,
+        );
+        if (!completed) {
+          // Waiting on another durable action is polling, not a failed attempt.
+          // A persisted 15-minute run deadline bounds this path.
+          await transaction`UPDATE ops.jobs SET status='queued', attempts=GREATEST(0,attempts-1),
+            available_at=CURRENT_TIMESTAMP+INTERVAL '2 seconds', locked_at=NULL, locked_by=NULL,
+            updated_at=CURRENT_TIMESTAMP WHERE id=${job.id}::uuid AND locked_by=${workerId}`;
+          return;
+        }
+      } else if (job.job_type === "cross_channel.whatsapp_followup.simulated") {
         await deliverSimulatedCallFollowup(
           transaction,
           job.id,
@@ -141,6 +160,18 @@ async function processJob(
       await transaction`
         SELECT ops.fail_job(${job.id}::uuid, ${workerId}, ${reason}, 5)
       `;
+      if (
+        job.job_type === "cross_channel.flow.simulated" &&
+        job.reference_id !== null
+      ) {
+        await transaction`UPDATE automation.flow_runs SET status='failed', error_safe='simulation_action_failed',
+          completed_at=CURRENT_TIMESTAMP WHERE id=${job.reference_id}::uuid
+          AND EXISTS(SELECT 1 FROM ops.jobs WHERE id=${job.id}::uuid AND status='dead')`;
+        await transaction`UPDATE automation.flow_step_runs SET status='failed',
+          error_safe='simulation_action_failed', completed_at=CURRENT_TIMESTAMP
+          WHERE flow_run_id=${job.reference_id}::uuid AND status IN ('running','waiting')
+          AND EXISTS(SELECT 1 FROM ops.jobs WHERE id=${job.id}::uuid AND status='dead')`;
+      }
     });
   }
 }

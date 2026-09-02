@@ -40,10 +40,37 @@ adapters; voice-only and message-only nodes appear only in the corresponding
 adapter. The compiled artifact is persisted with the canonical flow version.
 Published profile and flow versions are immutable PostgreSQL records.
 
-These compiled artifacts currently prove a deterministic channel-specific shape,
-not execution parity with the retained engines. P6-007/P6-008 remain open for
-configuration preservation and executable adapter integration; do not advertise
-full canonical-graph execution yet.
+Publication now validates actionable configuration and one reachable, acyclic,
+unambiguous path per channel (at most 100 nodes / 200 edges). Execution follows
+edges, not the sorted artifact array. Unsupported branching, disconnected nodes,
+unknown action options and embedded credential fields fail closed. The Python
+validation endpoint remains a structural contract check; the BFF publication
+gate also checks action configuration and retained voice references.
+
+`cross_channel.flow.simulated` is a durable coordinator over existing action
+ports, not a replacement voice or messaging engine. It pins the published
+canonical/agent versions, rechecks active flow-management membership, applies
+allow-listed CRM fields, queues a child message/call, persists `waiting`, and
+resumes only after child success. A failed child stops the run before handoff.
+Polling does not consume retry attempts; a persisted 15-minute deadline bounds
+the simulator. Duplicate admission keys are serialized per tenant and must match
+the original input. Run/step states are visible in **Automations**.
+
+Voice actions reference an exact retained `public.flows` UUID/version. The
+adapter loads the frozen `oron_flows.FlowSpec`, validates identity/version and
+never re-expands a published composition. The local consumer records simulator
+session/event effects, not real audio. A separate provider-free parity test feeds
+this same adapter output to the **retained Pipecat binder**, traverses its handler
+and verifies Hebrew prompts and terminal actions. No carrier/LLM/audio execution
+is claimed by the simulator.
+
+Messaging retains WACRM `{{vars.key}}` interpolation and numeric template
+parameter ordering, using existing canonical CRM/WhatsApp action ports. Object
+parameters are rejected rather than stringified ambiguously. This is the
+accepted six-node Phase 6 subset, not full WACRM engine parity: waits,
+conditions, outbound HTTP, parallel branches and advanced source actions remain
+unsupported. Legacy empty manual proofs remain available; nonempty canonical
+flows cannot use the old immediate-success manual-run shortcut.
 
 The FastAPI `POST /api/v1/orchestration/flows/validate` contract provides the
 cross-language validation/adapter shape and generates the TypeScript client from
@@ -92,7 +119,8 @@ It never reads `.env`, changes existing runtime-role passwords, processes the
 development queue, or seeds over the development login. Admission and worker
 connections use PostgreSQL startup `SET ROLE` privileges, asserted in the test;
 they do not exercise production login credential provisioning. Provider spies
-fail if invoked. Ordinary offline tests skip this explicitly opt-in suite.
+fail if a real provider is invoked; template tests use the local simulator.
+Ordinary offline tests skip this explicitly opt-in suite.
 
 ## Activity, usage, and cost
 

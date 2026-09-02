@@ -14,7 +14,7 @@ Last updated: 2026-09-02 (Asia/Jerusalem)
 - Phase 4 status: **COMPLETE**
 - Phase 5 status: **COMPLETE — SIMULATOR-FIRST ACCEPTANCE PASSED**
 - Phase 6 status: **IN PROGRESS — WORKER COMPLETION AND RUNTIME PARITY; OPENLIVE DEFERRED**
-- Active task: P6-011 worker complete; verify retained-runtime adapters and final Phase 6 acceptance
+- Active task: Final Phase 6 acceptance and clean checkpoint; both simulator paths implemented
 - Phase 2B clean baseline commit: `830a8371836ea7922fca5c320624bf3bd32ec229`
 - Phase 3 exact baseline commit: `9ca3a022c2fb18a5d416b39aa7d1404f7910ae1b`
 - Phase 4 exact baseline commit: `fdaabedfe0c6dd3586261a338f2fd82f904023d8`
@@ -37,9 +37,9 @@ messaging agent/flow adapters. The authoritative scope is
 | P6-001 | Baseline, instruction, upstream-integrity, and scope verification | complete | preparation checkpoint | Clean Phase 5 baseline `946b08a`; all locked upstreams clean; roadmap reordered by explicit user direction | Inventory retained voice and messaging profile/flow semantics. |
 | P6-002 | Canonical agent/profile and flow source-parity inventory | complete | `7fb1b74` | Retained Or-on voice and WACRM messaging semantics mapped to one versioned contract; OpenLive excluded | Complete. |
 | P6-003–P6-006 | Canonical agent/flow schema, validation, publishing, immutability, RBAC, RLS, and audit | complete | `a6aa0c1`, `7fb1b74` | Two generated Alembic revisions; one head; live PostgreSQL catalog/RLS/immutability tests pass | Complete. |
-| P6-007–P6-009 | Retained voice/messaging adapters and cross-channel coordinator | in progress | `7fb1b74` | Deterministic channel-filtered artifacts exist; they do not yet prove execution through retained engines | Verify configuration preservation and runtime parity. |
+| P6-007–P6-009 | Retained voice/messaging adapters and cross-channel coordinator | complete for accepted six-node simulator subset | successor to `7f6881a` | Frozen Or-on FlowSpec/native Pipecat binder parity; WACRM interpolation/template ordering; twelve isolated worker tests prove ordered actions, durable wait/resume, replay, actor revocation, deadline and child failures | Final consolidated acceptance. |
 | P6-010 | Call-outcome-to-WhatsApp simulator workflow | complete | successor to `34a14ac` | Worker now consumes the job atomically; four isolated PostgreSQL tests cover runtime-role RLS, concurrency/replay, consent/opt-out, malformed mode and foreign-tenant contact; workspace tests/typecheck/build pass | P6-011 voice-job consumer. |
-| P6-011 | WhatsApp-to-CRM-to-call simulator workflow | complete | successor to `7a9657f` | Nine isolated PostgreSQL consumer tests and cross-language inbound→CRM→call→follow-up test pass; simulator sessions/events/outbox and completion share one transaction | Retained adapter execution parity and full acceptance. |
+| P6-011 | WhatsApp-to-CRM-to-call simulator workflow | complete | `7f6881a`, successor | Ten isolated PostgreSQL consumer tests and cross-language inbound→CRM→call→follow-up test pass; simulator sessions/events/outbox and completion share one transaction; replay also binds frozen flow identity/version | Final consolidated acceptance. |
 | P6-012–P6-014 | Handoff, activity, usage, latency, and cost | implemented | `7fb1b74` | Existing domain/API tests; cost intentionally unpriced | Recheck in final cross-channel end-to-end acceptance. |
 | P6-015–P6-017 | Control API contracts and accessible responsive operator surfaces | complete | `7fb1b74`, `10ae55f` | Generated OpenAPI/client, strict typecheck, UI tests, and Next.js 16.3.3 production build pass | Complete. |
 | P6-018–P6-021 | Database/end-to-end verification, architecture, provenance, and clean checkpoint | reopened | successor to `34a14ac` | Earlier suite results did not exercise both queued cross-channel job consumers; previous completion claim was too broad | Finish remaining consumers/adapters before final acceptance. |
@@ -623,7 +623,7 @@ file precedence and provider flags remain false.
 
 ## Next exact task
 
-Prepare an explicit Phase 6 scope for the OpenLive live-agent/Live Lab
-integration. Begin with locked-source protocol, provider-harness, browser-local
-speech, WebSocket authentication, desktop, and persistence-adapter parity maps;
-do not port features or enable external providers until that scope is approved.
+Finish the Phase 6 acceptance checkpoint, then prepare the Phase 7 scope from
+the authoritative roadmap with the user. Do not begin Phase 7 implementation in
+this checkpoint. OpenLive/Live Lab remains deferred to Phase 9 by explicit user
+direction, not the next phase.

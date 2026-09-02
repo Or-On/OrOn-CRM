@@ -174,7 +174,24 @@ until their boundary validates identity, integrity, authorization, type, and siz
   raw bytes, and provider events are persisted/deduplicated before acknowledgement.
   Status application is tenant-scoped and monotonic.
 
-## Planned controls
+## Phase 6 simulator execution controls (implemented)
+
+- Voice jobs have a dedicated claim function, restricted queue/type RLS and
+  `platform_voice` grants; no generic all-tenant claim or messaging-table access.
+  Eligibility locks active contact/consent/tenant/operator membership until the
+  simulator effects and job completion commit. Savepoints discard partial effects
+  on failure; bounded retries and expired final leases are tested on PostgreSQL.
+- Canonical runs pin immutable versions, recheck active owner/admin/editor
+  membership on execution, bound graph size and duration, and wait for durable
+  child success before handoff. Literal simulator mode is enforced; no real
+  provider selector exists in this coordinator. CRM writes are column-allow-listed.
+- New SECURITY DEFINER helpers use fixed `pg_catalog` search paths, qualified
+  names, explicit execute grants and no PUBLIC execute. No additional identity
+  table SELECT is granted to web/messaging roles. Existing tenant RLS remains.
+- Flow credential-field rejection is defense in depth, not a generic secret
+  detector: users must never paste secrets into prompts, message text or drafts.
+
+## Outstanding security work
 
 The 2026-09-02 dependency scan reports high-severity
 `GHSA-8mgp-746c-j5xp` in transitive `nltk==3.10.3`, with no patched release

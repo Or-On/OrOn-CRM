@@ -1,0 +1,267 @@
+import type postgres from "postgres";
+import {
+  parseCanonicalFlow,
+  publishCanonicalFlow,
+  queueWhatsAppTriggeredCall,
+  requestHandoff,
+  type CanonicalFlow,
+  type SupportedChannel,
+} from "./cross-channel.js";
+import {
+  configurationText,
+  executablePath,
+  interpolateAutomation,
+  templateParameters,
+} from "./flow-adapters.js";
+import { queueWhatsAppOutbound } from "./whatsapp-outbound.js";
+import type { JsonValue } from "./types.js";
+
+async function validateRetainedReferences(
+  sql: postgres.TransactionSql,
+  flow: CanonicalFlow,
+) {
+  for (const channel of flow.channels)
+    for (const node of executablePath(flow, channel)) {
+      if (node.type !== "voice.call") continue;
+      const cfg = node.configuration ?? {};
+      const rows = await sql<
+        { available: boolean }[]
+      >`SELECT platform.voice_flow_available(
+      ${configurationText(cfg, "flowId")}::uuid, ${Number(cfg.flowVersion)}::integer) AS available`;
+      if (!rows[0]?.available)
+        throw new TypeError("retained voice flow version is unavailable");
+    }
+}
+
+export async function publishExecutableFlow(
+  sql: postgres.TransactionSql,
+  actor: string,
+  definitionId: string,
+): Promise<boolean> {
+  const rows = await sql<
+    { definition: unknown }[]
+  >`SELECT definition FROM automation.flow_versions
+    WHERE flow_definition_id=${definitionId}::uuid AND published_at IS NULL
+    ORDER BY version DESC LIMIT 1 FOR UPDATE`;
+  if (!rows[0]) return false;
+  await validateRetainedReferences(sql, parseCanonicalFlow(rows[0].definition));
+  return publishCanonicalFlow(sql, actor, definitionId);
+}
+
+export async function queueCanonicalSimulation(
+  sql: postgres.TransactionSql,
+  actor: string,
+  definitionId: string,
+  conversationId: string,
+  channel: SupportedChannel,
+  key: string,
+): Promise<string> {
+  if (key.length < 8 || key.length > 128)
+    throw new TypeError("invalid simulation idempotency key");
+  if (
+    !(
+      await sql<
+        { allowed: boolean }[]
+      >`SELECT platform.canonical_actor_authorized() AS allowed`
+    )[0]?.allowed
+  )
+    throw new TypeError("active flow-management membership required");
+  await sql`SELECT pg_advisory_xact_lock(hashtextextended(platform.current_tenant_id()::text || ${key}, 6))`;
+  const prior = await sql<
+    { id: string; trigger_metadata: Record<string, string> }[]
+  >`SELECT id, trigger_metadata
+    FROM automation.flow_runs WHERE trigger_type='canonical.simulator'
+      AND trigger_metadata->>'idempotencyKey'=${key}`;
+  if (prior[0]) {
+    const previous = prior[0].trigger_metadata;
+    if (
+      previous.definitionId !== definitionId ||
+      previous.conversationId !== conversationId ||
+      previous.channel !== channel ||
+      previous.actorUserId !== actor
+    )
+      throw new TypeError("simulation idempotency key conflict");
+    return prior[0].id;
+  }
+  const versions = await sql<
+    { id: string; definition: unknown; channel_capabilities: string[] }[]
+  >`
+    SELECT flow.id, flow.definition, agent.channel_capabilities
+    FROM automation.flow_versions flow JOIN agents.agent_profile_versions agent
+      ON agent.id=flow.agent_profile_version_id AND agent.tenant_id=flow.tenant_id
+    WHERE flow.flow_definition_id=${definitionId}::uuid AND flow.published_at IS NOT NULL
+      AND agent.published_at IS NOT NULL ORDER BY flow.version DESC LIMIT 1`;
+  const version = versions[0];
+  if (!version?.channel_capabilities.includes(channel))
+    throw new TypeError("published compatible agent and flow required");
+  const flow = parseCanonicalFlow(version.definition);
+  executablePath(flow, channel);
+  await validateRetainedReferences(sql, flow);
+  const contacts = await sql<
+    { contact_id: string }[]
+  >`SELECT contact_id FROM messaging.conversations WHERE id=${conversationId}::uuid`;
+  if (!contacts[0]) throw new TypeError("conversation is unavailable");
+  const metadata = {
+    mode: "simulator",
+    actorUserId: actor,
+    conversationId,
+    channel,
+    definitionId,
+    idempotencyKey: key,
+  };
+  const runs = await sql<{ id: string }[]>`INSERT INTO automation.flow_runs
+    (tenant_id, flow_version_id, contact_id, trigger_type, trigger_metadata, status, started_at)
+    VALUES (platform.current_tenant_id(), ${version.id}::uuid, ${contacts[0].contact_id}::uuid,
+      'canonical.simulator', ${sql.json(metadata)}, 'running', CURRENT_TIMESTAMP) RETURNING id`;
+  const id = runs[0]?.id;
+  if (!id) throw new Error("flow run insert failed");
+  await sql`INSERT INTO ops.jobs(tenant_id, queue, job_type, reference_type, reference_id, payload, idempotency_key)
+    VALUES(platform.current_tenant_id(), 'messaging', 'cross_channel.flow.simulated', 'flow_run',
+      ${id}::uuid, '{"mode":"simulator"}', ${`flow:${id}`})`;
+  return id;
+}
+
+/** One bounded orchestration tick; durable child jobs stay in their existing engines. */
+export async function advanceCanonicalSimulation(
+  sql: postgres.TransactionSql,
+  runId: string,
+): Promise<boolean> {
+  const rows = await sql<
+    {
+      id: string;
+      contact_id: string;
+      definition: unknown;
+      status: string;
+      trigger_metadata: Record<string, string>;
+      expired: boolean;
+      variables: Record<string, JsonValue>;
+    }[]
+  >`
+    SELECT run.*, version.definition, run.created_at < CURRENT_TIMESTAMP - INTERVAL '15 minutes' AS expired
+    FROM automation.flow_runs run JOIN automation.flow_versions version ON version.id=run.flow_version_id
+    WHERE run.id=${runId}::uuid AND run.trigger_type='canonical.simulator' FOR UPDATE OF run`;
+  const run = rows[0];
+  if (!run) throw new TypeError("canonical simulation is unavailable");
+  if (run.status === "succeeded") return true;
+  if (["failed", "cancelled"].includes(run.status) || run.expired)
+    throw new TypeError("canonical simulation expired or stopped");
+  const actor = run.trigger_metadata.actorUserId;
+  const conversation = run.trigger_metadata.conversationId;
+  const channel = run.trigger_metadata.channel;
+  if (!actor || !conversation || !["voice", "whatsapp"].includes(channel ?? ""))
+    throw new TypeError("invalid simulation context");
+  await sql`SELECT set_config('app.current_user', ${actor}, true)`;
+  if (
+    !(
+      await sql<
+        { allowed: boolean }[]
+      >`SELECT platform.canonical_actor_authorized() AS allowed`
+    )[0]?.allowed
+  )
+    throw new TypeError("flow actor no longer authorized");
+  const path = executablePath(
+    parseCanonicalFlow(run.definition),
+    channel as SupportedChannel,
+  );
+  for (const node of path) {
+    const previous = (
+      await sql<{ status: string; output_metadata: { jobId?: string } }[]>`
+      SELECT status, output_metadata FROM automation.flow_step_runs WHERE flow_run_id=${runId}::uuid AND step_key=${node.id}`
+    )[0];
+    if (previous?.status === "succeeded") continue;
+    if (previous?.status === "waiting") {
+      const child = (
+        await sql<
+          { status: string }[]
+        >`SELECT status FROM ops.jobs WHERE id=${previous.output_metadata.jobId ?? ""}::uuid`
+      )[0];
+      if (!child || ["dead", "cancelled"].includes(child.status))
+        throw new TypeError("simulation child action failed");
+      if (child.status !== "succeeded") return false;
+      await sql`UPDATE automation.flow_step_runs SET status='succeeded', completed_at=CURRENT_TIMESTAMP
+        WHERE flow_run_id=${runId}::uuid AND step_key=${node.id}`;
+      continue;
+    }
+    const cfg = node.configuration ?? {};
+    let jobId: string | undefined;
+    const key = `flow:${runId}:${node.id}`;
+    switch (node.type) {
+      case "start":
+      case "end":
+        break;
+      case "crm.update": {
+        const field = configurationText(cfg, "field"); // allow-list validated by executablePath
+        const value = interpolateAutomation(
+          configurationText(cfg, "value"),
+          run.variables,
+        );
+        const updated =
+          await sql`UPDATE crm.contacts SET ${sql(field)}=${value}, updated_at=CURRENT_TIMESTAMP
+          WHERE id=${run.contact_id}::uuid AND lifecycle_status='active' RETURNING id`;
+        if (!updated.length) throw new TypeError("active contact required");
+        break;
+      }
+      case "handoff":
+        await requestHandoff(
+          sql,
+          actor,
+          run.contact_id,
+          channel as SupportedChannel,
+          configurationText(cfg, "reason"),
+          key,
+        );
+        break;
+      case "voice.call":
+        jobId = (
+          await queueWhatsAppTriggeredCall(sql, actor, conversation, key, {
+            flowId: configurationText(cfg, "flowId"),
+            flowVersion: Number(cfg.flowVersion),
+          })
+        ).jobId;
+        break;
+      case "message.send": {
+        const common = {
+          conversationId: conversation,
+          senderUserId: actor,
+          provider: "simulator" as const,
+          realProviderEnabled: false,
+          explicitlyConfirmed: false,
+          idempotencyKey: key,
+        };
+        const request = await queueWhatsAppOutbound(
+          sql,
+          cfg.kind === "template"
+            ? {
+                ...common,
+                kind: "template",
+                templateName: configurationText(cfg, "template_name"),
+                language: configurationText(cfg, "language"),
+                parameters: templateParameters(cfg.variables),
+              }
+            : {
+                ...common,
+                kind: "text",
+                text: interpolateAutomation(
+                  configurationText(cfg, "text"),
+                  run.variables,
+                ),
+              },
+        );
+        jobId = (
+          await sql<
+            { id: string }[]
+          >`SELECT id FROM ops.jobs WHERE reference_id=${request.requestId}::uuid AND job_type='whatsapp.outbound.send'`
+        )[0]?.id;
+        if (!jobId) throw new Error("durable message job missing");
+        break;
+      }
+    }
+    await sql`INSERT INTO automation.flow_step_runs(tenant_id,flow_run_id,step_key,status,output_metadata,completed_at)
+      VALUES(platform.current_tenant_id(),${runId}::uuid,${node.id},${jobId ? "waiting" : "succeeded"},
+        ${sql.json(jobId ? { jobId } : {})},${jobId ? null : new Date()})`;
+    await sql`UPDATE automation.flow_runs SET current_step_key=${node.id}, status=${jobId ? "waiting" : "running"} WHERE id=${runId}::uuid`;
+    if (jobId) return false;
+  }
+  await sql`UPDATE automation.flow_runs SET status='succeeded', completed_at=CURRENT_TIMESTAMP WHERE id=${runId}::uuid`;
+  return true;
+}

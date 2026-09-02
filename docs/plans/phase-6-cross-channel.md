@@ -43,9 +43,9 @@ must not import or implement them. Schema/contracts may reserve a disabled
 | P6-004 | Agent profile validation, publish, RBAC, RLS, and audit | complete |
 | P6-005 | Canonical flow draft/version/node/edge contract | complete |
 | P6-006 | Flow validation, publishing, immutability, and compatibility checks | complete |
-| P6-007 | Or-on voice-flow compiler/adapter | runtime parity pending |
-| P6-008 | WACRM messaging-automation compiler/adapter | runtime parity pending |
-| P6-009 | Cross-channel trigger and execution coordinator | consumer verification in progress |
+| P6-007 | Or-on voice-flow compiler/adapter | complete: frozen FlowSpec reference and provider-free retained binder parity |
+| P6-008 | WACRM messaging-automation compiler/adapter | complete for six-node subset: configured actions/interpolation/template order |
+| P6-009 | Cross-channel trigger and execution coordinator | complete: durable wait/resume, bounded deadline, child failure and replay |
 | P6-010 | Call-outcome-to-WhatsApp simulator workflow | complete |
 | P6-011 | WhatsApp-to-CRM-to-call simulator workflow | complete; isolated worker and cross-language round-trip tests pass |
 | P6-012 | Human handoff and ownership/escalation state | complete |
@@ -54,8 +54,8 @@ must not import or implement them. Schema/contracts may reserve a disabled
 | P6-015 | Control API and generated TypeScript contracts | complete |
 | P6-016 | Unified agent/flow/activity web surfaces | complete |
 | P6-017 | Accessibility, Hebrew/RTL, responsive, and keyboard verification | complete |
-| P6-018 | PostgreSQL, RLS, idempotency, concurrency, and adapter tests | expanded for P6-010; remaining parity pending |
-| P6-019 | Simulator cross-channel end-to-end acceptance | pending both runtime paths |
+| P6-018 | PostgreSQL, RLS, idempotency, concurrency, and adapter tests | complete; final consolidated rerun pending |
+| P6-019 | Simulator cross-channel end-to-end acceptance | complete: both provider-free paths and failure cases pass |
 | P6-020 | Architecture, provenance, threat model, and runbooks | complete |
 | P6-021 | Full verification and clean checkpoint | final acceptance reopened |
 | P6-022 | Real Meta WhatsApp adapter, durable admission, and kill switches | complete |

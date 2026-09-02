@@ -3,12 +3,15 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator
+from uuid import uuid4
 
 import asyncpg
 import pytest
 import pytest_asyncio
-from control_api.voice import PostgresVoiceRepository
+from control_api.auth import ServicePrincipal
+from control_api.voice import PostgresVoiceRepository, SimulatedCallConflict, SimulatedCallRequest
 from control_api.voice_jobs import consume_voice_simulation
+from oron_flows.graph import FlowSpec
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -16,6 +19,33 @@ from db.tests.postgres.conftest import run_alembic
 from db.tests.postgres.test_phase6_cross_channel import _tenant_fixture
 
 pytestmark = [pytest.mark.postgres, pytest.mark.integration, pytest.mark.rls]
+
+
+async def test_voice_replay_is_bound_to_frozen_flow_version(voice_jobs: tuple) -> None:
+    _, repository, tenant, _, actor, contact, _, job, _ = voice_jobs
+    identifier = uuid4()
+    spec = FlowSpec.model_validate(
+        {
+            "id": str(identifier),
+            "version": 1,
+            "entry": "done",
+            "nodes": [{"name": "done", "post_actions": [{"type": "end_conversation"}]}],
+        }
+    )
+    principal = ServicePrincipal(
+        user_id=actor, tenant_id=tenant, role="agent", session_id=job, capability="voice:write"
+    )
+    command = SimulatedCallRequest(contact_id=contact, idempotency_key="frozen-flow-fixture")
+    assert (await repository.simulate_call(principal, command, retained_flow=spec)).created
+    assert not (await repository.simulate_call(principal, command, retained_flow=spec)).created
+    with pytest.raises(SimulatedCallConflict, match="another flow version"):
+        await repository.simulate_call(
+            principal, command, retained_flow=spec.model_copy(update={"version": 2})
+        )
+    with pytest.raises(SimulatedCallConflict, match="another retained flow"):
+        await repository.simulate_call(
+            principal, command, retained_flow=spec.model_copy(update={"id": uuid4()})
+        )
 
 
 @pytest_asyncio.fixture

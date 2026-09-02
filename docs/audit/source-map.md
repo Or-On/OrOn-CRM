@@ -283,6 +283,17 @@ upstream file was copied.
 
 ## Phase 6 cross-channel adaptations
 
+Final simulator execution adapters (2026-09-02):
+
+| Source repository / locked SHA | Original path | Target path | Disposition / license |
+| --- | --- | --- | --- |
+| WACRM `98b5bd26e8feacacfd4b74ff58411acb8154d212` | `src/lib/automations/engine.ts`; `steps-tree.ts` | `packages/ts/crm/src/flow-adapters.ts`, `flow-runtime.ts`, corresponding unit/worker tests | Adapted interpolation, numeric template ordering and ordered action semantics for the six-node subset; orchestration/persistence is new platform code. No Supabase/external-action engine copied. MIT notice retained in `THIRD_PARTY_NOTICES.md`. |
+| Or-on `cece174f4d590a1b8a283d539dd66e08cc689aa9` | `packages/oron-flows/src/oron_flows/{compose,graph,node}.py`; `packages/oron-agent/src/oron_agent/flows/{binder,runtime}.py` | `services/py/control-api/src/control_api/voice_flow_adapter.py`, `voice_jobs.py`, `tests/test_voice_flow_adapter.py`; TS retained-flow reference adapter | Thin new adapter over already imported private/proprietary code; frozen FlowSpec and retained binder behavior preserved, no engine copied/replaced and no license invented. |
+
+Migrations `3f6133842389` and `50a6befe7903`, scoped claiming/eligibility
+functions, canonical coordinator, BFF/UI wiring and new regression tests are
+platform-owned successor code; no historical Or-on revision was modified.
+
 | Source | Locked source artifacts | Target artifacts | Status / license implications |
 | --- | --- | --- | --- |
 | Or-on `cece174f4d590a1b8a283d539dd66e08cc689aa9` | `packages/oron-flows/`, retained session/outcome and dispatcher contracts | Alembic `bc63218e8d41`; `packages/ts/crm/src/cross-channel.ts`; `control_api/orchestration.py` | Behaviorally adapted/re-written as a thin `oron-flow.v1` compiler and terminal-session workflow. No new upstream source is copied; Or-on remains private/proprietary. |

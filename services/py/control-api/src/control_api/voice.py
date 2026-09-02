@@ -17,6 +17,7 @@ from oron_common import E164, CallUsage, Direction
 from oron_db import make_engine, make_sessionmaker, set_tenant
 from oron_flows.components import SPEC_VERSION, export_catalog
 from oron_flows.compose import Composition, expand
+from oron_flows.graph import FlowSpec
 from oron_sessions.models import Session, SessionEvent, SessionStatus
 from oron_tenancy.models import Flow, PhoneNumber
 from pydantic import BaseModel, Field
@@ -360,6 +361,7 @@ class PostgresVoiceRepository:
         command: SimulatedCallRequest,
         *,
         transaction: AsyncSession | None = None,
+        retained_flow: FlowSpec | None = None,
     ) -> SimulatedCallResult:
         session_id = uuid5(
             NAMESPACE_URL,
@@ -369,7 +371,17 @@ class PostgresVoiceRepository:
         transcript = "Fictional simulator transcript."
         transcript_object_id = uuid5(NAMESPACE_URL, f"or-on-platform:transcript:{session_id}")
         successful_events: tuple[tuple[str, dict[str, object]], ...] = (
-            ("voice.call.requested.v1", {"mode": "simulator"}),
+            (
+                "voice.call.requested.v1",
+                {
+                    "mode": "simulator",
+                    **(
+                        {"flowId": str(retained_flow.id), "flowVersion": retained_flow.version}
+                        if retained_flow is not None
+                        else {}
+                    ),
+                },
+            ),
             ("voice.call.started.v1", {"mode": "simulator"}),
             ("voice.call.answered.v1", {"answered": True}),
             (
@@ -451,7 +463,7 @@ class PostgresVoiceRepository:
                     provider="simulator",
                     direction=Direction.OUTBOUND,
                     room=f"simulator:{session_id}",
-                    flow_id=UUID(int=0),
+                    flow_id=retained_flow.id if retained_flow is not None else UUID(int=0),
                     status=status,
                     answered=answered,
                     outcome=outcome,
@@ -531,6 +543,19 @@ class PostgresVoiceRepository:
                 raise SimulatedCallConflict(
                     "idempotency key is already bound to another simulator scenario"
                 )
+            if row.flow_id != (retained_flow.id if retained_flow is not None else UUID(int=0)):
+                raise SimulatedCallConflict("idempotency key is bound to another retained flow")
+            if retained_flow is not None:
+                first_event = (
+                    await database.execute(
+                        select(SessionEvent).where(
+                            col(SessionEvent.session_id) == session_id,
+                            col(SessionEvent.sequence) == 0,
+                        )
+                    )
+                ).scalar_one()
+                if first_event.payload.get("flowVersion") != retained_flow.version:
+                    raise SimulatedCallConflict("idempotency key is bound to another flow version")
             return SimulatedCallResult(
                 session=_summary(row),
                 created=created,

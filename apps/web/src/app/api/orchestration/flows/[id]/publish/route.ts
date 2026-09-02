@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { publishCanonicalFlow } from "@or-on/crm";
+import { publishExecutableFlow } from "@or-on/crm";
 
 import { withCurrentTenant } from "../../../../../../features/auth";
 import {
@@ -16,7 +16,7 @@ export async function POST(
     await assertCrmMutation(request);
     const { id } = await context.params;
     const published = await withCurrentTenant("flows:manage", (sql, session) =>
-      publishCanonicalFlow(sql, session.userId, id),
+      publishExecutableFlow(sql, session.userId, id),
     );
     if (!published)
       throw new TypeError(

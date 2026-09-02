@@ -1,5 +1,5 @@
 {
-  "alembic_head": "3f6133842389",
+  "alembic_head": "50a6befe7903",
   "expected_functions": [
     "automation.protect_published_flow_version",
     "messaging.adjust_broadcast_counts",
@@ -22,6 +22,8 @@
     "platform.current_tenant_id",
     "platform.current_tenant_team",
     "platform.current_user_id",
+    "platform.canonical_actor_authorized",
+    "platform.voice_flow_available",
     "platform.voice_simulation_eligible",
     "platform.resolve_api_key",
     "platform.protect_last_tenant_owner"

@@ -76,6 +76,7 @@ export async function publishAutomation(
     WHERE id = (SELECT id FROM automation.flow_versions
                 WHERE flow_definition_id = ${definitionId}::uuid
                   AND published_at IS NULL AND validation_status = 'valid'
+                  AND definition->'nodes' = '[]'::jsonb
                 ORDER BY version DESC LIMIT 1)
     RETURNING id
   `;
@@ -96,12 +97,15 @@ export async function runManualAutomation(
     FROM automation.flow_versions version
     WHERE version.flow_definition_id = ${definitionId}::uuid
       AND version.published_at IS NOT NULL
+      AND version.definition->'nodes' = '[]'::jsonb
     ORDER BY version.version DESC LIMIT 1
     RETURNING id
   `;
   const id = rows[0]?.id;
   if (id === undefined)
-    throw new TypeError("automation must be published before it can run");
+    throw new TypeError(
+      "use canonical simulation with a conversation for non-empty flows; empty automation must be published",
+    );
   return id;
 }
 

@@ -29,6 +29,20 @@ const crossChannelFlow: CanonicalFlow = {
 };
 
 describe("canonical cross-channel flow", () => {
+  it("rejects embedded credential fields before draft persistence", () => {
+    expect(() =>
+      parseCanonicalFlow({
+        ...crossChannelFlow,
+        nodes: [
+          {
+            id: "start",
+            type: "start",
+            configuration: { nested: { apiKey: "fixture" } },
+          },
+        ],
+      }),
+    ).toThrow("credentials");
+  });
   it("preserves detached configuration through parsing and compilation", () => {
     const configuration = {
       text: "Fictional {{vars.greeting}}",

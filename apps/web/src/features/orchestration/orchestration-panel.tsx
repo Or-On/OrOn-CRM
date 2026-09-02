@@ -82,10 +82,32 @@ export function OrchestrationPanel({
           channels: ["voice", "whatsapp"],
           nodes: [
             { id: "start", type: "start" },
-            { id: "crm", type: "crm.update" },
-            { id: "voice", type: "voice.call" },
-            { id: "whatsapp", type: "message.send" },
-            { id: "handoff", type: "handoff" },
+            {
+              id: "crm",
+              type: "crm.update",
+              configuration: { field: "company", value: data.get("company") },
+            },
+            {
+              id: "voice",
+              type: "voice.call",
+              configuration: {
+                flowId: data.get("voiceFlowId"),
+                flowVersion: Number(data.get("voiceFlowVersion")),
+              },
+            },
+            {
+              id: "whatsapp",
+              type: "message.send",
+              configuration: { text: data.get("messageText") },
+            },
+            {
+              id: "handoff",
+              type: "handoff",
+              configuration: {
+                reason:
+                  "Canonical simulator completed; operator follow-up requested.",
+              },
+            },
             { id: "end", type: "end" },
           ],
           edges: [
@@ -238,6 +260,33 @@ export function OrchestrationPanel({
             onSubmit={(event) => void createFlow(event)}
           >
             <Input id="flow-name" label="Flow name" name="name" required />
+            <Input
+              id="flow-company"
+              label="CRM company value for this simulation"
+              name="company"
+              required
+            />
+            <Input
+              id="flow-message"
+              label="Simulator message text"
+              name="messageText"
+              required
+            />
+            <Input
+              id="flow-voice-id"
+              label="Published voice flow UUID (from Voice flows)"
+              name="voiceFlowId"
+              required
+            />
+            <Input
+              id="flow-voice-version"
+              label="Published voice flow version"
+              name="voiceFlowVersion"
+              type="number"
+              min="1"
+              defaultValue="1"
+              required
+            />
             <label htmlFor="flow-agent">Published agent version</label>
             <select id="flow-agent" name="agentProfileVersionId" required>
               <option value="">Select agent</option>
@@ -279,6 +328,53 @@ export function OrchestrationPanel({
                   >
                     Publish
                   </Button>
+                ) : null}
+                {flow.published ? (
+                  <form
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      const data = new FormData(event.currentTarget);
+                      void run(() =>
+                        crmMutation(
+                          `/api/orchestration/flows/${flow.id}/simulate`,
+                          {
+                            conversationId: data.get("conversationId"),
+                            channel: data.get("channel"),
+                          },
+                          { idempotencyKey: idempotencyKey("flow") },
+                        ),
+                      );
+                    }}
+                  >
+                    <label htmlFor={`flow-conversation-${flow.id}`}>
+                      Simulator conversation
+                    </label>
+                    <select
+                      id={`flow-conversation-${flow.id}`}
+                      name="conversationId"
+                      required
+                    >
+                      {conversations.map((conversation) => (
+                        <option key={conversation.id} value={conversation.id}>
+                          {conversation.contactName}
+                        </option>
+                      ))}
+                    </select>
+                    <label htmlFor={`flow-channel-${flow.id}`}>
+                      Simulator channel
+                    </label>
+                    <select id={`flow-channel-${flow.id}`} name="channel">
+                      <option value="voice">Voice</option>
+                      <option value="whatsapp">WhatsApp</option>
+                    </select>
+                    <Button disabled={pending} type="submit">
+                      Queue flow simulation
+                    </Button>
+                    <p>
+                      Local simulation only. View step completion under
+                      Automations.
+                    </p>
+                  </form>
                 ) : null}
               </article>
             ))}
