@@ -39,7 +39,7 @@ no real call path is enabled.
 
 Phase 6 now provides the cross-channel control plane: tenant-scoped immutable
 agent versions, one canonical voice/WhatsApp flow contract with deterministic
-retained-engine adapters, idempotent PostgreSQL simulator jobs, consent-aware
+channel-adapter artifacts, idempotent PostgreSQL simulator jobs, consent-aware
 channel transitions, race-safe human handoff, safe contact activity, and honest
 usage/latency/unpriced-cost reporting. The unified shell exposes these under
 **Agents & flows**, and FastAPI OpenAPI generates the cross-language validation
@@ -47,6 +47,11 @@ client. WhatsApp additionally has a simulator-default Meta Cloud API adapter:
 real sends are explicitly selected and confirmed, durably queued in PostgreSQL,
 processed outside database transactions, and updated by raw-body-verified,
 deduplicated status webhooks.
+
+Phase 6 remains in progress: the call-outcome follow-up worker now delivers
+simulated messages, but the WhatsApp-triggered voice-job consumer and executable
+parity of both retained-engine adapters are still pending. Queued work or a
+compiled artifact alone must not be treated as completed runtime execution.
 
 It does **not** enable real WhatsApp by default or any real telephony, public signup/OAuth/MFA,
 OpenLive/Live Lab/visual-agent execution, or production GCP infrastructure.

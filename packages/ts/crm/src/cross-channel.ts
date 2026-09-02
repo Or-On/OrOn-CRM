@@ -474,14 +474,18 @@ async function enqueueSimulation(
         SELECT id FROM ops.jobs
         WHERE tenant_id = platform.current_tenant_id() AND queue = ${queue}
           AND idempotency_key = ${idempotencyKey}
+          AND job_type = ${jobType} AND reference_id = ${contactId}::uuid
+          AND payload = ${sql.json({ ...payload, mode: "simulator" })}::jsonb
         LIMIT 1
       `;
   const row = existing[0];
-  if (row === undefined) throw new Error("simulation job insert failed");
-  await auditAction(sql, actorUserId, "simulation.queued", "job", row.id, {
-    jobType,
-    mode: "simulator",
-  });
+  if (row === undefined)
+    throw new TypeError("idempotency key belongs to different simulation work");
+  if (inserted)
+    await auditAction(sql, actorUserId, "simulation.queued", "job", row.id, {
+      jobType,
+      mode: "simulator",
+    });
   return { jobId: row.id, queued: inserted, mode: "simulator" };
 }
 
@@ -499,6 +503,15 @@ export async function queueCallOutcomeWhatsAppFollowup(
   const outcome = outcomes[0];
   if (outcome === undefined)
     throw new TypeError("a terminal contact-linked call outcome is required");
+  const contacts = await sql<{ id: string }[]>`
+    SELECT id FROM crm.contacts
+    WHERE id = ${outcome.contact_id}::uuid
+      AND tenant_id = platform.current_tenant_id()
+      AND whatsapp_consent = 'granted' AND whatsapp_opted_out_at IS NULL
+    FOR SHARE
+  `;
+  if (contacts[0] === undefined)
+    throw new TypeError("WhatsApp follow-up consent is required");
   return enqueueSimulation(
     sql,
     actorUserId,

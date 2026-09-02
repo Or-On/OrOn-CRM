@@ -10,6 +10,8 @@ from typing import Any
 import asyncpg
 import pytest
 
+from db.tests.postgres.conftest import run_alembic
+
 pytestmark = [pytest.mark.postgres, pytest.mark.integration, pytest.mark.migration]
 
 
@@ -170,9 +172,11 @@ async def test_all_unified_foreign_keys_declare_delete_semantics(pg: asyncpg.Con
     assert {row["confdeltype"] for row in rows} == {"c", "n", "r"}
 
 
-async def test_development_seed_is_idempotent(postgres_url: str) -> None:
+async def test_development_seed_is_idempotent(isolated_postgres_url: str) -> None:
+    # Seed updates credentials: never run it against the developer's shared DB.
+    await run_alembic(isolated_postgres_url, "upgrade", "head")
     environment = dict(os.environ)
-    environment["DATABASE_URL"] = postgres_url
+    environment["DATABASE_URL"] = isolated_postgres_url
     environment["DEV_AUTH_EMAIL"] = "operator@or-on.local"
     environment["DEV_AUTH_PASSWORD_HASH"] = (
         "$argon2id$v=19$m=65536,t=3,p=1$cGhhc2UtdGhyZWUtdGVzdA$bm90LXVzZWQtZm9yLXZlcmlmaWNhdGlvbg"
@@ -189,7 +193,7 @@ async def test_development_seed_is_idempotent(postgres_url: str) -> None:
 
     await asyncio.to_thread(run_seed)
     await asyncio.to_thread(run_seed)
-    connection = await asyncpg.connect(postgres_url)
+    connection = await asyncpg.connect(isolated_postgres_url)
     try:
         row = await connection.fetchrow(
             "SELECT value FROM platform.system_metadata WHERE key = 'foundation_version'"

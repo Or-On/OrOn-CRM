@@ -40,6 +40,11 @@ adapters; voice-only and message-only nodes appear only in the corresponding
 adapter. The compiled artifact is persisted with the canonical flow version.
 Published profile and flow versions are immutable PostgreSQL records.
 
+These compiled artifacts currently prove a deterministic channel-specific shape,
+not execution parity with the retained engines. P6-007/P6-008 remain open for
+configuration preservation and executable adapter integration; do not advertise
+full canonical-graph execution yet.
+
 The FastAPI `POST /api/v1/orchestration/flows/validate` contract provides the
 cross-language validation/adapter shape and generates the TypeScript client from
 OpenAPI. Stateful product commands remain same-origin BFF operations over a
@@ -48,9 +53,16 @@ tenant-local PostgreSQL transaction.
 ## Safe workflows
 
 - Call outcome → WhatsApp: only a terminal, contact-linked retained session can
-  enqueue `cross_channel.whatsapp_followup.simulated`.
+  enqueue `cross_channel.whatsapp_followup.simulated`, with granted WhatsApp
+  consent and no opt-out. The messaging worker rechecks consent under a row lock,
+  requires literal simulator mode and the expected contact reference, and writes
+  a clearly labeled local follow-up to a simulator channel. Message, receipt,
+  and owned-job completion commit together. Stable provider IDs derived from the
+  job prevent duplicates on replay. Neither provider adapter is invoked. No
+  inbound message is fabricated and inbox unread counts are preserved.
 - WhatsApp → CRM → call: the conversation supplies the canonical contact; a call
-  job is denied unless `voice_consent = 'granted'`.
+  job is denied unless `voice_consent = 'granted'`. The voice-job consumer is
+  still pending P6-011; admission alone is not execution.
 - Handoff: request keys are tenant-idempotent and accept/resolve/cancel updates
   use compare-and-set status predicates. Concurrent accepts yield one winner.
 
@@ -59,6 +71,23 @@ Inbox delivery may separately enqueue `whatsapp.outbound.send`; Meta is never a
 fallback and requires explicit provider selection, consent, confirmation, and
 both admission/provider kill switches. See
 [Meta WhatsApp delivery](whatsapp-cloud-api.md).
+
+### Local worker verification
+
+Set `CROSS_CHANNEL_TEST_DATABASE_URL` to an explicit **localhost test PostgreSQL**
+migration connection with permission to create disposable databases, then run:
+
+```sh
+pnpm --filter @or-on/crm build
+pnpm --filter @or-on/messaging-worker exec vitest run tests/call-followup.live.test.ts
+```
+
+The suite migrates/seeds a new UUID-named database and removes it in teardown.
+It never reads `.env`, changes existing runtime-role passwords, processes the
+development queue, or seeds over the development login. Admission and worker
+connections use PostgreSQL startup `SET ROLE` privileges, asserted in the test;
+they do not exercise production login credential provisioning. Provider spies
+fail if invoked. Ordinary offline tests skip this explicitly opt-in suite.
 
 ## Activity, usage, and cost
 

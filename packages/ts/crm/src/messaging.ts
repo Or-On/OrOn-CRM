@@ -404,6 +404,83 @@ export async function ingestWhatsAppStatus(
   return true;
 }
 
+/** A local simulator effect only: never resolves or invokes a real provider. */
+export async function deliverSimulatedCallFollowup(
+  sql: postgres.TransactionSql,
+  jobId: string,
+  contactId: string | null,
+  payload: unknown,
+): Promise<void> {
+  if (payload === null || typeof payload !== "object")
+    throw new TypeError("invalid simulated follow-up payload");
+  const value = payload as Readonly<Record<string, unknown>>;
+  if (
+    value.mode !== "simulator" ||
+    value.template !== "call-followup" ||
+    contactId === null ||
+    value.contactId !== contactId ||
+    typeof value.sessionId !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      value.sessionId,
+    ) ||
+    typeof value.outcome !== "string" ||
+    value.outcome.length === 0 ||
+    value.outcome.length > 128
+  )
+    throw new TypeError("invalid simulated follow-up payload");
+
+  // Serialize with consent changes and recheck after time spent in the queue.
+  const contacts = await sql<{ id: string }[]>`
+    SELECT id FROM crm.contacts
+    WHERE id = ${contactId}::uuid AND tenant_id = platform.current_tenant_id()
+      AND whatsapp_consent = 'granted' AND whatsapp_opted_out_at IS NULL
+    FOR SHARE
+  `;
+  if (contacts[0] === undefined)
+    throw new TypeError("WhatsApp follow-up consent is required");
+  const channelId = await simulatorChannelId(sql);
+  const conversations = await sql<{ id: string }[]>`
+    INSERT INTO messaging.conversations (tenant_id, channel_id, contact_id, status)
+    VALUES (platform.current_tenant_id(), ${channelId}::uuid, ${contactId}::uuid, 'open')
+    ON CONFLICT (tenant_id, channel_id, contact_id)
+    DO UPDATE SET channel_id = EXCLUDED.channel_id
+    RETURNING id
+  `;
+  const conversationId = conversations[0]?.id;
+  if (conversationId === undefined)
+    throw new Error("follow-up conversation unavailable");
+  const providerMessageId = `sim_call_followup_${jobId}`;
+  const text =
+    "[Simulator] Thank you for speaking with us. This is your call follow-up.";
+  const messages = await sql<{ id: string; created_at: Date }[]>`
+    INSERT INTO messaging.messages
+      (tenant_id, conversation_id, direction, sender_type, content_type,
+       content_text, provider, provider_message_id, status, provider_payload)
+    VALUES (platform.current_tenant_id(), ${conversationId}::uuid, 'outbound',
+            'system', 'text', ${text}, 'simulator', ${providerMessageId}, 'delivered',
+            ${sql.json({ simulator: true, jobId, sessionId: value.sessionId })})
+    ON CONFLICT (tenant_id, provider, provider_message_id)
+      WHERE provider IS NOT NULL AND provider_message_id IS NOT NULL
+    DO NOTHING RETURNING id, created_at
+  `;
+  const message = messages[0];
+  // A replay must not regress the conversation cursor or create another receipt.
+  if (message === undefined) return;
+  await sql`
+    INSERT INTO messaging.message_delivery_events
+      (tenant_id, message_id, provider_event_id, status, occurred_at)
+    VALUES (platform.current_tenant_id(), ${message.id}::uuid,
+            ${`sim_status_${providerMessageId}`}, 'delivered', ${message.created_at})
+  `;
+  await sql`
+    UPDATE messaging.conversations
+    SET last_message_at = ${message.created_at}, last_message_preview = ${text},
+        updated_at = CURRENT_TIMESTAMP
+    WHERE id = ${conversationId}::uuid
+      AND (last_message_at IS NULL OR last_message_at <= ${message.created_at})
+  `;
+}
+
 export async function sendSimulatedReply(
   sql: postgres.TransactionSql,
   input: SimulatedOutboundInput,

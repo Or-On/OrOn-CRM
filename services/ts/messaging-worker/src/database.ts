@@ -2,6 +2,7 @@ import postgres, { type Sql } from "postgres";
 
 import {
   deliverSimulatorBroadcastRecipient,
+  deliverSimulatedCallFollowup,
   ingestWhatsAppInbound,
   ingestWhatsAppStatus,
   parseStoredWhatsAppEnvelope,
@@ -23,6 +24,7 @@ interface JobRow {
   tenant_id: string;
   job_type: string;
   reference_id: string | null;
+  payload: unknown;
 }
 
 interface OutboundWork {
@@ -96,13 +98,28 @@ async function processJob(
   try {
     await sql.begin(async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
-      if (
-        job.job_type !== "simulator.broadcast.recipient" ||
-        job.reference_id === null
+      const owned = await transaction<{ id: string }[]>`
+        SELECT id FROM ops.jobs WHERE id = ${job.id}::uuid
+          AND status = 'running' AND locked_by = ${workerId}
+          AND locked_at > CURRENT_TIMESTAMP - INTERVAL '60 seconds'
+        FOR UPDATE
+      `;
+      if (owned[0] === undefined) return;
+      if (job.job_type === "cross_channel.whatsapp_followup.simulated") {
+        await deliverSimulatedCallFollowup(
+          transaction,
+          job.id,
+          job.reference_id,
+          job.payload,
+        );
+      } else if (
+        job.job_type === "simulator.broadcast.recipient" &&
+        job.reference_id !== null
       ) {
+        await deliverSimulatorBroadcastRecipient(transaction, job.reference_id);
+      } else {
         throw new TypeError("unsupported messaging job");
       }
-      await deliverSimulatorBroadcastRecipient(transaction, job.reference_id);
       await transaction`
         UPDATE ops.jobs SET status = 'succeeded', completed_at = CURRENT_TIMESTAMP,
           locked_at = NULL, locked_by = NULL, last_error_safe = NULL,
@@ -115,6 +132,12 @@ async function processJob(
       error instanceof TypeError ? error.message : "messaging job failed";
     await sql.begin(async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
+      if (error instanceof TypeError) {
+        await transaction`
+          UPDATE ops.jobs SET max_attempts = attempts
+          WHERE id = ${job.id}::uuid AND status = 'running' AND locked_by = ${workerId}
+        `;
+      }
       await transaction`
         SELECT ops.fail_job(${job.id}::uuid, ${workerId}, ${reason}, 5)
       `;
@@ -307,7 +330,7 @@ export function createMessagingStore(
       for (const event of events) await processInbound(sql, workerId, event);
 
       const jobs = await sql<JobRow[]>`
-        SELECT id, tenant_id, job_type, reference_id
+        SELECT id, tenant_id, job_type, reference_id, payload
         FROM ops.claim_jobs_all_tenants(${workerId}, 'messaging', 25, 60)
       `;
       for (const job of jobs) await processJob(sql, workerId, job, providers);

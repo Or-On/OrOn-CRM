@@ -13,8 +13,8 @@ Last updated: 2026-09-02 (Asia/Jerusalem)
 - Phase 3 status: **COMPLETE**
 - Phase 4 status: **COMPLETE**
 - Phase 5 status: **COMPLETE — SIMULATOR-FIRST ACCEPTANCE PASSED**
-- Phase 6 status: **COMPLETE — CROSS-CHANNEL + REAL WHATSAPP GATES PASSED; OPENLIVE DEFERRED**
-- Active task: Phase 6 complete; manually configure/authorize the Meta development account before the first real send
+- Phase 6 status: **IN PROGRESS — WORKER COMPLETION AND RUNTIME PARITY; OPENLIVE DEFERRED**
+- Active task: P6-010 worker complete; next implement/verify P6-011 voice-job consumption and retained-runtime adapter parity
 - Phase 2B clean baseline commit: `830a8371836ea7922fca5c320624bf3bd32ec229`
 - Phase 3 exact baseline commit: `9ca3a022c2fb18a5d416b39aa7d1404f7910ae1b`
 - Phase 4 exact baseline commit: `fdaabedfe0c6dd3586261a338f2fd82f904023d8`
@@ -37,13 +37,54 @@ messaging agent/flow adapters. The authoritative scope is
 | P6-001 | Baseline, instruction, upstream-integrity, and scope verification | complete | preparation checkpoint | Clean Phase 5 baseline `946b08a`; all locked upstreams clean; roadmap reordered by explicit user direction | Inventory retained voice and messaging profile/flow semantics. |
 | P6-002 | Canonical agent/profile and flow source-parity inventory | complete | `7fb1b74` | Retained Or-on voice and WACRM messaging semantics mapped to one versioned contract; OpenLive excluded | Complete. |
 | P6-003–P6-006 | Canonical agent/flow schema, validation, publishing, immutability, RBAC, RLS, and audit | complete | `a6aa0c1`, `7fb1b74` | Two generated Alembic revisions; one head; live PostgreSQL catalog/RLS/immutability tests pass | Complete. |
-| P6-007–P6-009 | Retained voice/messaging adapters and cross-channel coordinator | complete | `7fb1b74` | Deterministic channel-filtered adapters and durable orchestration commands pass TypeScript/Python tests | Complete. |
-| P6-010–P6-014 | Cross-channel simulator workflows, handoff, activity, usage, latency, and cost | complete | `7fb1b74` | PostgreSQL replay/tenant/concurrency tests and simulator UI/API tests pass | Complete. |
+| P6-007–P6-009 | Retained voice/messaging adapters and cross-channel coordinator | in progress | `7fb1b74` | Deterministic channel-filtered artifacts exist; they do not yet prove execution through retained engines | Verify configuration preservation and runtime parity. |
+| P6-010 | Call-outcome-to-WhatsApp simulator workflow | complete | successor to `34a14ac` | Worker now consumes the job atomically; four isolated PostgreSQL tests cover runtime-role RLS, concurrency/replay, consent/opt-out, malformed mode and foreign-tenant contact; workspace tests/typecheck/build pass | P6-011 voice-job consumer. |
+| P6-011 | WhatsApp-to-CRM-to-call simulator workflow | in progress | `7fb1b74` | Admission exists; no consumer for `cross_channel.voice_call.simulated` was found | Implement a thin bridge to the retained voice simulator, with end-to-end worker evidence. |
+| P6-012–P6-014 | Handoff, activity, usage, latency, and cost | implemented | `7fb1b74` | Existing domain/API tests; cost intentionally unpriced | Recheck in final cross-channel end-to-end acceptance. |
 | P6-015–P6-017 | Control API contracts and accessible responsive operator surfaces | complete | `7fb1b74`, `10ae55f` | Generated OpenAPI/client, strict typecheck, UI tests, and Next.js 16.3.3 production build pass | Complete. |
-| P6-018–P6-021 | Database/end-to-end verification, architecture, provenance, and clean checkpoint | complete | Phase 6 checkpoint | 44 live PostgreSQL tests, 636 offline Python tests, all TypeScript suites, lint/type/build/guards pass; OpenLive stays deferred | Preserve the checkpoint and use the documented real-provider runbook. |
+| P6-018–P6-021 | Database/end-to-end verification, architecture, provenance, and clean checkpoint | reopened | successor to `34a14ac` | Earlier suite results did not exercise both queued cross-channel job consumers; previous completion claim was too broad | Finish remaining consumers/adapters before final acceptance. |
 | P6-022 | Real Meta adapter, durable admission, consent/window/idempotency, and dual kill switches | complete | `956cf75` | Mocked 400/401/403/429/5xx/timeout/success tests; no network call; worker persists provider IDs outside request transactions | Complete. |
 | P6-023 | GET verification, exact-raw-body POST signature, status ingestion, and deduplication | complete | `956cf75` | API/parser tests and live durable worker test prove signed duplicate delivery updates once | Complete. |
 | P6-024 | Real-delivery UI, explicit confirmation, protected smoke command, and runbook | complete | `10ae55f`, Phase 6 docs checkpoint | Simulator remains default; REAL path is unmistakable and double-confirmed; smoke command is manual-only | User must finish Meta Dashboard configuration before the first authorized send. |
+
+### Phase 6 continuation audit — 2026-09-02
+
+Clean continuation baseline: `34a14ac08b8b570d2ab890648c9b9261399cdd27`.
+The prior P6-010 command queued work that the messaging worker rejected as
+unsupported. This checkpoint adds a literal simulator-only consumer, consent
+checks at admission and execution, owned-lease locking, atomic message/receipt/job
+completion, and payload-aware idempotency. It does not enable real follow-ups.
+No historical failed jobs are silently replayed; authorize a fresh simulation
+after checking consent. The seed-idempotency test now uses an isolated database
+because its fixture password hash must never overwrite the developer login.
+
+All new live worker fixtures create and drop their own UUID-named localhost
+database, execute under `platform_web` / `platform_messaging` roles, and use
+provider spies that reject any send. The CI database job now runs this suite.
+Local checkpoint verification:
+
+- New payload unit tests: 4 passed; isolated live worker tests: 4 passed.
+- Existing CRM live transaction test: passed; PostgreSQL suite: 44 passed.
+- TypeScript workspace: 79 passed, 7 opt-in tests skipped; the new worker tests
+  and CRM live test were also executed explicitly as recorded above.
+- Python: 637 passed, 45 skipped (live suites/provider eval opt-ins); all 44
+  database tests also executed explicitly. The first unisolated defaults-test
+  run failed after retained code loaded the operator's enabled flag; the test
+  now removes environment overrides before testing defaults. Tests rerun with
+  real-provider flags disabled without modifying `.env`.
+- Strict TypeScript checks, ESLint, Prettier, Ruff, production workspace/Next.js
+  build, generated contract freshness, offline DB graph/contracts, repository
+  boundaries, documentation links, and secret checks passed.
+- PostgreSQL is healthy; one unchanged Alembic head `a1a71d1f7a03`.
+- Full Python typing check passed (existing suppressions retained). JavaScript
+  dependency audit is clear; Python audit passes with the pre-existing
+  `PYSEC-2026-3740` exception through 2026-09-09, not an unconditional clean bill.
+- CI is configured, not claimed to have run remotely. No upstream artifact was
+  copied. All three upstreams remain clean at their locked SHAs.
+
+Next exact task: P6-011 — implement the consumer for
+`cross_channel.voice_call.simulated` through the retained voice simulator,
+rechecking consent and testing real PostgreSQL replay/tenant/lease behavior.
 
 ## Phase 5 implementation state
 

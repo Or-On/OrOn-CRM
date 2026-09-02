@@ -3,7 +3,10 @@ from or_on_platform.config import PlatformSettings
 from pydantic import ValidationError
 
 
-def test_real_provider_actions_default_to_disabled() -> None:
+def test_real_provider_actions_default_to_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Test defaults, not the operator's explicitly enabled development settings.
+    for key in ("ENABLE_REAL_TELEPHONY", "ENABLE_REAL_WHATSAPP", "CONTROL_API_BIND_HOST"):
+        monkeypatch.delenv(key, raising=False)
     settings = PlatformSettings(_env_file=None)
 
     assert settings.enable_real_telephony is False

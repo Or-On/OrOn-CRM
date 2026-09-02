@@ -1,6 +1,6 @@
 # Phase 6 — Cross-channel platform
 
-Status: implementation complete; final verification active
+Status: in progress — worker completion and retained-runtime parity verification
 
 Baseline: Phase 5 clean head `946b08a1c418567f56df87cbe17a97b143596a01`
 
@@ -43,21 +43,21 @@ must not import or implement them. Schema/contracts may reserve a disabled
 | P6-004 | Agent profile validation, publish, RBAC, RLS, and audit | complete |
 | P6-005 | Canonical flow draft/version/node/edge contract | complete |
 | P6-006 | Flow validation, publishing, immutability, and compatibility checks | complete |
-| P6-007 | Or-on voice-flow compiler/adapter | complete |
-| P6-008 | WACRM messaging-automation compiler/adapter | complete |
-| P6-009 | Cross-channel trigger and execution coordinator | complete |
+| P6-007 | Or-on voice-flow compiler/adapter | runtime parity pending |
+| P6-008 | WACRM messaging-automation compiler/adapter | runtime parity pending |
+| P6-009 | Cross-channel trigger and execution coordinator | consumer verification in progress |
 | P6-010 | Call-outcome-to-WhatsApp simulator workflow | complete |
-| P6-011 | WhatsApp-to-CRM-to-call simulator workflow | complete |
+| P6-011 | WhatsApp-to-CRM-to-call simulator workflow | admission exists; consumer pending |
 | P6-012 | Human handoff and ownership/escalation state | complete |
 | P6-013 | Unified contact activity query/projection | complete |
 | P6-014 | Unified audit, usage, latency, and cost views | complete |
 | P6-015 | Control API and generated TypeScript contracts | complete |
 | P6-016 | Unified agent/flow/activity web surfaces | complete |
 | P6-017 | Accessibility, Hebrew/RTL, responsive, and keyboard verification | complete |
-| P6-018 | PostgreSQL, RLS, idempotency, concurrency, and adapter tests | complete |
-| P6-019 | Simulator cross-channel end-to-end acceptance | complete |
+| P6-018 | PostgreSQL, RLS, idempotency, concurrency, and adapter tests | expanded for P6-010; remaining parity pending |
+| P6-019 | Simulator cross-channel end-to-end acceptance | pending both runtime paths |
 | P6-020 | Architecture, provenance, threat model, and runbooks | complete |
-| P6-021 | Full verification and clean checkpoint | complete |
+| P6-021 | Full verification and clean checkpoint | final acceptance reopened |
 | P6-022 | Real Meta WhatsApp adapter, durable admission, and kill switches | complete |
 | P6-023 | Signed verification/status webhooks and delivery persistence | complete |
 | P6-024 | Real-delivery UI, smoke command, security tests, and runbook | complete |
@@ -71,9 +71,11 @@ Phase 6 is complete only when:
 2. One canonical graph validates and compiles deterministically to both retained
    runtime adapter contracts where its nodes are supported.
 3. Unsupported channel nodes fail before publication/execution.
-4. Simulated call outcomes can enqueue an idempotent simulated WhatsApp action.
+4. Simulated call outcomes enqueue an idempotent simulated WhatsApp action that
+   the worker actually completes, with one message/receipt on replay and no
+   provider traffic.
 5. A simulated inbound WhatsApp event can update CRM state and enqueue a
-   consent/policy-eligible simulated call.
+   consent/policy-eligible simulated call that a voice consumer actually executes.
 6. Human handoff is authorized, durable, auditable, and race-safe.
 7. One contact timeline returns stable cursor-ordered voice, messaging, CRM,
    campaign, automation, and handoff activity without replacing source tables.

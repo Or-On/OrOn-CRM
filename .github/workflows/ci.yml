@@ -98,6 +98,19 @@ jobs:
       - run: uv run alembic -c db/alembic/alembic.ini upgrade head
       - run: uv run alembic -c db/alembic/alembic.ini current --check-heads
       - run: uv run pytest -p no:cacheprovider db/tests/test_migration_graph.py db/tests/postgres
+      - uses: pnpm/action-setup@ebd50bdde86241dd1b03a5b0a54a71aee9a1ca80 # v6.0.1
+        with:
+          version: 11.24.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.20.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @or-on/crm build
+      - name: Isolated cross-channel worker acceptance (no providers)
+        env:
+          CROSS_CHANNEL_TEST_DATABASE_URL: postgresql://platform_migrator:ci-only-password@127.0.0.1:5432/or_on_platform_ci
+        run: pnpm --filter @or-on/messaging-worker exec vitest run tests/call-followup.live.test.ts
 
   contracts:
     name: Contract freshness

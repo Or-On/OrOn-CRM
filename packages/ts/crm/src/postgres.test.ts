@@ -319,6 +319,11 @@ describe.skipIf(databaseUrl === undefined)(
             const voiceOutcome = (await listVoiceOutcomes(transaction))[0];
             if (voiceOutcome === undefined)
               throw new Error("seeded voice outcome is required");
+            await transaction`
+              UPDATE crm.contacts SET whatsapp_consent = 'granted', whatsapp_opted_out_at = NULL
+              WHERE id = (SELECT contact_id FROM public.sessions
+                          WHERE session_id = ${voiceOutcome.sessionId}::uuid)
+            `;
             const followup = await queueCallOutcomeWhatsAppFollowup(
               transaction,
               userId,
