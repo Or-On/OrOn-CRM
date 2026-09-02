@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, type SyntheticEvent } from "react";
 
-import type { ContactDetail } from "@or-on/crm";
+import type { ContactActivity, ContactDetail } from "@or-on/crm";
 import { Button, Input, Surface } from "@or-on/ui";
 
 import { crmMutation } from "../crm";
@@ -20,8 +20,10 @@ function fieldText(
 }
 
 export function ContactDetailPanel({
+  activity,
   contact,
 }: {
+  readonly activity: readonly ContactActivity[];
   readonly contact: ContactDetail;
 }) {
   const router = useRouter();
@@ -147,6 +149,29 @@ export function ContactDetailPanel({
             Start simulator call
           </Button>
           <small>Real carrier dialing remains disabled.</small>
+          <label htmlFor="whatsapp-consent">WhatsApp consent</label>
+          <select
+            disabled={pending}
+            id="whatsapp-consent"
+            onChange={(event) =>
+              void mutate(() =>
+                crmMutation(
+                  `/api/crm/contacts/${contact.id}`,
+                  { whatsAppConsent: event.target.value },
+                  { method: "PATCH" },
+                ),
+              )
+            }
+            value={contact.whatsAppConsent}
+          >
+            <option value="unknown">Unknown</option>
+            <option value="granted">Granted</option>
+            <option value="revoked">Revoked / opted out</option>
+          </select>
+          <small>
+            Real WhatsApp delivery requires granted consent and no recorded
+            opt-out.
+          </small>
         </div>
         <div className="detail-identities">
           <h3>Channel identities</h3>
@@ -213,6 +238,24 @@ export function ContactDetailPanel({
               </Button>
             </form>
           ))
+        )}
+      </Surface>
+      <Surface>
+        <h2>Cross-channel activity</h2>
+        {activity.length === 0 ? (
+          <p>No channel activity yet.</p>
+        ) : (
+          <ol className="timeline">
+            {activity.map((item) => (
+              <li key={`${item.sourceType}-${item.eventId}`}>
+                <div>
+                  <strong>{item.eventType}</strong>
+                  <time>{new Date(item.occurredAt).toLocaleString()}</time>
+                </div>
+                <pre>{JSON.stringify(item.metadata, null, 2)}</pre>
+              </li>
+            ))}
+          </ol>
         )}
       </Surface>
       {error === undefined ? null : (

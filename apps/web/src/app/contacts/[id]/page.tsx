@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 
-import { getContactDetail } from "@or-on/crm";
+import { getContactDetail, listContactActivity } from "@or-on/crm";
 
 import {
   UnauthenticatedError,
@@ -15,8 +15,12 @@ export default async function ContactDetailPage({
 }) {
   try {
     const { id } = await params;
-    const contact = await withCurrentTenant("crm:read", (sql) =>
-      getContactDetail(sql, id),
+    const { activity, contact } = await withCurrentTenant(
+      "crm:read",
+      async (sql) => ({
+        contact: await getContactDetail(sql, id),
+        activity: await listContactActivity(sql, id),
+      }),
     );
     if (contact === undefined) notFound();
     return (
@@ -26,7 +30,7 @@ export default async function ContactDetailPage({
           <h1>{contact.name}</h1>
           <p>Identity, notes, and tenant-owned relationship context.</p>
         </header>
-        <ContactDetailPanel contact={contact} />
+        <ContactDetailPanel activity={activity} contact={contact} />
       </main>
     );
   } catch (error) {

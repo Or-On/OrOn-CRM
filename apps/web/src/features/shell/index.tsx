@@ -41,6 +41,12 @@ const navigation = [
   { href: "/pipelines", label: "Pipeline", icon: Columns3, available: true },
   { href: "/operations", label: "Campaigns", icon: Megaphone, available: true },
   { href: "/settings", label: "Settings", icon: Settings, available: true },
+  {
+    href: "/orchestration",
+    label: "Agents & flows",
+    icon: Bot,
+    available: true,
+  },
   { href: "/flows", label: "Voice flows", icon: Workflow, available: true },
   { href: "/voice", label: "Voice", icon: PhoneCall, available: true },
   {
@@ -49,7 +55,7 @@ const navigation = [
     icon: Megaphone,
     available: true,
   },
-  { href: "/live", label: "Live agents", icon: Bot, available: false },
+  { href: "/live", label: "Visual agent", icon: Bot, available: false },
 ] as const;
 
 function csrfToken(): string {

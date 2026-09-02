@@ -18,11 +18,13 @@ export function InboxWorkspace({
   conversations,
   initialMessages,
   quickReplies,
+  realWhatsAppEnabled,
   teamMembers,
 }: {
   readonly conversations: readonly ConversationSummary[];
   readonly initialMessages: readonly Message[];
   readonly quickReplies: readonly QuickReply[];
+  readonly realWhatsAppEnabled: boolean;
   readonly teamMembers: readonly TeamMember[];
 }) {
   const router = useRouter();
@@ -31,6 +33,8 @@ export function InboxWorkspace({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
   const [replyText, setReplyText] = useState("");
+  const [provider, setProvider] = useState<"simulator" | "meta">("simulator");
+  const [messageKind, setMessageKind] = useState<"text" | "template">("text");
   const selected = conversations.find(
     (conversation) => conversation.id === selectedId,
   );
@@ -67,18 +71,37 @@ export function InboxWorkspace({
     const form = event.currentTarget;
     const data = new FormData(form);
     const text = formText(data, "text");
+    const real = provider === "meta";
+    if (
+      real &&
+      !window.confirm(
+        "Send this message to the real recipient through Meta WhatsApp Cloud API? This cannot be undone.",
+      )
+    )
+      return;
     setPending(true);
     setError(undefined);
     try {
-      const payload = await crmMutation<{ message: Message }>(
+      await crmMutation<{ queued: boolean }>(
         `/api/messaging/conversations/${selectedId}/messages`,
-        { text },
+        {
+          provider,
+          kind: messageKind,
+          text,
+          templateName: formText(data, "templateName"),
+          language: formText(data, "language"),
+          parameters: formText(data, "parameters")
+            .split("|")
+            .map((value) => value.trim())
+            .filter(Boolean),
+          confirmReal: real && data.get("confirmReal") === "yes",
+        },
         { idempotencyKey: crypto.randomUUID() },
       );
-      setMessages((current) => [...current, payload.message]);
       setReplyText("");
       form.reset();
       router.refresh();
+      await selectConversation(selectedId);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Reply failed");
     } finally {
@@ -143,7 +166,14 @@ export function InboxWorkspace({
       <Surface className="inbox-list">
         <div className="inbox-list__heading">
           <h2>Conversations</h2>
-          <Badge label="Simulator" tone="info" />
+          <Badge
+            label={
+              realWhatsAppEnabled
+                ? "Simulator + Meta enabled"
+                : "Simulator default"
+            }
+            tone={realWhatsAppEnabled ? "warning" : "info"}
+          />
         </div>
         {conversations.length === 0 ? (
           <EmptyState
@@ -222,7 +252,11 @@ export function InboxWorkspace({
           <>
             <header className="message-panel__heading">
               <div>
-                <p className="eyebrow">WhatsApp simulator</p>
+                <p className="eyebrow">
+                  {selected.channelKind === "whatsapp"
+                    ? "WhatsApp"
+                    : selected.channelKind}
+                </p>
                 <h2>{selected.contactName}</h2>
               </div>
               <Badge
@@ -243,6 +277,10 @@ export function InboxWorkspace({
                 <option value="resolved">Resolved</option>
                 <option value="closed">Closed</option>
               </select>
+              <small>
+                Real delivery requires the checkbox below and a final browser
+                confirmation.
+              </small>
               <select
                 aria-label="Conversation assignee"
                 onChange={(event) => void assign(event.target.value)}
@@ -289,7 +327,35 @@ export function InboxWorkspace({
               ))}
             </div>
             <form className="composer" onSubmit={(event) => void reply(event)}>
-              <label htmlFor="reply-text">Reply through simulator</label>
+              <label htmlFor="delivery-provider">Delivery provider</label>
+              <select
+                id="delivery-provider"
+                onChange={(event) =>
+                  setProvider(event.target.value as "simulator" | "meta")
+                }
+                value={provider}
+              >
+                <option value="simulator">
+                  Simulator — no external delivery
+                </option>
+                <option disabled={!realWhatsAppEnabled} value="meta">
+                  REAL Meta WhatsApp delivery
+                  {realWhatsAppEnabled ? "" : " — disabled"}
+                </option>
+              </select>
+              <label htmlFor="message-kind">Message kind</label>
+              <select
+                id="message-kind"
+                onChange={(event) =>
+                  setMessageKind(event.target.value as "text" | "template")
+                }
+                value={messageKind}
+              >
+                <option value="text">
+                  Free-form text (24-hour window only)
+                </option>
+                <option value="template">Approved template</option>
+              </select>
               <div className="quick-reply-row">
                 {quickReplies.map((quickReply) => (
                   <button
@@ -301,13 +367,35 @@ export function InboxWorkspace({
                   </button>
                 ))}
               </div>
+              {messageKind === "template" ? (
+                <div className="feature-form">
+                  <Input
+                    id="template-name"
+                    label="Approved template name"
+                    name="templateName"
+                    required
+                  />
+                  <Input
+                    id="template-language"
+                    label="Template language"
+                    name="language"
+                    placeholder="he"
+                    required
+                  />
+                  <Input
+                    id="template-parameters"
+                    label="Body parameters (separate with |)"
+                    name="parameters"
+                  />
+                </div>
+              ) : null}
               <div>
                 <textarea
                   id="reply-text"
                   name="text"
                   onChange={(event) => setReplyText(event.target.value)}
                   placeholder="Write a reply"
-                  required
+                  required={messageKind === "text"}
                   rows={2}
                   value={replyText}
                 />
@@ -319,6 +407,18 @@ export function InboxWorkspace({
                   <Send aria-hidden="true" size={16} />
                 </Button>
               </div>
+              {provider === "meta" ? (
+                <label className="real-provider-confirmation">
+                  <input
+                    name="confirmReal"
+                    required
+                    type="checkbox"
+                    value="yes"
+                  />
+                  I understand this sends a real WhatsApp message to the
+                  selected contact.
+                </label>
+              ) : null}
               {error === undefined ? null : (
                 <p className="form-error" role="alert">
                   {error}

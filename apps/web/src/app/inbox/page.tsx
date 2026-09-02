@@ -6,12 +6,17 @@ import {
   listQuickReplies,
   listTeamMembers,
 } from "@or-on/crm";
+import { loadConfig } from "@or-on/config";
 
 import { UnauthenticatedError, withCurrentTenant } from "../../features/auth";
 import { InboxWorkspace } from "../../features/inbox";
 
 export default async function InboxPage() {
   try {
+    const platformConfig = loadConfig(process.env, {
+      requireWhatsApp: true,
+      service: "web",
+    });
     const data = await withCurrentTenant("crm:read", async (sql) => {
       const conversations = await listConversations(sql);
       const first = conversations[0];
@@ -34,6 +39,7 @@ export default async function InboxPage() {
           conversations={data.conversations}
           initialMessages={data.messages}
           quickReplies={data.quickReplies}
+          realWhatsAppEnabled={platformConfig.enableRealWhatsApp}
           teamMembers={data.teamMembers}
         />
       </main>
