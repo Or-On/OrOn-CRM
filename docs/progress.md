@@ -13,7 +13,7 @@ Last updated: 2026-09-02 (Asia/Jerusalem)
 - Phase 3 status: **COMPLETE**
 - Phase 4 status: **COMPLETE**
 - Phase 5 status: **IMPLEMENTATION IN PROGRESS**
-- Active task: P5-008 — telephony simulator and real-provider denial boundary
+- Active task: P5-009 — import/adapt dispatcher and LiveKit webhook contracts
 - Phase 2B clean baseline commit: `830a8371836ea7922fca5c320624bf3bd32ec229`
 - Phase 3 exact baseline commit: `9ca3a022c2fb18a5d416b39aa7d1404f7910ae1b`
 - Phase 4 exact baseline commit: `fdaabedfe0c6dd3586261a338f2fd82f904023d8`
@@ -76,6 +76,20 @@ offline Python tests, 38 live PostgreSQL tests, all TypeScript suites, strict
 typing, production builds, repository/secret guards, and clean dependency
 audits. No provider operation occurred.
 
+Checkpoint `7a56c78` completed P5-008. An authenticated, CSRF-protected,
+development-only BFF command now invokes the generated control API client with
+`voice:write`; the Python boundary accepts only literal simulator mode. One
+least-privilege PostgreSQL transaction creates the retained terminal session,
+six ordered lifecycle records, six durable outbox records, and one immutable
+safe audit record. Replaying the same tenant/idempotency key returns the same
+session with no duplicate writes, while rebinding it to another contact fails.
+The real-provider authorization primitive separately requires both the trusted
+feature flag and per-action approval, and no provider adapter is reachable.
+Container E2E returned `created=true` then `created=false`, and the call appeared
+once in the authenticated list. The full gate passes with 257 offline Python
+tests and 39 live PostgreSQL tests plus all TypeScript, contract, typing, build,
+and security checks.
+
 The authoritative implementation scope and acceptance gate is
 [`phase-5-telephony.md`](plans/phase-5-telephony.md). It preserves the Or-on
 engine and package identities, makes the existing `sessions` table the canonical
@@ -95,8 +109,8 @@ Status values: `pending`, `active`, `complete`, `blocked`.
 | P5-005 | Reconcile imported models with canonical identity/RLS/schema | complete | `5fc6391` | Retained identity, role, and API-key models match canonical tables; repository boundary guard passes; 35 live PostgreSQL tests pass at sole head `b56eb0a0aca1` | Add new behavior only through an Alembic successor. |
 | P5-006 | Canonical call/contact/campaign/object/event bridge migration | complete | `0b16ccb` | Generated successor `e24340ce81c8`; deterministic one-head SQL; tenant-consistent contact/campaign/object/session FKs; scoped idempotency; append-only RLS events; 38 live PostgreSQL tests | Keep `sessions` authoritative and emit transport events through the outbox. |
 | P5-007 | Control API voice routes and generated TypeScript client | complete | `8d903a6` | Authenticated `GET /api/v1/voice/sessions`; canonical RBAC and tenant assertion; `platform_voice` RLS query; deterministic OpenAPI/client; container and same-origin login/BFF proof; full verification clean | Preserve this read-only contract while adding mutations through the simulator-first command boundary. |
-| P5-008 | Telephony simulator and real-provider denial boundary | active | — | Real provider defaults and retained construction guards already deny accidental traffic | Add a deterministic outbound-call simulator command and prove both feature-flag and explicit-approval gates for any real adapter. |
-| P5-009 | Import/adapt dispatcher and LiveKit webhook contracts | pending | — | — | Remove Firebase/admin coupling and add service auth/idempotency. |
+| P5-008 | Telephony simulator and real-provider denial boundary | complete | `7a56c78` | CSRF/RBAC/service-auth command; deterministic PostgreSQL lifecycle/outbox/audit; replay idempotency and contact-conflict test; 39-test live gate; production-container E2E; both real-action gates tested | Keep the simulator as the default adapter and never add a fallback to real transport. |
+| P5-009 | Import/adapt dispatcher and LiveKit webhook contracts | active | — | Locked dispatcher source and retained session client were inventoried during Phase 5 preparation | Import the minimal dispatcher runtime, replace Firebase/admin trust, verify signed fixture/idempotency behavior, and keep every dial path disabled. |
 | P5-010 | Import/adapt Hebrew and Pipecat voice-agent packages | pending | — | — | Preserve audio/flow semantics under the compatibility gate. |
 | P5-011 | LiveKit/SIP/Redis opt-in Compose voice profile | pending | — | — | Validate control plane only; never place a call. |
 | P5-012 | Phone-number/DID admission and reconciliation | pending | — | — | Preserve non-empty ACL and explicit drift behavior. |
@@ -431,8 +445,8 @@ file precedence and provider flags remain false.
 
 ## Next exact task
 
-Execute P5-008: add a deterministic outbound-call simulator command through the
-canonical control API, persist its lifecycle through the retained session and
-event/outbox model, and prove that real telephony requires both the explicit
-feature flag and per-action approval. Do not contact LiveKit, SIP, or any real
-provider.
+Execute P5-009: import the minimum retained Or-on dispatcher and LiveKit webhook
+contract code under its original package identity, replace Firebase/admin trust
+with canonical service assertions and provider signature fixtures, and prove
+idempotent lifecycle handling. Keep dialing disabled and do not contact LiveKit,
+SIP, or any provider.
