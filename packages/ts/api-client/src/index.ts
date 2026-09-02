@@ -9,6 +9,8 @@ export type {
   LiveStatus,
   ReadyStatus,
   SessionStatus,
+  SimulatedCallRequest,
+  SimulatedCallResult,
   VoiceSessionList,
   VoiceSessionSummary,
 } from "./generated/schema";

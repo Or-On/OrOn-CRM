@@ -19,6 +19,19 @@
         "title": "Direction",
         "type": "string"
       },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
       "LiveStatus": {
         "properties": {
           "service": {
@@ -64,6 +77,88 @@
         "enum": ["started", "ended", "failed"],
         "title": "SessionStatus",
         "type": "string"
+      },
+      "SimulatedCallRequest": {
+        "properties": {
+          "contact_id": {
+            "format": "uuid",
+            "title": "Contact Id",
+            "type": "string"
+          },
+          "idempotency_key": {
+            "maxLength": 128,
+            "minLength": 8,
+            "pattern": "^[A-Za-z0-9._:-]+$",
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "mode": {
+            "const": "simulator",
+            "default": "simulator",
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "required": ["contact_id", "idempotency_key"],
+        "title": "SimulatedCallRequest",
+        "type": "object"
+      },
+      "SimulatedCallResult": {
+        "properties": {
+          "created": {
+            "title": "Created",
+            "type": "boolean"
+          },
+          "event_types": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Event Types",
+            "type": "array"
+          },
+          "session": {
+            "$ref": "#/components/schemas/VoiceSessionSummary"
+          }
+        },
+        "required": ["session", "created", "event_types"],
+        "title": "SimulatedCallResult",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": ["loc", "msg", "type"],
+        "title": "ValidationError",
+        "type": "object"
       },
       "VoiceSessionList": {
         "properties": {
@@ -210,6 +305,50 @@
           }
         ],
         "summary": "List Voice Sessions",
+        "tags": ["voice"]
+      }
+    },
+    "/api/v1/voice/simulated-calls": {
+      "post": {
+        "operationId": "simulate_voice_call",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SimulatedCallRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulatedCallResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Simulate Voice Call",
         "tags": ["voice"]
       }
     },

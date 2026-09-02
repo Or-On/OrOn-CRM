@@ -6,6 +6,10 @@ export interface DependencyStatus {
 
 export type Direction = "inbound" | "outbound" | "browser";
 
+export interface HTTPValidationError {
+  readonly detail?: Array<ValidationError>;
+}
+
 export interface LiveStatus {
   readonly service: string;
   readonly status?: "alive";
@@ -19,6 +23,26 @@ export interface ReadyStatus {
 }
 
 export type SessionStatus = "started" | "ended" | "failed";
+
+export interface SimulatedCallRequest {
+  readonly contact_id: string;
+  readonly idempotency_key: string;
+  readonly mode?: "simulator";
+}
+
+export interface SimulatedCallResult {
+  readonly created: boolean;
+  readonly event_types: Array<string>;
+  readonly session: VoiceSessionSummary;
+}
+
+export interface ValidationError {
+  readonly ctx?: Record<string, unknown>;
+  readonly input?: unknown;
+  readonly loc: Array<string | number>;
+  readonly msg: string;
+  readonly type: string;
+}
 
 export interface VoiceSessionList {
   readonly items: Array<VoiceSessionSummary>;

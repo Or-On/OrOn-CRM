@@ -1,6 +1,12 @@
 // Generated from control-api OpenAPI. Do not edit by hand.
 
-import type { LiveStatus, ReadyStatus, VoiceSessionList } from "./schema";
+import type {
+  LiveStatus,
+  ReadyStatus,
+  SimulatedCallRequest,
+  SimulatedCallResult,
+  VoiceSessionList,
+} from "./schema";
 
 export interface ApiResponse<T> {
   readonly data: T;
@@ -23,6 +29,16 @@ export class GeneratedControlApiClient {
     return this.request<VoiceSessionList>("/api/v1/voice/sessions");
   }
 
+  public async simulateVoiceCall(
+    body: SimulatedCallRequest,
+  ): Promise<ApiResponse<SimulatedCallResult>> {
+    return this.request<SimulatedCallResult>("/api/v1/voice/simulated-calls", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+
   public async getLiveness(): Promise<ApiResponse<LiveStatus>> {
     return this.request<LiveStatus>("/health/live");
   }
@@ -31,8 +47,15 @@ export class GeneratedControlApiClient {
     return this.request<ReadyStatus>("/health/ready");
   }
 
-  private async request<T>(path: string): Promise<ApiResponse<T>> {
-    const response = await this.fetcher(new URL(path, this.baseUrl));
+  private async request<T>(
+    path: string,
+    init?: RequestInit,
+  ): Promise<ApiResponse<T>> {
+    const url = new URL(path, this.baseUrl);
+    const response =
+      init === undefined
+        ? await this.fetcher(url)
+        : await this.fetcher(url, init);
     return {
       data: (await response.json()) as T,
       ok: response.ok,

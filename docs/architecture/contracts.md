@@ -31,6 +31,13 @@ least-privilege `platform_voice` role. The response deliberately excludes
 decrypted telephone numbers, provider credentials, transcript text, and object
 storage locations.
 
+`POST /api/v1/voice/simulated-calls` is development-only and accepts only the
+literal `simulator` mode, a canonical contact UUID, and a bounded idempotency
+key. The generated client serializes the request; the BFF applies the shared
+Origin/Fetch-Metadata/CSRF guard and requests a `voice:write` assertion. A first
+request returns `created=true`; a replay returns the same deterministic session
+with `created=false`. Reusing the key for another contact is a conflict.
+
 Domain clients preserve HTTP status and validated response bodies. Internal
 stack traces, assertions, database credentials, and secrets never cross the
 browser boundary.

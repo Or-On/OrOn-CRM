@@ -76,6 +76,14 @@ protected phone values and artifact content remain outside the contract.
 
 P5-006 added tenant-consistent contact/campaign/object links,
 provider/request idempotency, and append-only session events at Alembic head
-`e24340ce81c8`. P5-008 will add the simulator command path and the separate
-real-action approval gate. No real telephone call, LiveKit/SIP mutation, model
-download, or provider request is a claim of this API checkpoint.
+`e24340ce81c8`.
+
+P5-008 adds a development-only simulator command that never resolves a phone
+number or constructs a LiveKit/SIP adapter. One PostgreSQL transaction writes a
+terminal retained session, six ordered lifecycle records, six durable outbox
+events, and one safe audit record. A tenant-scoped deterministic session ID plus
+the database idempotency constraint makes replay return the same logical call.
+The real-action guard independently requires both
+`ENABLE_REAL_TELEPHONY=true` and explicit per-action approval, while no real
+adapter is reachable from this endpoint. No telephone call, LiveKit/SIP
+mutation, model download, or provider request is a claim of this checkpoint.

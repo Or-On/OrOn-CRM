@@ -2,7 +2,7 @@
 
 Status: living architecture threat model
 
-Last reviewed: 2026-09-01 (Phase 3 identity boundary)
+Last reviewed: 2026-09-02 (Phase 5 simulator boundary)
 
 Scope: Phase 1 foundation and the explicitly planned unified platform
 
@@ -65,7 +65,7 @@ until their boundary validates identity, integrity, authorization, type, and siz
 | WebSocket authentication | Stolen/anonymous socket observes or controls live sessions | 60-second issuer/audience/capability-bound signed live-session grant and live-agent validator | Bind grant to actual OpenLive session, validate browser origin, authorize every message, add rate/size limits and revocation fan-out |
 | Service-to-service trust | Compromised web/worker impersonates another runtime | Private Compose network, distinct future roles, loopback-only host ports, no shared superuser app DSN | Workload identities or rotated service credentials, audience-bound tokens/mTLS evaluation, network segmentation, per-service DB grants |
 | Prompt/tool abuse | Content induces agent to exfiltrate secrets or invoke dangerous tools | No product tool execution; explicit contract boundaries and secret references | Versioned tool allowlists, argument schemas, tenant authorization, confirmation for consequential actions, sandboxing, output filtering, audit trail |
-| Call abuse | Fraud, premium dialing, harassment, runaway retries | `ENABLE_REAL_TELEPHONY=false` default tested in both languages; no call adapter; developer runner refuses enabled flag | Explicit user approval plus flag, destination policy, budget/concurrency/rate limits, consent/legal checks, idempotency and kill switch |
+| Call abuse | Fraud, premium dialing, harassment, runaway retries | `ENABLE_REAL_TELEPHONY=false` default; developer runner refuses enabled flag; development endpoint accepts only simulator mode; real boundary requires both flag and explicit per-action approval; idempotent simulator never resolves a phone number | Destination policy, budget/concurrency/rate limits, consent/legal checks, kill switch, and protected manual real-provider smoke |
 | WhatsApp abuse | Spam, unauthorized campaign, template/account misuse | `ENABLE_REAL_WHATSAPP=false` default tested in both languages; no send adapter; developer runner refuses enabled flag | Explicit approval plus flag, RBAC, recipient/template policy, opt-out/suppression, campaign caps, outbox idempotency, audit and kill switch |
 | PostgreSQL exposure | Internet access, shared superuser, weak tenant boundary | Loopback-only Compose mapping, private network, pinned PostgreSQL, named volume, app uses `platform_web`, Alembic uses migrator | VM firewall/private binding, TLS where crossing hosts, forced RLS, per-service grants, connection limits, audit/monitoring and patch runbook |
 | Backup exposure | Snapshot contains all tenants/credentials and is copied or restored unsafely | Backups not implemented or claimed in Phase 1 | Encrypted versioned GCS bucket, narrow backup identity, retention/lock policy, checksums, restore-to-new-DB drills, access logging and deletion process |
@@ -106,6 +106,22 @@ until their boundary validates identity, integrity, authorization, type, and siz
   runtime roles. The final tenant owner cannot be removed or demoted accidentally.
 - Local bootstrap generates ignored secrets and a fictional operator credential;
   real provider flags remain false and unrelated to identity activation.
+
+## Implemented Phase 5 simulator controls
+
+- The authenticated browser reaches voice operations only through same-origin
+  BFF routes, canonical RBAC, short-lived audience-bound assertions, and the
+  least-privilege `platform_voice` PostgreSQL role.
+- The simulator mutation is development-only, applies the shared Origin,
+  Fetch-Metadata, and session-bound CSRF controls, and accepts only a literal
+  simulator mode. It has no provider client, telephone number, trunk, or
+  credential input.
+- One transaction persists the retained session, ordered lifecycle events,
+  durable outbox records, and immutable audit record. Replays are idempotent,
+  and reusing a key for a different contact is rejected.
+- The future real-provider authorization primitive denies unless both the
+  trusted feature flag and explicit per-action approval are present. No real
+  provider adapter is connected to the simulator route.
 
 ## Planned controls
 

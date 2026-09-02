@@ -6,7 +6,13 @@ from uuid import UUID, uuid4
 import jwt
 from control_api.app import create_app
 from control_api.auth import ServiceAssertionVerifier, ServicePrincipal
-from control_api.voice import VoiceSessionSummary
+from control_api.voice import (
+    RealTelephonyDenied,
+    SimulatedCallRequest,
+    SimulatedCallResult,
+    VoiceSessionSummary,
+    require_real_telephony_authorization,
+)
 from httpx import ASGITransport, AsyncClient
 from or_on_platform.config import PlatformSettings
 from oron_common import Direction
@@ -44,6 +50,21 @@ class FakeVoiceRepository:
                 ended_at=dt.datetime(2026, 9, 2, 0, 1, tzinfo=dt.UTC),
             )
         ]
+
+    async def simulate_call(
+        self, principal: ServicePrincipal, command: SimulatedCallRequest
+    ) -> SimulatedCallResult:
+        self.principal = principal
+        return SimulatedCallResult(
+            session=(await self.list_sessions(principal))[0],
+            created=True,
+            event_types=[
+                "voice.call.requested.v1",
+                "voice.call.started.v1",
+                "voice.call.answered.v1",
+                "voice.call.ended.v1",
+            ],
+        )
 
     async def close(self) -> None:
         self.closed = True
@@ -129,6 +150,57 @@ async def test_voice_sessions_reject_wrong_audience_and_missing_capability() -> 
     assert wrong_audience.status_code == 401
     assert missing_capability.status_code == 403
     assert excessive_lifetime.status_code == 401
+
+
+async def test_simulated_call_requires_write_capability() -> None:
+    contact_id = uuid4()
+    repository = FakeVoiceRepository()
+    app = create_app(
+        settings=_settings(),
+        database_probe=FakeProbe(),
+        voice_repository=repository,
+        assertion_verifier=ServiceAssertionVerifier(SECRET),
+    )
+    command = {
+        "contact_id": str(contact_id),
+        "idempotency_key": "phase5-simulator-unit",
+        "mode": "simulator",
+    }
+    async with (
+        app.router.lifespan_context(app),
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client,
+    ):
+        denied = await client.post(
+            "/api/v1/voice/simulated-calls",
+            headers={"authorization": f"Bearer {_token(capability='voice:read')}"},
+            json=command,
+        )
+        accepted = await client.post(
+            "/api/v1/voice/simulated-calls",
+            headers={"authorization": f"Bearer {_token(capability='voice:write')}"},
+            json=command,
+        )
+
+    assert denied.status_code == 403
+    assert accepted.status_code == 200
+    assert accepted.json()["created"] is True
+    assert repository.principal is not None
+    assert repository.principal.capability == "voice:write"
+
+
+def test_real_telephony_requires_flag_and_explicit_action_approval() -> None:
+    for enabled, approved in ((False, False), (False, True), (True, False)):
+        try:
+            require_real_telephony_authorization(
+                enabled=enabled,
+                explicit_approval=approved,
+            )
+        except RealTelephonyDenied:
+            pass
+        else:
+            raise AssertionError("a missing real-telephony gate must deny the action")
+
+    require_real_telephony_authorization(enabled=True, explicit_approval=True)
 
 
 async def test_voice_contract_exists_but_unconfigured_runtime_fails_closed() -> None:

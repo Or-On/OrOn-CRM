@@ -1,26 +1,13 @@
-import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
-import { assertTrustedUnsafeRequest } from "@or-on/auth";
-
 import {
-  CSRF_COOKIE,
+  assertAuthenticatedMutation,
   ForbiddenError,
   UnauthenticatedError,
-  currentRawSession,
-  withAuthService,
 } from "../auth";
 
 export async function assertCrmMutation(request: Request): Promise<void> {
-  assertTrustedUnsafeRequest(request);
-  const resolved = await currentRawSession();
-  if (resolved === undefined) throw new UnauthenticatedError("Unauthenticated");
-  const csrfCookie = (await cookies()).get(CSRF_COOKIE)?.value ?? "";
-  const csrfHeader = request.headers.get("x-csrf-token") ?? "";
-  await withAuthService((service) => {
-    service.validateCsrf(resolved.session, csrfCookie, csrfHeader);
-    return Promise.resolve();
-  });
+  await assertAuthenticatedMutation(request);
 }
 
 export function crmErrorResponse(error: unknown): NextResponse {

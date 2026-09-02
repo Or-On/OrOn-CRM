@@ -86,16 +86,39 @@ def _method_name(operation_id: str) -> str:
 
 
 def generate_client(document: dict[str, Any]) -> str:
-    operations: list[tuple[str, str, str]] = []
+    operations: list[tuple[str, str, str, str, str | None]] = []
     for path, path_item in sorted(document.get("paths", {}).items()):
-        operation = path_item.get("get")
-        if not isinstance(operation, dict):
-            continue
-        response_schema = operation["responses"]["200"]["content"]["application/json"]["schema"]
-        response_type = _typescript_type(response_schema)
-        operations.append((_method_name(operation["operationId"]), path, response_type))
+        for http_method in ("get", "post"):
+            operation = path_item.get(http_method)
+            if not isinstance(operation, dict):
+                continue
+            response_schema = operation["responses"]["200"]["content"]["application/json"]["schema"]
+            response_type = _typescript_type(response_schema)
+            request_body = operation.get("requestBody")
+            request_type = None
+            if isinstance(request_body, dict):
+                request_schema = request_body["content"]["application/json"]["schema"]
+                request_type = _typescript_type(request_schema)
+            operations.append(
+                (
+                    _method_name(operation["operationId"]),
+                    path,
+                    response_type,
+                    http_method.upper(),
+                    request_type,
+                )
+            )
 
-    imported = ", ".join(sorted({response_type for _, _, response_type in operations}))
+    imported = ", ".join(
+        sorted(
+            {
+                schema_type
+                for _, _, response_type, _, request_type in operations
+                for schema_type in (response_type, request_type)
+                if schema_type is not None
+            }
+        )
+    )
     lines = [
         _HEADER.rstrip(),
         "",
@@ -119,19 +142,41 @@ def generate_client(document: dict[str, Any]) -> str:
         "  ) {}",
         "",
     ]
-    for method_name, path, response_type in operations:
-        lines.extend(
-            [
-                f"  public async {method_name}(): Promise<ApiResponse<{response_type}>> {{",
-                f'    return this.request<{response_type}>("{path}");',
-                "  }",
-                "",
-            ]
-        )
+    for method_name, path, response_type, http_method, request_type in operations:
+        if request_type is None:
+            lines.extend(
+                [
+                    f"  public async {method_name}(): Promise<ApiResponse<{response_type}>> {{",
+                    f'    return this.request<{response_type}>("{path}");',
+                    "  }",
+                    "",
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    (
+                        f"  public async {method_name}(body: {request_type}): "
+                        f"Promise<ApiResponse<{response_type}>> {{"
+                    ),
+                    f'    return this.request<{response_type}>("{path}", {{',
+                    f'      method: "{http_method}",',
+                    '      headers: { "content-type": "application/json" },',
+                    "      body: JSON.stringify(body),",
+                    "    });",
+                    "  }",
+                    "",
+                ]
+            )
     lines.extend(
         [
-            "  private async request<T>(path: string): Promise<ApiResponse<T>> {",
-            "    const response = await this.fetcher(new URL(path, this.baseUrl));",
+            (
+                "  private async request<T>(path: string, init?: RequestInit): "
+                "Promise<ApiResponse<T>> {"
+            ),
+            "    const url = new URL(path, this.baseUrl);",
+            "    const response =",
+            "      init === undefined ? await this.fetcher(url) : await this.fetcher(url, init);",
             "    return {",
             "      data: (await response.json()) as T,",
             "      ok: response.ok,",

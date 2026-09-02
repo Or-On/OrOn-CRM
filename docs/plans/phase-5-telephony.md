@@ -9,7 +9,7 @@ source at `cece174f4d590a1b8a283d539dd66e08cc689aa9`.
 - Phase 4 baseline: `e6d2e303c07a3a0df35e39d30baf1f5584564464`
 - Phase 5 branch: `codex/phase-5-telephony`
 - Preparation status: complete
-- Application implementation status: not started
+- Application implementation status: in progress through P5-008
 - Real-provider status: prohibited by default
 
 The branch is a planning checkpoint until the explicit Phase 5 implementation

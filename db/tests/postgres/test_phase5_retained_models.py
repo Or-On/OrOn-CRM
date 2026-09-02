@@ -4,6 +4,12 @@ from uuid import UUID, uuid4
 
 import asyncpg
 import pytest
+from control_api.auth import ServicePrincipal
+from control_api.voice import (
+    PostgresVoiceRepository,
+    SimulatedCallConflict,
+    SimulatedCallRequest,
+)
 from oron_sessions.campaigns import Campaign, CampaignContact
 from oron_sessions.models import Session, SessionEvent
 from oron_tenancy.models import (
@@ -16,6 +22,8 @@ from oron_tenancy.models import (
     Tenant,
     User,
 )
+
+from db.tests.postgres.conftest import run_alembic
 
 pytestmark = [pytest.mark.postgres, pytest.mark.integration]
 
@@ -280,3 +288,107 @@ async def test_platform_voice_session_event_rls_fails_closed(pg: asyncpg.Connect
             )
     await pg.execute("SELECT set_config('app.current_tenant', $1, true)", str(tenant_b))
     assert await pg.fetchval("SELECT count(*) FROM session_events") == 0
+
+
+async def test_simulator_persists_one_idempotent_lifecycle(
+    isolated_postgres_url: str,
+) -> None:
+    await run_alembic(isolated_postgres_url, "upgrade", "head")
+    tenant_id, user_id, contact_id, other_contact_id = uuid4(), uuid4(), uuid4(), uuid4()
+    connection = await asyncpg.connect(isolated_postgres_url)
+    try:
+        await connection.execute(
+            "INSERT INTO tenants (id, name, slug) VALUES ($1, 'Simulator tenant', $2)",
+            tenant_id,
+            f"simulator-{tenant_id}",
+        )
+        await connection.execute(
+            "INSERT INTO users (id, email) VALUES ($1, $2)",
+            user_id,
+            f"{user_id}@example.test",
+        )
+        await connection.execute(
+            "INSERT INTO memberships (tenant_id, user_id, role) VALUES ($1, $2, 'agent')",
+            tenant_id,
+            user_id,
+        )
+        await connection.execute(
+            "INSERT INTO crm.contacts (id, tenant_id, name) "
+            "VALUES ($1, $2, 'Fictional simulator contact')",
+            contact_id,
+            tenant_id,
+        )
+        await connection.execute(
+            "INSERT INTO crm.contacts (id, tenant_id, name) "
+            "VALUES ($1, $2, 'Other fictional simulator contact')",
+            other_contact_id,
+            tenant_id,
+        )
+    finally:
+        await connection.close()
+
+    repository = PostgresVoiceRepository(isolated_postgres_url)
+    principal = ServicePrincipal(
+        user_id=user_id,
+        tenant_id=tenant_id,
+        role="agent",
+        session_id=uuid4(),
+        capability="voice:write",
+    )
+    command = SimulatedCallRequest(
+        contact_id=contact_id,
+        idempotency_key="phase5-live-simulator",
+    )
+    try:
+        first = await repository.simulate_call(principal, command)
+        second = await repository.simulate_call(principal, command)
+        with pytest.raises(SimulatedCallConflict):
+            await repository.simulate_call(
+                principal,
+                SimulatedCallRequest(
+                    contact_id=other_contact_id,
+                    idempotency_key=command.idempotency_key,
+                ),
+            )
+    finally:
+        await repository.close()
+
+    connection = await asyncpg.connect(isolated_postgres_url)
+    try:
+        assert first.created is True
+        assert second.created is False
+        assert first.session.session_id == second.session.session_id
+        assert first.session.provider == "simulator"
+        assert first.session.status.value == "ended"
+        assert len(first.event_types) == 6
+        assert (
+            await connection.fetchval(
+                "SELECT count(*) FROM sessions WHERE tenant_id = $1 AND provider = 'simulator'",
+                tenant_id,
+            )
+            == 1
+        )
+        assert (
+            await connection.fetchval(
+                "SELECT count(*) FROM session_events WHERE session_id = $1",
+                first.session.session_id,
+            )
+            == 6
+        )
+        assert (
+            await connection.fetchval(
+                "SELECT count(*) FROM ops.outbox_events WHERE aggregate_id = $1",
+                first.session.session_id,
+            )
+            == 6
+        )
+        assert (
+            await connection.fetchval(
+                "SELECT count(*) FROM audit.records "
+                "WHERE target_id = $1 AND action = 'voice.simulated_call.completed'",
+                first.session.session_id,
+            )
+            == 1
+        )
+    finally:
+        await connection.close()

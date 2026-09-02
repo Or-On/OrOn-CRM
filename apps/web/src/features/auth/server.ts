@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 
 import {
   AuthService,
+  assertTrustedUnsafeRequest,
   createAuthRepository,
   hasPermission,
   issueServiceAssertion,
@@ -154,6 +155,21 @@ export async function issueControlApiGrant(
 
 export class UnauthenticatedError extends Error {}
 export class ForbiddenError extends Error {}
+
+export async function assertAuthenticatedMutation(
+  request: Request,
+): Promise<AuthSession> {
+  assertTrustedUnsafeRequest(request);
+  const resolved = await currentRawSession();
+  if (resolved === undefined) throw new UnauthenticatedError("Unauthenticated");
+  const csrfCookie = (await cookies()).get(CSRF_COOKIE)?.value ?? "";
+  const csrfHeader = request.headers.get("x-csrf-token") ?? "";
+  await withAuthService((service) => {
+    service.validateCsrf(resolved.session, csrfCookie, csrfHeader);
+    return Promise.resolve();
+  });
+  return resolved.session;
+}
 
 export async function withCurrentTenant<T>(
   permission: Permission,
