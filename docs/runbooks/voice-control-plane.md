@@ -6,8 +6,10 @@ create trunks or dispatch rules, provision a DID, or place a telephone call.
 
 ## One-time local configuration
 
-Run the normal bootstrap first so the ignored `.env` exists. Set a local-only
-LiveKit API key and a random API secret of at least 32 characters:
+Run the normal bootstrap first so the ignored `.env` exists. `make voice-up`
+generates a local-only LiveKit API key and random API secret when these fields
+are blank; it never prints either value. You may instead set your own local
+values before the first run:
 
 ```dotenv
 LIVEKIT_URL=ws://127.0.0.1:7880

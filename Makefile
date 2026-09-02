@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := help
 
 PYTHON ?= python
-RUNNER := $(PYTHON) scripts/dev.py
+RUNNER := $(PYTHON) -m scripts.dev
 
 .PHONY: help doctor bootstrap voice-bootstrap voice-up voice-check voice-down dev stop ps logs migrate migration-check migration-graph migration-sql db-contract-check db-verify-offline db-verify-live seed lint format typecheck test verify
 

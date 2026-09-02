@@ -4,14 +4,20 @@ from __future__ import annotations
 
 import os
 import re
+import secrets
 import shutil
 import socket
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
+from contextlib import suppress
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+# Keep direct `python scripts/dev.py ...` invocation compatible with imports from
+# the repository's scripts namespace. Module invocation already includes ROOT.
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 ENV_FILE = ROOT / ".env"
 ENV_EXAMPLE = ROOT / ".env.example"
 COMPOSE_FILE = ROOT / "infra" / "compose" / "compose.yaml"
@@ -377,6 +383,46 @@ def voice_bootstrap() -> None:
     print("Voice dependencies installed; all real provider flags remain disabled.")
 
 
+def _ensure_local_voice_credentials() -> dict[str, str]:
+    """Create ignored localhost-only LiveKit credentials when fields are blank."""
+
+    if not ENV_FILE.exists():
+        raise RuntimeError(".env is missing; run `make bootstrap` first")
+    generated = {
+        "LIVEKIT_API_KEY": f"local-{secrets.token_urlsafe(18)}",
+        "LIVEKIT_API_SECRET": secrets.token_urlsafe(48),
+    }
+    lines = ENV_FILE.read_text(encoding="utf-8").splitlines()
+    found: set[str] = set()
+    updated: list[str] = []
+    changed = False
+    for line in lines:
+        if "=" not in line or line.lstrip().startswith("#"):
+            updated.append(line)
+            continue
+        key, value = line.split("=", maxsplit=1)
+        normalized = key.strip()
+        if normalized not in generated:
+            updated.append(line)
+            continue
+        found.add(normalized)
+        if value.strip().strip('"').strip("'"):
+            updated.append(line)
+            continue
+        updated.append(f"{normalized}={generated[normalized]}")
+        changed = True
+    for key, value in generated.items():
+        if key not in found:
+            updated.append(f"{key}={value}")
+            changed = True
+    if changed:
+        ENV_FILE.write_text("\n".join(updated) + "\n", encoding="utf-8")
+        with suppress(OSError):
+            ENV_FILE.chmod(0o600)
+        print("Generated ignored localhost-only LiveKit credentials.")
+    return _load_environment()
+
+
 def _voice_profile_environment() -> dict[str, str]:
     environment = _load_environment()
     _require_provider_safety(environment)
@@ -409,7 +455,14 @@ def voice_check() -> None:
 
 def voice_up() -> None:
     voice_bootstrap()
-    environment = _voice_profile_environment()
+    environment = _ensure_local_voice_credentials()
+    _require_provider_safety(environment)
+    from scripts.verify_voice_profile import validate_local_credentials
+
+    validate_local_credentials(
+        environment.get("LIVEKIT_API_KEY", ""),
+        environment.get("LIVEKIT_API_SECRET", ""),
+    )
     _run(
         _compose(
             "up",
