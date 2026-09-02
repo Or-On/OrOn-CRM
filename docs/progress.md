@@ -1,22 +1,70 @@
 # Or-On Platform progress
 
-Last updated: 2026-09-01 (Asia/Jerusalem)
+Last updated: 2026-09-02 (Asia/Jerusalem)
 
 ## Current checkpoint
 
-- Phase: Phase 4 — CRM and WhatsApp
-- Branch: `codex/phase-4-crm-whatsapp`
+- Phase: Phase 5 — Telephony preparation
+- Branch: `codex/phase-5-telephony`
 - Phase 0 baseline: `93eb808e65f8edb1754c1940afe1949e7e18223a`
 - Phase 1 baseline: `20b46159078ec533a9891e6768d47595e35b7a7c`
 - Phase 2A status: **OFFLINE IMPLEMENTATION COMPLETE**
 - Live status: **PHASE 2B LIVE POSTGRESQL VALIDATION COMPLETE**
 - Phase 3 status: **COMPLETE**
 - Phase 4 status: **COMPLETE**
-- Active task: Phase 4 acceptance checkpoint complete; await an explicit next-phase scope
+- Phase 5 status: **PREPARED — APPLICATION IMPLEMENTATION NOT STARTED**
+- Active task: Await the explicit Phase 5 implementation request, then begin P5-002
 - Phase 2B clean baseline commit: `830a8371836ea7922fca5c320624bf3bd32ec229`
 - Phase 3 exact baseline commit: `9ca3a022c2fb18a5d416b39aa7d1404f7910ae1b`
 - Phase 4 exact baseline commit: `fdaabedfe0c6dd3586261a338f2fd82f904023d8`
+- Phase 5 exact baseline commit: `e6d2e303c07a3a0df35e39d30baf1f5584564464`
 - Provider safety: no real telephone call, WhatsApp message, webhook mutation, or provider provisioning performed
+
+## Phase 5 preparation state
+
+Phase 5 was prepared from the clean Phase 4 head
+`e6d2e303c07a3a0df35e39d30baf1f5584564464` on
+`codex/phase-5-telephony`. The target and all three upstream worktrees were clean;
+Or-on, WACRM, and OpenLive matched their locked commits. The master scope,
+completed Phase 0–4 evidence, Or-on instructions/README, package manifests,
+routes/models/tests, LiveKit/SIP deployment documentation, preserved target
+migrations, target Python service rules, and existing architecture decisions were
+reviewed. No application code, dependency, migration, provider configuration, or
+runtime state changed during preparation.
+
+The authoritative implementation scope and acceptance gate is
+[`phase-5-telephony.md`](plans/phase-5-telephony.md). It preserves the Or-on
+engine and package identities, makes the existing `sessions` table the canonical
+call record, replaces Firebase/admin-console coupling with canonical identity and
+service authentication, and requires simulator-first end-to-end evidence.
+
+## Phase 5 tasks
+
+Status values: `pending`, `active`, `complete`, `blocked`.
+
+| ID | Task | Status | Commit | Verification evidence | Next exact task |
+| --- | --- | --- | --- | --- | --- |
+| P5-001 | Baseline, instructions, locked-source inventory, and Phase 5 scope | complete | preparation checkpoint | Clean Phase 4 baseline `e6d2e303`; locked clean upstreams; actual Or-on packages/routes/models/tests/deployment inspected; authoritative scope recorded | Begin the compatibility/license gate without importing source yet. |
+| P5-002 | Or-on dependency/version/license compatibility gate | pending | — | — | Verify selected stable Python/voice/native versions and asset licenses. |
+| P5-003 | Import `oron-common`, `oron-db`, and `oron-flows` | pending | — | — | Preserve identities/tests and enforce dependency direction. |
+| P5-004 | Import/adapt tenancy, secrets, and sessions packages | pending | — | — | Replace target-incompatible identity/config boundaries only. |
+| P5-005 | Reconcile imported models with canonical identity/RLS/schema | pending | — | — | Prove no runtime schema mutation or Alembic drift. |
+| P5-006 | Canonical call/contact/campaign/object/event bridge migration | pending | — | — | Generate a target successor from the current sole head. |
+| P5-007 | Control API voice routes and generated TypeScript client | pending | — | — | Keep FastAPI/OpenAPI authoritative. |
+| P5-008 | Telephony simulator and real-provider denial boundary | pending | — | — | Prove deterministic lifecycle with real flags false. |
+| P5-009 | Import/adapt dispatcher and LiveKit webhook contracts | pending | — | — | Remove Firebase/admin coupling and add service auth/idempotency. |
+| P5-010 | Import/adapt Hebrew and Pipecat voice-agent packages | pending | — | — | Preserve audio/flow semantics under the compatibility gate. |
+| P5-011 | LiveKit/SIP/Redis opt-in Compose voice profile | pending | — | — | Validate control plane only; never place a call. |
+| P5-012 | Phone-number/DID admission and reconciliation | pending | — | — | Preserve non-empty ACL and explicit drift behavior. |
+| P5-013 | Voice flow catalog, validation, publishing, and adapter UI | pending | — | — | Do not claim the Phase 7 canonical compiler. |
+| P5-014 | Canonical voice campaigns and CRM audience integration | pending | — | — | Enforce consent, calling windows, retries, and concurrency. |
+| P5-015 | Calls overview/detail and contact call action | pending | — | — | Use authenticated same-origin routes and simulator default. |
+| P5-016 | Transcript, outcome, artifacts, usage, latency, and analytics | pending | — | — | Preserve field protection and object metadata ownership. |
+| P5-017 | Observability, audit, provider diagnostics, and security controls | pending | — | — | Re-review the threat model before exposing any webhook. |
+| P5-018 | Unit, contract, PostgreSQL, RLS, simulator, and concurrency tests | pending | — | — | Use only fictional fixtures and real PostgreSQL where claimed. |
+| P5-019 | UI accessibility, responsive, keyboard, English/Hebrew/RTL checks | pending | — | — | Verify operational screens at desktop and mobile widths. |
+| P5-020 | Provenance, parity, architecture, runbook, and threat-model updates | pending | — | — | Keep implemented/deferred claims exact. |
+| P5-021 | Full Phase 5 verification and clean checkpoint | pending | — | — | Run the complete gate and preserve upstream integrity. |
 
 ## Phase 3 starting state
 
@@ -339,7 +387,8 @@ file precedence and provider flags remain false.
 
 ## Next exact task
 
-Install GNU Make and execute the literal Phase 1 command spelling; the
-already-validated cross-platform runner is unchanged. Then, under an explicit
-new phase request and branch, begin Phase 3 with the canonical authentication
-selection/identity adapter gate before feature UI or provider integration.
+After explicit approval to implement Phase 5, execute P5-002: verify the current
+selected Python/Pipecat/LiveKit/native dependency compatibility and relevant
+model/asset licenses, then import only `oron-common`, `oron-db`, and `oron-flows`
+with their original package identities and behavioral tests. Do not enable the
+voice Compose profile or any real provider path during this first slice.
