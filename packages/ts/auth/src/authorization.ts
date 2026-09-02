@@ -3,6 +3,8 @@ export type Role = (typeof canonicalRoles)[number];
 
 export const permissions = [
   "platform:read",
+  "voice:read",
+  "voice:operate",
   "crm:read",
   "crm:write",
   "pipelines:manage",
@@ -19,6 +21,8 @@ const rolePermissions: Readonly<Record<Role, ReadonlySet<Permission>>> = {
   owner: new Set(permissions),
   admin: new Set([
     "platform:read",
+    "voice:read",
+    "voice:operate",
     "crm:read",
     "crm:write",
     "pipelines:manage",
@@ -31,12 +35,14 @@ const rolePermissions: Readonly<Record<Role, ReadonlySet<Permission>>> = {
   ]),
   agent: new Set([
     "platform:read",
+    "voice:read",
+    "voice:operate",
     "crm:read",
     "crm:write",
     "pipelines:manage",
     "messaging:operate",
   ]),
-  viewer: new Set(["platform:read", "crm:read"]),
+  viewer: new Set(["platform:read", "voice:read", "crm:read"]),
 };
 
 export function normalizeRole(value: string): Role | undefined {

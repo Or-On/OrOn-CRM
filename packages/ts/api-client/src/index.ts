@@ -5,6 +5,10 @@ export {
 } from "./generated/client";
 export type {
   DependencyStatus,
+  Direction,
   LiveStatus,
   ReadyStatus,
+  SessionStatus,
+  VoiceSessionList,
+  VoiceSessionSummary,
 } from "./generated/schema";

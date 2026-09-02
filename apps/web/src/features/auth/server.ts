@@ -129,6 +129,29 @@ export async function issueLiveAgentGrant(
   });
 }
 
+export async function issueControlApiGrant(
+  session: AuthSession,
+  capability: "voice:read" | "voice:write",
+): Promise<string> {
+  const permission =
+    capability === "voice:read" ? "voice:read" : "voice:operate";
+  if (!hasPermission(session.tenant.role, permission)) {
+    throw new ForbiddenError("Forbidden");
+  }
+  const { serviceSecret } = authConfig();
+  return issueServiceAssertion({
+    audience: "control-api",
+    capability,
+    identity: {
+      role: session.tenant.role,
+      sessionId: session.sessionId,
+      tenantId: session.tenant.tenantId,
+      userId: session.userId,
+    },
+    secret: serviceSecret,
+  });
+}
+
 export class UnauthenticatedError extends Error {}
 export class ForbiddenError extends Error {}
 

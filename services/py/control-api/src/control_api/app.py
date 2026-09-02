@@ -14,6 +14,9 @@ from or_on_platform.database import create_database_probe
 from or_on_platform.logging import configure_logging
 from pydantic import BaseModel
 
+from control_api.auth import ServiceAssertionVerifier
+from control_api.voice import PostgresVoiceRepository, VoiceRepository, create_voice_router
+
 
 class ReadinessProbe(Protocol):
     async def is_ready(self) -> bool: ...
@@ -41,6 +44,8 @@ def create_app(
     *,
     settings: PlatformSettings | None = None,
     database_probe: ReadinessProbe | None = None,
+    voice_repository: VoiceRepository | None = None,
+    assertion_verifier: ServiceAssertionVerifier | None = None,
 ) -> FastAPI:
     """Create a process-owned app; tests inject dependencies without module globals."""
 
@@ -52,6 +57,19 @@ def create_app(
         if resolved_settings.database_url is None:
             raise RuntimeError("control-api requires DATABASE_URL")
         resolved_probe = create_database_probe(str(resolved_settings.database_url))
+
+    resolved_voice_repository = voice_repository
+    resolved_assertion_verifier = assertion_verifier
+    voice_database_url = resolved_settings.voice_database_url
+    auth_service_secret = resolved_settings.auth_service_secret
+    if voice_database_url is not None and auth_service_secret is None:
+        raise RuntimeError("AUTH_SERVICE_SECRET is required when VOICE_DATABASE_URL is configured")
+    if resolved_voice_repository is None and voice_database_url is not None:
+        resolved_voice_repository = PostgresVoiceRepository(str(voice_database_url))
+    if resolved_assertion_verifier is None and auth_service_secret is not None:
+        resolved_assertion_verifier = ServiceAssertionVerifier(
+            auth_service_secret.get_secret_value()
+        )
 
     logger = configure_logging(
         service="control-api",
@@ -65,6 +83,8 @@ def create_app(
         try:
             yield
         finally:
+            if resolved_voice_repository is not None:
+                await resolved_voice_repository.close()
             await resolved_probe.close()
             logger.info("service_stopped")
 
@@ -75,6 +95,7 @@ def create_app(
         docs_url="/docs" if resolved_settings.environment != "production" else None,
         redoc_url=None,
     )
+    app.include_router(create_voice_router(resolved_voice_repository, resolved_assertion_verifier))
 
     @app.middleware("http")
     async def correlation_id(request: Request, call_next):  # type: ignore[no-untyped-def]

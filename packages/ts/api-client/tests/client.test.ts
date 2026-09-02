@@ -27,4 +27,19 @@ describe("ControlApiClient", () => {
     expect(result.ok).toBe(false);
     expect(result.data.dependencies.postgres).toBe("unavailable");
   });
+
+  it("uses the generated authenticated voice-session route", async () => {
+    const fetcher = vi.fn(() =>
+      Promise.resolve(Response.json({ items: [] }, { status: 200 })),
+    );
+    const client = new ControlApiClient("http://control-api:8000", fetcher);
+
+    const result = await client.listVoiceSessions();
+
+    expect(fetcher).toHaveBeenCalledWith(
+      new URL("http://control-api:8000/api/v1/voice/sessions"),
+    );
+    expect(result.status).toBe(200);
+    expect(result.data.items).toEqual([]);
+  });
 });

@@ -1,6 +1,6 @@
 // Generated from control-api OpenAPI. Do not edit by hand.
 
-import type { LiveStatus, ReadyStatus } from "./schema";
+import type { LiveStatus, ReadyStatus, VoiceSessionList } from "./schema";
 
 export interface ApiResponse<T> {
   readonly data: T;
@@ -18,6 +18,10 @@ export class GeneratedControlApiClient {
     private readonly baseUrl: string,
     private readonly fetcher: FetchLike = fetch,
   ) {}
+
+  public async listVoiceSessions(): Promise<ApiResponse<VoiceSessionList>> {
+    return this.request<VoiceSessionList>("/api/v1/voice/sessions");
+  }
 
   public async getLiveness(): Promise<ApiResponse<LiveStatus>> {
     return this.request<LiveStatus>("/health/live");

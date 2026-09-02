@@ -12,7 +12,10 @@ BEGIN
       NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'platform_voice') THEN
-    CREATE ROLE platform_voice NOLOGIN
+    CREATE ROLE platform_voice LOGIN PASSWORD 'platform-voice-dev-only'
+      NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
+  ELSE
+    ALTER ROLE platform_voice LOGIN PASSWORD 'platform-voice-dev-only'
       NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'platform_worker') THEN

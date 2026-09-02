@@ -13,21 +13,27 @@ control API emits a deterministic `openapi.json`; a pinned generator creates the
 TypeScript client below `packages/ts/api-client/src/generated/`. CI regenerates to
 a temporary path and fails on a diff.
 
-Phase 1 proves:
+The current control contract proves:
 
 ```text
 control-api implementation
   -> deterministic OpenAPI JSON
   -> deterministic generated TypeScript types/client
-  -> web system-health consumer
+  -> web system-health and authenticated voice-session consumers
 ```
 
-The initial contract contains liveness/readiness and version metadata only. It is
-not a placeholder CRM API.
+The public health routes remain unauthenticated. `GET /api/v1/voice/sessions`
+is the first Phase 5 domain route: the same-origin web BFF resolves the canonical
+browser session, applies RBAC, and supplies a short-lived issuer- and
+audience-bound bearer assertion. The Python endpoint validates that assertion,
+sets transaction-local tenant, user, and role context, and queries through the
+least-privilege `platform_voice` role. The response deliberately excludes
+decrypted telephone numbers, provider credentials, transcript text, and object
+storage locations.
 
-HTTP errors use an envelope with a stable code, human message, request ID, and
-optional validated details. Internal stack traces and secrets never cross the
-boundary.
+Domain clients preserve HTTP status and validated response bodies. Internal
+stack traces, assertions, database credentials, and secrets never cross the
+browser boundary.
 
 ## Events and WebSocket contracts
 

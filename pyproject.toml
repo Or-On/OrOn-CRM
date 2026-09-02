@@ -49,6 +49,7 @@ ignore = ["S101"]
 "packages/py/oron-sessions/src/oron_sessions/api.py" = ["B008", "B904"]
 "packages/py/oron-sessions/src/oron_sessions/deps.py" = ["B008"]
 "packages/py/oron-tenancy/src/oron_tenancy/router.py" = ["B008", "B904"]
+"services/py/control-api/src/control_api/voice.py" = ["B008"]
 # Preserved source translates driver/provider failures into domain errors.
 "packages/py/oron-sessions/src/oron_sessions/artifacts.py" = ["B904"]
 "packages/py/oron-sessions/src/oron_sessions/campaigns.py" = ["B904"]

@@ -43,6 +43,9 @@ describe("authorization", () => {
     expect(hasPermission("agent", "tenant:manage")).toBe(false);
     expect(canAssignRole("admin", "owner")).toBe(false);
     expect(canAssignRole("owner", "owner")).toBe(true);
+    expect(hasPermission("viewer", "voice:read")).toBe(true);
+    expect(hasPermission("viewer", "voice:operate")).toBe(false);
+    expect(hasPermission("agent", "voice:operate")).toBe(true);
   });
 });
 

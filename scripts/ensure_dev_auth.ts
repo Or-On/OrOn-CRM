@@ -84,6 +84,12 @@ async function main(): Promise<void> {
 
   ensure("AUTH_TOKEN_PEPPER", token());
   ensure("AUTH_SERVICE_SECRET", token());
+  const postgresDatabase = values.get("POSTGRES_DB") ?? "or_on_platform_dev";
+  const postgresPort = values.get("POSTGRES_PORT") ?? "5433";
+  ensure(
+    "VOICE_DATABASE_URL",
+    `postgresql://platform_voice:platform-voice-dev-only@127.0.0.1:${postgresPort}/${postgresDatabase}`,
+  );
   if (!values.get("AUTH_DUMMY_PASSWORD_HASH")) {
     ensure("AUTH_DUMMY_PASSWORD_HASH", await hashPassword(token(24)));
   }

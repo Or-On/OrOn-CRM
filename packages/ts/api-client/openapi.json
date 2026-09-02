@@ -13,6 +13,12 @@
         "title": "DependencyStatus",
         "type": "object"
       },
+      "Direction": {
+        "description": "Which side placed the call.\n\nBROWSER is not a third side — it is the console's mic with no PSTN leg at\nall. It exists because a test call recorded as `inbound` is indistinguishable\nfrom a voter's, which silently mixes rehearsals into the campaign's numbers.",
+        "enum": ["inbound", "outbound", "browser"],
+        "title": "Direction",
+        "type": "string"
+      },
       "LiveStatus": {
         "properties": {
           "service": {
@@ -53,6 +59,127 @@
         "required": ["status", "service", "dependencies"],
         "title": "ReadyStatus",
         "type": "object"
+      },
+      "SessionStatus": {
+        "enum": ["started", "ended", "failed"],
+        "title": "SessionStatus",
+        "type": "string"
+      },
+      "VoiceSessionList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/VoiceSessionSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": ["items"],
+        "title": "VoiceSessionList",
+        "type": "object"
+      },
+      "VoiceSessionSummary": {
+        "properties": {
+          "answered": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answered"
+          },
+          "contact_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Id"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "direction": {
+            "$ref": "#/components/schemas/Direction"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome"
+          },
+          "platform_campaign_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform Campaign Id"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "session_id": {
+            "format": "uuid",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SessionStatus"
+          }
+        },
+        "required": [
+          "session_id",
+          "contact_id",
+          "platform_campaign_id",
+          "provider",
+          "direction",
+          "status",
+          "answered",
+          "outcome",
+          "created_at",
+          "ended_at"
+        ],
+        "title": "VoiceSessionSummary",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "scheme": "bearer",
+        "type": "http"
       }
     }
   },
@@ -62,6 +189,30 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/voice/sessions": {
+      "get": {
+        "operationId": "list_voice_sessions",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceSessionList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Voice Sessions",
+        "tags": ["voice"]
+      }
+    },
     "/health/live": {
       "get": {
         "operationId": "get_liveness",

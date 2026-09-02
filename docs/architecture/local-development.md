@@ -22,8 +22,11 @@ prove independent production packaging without degrading the edit/reload loop.
 
 `platform_migrator` is used only by explicit migration/bootstrap commands.
 Readiness and ordinary app traffic use the non-superuser `platform_web` role. The
-two DSNs still target the same PostgreSQL database; they are not separate runtime
-databases.
+authenticated voice repository uses the non-superuser `platform_voice` role.
+The bootstrap SQL idempotently assigns fictional localhost-only passwords to
+both login roles; production credentials remain outside migrations and source
+control. All DSNs still target the same PostgreSQL database; they are not
+separate runtime databases.
 
 ## Prerequisites
 

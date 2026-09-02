@@ -56,6 +56,22 @@ PostgreSQL functions needed before tenant context exists (login/session lookup)
 are narrow `SECURITY DEFINER` functions with explicit `search_path`, revoked
 `PUBLIC` execution, bounded results, and live privilege tests.
 
+## Service assertions
+
+The web BFF may exchange a resolved canonical session for a narrowly scoped,
+HS256 service assertion. Assertions include issuer, audience, subject, tenant,
+role, session, capability, unique token ID, issue time, and expiry. Consumers
+pin the issuer and audience, allow only the configured algorithm, validate UUID
+identity claims, and reject lifetimes longer than 120 seconds. Assertions are
+never browser session tokens and are never logged.
+
+The Phase 5 control API accepts only `voice:read` or `voice:write` assertions on
+its voice boundary. Browser access remains same-origin through the BFF, and the
+database query still relies on PostgreSQL RLS after the application-level RBAC
+decision. The shared local signing secret is injected from ignored environment
+configuration; future deployed service identity is still governed by the
+secrets and GCP identity ADRs.
+
 ## Deferred capabilities
 
 Public signup, real email delivery, OAuth/OIDC login, MFA/WebAuthn, self-service

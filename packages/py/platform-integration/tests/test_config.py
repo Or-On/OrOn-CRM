@@ -29,6 +29,8 @@ def test_diagnostics_redact_database_and_provider_secrets() -> None:
     settings = PlatformSettings(
         _env_file=None,
         DATABASE_URL="postgresql://platform:do-not-print@localhost/platform",
+        VOICE_DATABASE_URL="postgresql://voice:do-not-print-voice@localhost/platform",
+        AUTH_SERVICE_SECRET="auth-service-secret-that-must-not-print",
         LIVEKIT_API_SECRET="livekit-secret",
         WHATSAPP_ACCESS_TOKEN="whatsapp-secret",
         AI_API_KEY="ai-secret",
@@ -36,6 +38,8 @@ def test_diagnostics_redact_database_and_provider_secrets() -> None:
 
     rendered = str(settings.diagnostics())
     assert "do-not-print" not in rendered
+    assert "do-not-print-voice" not in rendered
+    assert "auth-service-secret" not in rendered
     assert "livekit-secret" not in rendered
     assert "whatsapp-secret" not in rendered
     assert "ai-secret" not in rendered

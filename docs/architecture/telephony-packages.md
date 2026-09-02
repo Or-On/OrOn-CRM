@@ -64,13 +64,18 @@ flowchart TD
 - Ruff, Pyrefly production-source checking, repository dependency guards, and
   package imports pass.
 
-## Deferred boundary work
+## Canonical API boundary
 
-The imported standalone routers are not yet exposed. P5-007 will mount selected
-capabilities behind canonical Phase 3 browser/service authentication and
-generated OpenAPI. P5-006 added tenant-consistent contact/campaign/object links,
+P5-007 exposes the first retained capability as a new, narrow control API
+adapter rather than mounting the legacy standalone router. The versioned
+`GET /api/v1/voice/sessions` endpoint uses canonical Phase 3 identity, role and
+tenant claims, a generated TypeScript client, transaction-local PostgreSQL
+context, and the `platform_voice` runtime role. A same-origin web BFF is the
+browser boundary. The list is bounded and returns operational metadata only;
+protected phone values and artifact content remain outside the contract.
+
+P5-006 added tenant-consistent contact/campaign/object links,
 provider/request idempotency, and append-only session events at Alembic head
-`e24340ce81c8`. P5-008 will add the simulator command path and second explicit
-approval gate. No real
-telephone call, LiveKit/SIP mutation, model download, or provider request is a
-claim of this package-import checkpoint.
+`e24340ce81c8`. P5-008 will add the simulator command path and the separate
+real-action approval gate. No real telephone call, LiveKit/SIP mutation, model
+download, or provider request is a claim of this API checkpoint.

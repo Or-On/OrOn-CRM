@@ -978,6 +978,9 @@ source = { editable = "services/py/control-api" }
 dependencies = [
     { name = "fastapi" },
     { name = "or-on-platform-integration" },
+    { name = "oron-db" },
+    { name = "oron-sessions" },
+    { name = "pyjwt" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -985,6 +988,9 @@ dependencies = [
 requires-dist = [
     { name = "fastapi", specifier = "==0.141.1" },
     { name = "or-on-platform-integration", editable = "packages/py/platform-integration" },
+    { name = "oron-db", editable = "packages/py/oron-db" },
+    { name = "oron-sessions", editable = "packages/py/oron-sessions" },
+    { name = "pyjwt", specifier = "==2.13.0" },
     { name = "uvicorn", extras = ["standard"], specifier = "==0.52.4" },
 ]
 
