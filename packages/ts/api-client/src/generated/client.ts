@@ -1,11 +1,27 @@
 // Generated from control-api OpenAPI. Do not edit by hand.
 
 import type {
+  ComponentCatalog,
+  FlowDocumentRequest,
+  FlowList,
+  FlowPublishResult,
+  FlowValidationResult,
   LiveStatus,
+  PhoneNumberList,
+  PhoneNumberSummary,
   ReadyStatus,
+  ReconciliationReport,
+  RegisterPhoneNumberRequest,
   SimulatedCallRequest,
   SimulatedCallResult,
+  VoiceCampaignCreate,
+  VoiceCampaignList,
+  VoiceCampaignRun,
+  VoiceCampaignRunResult,
+  VoiceCampaignSummary,
+  VoiceSessionDetail,
   VoiceSessionList,
+  VoiceSessionLookup,
 } from "./schema";
 
 export interface ApiResponse<T> {
@@ -24,6 +40,92 @@ export class GeneratedControlApiClient {
     private readonly baseUrl: string,
     private readonly fetcher: FetchLike = fetch,
   ) {}
+
+  public async listVoiceCampaigns(): Promise<ApiResponse<VoiceCampaignList>> {
+    return this.request<VoiceCampaignList>("/api/v1/voice/campaigns");
+  }
+
+  public async createVoiceCampaign(
+    body: VoiceCampaignCreate,
+  ): Promise<ApiResponse<VoiceCampaignSummary>> {
+    return this.request<VoiceCampaignSummary>("/api/v1/voice/campaigns", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+
+  public async runVoiceCampaign(
+    body: VoiceCampaignRun,
+  ): Promise<ApiResponse<VoiceCampaignRunResult>> {
+    return this.request<VoiceCampaignRunResult>("/api/v1/voice/campaigns/run", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+
+  public async getVoiceComponentCatalog(): Promise<
+    ApiResponse<ComponentCatalog>
+  > {
+    return this.request<ComponentCatalog>("/api/v1/voice/component-catalog");
+  }
+
+  public async listVoiceFlows(): Promise<ApiResponse<FlowList>> {
+    return this.request<FlowList>("/api/v1/voice/flows");
+  }
+
+  public async publishVoiceFlow(
+    body: FlowDocumentRequest,
+  ): Promise<ApiResponse<FlowPublishResult>> {
+    return this.request<FlowPublishResult>("/api/v1/voice/flows/publish", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+
+  public async validateVoiceFlow(
+    body: FlowDocumentRequest,
+  ): Promise<ApiResponse<FlowValidationResult>> {
+    return this.request<FlowValidationResult>("/api/v1/voice/flows/validate", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+
+  public async listVoicePhoneNumbers(): Promise<ApiResponse<PhoneNumberList>> {
+    return this.request<PhoneNumberList>("/api/v1/voice/phone-numbers");
+  }
+
+  public async registerVoicePhoneNumber(
+    body: RegisterPhoneNumberRequest,
+  ): Promise<ApiResponse<PhoneNumberSummary>> {
+    return this.request<PhoneNumberSummary>("/api/v1/voice/phone-numbers", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+
+  public async reconcileVoicePhoneNumbers(): Promise<
+    ApiResponse<ReconciliationReport>
+  > {
+    return this.request<ReconciliationReport>(
+      "/api/v1/voice/phone-numbers/reconciliation",
+    );
+  }
+
+  public async getVoiceSession(
+    body: VoiceSessionLookup,
+  ): Promise<ApiResponse<VoiceSessionDetail>> {
+    return this.request<VoiceSessionDetail>("/api/v1/voice/session-detail", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
 
   public async listVoiceSessions(): Promise<ApiResponse<VoiceSessionList>> {
     return this.request<VoiceSessionList>("/api/v1/voice/sessions");

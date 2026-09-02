@@ -13,6 +13,7 @@ export interface ContactSummary {
   readonly email: string | null;
   readonly company: string | null;
   readonly lifecycleStatus: "active" | "archived" | "blocked";
+  readonly voiceConsent: "unknown" | "granted" | "revoked";
   readonly lastActivityAt: string | null;
   readonly createdAt: string;
   readonly identities: readonly ContactIdentity[];

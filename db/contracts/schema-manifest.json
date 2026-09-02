@@ -1,5 +1,5 @@
 {
-  "alembic_head": "315710614ae5",
+  "alembic_head": "7beb64e1ff33",
   "expected_functions": [
     "automation.protect_published_flow_version",
     "messaging.adjust_broadcast_counts",
@@ -27,6 +27,7 @@
     "ix_audit_records_tenant_cursor",
     "ix_broadcast_recipients_pending",
     "ix_contacts_tenant_activity",
+    "ix_contacts_voice_campaign_eligibility",
     "ix_conversations_inbox",
     "ix_flow_runs_status_time",
     "ix_flow_versions_published",
@@ -38,6 +39,7 @@
     "ix_session_events_cursor",
     "ix_sessions_contact_cursor",
     "ix_sessions_tenant_cursor",
+    "ix_platform_voice_campaigns",
     "uq_contact_identity_normalized",
     "uq_inbound_provider_event",
     "uq_messages_provider_id"

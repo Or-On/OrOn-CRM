@@ -222,6 +222,29 @@ async def test_voice_contract_exists_but_unconfigured_runtime_fails_closed() -> 
     assert "/api/v1/voice/sessions" in app.openapi()["paths"]
 
 
+def test_phase5_voice_contract_exposes_all_operator_boundaries() -> None:
+    app = create_app(
+        settings=_settings(),
+        database_probe=FakeProbe(),
+        voice_repository=FakeVoiceRepository(),
+        assertion_verifier=ServiceAssertionVerifier(SECRET),
+    )
+    paths = set(app.openapi()["paths"])
+    assert {
+        "/api/v1/voice/campaigns",
+        "/api/v1/voice/campaigns/run",
+        "/api/v1/voice/component-catalog",
+        "/api/v1/voice/flows",
+        "/api/v1/voice/flows/publish",
+        "/api/v1/voice/flows/validate",
+        "/api/v1/voice/phone-numbers",
+        "/api/v1/voice/phone-numbers/reconciliation",
+        "/api/v1/voice/session-detail",
+        "/api/v1/voice/sessions",
+        "/api/v1/voice/simulated-calls",
+    }.issubset(paths)
+
+
 def test_voice_database_requires_service_assertion_secret() -> None:
     settings = PlatformSettings(
         _env_file=None,

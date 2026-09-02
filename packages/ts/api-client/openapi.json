@@ -1,6 +1,82 @@
 {
   "components": {
     "schemas": {
+      "CallUsage": {
+        "description": "Per-call consumption.\n\n`call_seconds` is measured caller-join → caller-leave, not from the session\nrow's lifetime: `ended_at` is stamped after recording stops, a settle delay\nand an artifact upload, all of which would otherwise bill as talk time.\n\nThe model names are recorded because they are configurable at runtime, so\nthe rate that applies is a property of the call, not of today's config.",
+        "properties": {
+          "call_seconds": {
+            "default": 0.0,
+            "title": "Call Seconds",
+            "type": "number"
+          },
+          "carrier": {
+            "default": "",
+            "title": "Carrier",
+            "type": "string"
+          },
+          "llm_cached_prompt_tokens": {
+            "default": 0,
+            "title": "Llm Cached Prompt Tokens",
+            "type": "integer"
+          },
+          "llm_completion_tokens": {
+            "default": 0,
+            "title": "Llm Completion Tokens",
+            "type": "integer"
+          },
+          "llm_model": {
+            "default": "",
+            "title": "Llm Model",
+            "type": "string"
+          },
+          "llm_prompt_tokens": {
+            "default": 0,
+            "title": "Llm Prompt Tokens",
+            "type": "integer"
+          },
+          "stt_audio_seconds": {
+            "default": 0.0,
+            "title": "Stt Audio Seconds",
+            "type": "number"
+          },
+          "tts_audio_seconds": {
+            "default": 0.0,
+            "title": "Tts Audio Seconds",
+            "type": "number"
+          },
+          "tts_characters": {
+            "default": 0,
+            "title": "Tts Characters",
+            "type": "integer"
+          },
+          "tts_model": {
+            "default": "",
+            "title": "Tts Model",
+            "type": "string"
+          }
+        },
+        "title": "CallUsage",
+        "type": "object"
+      },
+      "ComponentCatalog": {
+        "properties": {
+          "components": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Components",
+            "type": "array"
+          },
+          "spec_version": {
+            "title": "Spec Version",
+            "type": "string"
+          }
+        },
+        "required": ["spec_version", "components"],
+        "title": "ComponentCatalog",
+        "type": "object"
+      },
       "DependencyStatus": {
         "properties": {
           "postgres": {
@@ -18,6 +94,110 @@
         "enum": ["inbound", "outbound", "browser"],
         "title": "Direction",
         "type": "string"
+      },
+      "FlowDocumentRequest": {
+        "properties": {
+          "source": {
+            "additionalProperties": true,
+            "title": "Source",
+            "type": "object"
+          }
+        },
+        "required": ["source"],
+        "title": "FlowDocumentRequest",
+        "type": "object"
+      },
+      "FlowList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FlowSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": ["items"],
+        "title": "FlowList",
+        "type": "object"
+      },
+      "FlowPublishResult": {
+        "properties": {
+          "created": {
+            "title": "Created",
+            "type": "boolean"
+          },
+          "flow": {
+            "$ref": "#/components/schemas/FlowSummary"
+          }
+        },
+        "required": ["flow", "created"],
+        "title": "FlowPublishResult",
+        "type": "object"
+      },
+      "FlowSummary": {
+        "properties": {
+          "flow_id": {
+            "format": "uuid",
+            "title": "Flow Id",
+            "type": "string"
+          },
+          "language": {
+            "title": "Language",
+            "type": "string"
+          },
+          "latest_version": {
+            "title": "Latest Version",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "packaged": {
+            "title": "Packaged",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "flow_id",
+          "name",
+          "language",
+          "latest_version",
+          "packaged"
+        ],
+        "title": "FlowSummary",
+        "type": "object"
+      },
+      "FlowValidationResult": {
+        "properties": {
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "normalized": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Normalized"
+          },
+          "valid": {
+            "title": "Valid",
+            "type": "boolean"
+          }
+        },
+        "required": ["valid", "errors"],
+        "title": "FlowValidationResult",
+        "type": "object"
       },
       "HTTPValidationError": {
         "properties": {
@@ -54,6 +234,50 @@
         "title": "LiveStatus",
         "type": "object"
       },
+      "PhoneNumberList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PhoneNumberSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": ["items"],
+        "title": "PhoneNumberList",
+        "type": "object"
+      },
+      "PhoneNumberSummary": {
+        "properties": {
+          "admission": {
+            "enum": ["simulated", "provider_disabled", "drifted"],
+            "title": "Admission",
+            "type": "string"
+          },
+          "dispatch_rule_id": {
+            "title": "Dispatch Rule Id",
+            "type": "string"
+          },
+          "e164": {
+            "title": "E164",
+            "type": "string"
+          },
+          "flow_id": {
+            "format": "uuid",
+            "title": "Flow Id",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": ["id", "e164", "flow_id", "dispatch_rule_id", "admission"],
+        "title": "PhoneNumberSummary",
+        "type": "object"
+      },
       "ReadyStatus": {
         "properties": {
           "dependencies": {
@@ -71,6 +295,59 @@
         },
         "required": ["status", "service", "dependencies"],
         "title": "ReadyStatus",
+        "type": "object"
+      },
+      "ReconciliationReport": {
+        "properties": {
+          "findings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Findings",
+            "type": "array"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "provider_enabled": {
+            "default": false,
+            "title": "Provider Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": ["ok", "findings"],
+        "title": "ReconciliationReport",
+        "type": "object"
+      },
+      "RegisterPhoneNumberRequest": {
+        "properties": {
+          "allowed_addresses": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Allowed Addresses",
+            "type": "array"
+          },
+          "e164": {
+            "title": "E164",
+            "type": "string"
+          },
+          "flow_id": {
+            "format": "uuid",
+            "title": "Flow Id",
+            "type": "string"
+          },
+          "mode": {
+            "const": "simulator",
+            "default": "simulator",
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "required": ["e164", "flow_id", "allowed_addresses"],
+        "title": "RegisterPhoneNumberRequest",
         "type": "object"
       },
       "SessionStatus": {
@@ -96,6 +373,12 @@
             "const": "simulator",
             "default": "simulator",
             "title": "Mode",
+            "type": "string"
+          },
+          "scenario": {
+            "default": "completed",
+            "enum": ["completed", "no_answer", "failed", "cancelled"],
+            "title": "Scenario",
             "type": "string"
           }
         },
@@ -160,6 +443,312 @@
         "title": "ValidationError",
         "type": "object"
       },
+      "VoiceCampaignCreate": {
+        "properties": {
+          "flow_id": {
+            "format": "uuid",
+            "title": "Flow Id",
+            "type": "string"
+          },
+          "max_attempts": {
+            "default": 1,
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Max Attempts",
+            "type": "integer"
+          },
+          "max_concurrent": {
+            "default": 1,
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "Max Concurrent",
+            "type": "integer"
+          },
+          "name": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "timezone": {
+            "default": "Asia/Jerusalem",
+            "title": "Timezone",
+            "type": "string"
+          },
+          "weekday_hours": {
+            "additionalProperties": {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "title": "Weekday Hours",
+            "type": "object"
+          }
+        },
+        "required": ["name", "flow_id"],
+        "title": "VoiceCampaignCreate",
+        "type": "object"
+      },
+      "VoiceCampaignList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/VoiceCampaignSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": ["items"],
+        "title": "VoiceCampaignList",
+        "type": "object"
+      },
+      "VoiceCampaignRun": {
+        "properties": {
+          "campaign_id": {
+            "format": "uuid",
+            "title": "Campaign Id",
+            "type": "string"
+          }
+        },
+        "required": ["campaign_id"],
+        "title": "VoiceCampaignRun",
+        "type": "object"
+      },
+      "VoiceCampaignRunResult": {
+        "properties": {
+          "campaign": {
+            "$ref": "#/components/schemas/VoiceCampaignSummary"
+          },
+          "created_calls": {
+            "title": "Created Calls",
+            "type": "integer"
+          },
+          "skipped_contacts": {
+            "title": "Skipped Contacts",
+            "type": "integer"
+          }
+        },
+        "required": ["campaign", "created_calls", "skipped_contacts"],
+        "title": "VoiceCampaignRunResult",
+        "type": "object"
+      },
+      "VoiceCampaignSummary": {
+        "properties": {
+          "completed_calls": {
+            "title": "Completed Calls",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "eligible_contacts": {
+            "title": "Eligible Contacts",
+            "type": "integer"
+          },
+          "flow_id": {
+            "format": "uuid",
+            "title": "Flow Id",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "max_attempts": {
+            "title": "Max Attempts",
+            "type": "integer"
+          },
+          "max_concurrent": {
+            "title": "Max Concurrent",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "status",
+          "flow_id",
+          "max_concurrent",
+          "max_attempts",
+          "eligible_contacts",
+          "completed_calls",
+          "created_at"
+        ],
+        "title": "VoiceCampaignSummary",
+        "type": "object"
+      },
+      "VoiceSessionDetail": {
+        "properties": {
+          "answered": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answered"
+          },
+          "contact_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Id"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "direction": {
+            "$ref": "#/components/schemas/Direction"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/VoiceSessionEvent"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome"
+          },
+          "platform_campaign_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform Campaign Id"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "recording_object_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recording Object Id"
+          },
+          "session_id": {
+            "format": "uuid",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SessionStatus"
+          },
+          "transcript_object_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transcript Object Id"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/CallUsage"
+          }
+        },
+        "required": [
+          "session_id",
+          "contact_id",
+          "platform_campaign_id",
+          "provider",
+          "direction",
+          "status",
+          "answered",
+          "outcome",
+          "created_at",
+          "ended_at",
+          "events",
+          "usage",
+          "recording_object_id",
+          "transcript_object_id"
+        ],
+        "title": "VoiceSessionDetail",
+        "type": "object"
+      },
+      "VoiceSessionEvent": {
+        "properties": {
+          "event_type": {
+            "title": "Event Type",
+            "type": "string"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "sequence": {
+            "title": "Sequence",
+            "type": "integer"
+          }
+        },
+        "required": ["sequence", "event_type", "payload", "occurred_at"],
+        "title": "VoiceSessionEvent",
+        "type": "object"
+      },
       "VoiceSessionList": {
         "properties": {
           "items": {
@@ -172,6 +761,18 @@
         },
         "required": ["items"],
         "title": "VoiceSessionList",
+        "type": "object"
+      },
+      "VoiceSessionLookup": {
+        "properties": {
+          "session_id": {
+            "format": "uuid",
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": ["session_id"],
+        "title": "VoiceSessionLookup",
         "type": "object"
       },
       "VoiceSessionSummary": {
@@ -284,6 +885,386 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/voice/campaigns": {
+      "get": {
+        "operationId": "list_voice_campaigns",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceCampaignList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Voice Campaigns",
+        "tags": ["voice"]
+      },
+      "post": {
+        "operationId": "create_voice_campaign",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoiceCampaignCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceCampaignSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Voice Campaign",
+        "tags": ["voice"]
+      }
+    },
+    "/api/v1/voice/campaigns/run": {
+      "post": {
+        "operationId": "run_voice_campaign",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoiceCampaignRun"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceCampaignRunResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Run Voice Campaign",
+        "tags": ["voice"]
+      }
+    },
+    "/api/v1/voice/component-catalog": {
+      "get": {
+        "operationId": "get_voice_component_catalog",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComponentCatalog"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Voice Component Catalog",
+        "tags": ["voice"]
+      }
+    },
+    "/api/v1/voice/flows": {
+      "get": {
+        "operationId": "list_voice_flows",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlowList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Voice Flows",
+        "tags": ["voice"]
+      }
+    },
+    "/api/v1/voice/flows/publish": {
+      "post": {
+        "operationId": "publish_voice_flow",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlowDocumentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlowPublishResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Publish Voice Flow",
+        "tags": ["voice"]
+      }
+    },
+    "/api/v1/voice/flows/validate": {
+      "post": {
+        "operationId": "validate_voice_flow",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlowDocumentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlowValidationResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Validate Voice Flow",
+        "tags": ["voice"]
+      }
+    },
+    "/api/v1/voice/phone-numbers": {
+      "get": {
+        "operationId": "list_voice_phone_numbers",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneNumberList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Voice Phone Numbers",
+        "tags": ["voice"]
+      },
+      "post": {
+        "operationId": "register_voice_phone_number",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterPhoneNumberRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneNumberSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Register Voice Phone Number",
+        "tags": ["voice"]
+      }
+    },
+    "/api/v1/voice/phone-numbers/reconciliation": {
+      "get": {
+        "operationId": "reconcile_voice_phone_numbers",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconciliationReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reconcile Voice Phone Numbers",
+        "tags": ["voice"]
+      }
+    },
+    "/api/v1/voice/session-detail": {
+      "post": {
+        "operationId": "get_voice_session",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoiceSessionLookup"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceSessionDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Voice Session",
+        "tags": ["voice"]
+      }
+    },
     "/api/v1/voice/sessions": {
       "get": {
         "operationId": "list_voice_sessions",

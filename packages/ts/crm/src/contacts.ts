@@ -19,6 +19,7 @@ interface ContactRow {
   email: string | null;
   company: string | null;
   lifecycle_status: ContactSummary["lifecycleStatus"];
+  voice_consent: ContactSummary["voiceConsent"];
   last_activity_at: Date | null;
   created_at: Date;
   identities: unknown;
@@ -41,6 +42,7 @@ function mapContact(row: ContactRow): ContactSummary {
     email: row.email,
     company: row.company,
     lifecycleStatus: row.lifecycle_status,
+    voiceConsent: row.voice_consent,
     lastActivityAt: row.last_activity_at?.toISOString() ?? null,
     createdAt: row.created_at.toISOString(),
     identities: safeArray(row.identities).flatMap((identity) =>
@@ -78,7 +80,7 @@ function mapContact(row: ContactRow): ContactSummary {
 }
 
 const contactProjection = `
-  SELECT c.id, c.name, c.email, c.company, c.lifecycle_status,
+  SELECT c.id, c.name, c.email, c.company, c.lifecycle_status, c.voice_consent,
          c.last_activity_at, c.created_at,
          COALESCE((SELECT jsonb_agg(jsonb_build_object(
            'id', i.id, 'channel', i.channel,
@@ -252,6 +254,20 @@ export async function updateContact(
         email = CASE WHEN ${input.email !== undefined} THEN ${email === "" ? null : email} ELSE email END,
         company = CASE WHEN ${input.company !== undefined} THEN ${company === "" ? null : company} ELSE company END,
         updated_at = CURRENT_TIMESTAMP
+    WHERE id = ${contactId}::uuid
+    RETURNING id
+  `;
+  return rows.length === 0 ? undefined : getContact(sql, contactId);
+}
+
+export async function setVoiceConsent(
+  sql: postgres.TransactionSql,
+  contactId: string,
+  consent: ContactSummary["voiceConsent"],
+): Promise<ContactSummary | undefined> {
+  const rows = await sql<{ id: string }[]>`
+    UPDATE crm.contacts
+    SET voice_consent = ${consent}, updated_at = CURRENT_TIMESTAMP
     WHERE id = ${contactId}::uuid
     RETURNING id
   `;

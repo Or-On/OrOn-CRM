@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import datetime as dt
 from uuid import UUID, uuid4
 
 import asyncpg
 import pytest
 from control_api.auth import ServicePrincipal
 from control_api.voice import (
+    FlowDocumentRequest,
     PostgresVoiceRepository,
+    RegisterPhoneNumberRequest,
     SimulatedCallConflict,
     SimulatedCallRequest,
+    VoiceCampaignCreate,
 )
 from oron_sessions.campaigns import Campaign, CampaignContact
 from oron_sessions.models import Session, SessionEvent
@@ -290,17 +294,23 @@ async def test_platform_voice_session_event_rls_fails_closed(pg: asyncpg.Connect
     assert await pg.fetchval("SELECT count(*) FROM session_events") == 0
 
 
-async def test_simulator_persists_one_idempotent_lifecycle(
+async def test_voice_did_flow_campaign_and_detail_use_canonical_postgres(
     isolated_postgres_url: str,
 ) -> None:
     await run_alembic(isolated_postgres_url, "upgrade", "head")
-    tenant_id, user_id, contact_id, other_contact_id = uuid4(), uuid4(), uuid4(), uuid4()
+    tenant_id, user_id, contact_id, other_contact_id, flow_id = (
+        uuid4(),
+        uuid4(),
+        uuid4(),
+        uuid4(),
+        uuid4(),
+    )
     connection = await asyncpg.connect(isolated_postgres_url)
     try:
         await connection.execute(
-            "INSERT INTO tenants (id, name, slug) VALUES ($1, 'Simulator tenant', $2)",
+            "INSERT INTO tenants (id, name, slug) VALUES ($1, 'Voice tenant', $2)",
             tenant_id,
-            f"simulator-{tenant_id}",
+            f"voice-{tenant_id}",
         )
         await connection.execute(
             "INSERT INTO users (id, email) VALUES ($1, $2)",
@@ -308,13 +318,13 @@ async def test_simulator_persists_one_idempotent_lifecycle(
             f"{user_id}@example.test",
         )
         await connection.execute(
-            "INSERT INTO memberships (tenant_id, user_id, role) VALUES ($1, $2, 'agent')",
+            "INSERT INTO memberships (tenant_id, user_id, role) VALUES ($1, $2, 'admin')",
             tenant_id,
             user_id,
         )
         await connection.execute(
-            "INSERT INTO crm.contacts (id, tenant_id, name) "
-            "VALUES ($1, $2, 'Fictional simulator contact')",
+            "INSERT INTO crm.contacts (id, tenant_id, name, voice_consent) "
+            "VALUES ($1, $2, 'Fictional opted-in contact', 'granted')",
             contact_id,
             tenant_id,
         )
@@ -324,8 +334,79 @@ async def test_simulator_persists_one_idempotent_lifecycle(
             other_contact_id,
             tenant_id,
         )
+        await connection.execute(
+            "INSERT INTO crm.contact_channel_identities "
+            "(tenant_id, contact_id, channel, normalized_value, validation_status, is_primary) "
+            "VALUES ($1, $2, 'phone', '+15550101010', 'valid', true)",
+            tenant_id,
+            contact_id,
+        )
     finally:
         await connection.close()
+
+    repository = PostgresVoiceRepository(isolated_postgres_url)
+    principal = ServicePrincipal(
+        user_id=user_id,
+        tenant_id=tenant_id,
+        role="admin",
+        session_id=uuid4(),
+        capability="voice:write",
+    )
+    source = {
+        "flow": {"id": str(flow_id), "version": 1, "language": "he", "name": "Test flow"},
+        "steps": [{"id": "done", "use": "announce", "then": "להתראות"}],
+    }
+    try:
+        validation = await repository.validate_flow(FlowDocumentRequest(source=source))
+        assert validation.valid
+        published = await repository.publish_flow(principal, FlowDocumentRequest(source=source))
+        replay = await repository.publish_flow(principal, FlowDocumentRequest(source=source))
+        number = await repository.register_phone_number(
+            principal,
+            RegisterPhoneNumberRequest(
+                e164="+14155550111",
+                flow_id=flow_id,
+                allowed_addresses=["203.0.113.0/24"],
+            ),
+        )
+        with pytest.raises(ValueError, match="restricted"):
+            await repository.register_phone_number(
+                principal,
+                RegisterPhoneNumberRequest(
+                    e164="+14155550112",
+                    flow_id=flow_id,
+                    allowed_addresses=["0.0.0.0/0"],
+                ),
+            )
+        now = dt.datetime.now(dt.UTC)
+        campaign = await repository.create_campaign(
+            principal,
+            VoiceCampaignCreate(
+                name="Fictional voice campaign",
+                flow_id=flow_id,
+                timezone="UTC",
+                weekday_hours={now.weekday(): [0, 24]},
+            ),
+        )
+        result = await repository.run_campaign(principal, campaign.id)
+        repeated = await repository.run_campaign(principal, campaign.id)
+        detail = await repository.get_session(
+            principal,
+            next(item.session_id for item in await repository.list_sessions(principal)),
+        )
+    finally:
+        await repository.close()
+
+    assert published.created is True
+    assert replay.created is False
+    assert number.admission == "simulated"
+    assert result.created_calls == 1
+    assert repeated.created_calls == 0
+    assert repeated.skipped_contacts == 1
+    assert detail is not None
+    assert detail.transcript_object_id is not None
+    assert [event.sequence for event in detail.events] == list(range(7))
+    assert any(event.event_type == "voice.call.usage.recorded.v1" for event in detail.events)
 
     repository = PostgresVoiceRepository(isolated_postgres_url)
     principal = ServicePrincipal(
@@ -360,27 +441,27 @@ async def test_simulator_persists_one_idempotent_lifecycle(
         assert first.session.session_id == second.session.session_id
         assert first.session.provider == "simulator"
         assert first.session.status.value == "ended"
-        assert len(first.event_types) == 6
+        assert len(first.event_types) == 7
         assert (
             await connection.fetchval(
                 "SELECT count(*) FROM sessions WHERE tenant_id = $1 AND provider = 'simulator'",
                 tenant_id,
             )
-            == 1
+            == 2
         )
         assert (
             await connection.fetchval(
                 "SELECT count(*) FROM session_events WHERE session_id = $1",
                 first.session.session_id,
             )
-            == 6
+            == 7
         )
         assert (
             await connection.fetchval(
                 "SELECT count(*) FROM ops.outbox_events WHERE aggregate_id = $1",
                 first.session.session_id,
             )
-            == 6
+            == 7
         )
         assert (
             await connection.fetchval(
