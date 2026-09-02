@@ -1,0 +1,26 @@
+[project]
+name = "oron-tenancy"
+version = "0.1.0"
+description = "Tenant, phone-number, flow, and SIP admission control retained from Or-on"
+requires-python = ">=3.14,<3.15"
+dependencies = [
+  "asyncpg==0.31.0",
+  "fastapi==0.141.1",
+  "livekit-api==1.2.1",
+  "loguru==0.7.3",
+  "oron-common",
+  "oron-db",
+  "oron-flows",
+  "pydantic-settings==2.15.0",
+  "sqlalchemy[asyncio]==2.0.52",
+  "sqlmodel==0.0.42",
+]
+
+[tool.uv.sources]
+oron-common = { workspace = true }
+oron-db = { workspace = true }
+oron-flows = { workspace = true }
+
+[build-system]
+requires = ["hatchling==1.32.0"]
+build-backend = "hatchling.build"

@@ -29,7 +29,8 @@ starts no provider service, downloads no model, and changes no upstream file.
 | safetensors | 0.8.0 | 0.8.0 | **0.8.0** | Import passed; no weight file loaded. |
 | cryptography | 49.0.0 | 50.0.1 | **50.0.1** | Updated target from 50.0.0 to the current wheel/OpenSSL patch; retained AES-GCM tests must remain green. |
 | Google Cloud KMS | 3.16.0 | 3.16.0 | **3.16.0** | Preserve envelope-key adapter; no credential or network access in normal tests. |
-| Google Cloud Storage | 3.13.0 | 3.13.1 | **3.13.1 candidate** | Patch selected for P5-010; mounted object storage remains the local default. |
+| Google Cloud Storage | 3.13.0 | 3.13.1 | **3.13.1** | Retained artifact reader dependency; mounted object storage remains the local write default. |
+| Google Cloud Secret Manager | >=2.20 source range | 2.30.0 | **2.30.0** | Retained optional entrypoint adapter; injected-client tests pass without GCP access. |
 | OpenTelemetry OTLP gRPC | 1.44.0 | 1.44.0 | **1.44.0** | Isolated import passed; no telemetry exported. |
 | OpenInference Pipecat | 2.0.1 | 2.0.3 | **2.0.3** | Patch import passed with Pipecat 1.8.1. |
 | Phoenix OTel | 0.16.1 | 0.17.1 | **0.17.1** | `phoenix.otel` import passed; exporter remains optional. |

@@ -16,6 +16,12 @@ services/
     messaging-worker/          future WhatsApp/automation durable worker
 packages/
   py/
+    oron-common/               retained shared primitives and logging
+    oron-db/                   retained SQLModel/PostgreSQL session foundation
+    oron-flows/                retained flow schema and validation model
+    oron-secrets/              retained secret-provider boundary
+    oron-tenancy/              retained tenant/user/membership control plane
+    oron-sessions/             retained session, contact, and call lifecycle
     platform-integration/      new cross-system configuration/contracts only
     README.md                  preserved Or-on package import direction
   ts/
@@ -50,9 +56,10 @@ scripts/                       cross-repository developer and verification tools
 .github/workflows/             consolidated target-only CI
 ```
 
-Directories are created only when they contain Phase 1 code/configuration or a
-concise ownership README. `apps/desktop` and later retained Or-on packages are not
-created as empty placeholders.
+Directories are created only when they contain implemented code/configuration or
+a concise ownership README. `apps/desktop` is not created as an empty
+placeholder. Retained Or-on packages are added incrementally only after their
+dependency, provenance, security, and compatibility gates pass.
 
 ## Naming policy
 
@@ -77,7 +84,9 @@ retained `oron_*` imports remain unchanged.
 
 ## Source provenance
 
-Phase 1 contains no copied business implementation. Any later copied/adapted file
-must add a row to `docs/audit/source-map.md` with source repository, locked commit,
-source path, target path, transformation, reason, and license treatment. WACRM and
-OpenLive substantial copies retain their MIT notices.
+Phase 1 contained no copied business implementation. Phase 5 imports retained
+Or-on packages from the locked private source and records each copied/adapted
+artifact in `docs/audit/source-map.md`. Any later copied/adapted file must add the
+same source repository, locked commit, source path, target path, transformation,
+reason, and license treatment. WACRM and OpenLive substantial copies retain their
+MIT notices.

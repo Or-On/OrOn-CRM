@@ -55,6 +55,27 @@ No source console, deployment configuration, provider credential, customer data,
 model weight, Firebase integration, or runtime sibling dependency was imported in
 this slice.
 
+### Phase 5 tenancy, secrets, and sessions packages
+
+Locked source SHA for every row remains
+`cece174f4d590a1b8a283d539dd66e08cc689aa9`.
+
+| Source path | Target path | Status | Reason / exact adaptation |
+| --- | --- | --- | --- |
+| `packages/oron-tenancy/src` | `packages/py/oron-tenancy/src` | adapted | Preserve tenant, phone, flow-store, SIP admission, RLS-facing, and membership behavior. Replace Firebase-specific runtime identity binding with `platform.identity_bindings`, canonicalize roles, align the Phase 4 scoped `api_keys` model, add the default-off telephony gate, redact credentials, and remove E.164/provider details from logs. |
+| `packages/oron-tenancy/tests/test_control_plane.py`, `test_reconcile.py`, `test_provisioner.py`, `test_users_models.py` | matching target tests | adapted | Preserve provider-free model/reconciliation/LiveKit request fixtures; assertions now cover canonical roles, identity binding, secret redaction, and the mandatory real-telephony gate. No LiveKit request leaves the injected fake. |
+| `packages/oron-tenancy/pyproject.toml` | `packages/py/oron-tenancy/pyproject.toml` | adapted | Identity retained; exact Python 3.14-compatible FastAPI, SQLModel, SQLAlchemy, asyncpg, LiveKit API, settings, and logging pins replace source ranges. |
+| `packages/oron-secrets/src`, `tests/test_secrets.py` | `packages/py/oron-secrets/src`, `tests/test_secrets.py` | copied | Preserve explicit-value precedence and injected-client Secret Manager resolution without network access. Formatting only. |
+| `packages/oron-secrets/pyproject.toml` | `packages/py/oron-secrets/pyproject.toml` | adapted | Identity retained; Python 3.14 and current stable Secret Manager client pinned. |
+| `packages/oron-sessions/src` | `packages/py/oron-sessions/src` | adapted | Preserve encrypted sessions, blind indexes, campaigns, artifacts, client, sweeper, and API behavior. Add typed/redacted secrets, real-telephony gating, PII-safe failure logging, Python 3.14 modernization, and target lint adaptations. |
+| `packages/oron-sessions/tests/test_client.py`, `test_config.py`, `test_contacts_file.py`, `test_crypto.py`, `test_models.py` | matching target tests | adapted | Preserve selected provider-free behavior; add default-off and redaction assertions. Source database/API/concurrency suites are deferred to P5-018 where they will use the canonical disposable-PostgreSQL harness rather than the source migration runner. |
+| `packages/oron-sessions/pyproject.toml` | `packages/py/oron-sessions/pyproject.toml` | adapted | Identity/scripts retained; exact Python 3.14-compatible web, PostgreSQL, encryption, KMS, object-storage, spreadsheet, and multipart pins replace source ranges. |
+
+The source `oron-sessions` Dockerfile, standalone source Alembic tests, console
+contract test, environment files, deployment manifests, and any provider/model
+assets were not copied. Target Compose, canonical Alembic, generated contracts,
+and later Phase 5 integration tests own those concerns.
+
 ## Planned WACRM reuse
 
 | Upstream source | Verified capability | Tentative target | Action |

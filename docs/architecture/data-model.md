@@ -30,7 +30,7 @@ erDiagram
 
 | Entity group | Classification / provenance | Tenant scope and key | Sensitive fields and ownership | Principal indexes / deletion |
 | --- | --- | --- | --- | --- |
-| `tenants`, `users`, `user_identities`, `memberships` | **Existing preserved Or-on tables** | UUIDs; memberships join user and tenant | Identity email/provider bindings; canonical RLS context | Historical indexes/FKs preserved; membership cascades as authored upstream. |
+| `tenants`, `users`, `user_identities`, `memberships` | **Existing preserved Or-on tables**; `user_identities` is historical compatibility state | UUIDs; memberships join user and tenant | Canonical tenant/user/RLS context; new provider bindings no longer target this legacy identity table | Historical indexes/FKs preserved; membership cascades as authored upstream. |
 | `platform.identity_bindings` | **New unified table**, WACRM-adapted semantics | Global provider binding to canonical `users.id` | Provider subject/email, never session claims | Unique provider+subject; user deletion cascades. |
 | `platform.tenant_invitations` | **New unified table**, WACRM-adapted semantics | `tenant_id`, UUID | Hashed invite token; invitee email and intended role | Unique token hash; explicit expiry/acceptance state. |
 | `crm.contacts` | **WACRM-adapted table** | `tenant_id`, UUID | Name, email/company, assignment | Tenant/name/activity indexes; tenant deletion cascades, referenced users set null. |

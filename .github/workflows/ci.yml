@@ -56,7 +56,11 @@ jobs:
       - run: uv run ruff format --check packages/py services/py db scripts
       - run: uv run ruff check packages/py services/py db scripts
       - run: >-
-          uv run pyrefly check packages/py services/py db/importers db/tests
+          uv run pyrefly check packages/py/oron-common/src packages/py/oron-db/src
+          packages/py/oron-flows/src packages/py/oron-secrets/src
+          packages/py/oron-sessions/src packages/py/oron-tenancy/src
+          packages/py/platform-integration/src services/py/control-api/src
+          services/py/dispatcher/src services/py/voice-agent/src db/importers
           db/alembic/env.py db/alembic/oron_migration_compat.py db/seeds scripts
       - run: uv run pytest -p no:cacheprovider
       - run: uv run pip-audit

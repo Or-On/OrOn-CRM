@@ -11,6 +11,12 @@ Phase 5 retains these low-level Or-on packages under their original identities:
   transaction-local tenant RLS helpers.
 - `oron-flows`: typed voice graph, component catalog, composition, publishing,
   and storage interfaces.
+- `oron-tenancy`: canonical tenant/membership models plus phone, flow, and SIP
+  admission control with provider actions disabled by default.
+- `oron-secrets`: optional GCP Secret Manager reference resolution at an
+  entrypoint boundary.
+- `oron-sessions`: encrypted voice-session, artifact, and campaign persistence
+  behavior.
 
 They are proprietary project code imported from the locked Or-on revision. The
 target manifests pin verified Python 3.14-compatible dependency versions; source

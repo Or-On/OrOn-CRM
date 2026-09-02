@@ -5,6 +5,7 @@ from pathlib import Path
 
 from scripts.check_repository import (
     check_node_manifests,
+    check_python_workspace_boundaries,
     check_runtime_imports,
     check_sibling_independence,
     check_workspace_boundaries,
@@ -55,3 +56,20 @@ def test_rejects_shared_package_dependency_on_service(tmp_path: Path) -> None:
     (service / "package.json").write_text(json.dumps({"name": "@test/worker"}), encoding="utf-8")
 
     assert "shared package depends on @test/worker" in check_workspace_boundaries(tmp_path)[0]
+
+
+def test_rejects_reversed_retained_python_dependency(tmp_path: Path) -> None:
+    common = tmp_path / "packages" / "py" / "oron-common"
+    sessions = tmp_path / "packages" / "py" / "oron-sessions"
+    common.mkdir(parents=True)
+    sessions.mkdir(parents=True)
+    (common / "pyproject.toml").write_text(
+        '[project]\nname = "oron-common"\nversion = "1.0.0"\ndependencies = ["oron-sessions"]\n',
+        encoding="utf-8",
+    )
+    (sessions / "pyproject.toml").write_text(
+        '[project]\nname = "oron-sessions"\nversion = "1.0.0"\n', encoding="utf-8"
+    )
+
+    errors = check_python_workspace_boundaries(tmp_path)
+    assert any("forbids dependency on oron-sessions" in error for error in errors)

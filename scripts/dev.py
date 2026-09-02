@@ -17,10 +17,17 @@ ENV_EXAMPLE = ROOT / ".env.example"
 COMPOSE_FILE = ROOT / "infra" / "compose" / "compose.yaml"
 PYTHON_PATHS = ("packages/py", "services/py", "db", "scripts")
 PYTHON_TYPE_PATHS = (
-    "packages/py",
-    "services/py",
+    "packages/py/oron-common/src",
+    "packages/py/oron-db/src",
+    "packages/py/oron-flows/src",
+    "packages/py/oron-secrets/src",
+    "packages/py/oron-sessions/src",
+    "packages/py/oron-tenancy/src",
+    "packages/py/platform-integration/src",
+    "services/py/control-api/src",
+    "services/py/dispatcher/src",
+    "services/py/voice-agent/src",
     "db/importers",
-    "db/tests",
     "db/alembic/env.py",
     "db/alembic/oron_migration_compat.py",
     "db/seeds",

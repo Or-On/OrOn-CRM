@@ -26,6 +26,11 @@ sequenceDiagram
 The runtime does not use Firebase Auth, Supabase Auth, a framework-owned
 organization model, or a second migration tool.
 
+The retained `oron-tenancy` package maps provider subjects through
+`platform.identity_bindings`. Its historical `user_identities.firebase_uid`
+table remains migration lineage only and is not the target runtime identity
+authority.
+
 ## Session contract
 
 - The cookie contains 256 bits of random opaque entropy and is never logged.

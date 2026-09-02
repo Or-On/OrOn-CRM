@@ -53,6 +53,20 @@ JS_IMPORT = re.compile(
     r"(?:from\s+|import\s+|import\s*\(|require\s*\()\s*['\"](?P<package>[^'\"]+)['\"]"
 )
 PY_IMPORT = re.compile(r"^\s*(?:from|import)\s+(?P<package>[A-Za-z0-9_\.]+)", re.MULTILINE)
+ORON_ALLOWED_DEPENDENCIES = {
+    "oron-common": set(),
+    "oron-db": set(),
+    "oron-flows": {"oron-common"},
+    "oron-secrets": set(),
+    "oron-tenancy": {"oron-common", "oron-db", "oron-flows"},
+    "oron-sessions": {
+        "oron-common",
+        "oron-db",
+        "oron-flows",
+        "oron-secrets",
+        "oron-tenancy",
+    },
+}
 
 
 def _walk_files(root: Path, start: Path) -> Iterable[Path]:
@@ -257,6 +271,83 @@ def check_workspace_boundaries(root: Path) -> list[str]:
     return errors
 
 
+def _python_dependency_name(requirement: str) -> str:
+    return re.split(r"[<>=!~\[ ;]", requirement.lower(), maxsplit=1)[0]
+
+
+def check_python_workspace_boundaries(root: Path) -> list[str]:
+    """Keep retained Or-on packages one-way and all Python workspaces acyclic."""
+
+    manifests: dict[str, tuple[Path, dict[str, object]]] = {}
+    for area in (root / "packages" / "py", root / "services" / "py"):
+        for manifest in _walk_files(root, area):
+            if manifest.name != "pyproject.toml":
+                continue
+            document = tomllib.loads(manifest.read_text(encoding="utf-8"))
+            project = document.get("project")
+            if not isinstance(project, dict):
+                continue
+            name = project.get("name")
+            if isinstance(name, str):
+                manifests[name] = (manifest, document)
+
+    graph: dict[str, set[str]] = {name: set() for name in manifests}
+    errors: list[str] = []
+    for source_name, (source_path, document) in manifests.items():
+        project = document.get("project")
+        assert isinstance(project, dict)
+        requirements = project.get("dependencies", [])
+        dependencies = {
+            name
+            for requirement in requirements
+            if isinstance(requirement, str)
+            and (name := _python_dependency_name(requirement)) in manifests
+        }
+        graph[source_name].update(dependencies)
+        if source_name in ORON_ALLOWED_DEPENDENCIES:
+            forbidden = {
+                dependency
+                for dependency in dependencies
+                if dependency.startswith("oron-")
+                and dependency not in ORON_ALLOWED_DEPENDENCIES[source_name]
+            }
+            for dependency in sorted(forbidden):
+                errors.append(
+                    f"{source_path.relative_to(root)}: retained package direction "
+                    f"forbids dependency on {dependency}"
+                )
+        if source_path.is_relative_to(root / "packages"):
+            for dependency in sorted(dependencies):
+                target_path = manifests[dependency][0]
+                if target_path.is_relative_to(root / "services"):
+                    errors.append(
+                        f"{source_path.relative_to(root)}: shared Python package depends on "
+                        f"service {dependency}"
+                    )
+
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(name: str, trail: list[str]) -> None:
+        if name in visiting:
+            cycle = " -> ".join([*trail[trail.index(name) :], name])
+            errors.append(f"Python workspace dependency cycle: {cycle}")
+            return
+        if name in visited:
+            return
+        visiting.add(name)
+        trail.append(name)
+        for dependency in sorted(graph[name]):
+            visit(dependency, trail)
+        trail.pop()
+        visiting.remove(name)
+        visited.add(name)
+
+    for package in sorted(graph):
+        visit(package, [])
+    return errors
+
+
 def collect_errors(root: Path = ROOT) -> list[str]:
     return [
         *check_node_manifests(root),
@@ -266,6 +357,7 @@ def collect_errors(root: Path = ROOT) -> list[str]:
         *check_external_symlinks(root),
         *check_database_topology(root),
         *check_workspace_boundaries(root),
+        *check_python_workspace_boundaries(root),
     ]
 
 
@@ -276,7 +368,10 @@ def main() -> None:
         for error in errors:
             print(f"- {error}")
         raise SystemExit(1)
-    print("Repository policy checks passed: PostgreSQL-only, Alembic-only, sibling-independent")
+    print(
+        "Repository policy checks passed: PostgreSQL-only, Alembic-only, "
+        "sibling-independent, workspace boundaries intact"
+    )
 
 
 if __name__ == "__main__":

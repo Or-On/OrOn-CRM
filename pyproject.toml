@@ -25,6 +25,9 @@ members = [
   "packages/py/oron-common",
   "packages/py/oron-db",
   "packages/py/oron-flows",
+  "packages/py/oron-secrets",
+  "packages/py/oron-sessions",
+  "packages/py/oron-tenancy",
   "packages/py/platform-integration",
   "services/py/control-api",
   "services/py/dispatcher",
@@ -42,9 +45,19 @@ ignore = ["S101"]
 
 [tool.ruff.lint.per-file-ignores]
 "**/tests/**" = ["S101", "S105", "S106"]
+# FastAPI intentionally declares dependency markers in parameter defaults.
+"packages/py/oron-sessions/src/oron_sessions/api.py" = ["B008", "B904"]
+"packages/py/oron-sessions/src/oron_sessions/deps.py" = ["B008"]
+"packages/py/oron-tenancy/src/oron_tenancy/router.py" = ["B008", "B904"]
+# Preserved source translates driver/provider failures into domain errors.
+"packages/py/oron-sessions/src/oron_sessions/artifacts.py" = ["B904"]
+"packages/py/oron-sessions/src/oron_sessions/campaigns.py" = ["B904"]
+"packages/py/oron-tenancy/src/oron_tenancy/admission.py" = ["B904"]
+"packages/py/oron-tenancy/src/oron_tenancy/security.py" = ["B904"]
+"packages/py/oron-tenancy/tests/test_provisioner.py" = ["B017"]
 
 [tool.pytest.ini_options]
-addopts = "-ra --strict-config --strict-markers"
+addopts = "-ra --strict-config --strict-markers --import-mode=importlib"
 asyncio_mode = "auto"
 testpaths = ["packages/py", "services/py", "db/tests", "db/importers", "scripts/tests"]
 pythonpath = ["."]
@@ -57,4 +70,15 @@ markers = [
 
 [tool.pyrefly]
 project-includes = ["packages/py/*/src", "services/py/*/src"]
-project-excludes = ["**/__pycache__", "**/.venv", "db/alembic/versions/**"]
+project-excludes = [
+  "**/__pycache__",
+  "**/.venv",
+  "**/tests/**",
+  "db/alembic/versions/**",
+]
+
+[tool.pyrefly.errors]
+# SQLModel exposes ``__tablename__`` as a descriptor on the declarative base,
+# while concrete table models correctly declare a string. This is a stub-level
+# false positive also documented by the retained Or-on workspace.
+bad-override = false
