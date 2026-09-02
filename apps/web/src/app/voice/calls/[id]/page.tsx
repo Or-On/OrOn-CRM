@@ -3,7 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { Badge, Surface } from "@or-on/ui";
 
 import { UnauthenticatedError } from "../../../../features/auth";
-import { voiceClient } from "../../../../features/voice";
+import { voiceClient } from "../../../../features/voice-server";
 
 export default async function CallDetailPage({
   params,

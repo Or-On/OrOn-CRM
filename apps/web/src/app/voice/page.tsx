@@ -1,7 +1,8 @@
 import { redirect } from "next/navigation";
 
 import { UnauthenticatedError } from "../../features/auth";
-import { voiceClient, VoiceOverview } from "../../features/voice";
+import { VoiceOverview } from "../../features/voice";
+import { voiceClient } from "../../features/voice-server";
 
 export default async function VoicePage() {
   try {

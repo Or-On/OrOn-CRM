@@ -5,7 +5,7 @@ import {
   ForbiddenError,
   UnauthenticatedError,
 } from "../../../features/auth";
-import { voiceClient } from "../../../features/voice";
+import { voiceClient } from "../../../features/voice-server";
 
 interface Upstream {
   readonly data: unknown;

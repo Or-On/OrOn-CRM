@@ -1,7 +1,8 @@
 import { redirect } from "next/navigation";
 
 import { UnauthenticatedError } from "../../../features/auth";
-import { voiceClient, VoiceCampaignPanel } from "../../../features/voice";
+import { VoiceCampaignPanel } from "../../../features/voice";
+import { voiceClient } from "../../../features/voice-server";
 
 export default async function VoiceCampaignsPage() {
   try {
