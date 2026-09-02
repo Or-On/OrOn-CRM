@@ -13,7 +13,7 @@ Last updated: 2026-09-02 (Asia/Jerusalem)
 - Phase 3 status: **COMPLETE**
 - Phase 4 status: **COMPLETE**
 - Phase 5 status: **IMPLEMENTATION IN PROGRESS**
-- Active task: P5-007 — control API voice routes and generated TypeScript client
+- Active task: P5-008 — telephony simulator and real-provider denial boundary
 - Phase 2B clean baseline commit: `830a8371836ea7922fca5c320624bf3bd32ec229`
 - Phase 3 exact baseline commit: `9ca3a022c2fb18a5d416b39aa7d1404f7910ae1b`
 - Phase 4 exact baseline commit: `fdaabedfe0c6dd3586261a338f2fd82f904023d8`
@@ -65,6 +65,17 @@ fresh upgrade and supported downgrade/re-upgrade, 38 live PostgreSQL tests, 251
 offline Python tests, the consolidated verification/build, and both dependency
 audits pass.
 
+Checkpoint `8d903a6` completed P5-007. The first canonical voice endpoint lists
+retained call sessions through the least-privilege `platform_voice` role after
+the web BFF resolves a Phase 3 session, applies RBAC, and issues a short-lived,
+audience-bound assertion. FastAPI OpenAPI remains authoritative and the
+generated TypeScript client is freshness-checked. Both production containers
+build and become healthy, and a fictional local login reaches the same-origin
+voice BFF with `200` while returning no calls. The full gate passes with 255
+offline Python tests, 38 live PostgreSQL tests, all TypeScript suites, strict
+typing, production builds, repository/secret guards, and clean dependency
+audits. No provider operation occurred.
+
 The authoritative implementation scope and acceptance gate is
 [`phase-5-telephony.md`](plans/phase-5-telephony.md). It preserves the Or-on
 engine and package identities, makes the existing `sessions` table the canonical
@@ -83,8 +94,8 @@ Status values: `pending`, `active`, `complete`, `blocked`.
 | P5-004 | Import/adapt tenancy, secrets, and sessions packages | complete | `5fc6391` | Package identities/direction preserved; provider-neutral identity binding, redacted secrets, default-off telephony, 249 offline Python tests, and dependency audit pass | Mount only through the later canonical API/service-auth boundary. |
 | P5-005 | Reconcile imported models with canonical identity/RLS/schema | complete | `5fc6391` | Retained identity, role, and API-key models match canonical tables; repository boundary guard passes; 35 live PostgreSQL tests pass at sole head `b56eb0a0aca1` | Add new behavior only through an Alembic successor. |
 | P5-006 | Canonical call/contact/campaign/object/event bridge migration | complete | `0b16ccb` | Generated successor `e24340ce81c8`; deterministic one-head SQL; tenant-consistent contact/campaign/object/session FKs; scoped idempotency; append-only RLS events; 38 live PostgreSQL tests | Keep `sessions` authoritative and emit transport events through the outbox. |
-| P5-007 | Control API voice routes and generated TypeScript client | active | — | Retained routers and canonical Phase 3 auth/service boundaries are mapped but not mounted | Expose the minimum versioned voice surface through canonical dependencies and regenerate the client. |
-| P5-008 | Telephony simulator and real-provider denial boundary | pending | — | — | Prove deterministic lifecycle with real flags false. |
+| P5-007 | Control API voice routes and generated TypeScript client | complete | `8d903a6` | Authenticated `GET /api/v1/voice/sessions`; canonical RBAC and tenant assertion; `platform_voice` RLS query; deterministic OpenAPI/client; container and same-origin login/BFF proof; full verification clean | Preserve this read-only contract while adding mutations through the simulator-first command boundary. |
+| P5-008 | Telephony simulator and real-provider denial boundary | active | — | Real provider defaults and retained construction guards already deny accidental traffic | Add a deterministic outbound-call simulator command and prove both feature-flag and explicit-approval gates for any real adapter. |
 | P5-009 | Import/adapt dispatcher and LiveKit webhook contracts | pending | — | — | Remove Firebase/admin coupling and add service auth/idempotency. |
 | P5-010 | Import/adapt Hebrew and Pipecat voice-agent packages | pending | — | — | Preserve audio/flow semantics under the compatibility gate. |
 | P5-011 | LiveKit/SIP/Redis opt-in Compose voice profile | pending | — | — | Validate control plane only; never place a call. |
@@ -420,7 +431,8 @@ file precedence and provider flags remain false.
 
 ## Next exact task
 
-Execute P5-007: mount the minimum retained session/voice control capabilities
-behind the canonical Phase 3 browser and service-auth boundaries, keep FastAPI
-OpenAPI authoritative, and regenerate/freshness-check the TypeScript client.
-Do not expose the standalone legacy service-key or provider paths.
+Execute P5-008: add a deterministic outbound-call simulator command through the
+canonical control API, persist its lifecycle through the retained session and
+event/outbox model, and prove that real telephony requires both the explicit
+feature flag and per-action approval. Do not contact LiveKit, SIP, or any real
+provider.
