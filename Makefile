@@ -3,7 +3,7 @@
 PYTHON ?= python
 RUNNER := $(PYTHON) scripts/dev.py
 
-.PHONY: help doctor bootstrap voice-bootstrap dev stop ps logs migrate migration-check migration-graph migration-sql db-contract-check db-verify-offline db-verify-live seed lint format typecheck test verify
+.PHONY: help doctor bootstrap voice-bootstrap voice-up voice-check voice-down dev stop ps logs migrate migration-check migration-graph migration-sql db-contract-check db-verify-offline db-verify-live seed lint format typecheck test verify
 
 help: ## Show the supported developer commands.
 	@$(RUNNER) help
@@ -16,6 +16,15 @@ bootstrap: ## Idempotently sync dependencies, start PostgreSQL, migrate, seed, a
 
 voice-bootstrap: ## Install the heavy retained Pipecat/audio group with providers disabled.
 	@$(RUNNER) voice-bootstrap
+
+voice-up: ## Start and read-only verify the optional local LiveKit/SIP control plane.
+	@$(RUNNER) voice-up
+
+voice-check: ## Verify the SIP control plane without creating provider state.
+	@$(RUNNER) voice-check
+
+voice-down: ## Stop only the optional local LiveKit/SIP/Redis services.
+	@$(RUNNER) voice-down
 
 dev: ## Run the current host-development processes with real providers disabled.
 	@$(RUNNER) dev

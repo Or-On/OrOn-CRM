@@ -144,3 +144,12 @@ without creating provider work. The provider-free retained suite passes 349
 tests with three deployment-wiring cases explicitly deferred to P5-011. No
 model asset was downloaded, bundled, or executed, and no real provider was
 contacted.
+
+P5-011 adds a separate opt-in Compose profile using digest-pinned Redis 8.10.1,
+LiveKit Server v1.13.6, and LiveKit SIP v1.13.0. All three container health
+checks pass and a read-only SDK probe lists inbound trunks, outbound trunks, and
+dispatch rules successfully. Redis and SIP have no host port bindings; the
+LiveKit control endpoint is loopback-only. The verified initial state contained
+zero trunks and zero rules, and no create/dial/provider operation ran. The
+provider-enabled agent and dispatcher runtime remain host/service integration
+work after the P5-012 admission boundary is complete.

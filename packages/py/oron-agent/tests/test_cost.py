@@ -1,4 +1,5 @@
 import uuid
+from pathlib import Path
 
 import pytest
 from oron_agent.cost import UsageObserver
@@ -246,7 +247,15 @@ def test_every_model_deploy_env_offers_is_priced():
     `unpriced` exists to prevent. `gemma-4-31b` was read back off Cerebras's own
     /v1/models before it was priced; this keeps the two spellings tied together.
     """
-    pytest.skip("target voice deployment environment is tracked by P5-011")
+    example = Path(__file__).resolve().parents[4] / ".env.example"
+    offered = {
+        line.split("=", 1)[1].strip()
+        for line in example.read_text(encoding="utf-8").splitlines()
+        if line.startswith("LLM_MODEL=")
+    }
+
+    assert offered, ".env.example no longer documents LLM_MODEL"
+    assert not (offered - {""} - set(PriceBook().llm))
 
 
 def test_a_real_shaped_call_prices_sanely():

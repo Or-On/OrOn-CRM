@@ -254,5 +254,17 @@ and no model weights or model licenses are imported by these rows.
 | `packages/oron-agent/src/oron_agent/` excluding `flows_seed/` | `packages/py/oron-agent/src/oron_agent/` | copied/adapted | Preserves Pipecat/LiveKit transport, STT/TTS/LLM pipeline, flow handlers, barge-in/turn behavior, audio filters, usage, lifecycle, and artifact behavior. Target adaptations add redacted secret types/logging, cross-platform local object URIs, explicit local model path/hash injection, and a default-off real-voice-provider gate. Filesystem JSON flow seeds are intentionally not imported because PostgreSQL/Alembic remain authoritative. |
 | `packages/oron-agent/src/oron_agent/config.py`, entrypoint/provider composition | same target package paths | adapted | Provider credentials default empty and are `SecretStr`; provider execution requires `ENABLE_REAL_VOICE_PROVIDERS=true` plus complete configuration. Diagnostics expose booleans only. No provider client/model is built before the gate. |
 | `packages/oron-dispatcher/src/oron_dispatcher/launcher.py` | `packages/py/oron-agent/src/oron_agent/launcher.py`; `services/py/dispatcher/src/dispatcher_runtime/app.py` | behaviorally adapted/re-written | Preserves one task per call and Pipecat `run_call` launch semantics in a target-owned typed handle with cancellation, override validation, and provider preflight. Dispatcher composition injects this port explicitly; default-off tests create no provider task. |
-| `packages/oron-agent/tests/` excluding `tests/eval/` | `packages/py/oron-agent/tests/` | copied/adapted | Preserves behavioral coverage with local fakes and target paths. External evaluation/model/provider cases are not imported; three deployment-wiring assertions remain explicit P5-011 skips. |
+| `packages/oron-agent/tests/` excluding `tests/eval/` | `packages/py/oron-agent/tests/` | copied/adapted | Preserves behavioral coverage with local fakes and target paths. External evaluation/model/provider cases are not imported; source deployment assertions now validate target `.env.example` defaults. |
 | `packages/oron-hebrew/pyproject.toml`, `packages/oron-agent/pyproject.toml` | target package manifests, root `pyproject.toml`, `uv.lock` | adapted/re-written | Retains verified technologies on Python 3.14 with current compatible pins. Heavy dependencies live in opt-in uv group `voice`; `audiolab==0.5.1` is the tested compatibility fallback for Pipecat's `pyrnnoise==0.4.3`. |
+
+## Phase 5 Or-on LiveKit/SIP deployment adaptation
+
+Locked Or-on source SHA:
+`cece174f4d590a1b8a283d539dd66e08cc689aa9`. Or-on remains private/proprietary;
+LiveKit Server and LiveKit SIP images declare Apache-2.0, while the official
+Redis 8 image has its separately documented tri-license.
+
+| Source artifacts | Target artifacts | Status | Reason / exact adaptation |
+| --- | --- | --- | --- |
+| `deploy/livekit/docker-compose.dev-sip.yml`, `livekit.dev-sip.yaml`, `sip/sip.dev.yaml` | `infra/compose/compose.yaml`, `infra/compose/livekit/*.yaml` | adapted | Preserves the required Redis-backed LiveKit/SIP bridge topology. Replaces floating images with exact tags and multi-platform digests, removes the public Redis/SIP/RTP bindings, injects local credentials from ignored environment state, adds dependency-aware health checks, and retains `use_external_ip: false`. |
+| Source control-plane readiness lesson (`sip not connected (redis required)`) | `scripts/verify_voice_profile.py`, `scripts/dev.py`, `Makefile` | behaviorally adapted/re-written | Uses only list-inbound, list-outbound, and list-dispatch-rule calls to prove SIP registration. Refuses missing/short/upstream-placeholder credentials and never invokes create/update/delete/participant/transfer APIs. |

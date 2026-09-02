@@ -6,7 +6,7 @@ from oron_agent.llm import LlmProvider, build_llm, warm_prompt_cache
 from pipecat.services.openai.llm import OpenAILLMService
 from pydantic import ValidationError
 
-DEPLOY = Path(__file__).resolve().parents[3] / "deploy" / "livekit"
+ENV_EXAMPLE = Path(__file__).resolve().parents[4] / ".env.example"
 
 COHERE = "https://api.cohere.com/compatibility/v1"
 
@@ -102,7 +102,15 @@ def test_the_warmup_switch_reaches_the_container():
     """#81: TURN_START was declared in settings and plumbed nowhere, so the guard
     behind it was unreachable on the VM and nobody could tell. A knob is only
     real if all four links exist."""
-    pytest.skip("target voice Compose wiring is tracked by P5-011")
+    configured = {
+        key: value
+        for key, value in (
+            line.split("=", 1)
+            for line in ENV_EXAMPLE.read_text(encoding="utf-8").splitlines()
+            if "=" in line and not line.startswith("#")
+        )
+    }
+    assert configured["LLM_WARMUP"] == str(Settings.model_fields["llm_warmup"].default).lower()
 
 
 def test_an_evaluation_model_is_flagged_unpriced_not_reported_as_free():

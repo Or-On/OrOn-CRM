@@ -1,5 +1,7 @@
 """Which end of the turn Soniox owns, and what taking it costs."""
 
+from pathlib import Path
+
 import pytest
 from oron_agent.audio import TurnEnd
 from oron_agent.bot import build_user_aggregator_params
@@ -93,4 +95,17 @@ def test_compose_fallbacks_match_the_code_defaults():
     OVERRIDES the Settings default rather than deferring to it. A fallback left
     behind a flipped default silently ships the old behaviour on any path where
     the env file lacks the var."""
-    pytest.skip("target voice Compose fallback coverage is tracked by P5-011")
+    configured = {
+        key: value
+        for key, value in (
+            line.split("=", 1)
+            for line in (Path(__file__).resolve().parents[4] / ".env.example")
+            .read_text(encoding="utf-8")
+            .splitlines()
+            if "=" in line and not line.startswith("#")
+        )
+    }
+    settings = Settings()
+    assert configured["TURN_START"] == settings.turn_start
+    assert configured["TURN_END"] == settings.turn_end
+    assert int(configured["INTERRUPT_MIN_WORDS"]) == settings.interrupt_min_words

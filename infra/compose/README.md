@@ -17,6 +17,12 @@ Alembic remains an explicit operator command; application startup never mutates
 schema. Local role bootstrap creates a non-superuser `platform_web` login while
 `platform_migrator` is reserved for migration and seed operations.
 
-Future `voice`, `integrations`, and `observability` profiles may add retained
-engines. Redis may coordinate LiveKit or cache data but never becomes authoritative
-application state.
+The opt-in `voice` profile adds digest-pinned Redis 8.10.1, LiveKit Server
+v1.13.6, and LiveKit SIP v1.13.0. Redis and SIP publish no host ports; LiveKit's
+control endpoint binds only to loopback. Redis is disposable coordination state
+and never authoritative application persistence. `voice-up` waits for all three
+health checks and then lists SIP resources through the read-only SDK surface;
+it creates no trunk, dispatch rule, participant, DID, or call. See the
+[voice control-plane runbook](../../docs/runbooks/voice-control-plane.md).
+
+Future `integrations` and `observability` profiles may add retained engines.

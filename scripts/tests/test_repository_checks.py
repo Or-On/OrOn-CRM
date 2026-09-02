@@ -8,6 +8,7 @@ from scripts.check_repository import (
     check_python_workspace_boundaries,
     check_runtime_imports,
     check_sibling_independence,
+    check_voice_topology,
     check_workspace_boundaries,
 )
 
@@ -73,3 +74,27 @@ def test_rejects_reversed_retained_python_dependency(tmp_path: Path) -> None:
 
     errors = check_python_workspace_boundaries(tmp_path)
     assert any("forbids dependency on oron-sessions" in error for error in errors)
+
+
+def test_rejects_public_redis_or_mutating_voice_probe(tmp_path: Path) -> None:
+    compose = tmp_path / "infra" / "compose" / "compose.yaml"
+    probe = tmp_path / "scripts" / "verify_voice_profile.py"
+    compose.parent.mkdir(parents=True)
+    probe.parent.mkdir(parents=True)
+    compose.write_text(
+        "\n".join(
+            (
+                "image: redis:8.10.1-alpine@sha256:test",
+                "image: livekit/livekit-server:v1.13.6@sha256:test",
+                "image: livekit/sip:v1.13.0@sha256:test",
+                'ports: ["127.0.0.1:${LIVEKIT_PORT:-7880}:7880", "6379:6379"]',
+            )
+        ),
+        encoding="utf-8",
+    )
+    probe.write_text("await client.sip.create_sip_participant(request)", encoding="utf-8")
+
+    errors = check_voice_topology(tmp_path)
+
+    assert any("voice port must remain private" in error for error in errors)
+    assert any("mutating SIP method create_" in error for error in errors)

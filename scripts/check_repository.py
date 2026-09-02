@@ -54,10 +54,18 @@ JS_IMPORT = re.compile(
 )
 PY_IMPORT = re.compile(r"^\s*(?:from|import)\s+(?P<package>[A-Za-z0-9_\.]+)", re.MULTILINE)
 ORON_ALLOWED_DEPENDENCIES = {
+    "oron-agent": {
+        "oron-common",
+        "oron-flows",
+        "oron-hebrew",
+        "oron-secrets",
+        "oron-sessions",
+    },
     "oron-common": set(),
     "oron-db": set(),
     "oron-dispatcher": {"oron-common", "oron-sessions"},
     "oron-flows": {"oron-common"},
+    "oron-hebrew": {"oron-common"},
     "oron-secrets": set(),
     "oron-tenancy": {"oron-common", "oron-db", "oron-flows"},
     "oron-sessions": {
@@ -212,6 +220,33 @@ def check_database_topology(root: Path) -> list[str]:
     return errors
 
 
+def check_voice_topology(root: Path) -> list[str]:
+    """Keep the optional control plane pinned, private, and mutation-free."""
+    compose = root / "infra" / "compose" / "compose.yaml"
+    content = compose.read_text(encoding="utf-8")
+    errors: list[str] = []
+    required_images = (
+        "redis:8.10.1-alpine@sha256:",
+        "livekit/livekit-server:v1.13.6@sha256:",
+        "livekit/sip:v1.13.0@sha256:",
+    )
+    for image in required_images:
+        if image not in content:
+            errors.append(f"{compose.relative_to(root)}: pinned voice image missing {image}")
+    for binding in ('"6379:6379"', '"5060:5060', '"10000-10100:'):
+        if binding in content:
+            errors.append(f"{compose.relative_to(root)}: voice port must remain private {binding}")
+    if '"127.0.0.1:${LIVEKIT_PORT:-7880}:7880"' not in content:
+        errors.append(f"{compose.relative_to(root)}: LiveKit control port is not loopback-bound")
+
+    probe = root / "scripts" / "verify_voice_profile.py"
+    probe_content = probe.read_text(encoding="utf-8")
+    for mutation in ("create_", "update_", "delete_", "transfer_", "participant"):
+        if f"client.sip.{mutation}" in probe_content:
+            errors.append(f"{probe.relative_to(root)}: mutating SIP method {mutation}")
+    return errors
+
+
 def check_workspace_boundaries(root: Path) -> list[str]:
     manifests: dict[str, tuple[Path, dict[str, object]]] = {}
     for manifest in _walk_files(root, root):
@@ -357,6 +392,7 @@ def collect_errors(root: Path = ROOT) -> list[str]:
         *check_sibling_independence(root),
         *check_external_symlinks(root),
         *check_database_topology(root),
+        *check_voice_topology(root),
         *check_workspace_boundaries(root),
         *check_python_workspace_boundaries(root),
     ]

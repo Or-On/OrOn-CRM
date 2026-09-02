@@ -102,8 +102,8 @@ prevent later unreviewed upgrades.
 | --- | --- | --- | --- | --- |
 | Pipecat | 1.7.0 | 1.8.1 | **1.8.1 candidate** | Python 3.14.7 import with required Or-on extras passed. Full Or-on behavioral tests are mandatory in the isolated voice upgrade group before Phase 5 adoption. |
 | LiveKit Python API | 1.2.0 | 1.2.1 | **1.2.1 candidate** | Imported with Pipecat gate. |
-| LiveKit server | floating source image | v1.13.6 | **v1.13.6** | Official stable release; pin image/digest before enabling voice profile. |
-| LiveKit SIP | floating source image | v1.12.0 | **v1.12.0** | Preserve separate SIP service plus Redis and non-empty ACL invariant. |
+| LiveKit server | floating source image | v1.13.6 | **v1.13.6** | P5-011 pins multi-platform image digest `sha256:e37d68…a815`; local HTTP control port is loopback-only. |
+| LiveKit SIP | floating source image | v1.13.0 | **v1.13.0** | P5-011 pins digest `sha256:80bf1f…58d3`; SIP/RTP remain private and the read-only SIP API proves Redis-backed control-plane connectivity. |
 | Renikud Plus | 0.3.0 | 0.5.0 | **0.5.0 candidate** | Module import passed. Or-on Hebrew fixtures and model-license review gate adoption. |
 | PyTorch | 2.13.0 | 2.13.0 | **2.13.0** | CPython 3.14 CPU wheel imported. |
 | Torchaudio | 2.11.0 | 2.11.0 | **2.11.0** | Imported with PyTorch 2.13 in the source-resolved combination. |
@@ -140,7 +140,7 @@ WebSocket contracts, and small service foundations are expected in Phase 1.
 | Component | Upstream state | Current stable | Selected target | Notes |
 | --- | --- | --- | --- | --- |
 | PostgreSQL image | 18 dev/CI; 16 Alpine deployment | 18.6 | `postgres:18.6-bookworm` | Core Compose service; loopback host binding only. Digest pin follows daemon-backed pull inspection. |
-| Redis image | 7 Alpine | Redis 8.10 line current | `redis:8.10.1-alpine` candidate | Not in Phase 1 core; future LiveKit coordination/cache only, never application truth. |
+| Redis image | 7 Alpine | Redis 8.10 line current | `redis:8.10.1-alpine` | P5-011 pins digest `sha256:becdda…f0576`; private, ephemeral LiveKit/SIP coordination only, never application truth. |
 | Caddy | floating `2-alpine` | 2.11.4 | `caddy:2.11.4-alpine` | Architecture/config foundation; public routing is not enabled in Phase 1. |
 | Node base image | 20 Alpine upstream WACRM | 24.20.0 LTS | `node:24.20.0-bookworm-slim` | Debian slim preferred over musl for native-module compatibility. |
 | Python base image | 3.12 slim upstream | 3.14.7 | `python:3.14.7-slim-bookworm` | Matches selected runtime; voice-native image compatibility remains a separate build. |

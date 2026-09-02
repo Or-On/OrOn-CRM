@@ -131,6 +131,8 @@ The default host workflow keeps PostgreSQL in Compose and runs the current app
 processes with hot reload. See the
 [local development runbook](docs/runbooks/local-development.md). CRM simulator
 details are in the [CRM/WhatsApp runbook](docs/runbooks/crm-whatsapp-local.md).
+The opt-in, no-call LiveKit/SIP setup is in the
+[voice control-plane runbook](docs/runbooks/voice-control-plane.md).
 
 ## Command surface
 
@@ -139,6 +141,8 @@ details are in the [CRM/WhatsApp runbook](docs/runbooks/crm-whatsapp-local.md).
 | `make doctor` | Report required tools, selected versions, daemon state, and ports |
 | `make bootstrap` | Sync, start PostgreSQL, migrate, generate, seed, and health-check |
 | `make voice-bootstrap` | Install the heavy retained voice dependency group with providers disabled |
+| `make voice-up` / `make voice-down` | Start/stop the private Redis/LiveKit/SIP control plane without enabling a carrier path |
+| `make voice-check` | Read-only list SIP control-plane resources; never creates or mutates provider state |
 | `make dev` | Run all current Phase 1 host processes with provider flags disabled |
 | `make stop` / `make ps` / `make logs` | Operate the non-destructive local Compose stack |
 | `make migrate` / `make migration-check` | Upgrade/check the sole Alembic lineage |

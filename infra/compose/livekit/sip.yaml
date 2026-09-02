@@ -1,0 +1,11 @@
+# Local SIP control-plane configuration. No signaling or RTP port is published
+# to the host by the Phase 5 profile, so it cannot receive a carrier call.
+redis:
+  address: redis:6379
+health_port: 8080
+sip_port: 5060
+rtp_port: 10000-10100
+use_external_ip: false
+logging:
+  level: info
+  json: true

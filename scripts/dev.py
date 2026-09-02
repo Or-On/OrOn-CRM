@@ -20,6 +20,8 @@ PYTHON_TYPE_PATHS = (
     "packages/py/oron-common/src",
     "packages/py/oron-db/src",
     "packages/py/oron-flows/src",
+    "packages/py/oron-hebrew/src",
+    "packages/py/oron-agent/src",
     "packages/py/oron-secrets/src",
     "packages/py/oron-sessions/src",
     "packages/py/oron-tenancy/src",
@@ -100,7 +102,7 @@ def _require_provider_safety(environment: dict[str, str]) -> None:
         raise RuntimeError(f"Phase 1 refuses real-provider flags: {names} must be false")
 
 
-def _compose(*arguments: str) -> list[str]:
+def _compose(*arguments: str, profile: str = "core") -> list[str]:
     return [
         "docker",
         "compose",
@@ -109,7 +111,7 @@ def _compose(*arguments: str) -> list[str]:
         "-f",
         str(COMPOSE_FILE),
         "--profile",
-        "core",
+        profile,
         *arguments,
     ]
 
@@ -375,6 +377,62 @@ def voice_bootstrap() -> None:
     print("Voice dependencies installed; all real provider flags remain disabled.")
 
 
+def _voice_profile_environment() -> dict[str, str]:
+    environment = _load_environment()
+    _require_provider_safety(environment)
+    from scripts.verify_voice_profile import validate_local_credentials
+
+    validate_local_credentials(
+        environment.get("LIVEKIT_API_KEY", ""),
+        environment.get("LIVEKIT_API_SECRET", ""),
+    )
+    return environment
+
+
+def voice_check() -> None:
+    environment = _voice_profile_environment()
+    port = environment.get("LIVEKIT_PORT", "7880")
+    _run(
+        [
+            "uv",
+            "run",
+            "--group",
+            "voice",
+            "python",
+            "scripts/verify_voice_profile.py",
+            "--url",
+            f"http://127.0.0.1:{port}",
+        ],
+        environment=environment,
+    )
+
+
+def voice_up() -> None:
+    voice_bootstrap()
+    environment = _voice_profile_environment()
+    _run(
+        _compose(
+            "up",
+            "-d",
+            "--wait",
+            "redis",
+            "livekit",
+            "livekit-sip",
+            profile="voice",
+        ),
+        environment=environment,
+    )
+    voice_check()
+
+
+def voice_down() -> None:
+    environment = _load_environment()
+    _run(
+        _compose("stop", "livekit-sip", "livekit", "redis", profile="voice"),
+        environment=environment,
+    )
+
+
 def dev() -> None:
     environment = _load_environment()
     _require_provider_safety(environment)
@@ -461,6 +519,9 @@ def help_text() -> None:
   doctor           check required local tools and ports
   bootstrap        sync core dependencies, start PostgreSQL, migrate, seed, and health-check
   voice-bootstrap  install the opt-in heavy Pipecat/audio development group
+  voice-up         start and read-only verify local Redis/LiveKit/SIP control plane
+  voice-check      list SIP control-plane resources without mutating them
+  voice-down       stop only the optional local voice infrastructure
   dev              run web, control API, live-agent, and messaging-worker on the host
   stop / ps / logs manage the local Compose stack without deleting its volume
   migrate / migration-check / seed
@@ -489,6 +550,9 @@ def main() -> None:
         "doctor": doctor,
         "bootstrap": bootstrap,
         "voice-bootstrap": voice_bootstrap,
+        "voice-up": voice_up,
+        "voice-check": voice_check,
+        "voice-down": voice_down,
         "dev": dev,
         "stop": lambda: _compose_action(environment, "stop"),
         "ps": lambda: _compose_action(environment, "ps"),

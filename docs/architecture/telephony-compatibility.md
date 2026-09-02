@@ -82,6 +82,14 @@ changing their runtime values. Assertions and production behavior are unchanged.
 - [LiveKit self-hosted SIP documentation](https://docs.livekit.io/transport/self-hosting/sip-server/)
   confirms that the SIP service is separate and its local Compose topology uses
   Redis; an SFU-only check is not SIP control-plane evidence.
+- [LiveKit Server v1.13.6](https://github.com/livekit/livekit/releases/tag/v1.13.6)
+  and [LiveKit SIP v1.13.0](https://github.com/livekit/sip/tree/v1.13.0)
+  are the stable revisions selected for P5-011. Pulled image labels matched the
+  corresponding source revisions, and the multi-platform image digests are
+  pinned in Compose.
+- The [official Redis image](https://hub.docker.com/_/redis) publishes the
+  selected 8.10.1 Alpine tag. It is private, ephemeral coordination state for
+  LiveKit/SIP only.
 - [Torchaudio installation compatibility](https://docs.pytorch.org/audio/main/installation.html)
   documents Torchaudio 2.11's stable ABI, PyTorch 2.11+ compatibility, and Python
   3.10–3.14 support.
