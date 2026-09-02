@@ -56,6 +56,7 @@ PY_IMPORT = re.compile(r"^\s*(?:from|import)\s+(?P<package>[A-Za-z0-9_\.]+)", re
 ORON_ALLOWED_DEPENDENCIES = {
     "oron-common": set(),
     "oron-db": set(),
+    "oron-dispatcher": {"oron-common", "oron-sessions"},
     "oron-flows": {"oron-common"},
     "oron-secrets": set(),
     "oron-tenancy": {"oron-common", "oron-db", "oron-flows"},

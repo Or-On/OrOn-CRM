@@ -1,0 +1,27 @@
+[project]
+name = "oron-dispatcher"
+version = "0.1.0"
+description = "Retained Or-on per-call dispatcher adapted to canonical platform boundaries"
+requires-python = ">=3.14,<3.15"
+dependencies = [
+  "asyncpg==0.31.0",
+  "fastapi==0.141.1",
+  "livekit-api==1.2.1",
+  "oron-common==0.1.0",
+  "oron-sessions==0.1.0",
+  "or-on-platform-integration==0.1.0",
+  "pydantic==2.13.5",
+  "pydantic-settings==2.15.0",
+]
+
+[build-system]
+requires = ["uv-build>=0.12.7,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+oron-common = { workspace = true }
+oron-sessions = { workspace = true }
+or-on-platform-integration = { workspace = true }
+
+[tool.uv.build-backend]
+module-name = "oron_dispatcher"

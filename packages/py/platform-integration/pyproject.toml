@@ -5,6 +5,7 @@ description = "New cross-system configuration and infrastructure integration"
 requires-python = ">=3.14,<3.15"
 dependencies = [
   "asyncpg==0.31.0",
+  "pyjwt==2.13.0",
   "pydantic==2.13.5",
   "pydantic-settings==2.15.0",
   "sqlalchemy[asyncio]==2.0.52",

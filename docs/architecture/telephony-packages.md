@@ -6,6 +6,8 @@ no build or runtime import reaches `../or-on`.
 
 ```mermaid
 flowchart TD
+  X[oron-dispatcher] --> S[oron-sessions]
+  X --> C
   S[oron-sessions] --> T[oron-tenancy]
   S --> K[oron-secrets]
   S --> F[oron-flows]
@@ -26,6 +28,9 @@ flowchart TD
 - `oron-sessions` retains encrypted call sessions, blind indexes, artifacts,
   campaign claiming/retry behavior, contact-file parsing, the session client,
   stale-session sweeping, and API models.
+- `oron-dispatcher` retains signed LiveKit webhook handling, fail-closed DID
+  admission, one-agent-per-room coordination, browser rooms, active-call
+  diagnostics, hangup/finalization, and the outbound LiveKit SIP adapter.
 - Alembic remains the only schema authority. No package calls `create_all` or
   introduces a second migration runner.
 
@@ -50,6 +55,16 @@ flowchart TD
   remain available to tests without weakening the production default.
 - Logs no longer include E.164 values or raw provider exception text in the
   imported paths.
+- Firebase/admin-console routes and dependencies are not imported. Platform
+  commands use a short-lived `dispatcher` audience assertion; LiveKit webhooks
+  retain signed-body verification.
+- Verified webhook envelopes are claimed through `ops.inbound_events` before
+  handling. PostgreSQL uniqueness makes completed delivery replays no-ops and
+  leaves failed claims retryable.
+- Outbound idempotency derives a stable session/room from tenant plus request
+  key. Session persistence must succeed before bot launch, and both provider
+  authorization gates plus a configured trunk are checked before lifecycle
+  work; the SIP adapter repeats the gate at its lowest boundary.
 
 ## Verification
 
@@ -87,3 +102,12 @@ The real-action guard independently requires both
 `ENABLE_REAL_TELEPHONY=true` and explicit per-action approval, while no real
 adapter is reachable from this endpoint. No telephone call, LiveKit/SIP
 mutation, model download, or provider request is a claim of this checkpoint.
+
+P5-009 adds the retained dispatcher package and HTTP contract without yet
+wiring the Pipecat voice-agent launcher. The service therefore reports not
+ready until P5-010 injects that engine. Signed fixture, tamper rejection,
+service-audience/capability, DID rejection, persistence-failure, idempotency,
+trunk, and default-off tests run without contacting LiveKit or SIP. Alembic head
+`315710614ae5` grants `platform_voice` only the select/insert/update privileges
+needed on the existing webhook ledger; it receives no job authority or delete
+privilege.

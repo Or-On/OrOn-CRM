@@ -1,62 +1,19 @@
-"""Canonical short-lived service assertion verification for Python routes."""
+"""Backward-compatible import surface for canonical service authentication."""
 
-from __future__ import annotations
-
-from typing import Literal
-from uuid import UUID
-
-import jwt
-from pydantic import BaseModel, ValidationError
-
-
-class ServicePrincipal(BaseModel):
-    user_id: UUID
-    tenant_id: UUID
-    role: Literal["viewer", "agent", "admin", "owner"]
-    session_id: UUID
-    capability: str | None = None
+from or_on_platform.service_auth import (
+    InvalidServiceAssertion,
+    ServicePrincipal,
+)
+from or_on_platform.service_auth import (
+    ServiceAssertionVerifier as _ServiceAssertionVerifier,
+)
 
 
-class InvalidServiceAssertion(ValueError):
-    """Raised without leaking token or claim details."""
-
-
-class ServiceAssertionVerifier:
-    """Verify assertions issued by the authenticated same-origin web BFF."""
+class ServiceAssertionVerifier(_ServiceAssertionVerifier):
+    """Control API verifier with its stable audience default."""
 
     def __init__(self, secret: str, *, audience: str = "control-api") -> None:
-        if len(secret) < 32:
-            raise ValueError("service assertion secret must be at least 32 characters")
-        self._secret = secret
-        self._audience = audience
+        super().__init__(secret, audience=audience)
 
-    def verify(self, token: str) -> ServicePrincipal:
-        try:
-            claims = jwt.decode(
-                token,
-                self._secret,
-                algorithms=["HS256"],
-                audience=self._audience,
-                issuer="or-on-platform-web",
-                options={"require": ["exp", "iat", "iss", "aud", "sub", "jti"]},
-            )
-            issued_at = claims["iat"]
-            expires_at = claims["exp"]
-            if (
-                not isinstance(issued_at, (int, float))
-                or isinstance(issued_at, bool)
-                or not isinstance(expires_at, (int, float))
-                or isinstance(expires_at, bool)
-                or expires_at <= issued_at
-                or expires_at - issued_at > 120
-            ):
-                raise TypeError("assertion lifetime is invalid")
-            return ServicePrincipal(
-                user_id=claims["sub"],
-                tenant_id=claims["tenant_id"],
-                role=claims["role"],
-                session_id=claims["session_id"],
-                capability=claims.get("capability"),
-            )
-        except (jwt.PyJWTError, KeyError, TypeError, ValidationError) as exc:
-            raise InvalidServiceAssertion("service assertion is invalid") from exc
+
+__all__ = ["InvalidServiceAssertion", "ServiceAssertionVerifier", "ServicePrincipal"]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from typing import Any
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -97,6 +98,7 @@ async def test_historical_nonempty_phone_backfill_preserves_oron_semantics(
 
 async def test_supported_target_successor_downgrade_and_reupgrade(
     isolated_postgres_url: str,
+    schema_manifest: dict[str, Any],
 ) -> None:
     await run_alembic(isolated_postgres_url, "upgrade", "head")
     await run_alembic(isolated_postgres_url, "downgrade", "a41d2f6c2925")
@@ -116,7 +118,8 @@ async def test_supported_target_successor_downgrade_and_reupgrade(
     connection = await asyncpg.connect(isolated_postgres_url)
     try:
         assert (
-            await connection.fetchval("SELECT version_num FROM alembic_version") == "e24340ce81c8"
+            await connection.fetchval("SELECT version_num FROM alembic_version")
+            == schema_manifest["alembic_head"]
         )
         assert await connection.fetchval(
             "SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'live')"

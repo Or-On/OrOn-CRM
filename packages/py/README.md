@@ -17,6 +17,8 @@ Phase 5 retains these low-level Or-on packages under their original identities:
   entrypoint boundary.
 - `oron-sessions`: encrypted voice-session, artifact, and campaign persistence
   behavior.
+- `oron-dispatcher`: signed LiveKit webhook, fail-closed DID admission,
+  one-agent-per-room lifecycle, and guarded SIP orchestration behavior.
 
 They are proprietary project code imported from the locked Or-on revision. The
 target manifests pin verified Python 3.14-compatible dependency versions; source

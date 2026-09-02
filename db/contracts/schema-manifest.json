@@ -1,5 +1,5 @@
 {
-  "alembic_head": "e24340ce81c8",
+  "alembic_head": "315710614ae5",
   "expected_functions": [
     "automation.protect_published_flow_version",
     "messaging.adjust_broadcast_counts",

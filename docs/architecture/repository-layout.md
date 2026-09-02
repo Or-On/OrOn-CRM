@@ -9,13 +9,14 @@ apps/
 services/
   py/
     control-api/               PostgreSQL/control boundary and OpenAPI authority
-    dispatcher/                future retained Or-on orchestration entrypoint
+    dispatcher/                retained Or-on orchestration composition entrypoint
     voice-agent/               future retained Or-on voice entrypoint
   ts/
     live-agent/                future OpenLive Hono/WebSocket/ACP host
     messaging-worker/          future WhatsApp/automation durable worker
 packages/
   py/
+    oron-dispatcher/           retained per-call engine and signed webhook contracts
     oron-common/               retained shared primitives and logging
     oron-db/                   retained SQLModel/PostgreSQL session foundation
     oron-flows/                retained flow schema and validation model

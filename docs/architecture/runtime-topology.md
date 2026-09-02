@@ -10,7 +10,7 @@ Phase 1.
 | --- | --- | --- | --- |
 | Unified web/BFF | Node.js / Next.js | Browser-facing UI and same-origin server APIs | Canonical login/session boundary, tenant-aware shell, system page, control-api health consumption |
 | Control API | Python / FastAPI | Preserves Or-on control/session/tenancy direction and owns Python OpenAPI | Liveness, PostgreSQL readiness, typed config, OpenAPI |
-| Dispatcher | Python | LiveKit webhooks and per-call orchestration | Safe process skeleton only; no LiveKit/provider adapter |
+| Dispatcher | Python / FastAPI | Signed LiveKit webhooks and retained per-call orchestration | Dispatcher/webhook/SIP contracts imported; runtime intentionally not ready until the P5-010 voice-agent launcher is injected; real provider disabled |
 | Voice agent | Python | Real-time Pipecat/LiveKit media lifecycle | Safe worker skeleton only; no call path |
 | Live agent | Node.js / Hono / WebSocket | OpenLive ACP/provider child-process lifecycle | Liveness/readiness and protocol placeholder, not the full live protocol |
 | Messaging worker | Node.js | Durable WhatsApp/automation/campaign work | Worker lifecycle/readiness skeleton; no provider adapter |
@@ -39,7 +39,7 @@ an HTTP server is not added solely for symmetry.
 | ---: | --- | --- |
 | 3000 | Unified web | loopback development |
 | 8000 | Control API | loopback development; private in Compose |
-| 8080 | Future dispatcher | private/loopback |
+| 8082 | Dispatcher | private/loopback; `/health/live`, `/health/ready`, signed LiveKit webhook, authenticated internal command |
 | 8787 | Live-agent HTTP/WebSocket | private/loopback |
 | 5433 -> 5432 | PostgreSQL developer access | explicitly bound to `127.0.0.1` only |
 | 6379 | Future LiveKit Redis | private network only |

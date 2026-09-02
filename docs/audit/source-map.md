@@ -221,3 +221,19 @@ source file was copied verbatim. The existing WACRM notice remains in
 | `src/lib/automations/validate.ts`, `engine.ts`, builder components and automation pages | `packages/ts/crm/src/automations.ts`; `apps/web/src/features/operations/` | behaviorally adapted/re-written | Preserve draft/publish direction using the canonical immutable flow graph/version tables. Runtime execution remains adapter-owned and is not rewritten. MIT behavioral reference. |
 | webhook persistence/retry and broadcast resume helpers | `db/alembic/versions/66e34e3b2067_add_messaging_worker_claim_primitives.py`; `services/ts/messaging-worker/src/database.ts` | behaviorally adapted/re-written | Preserve at-least-once webhook and resumable campaign semantics using canonical PostgreSQL leases/jobs rather than Supabase/background-process state. No provider SDK or source file copied. |
 | public API key routes and CRM integration helpers | `db/alembic/versions/b56eb0a0aca1_add_scoped_public_api_keys.py`; `packages/ts/crm/src/api-keys.ts`; `/api/v1/contacts` | behaviorally adapted/re-written | Preserve tenant API access while replacing plaintext/broad source assumptions with HMAC-digested, scoped, expirable canonical keys. MIT behavioral reference. |
+
+## Phase 5 Or-on dispatcher adaptations
+
+Locked Or-on source SHA for every row:
+`cece174f4d590a1b8a283d539dd66e08cc689aa9`. Or-on has no repository license
+file and remains private/proprietary project code. No public license is inferred.
+
+| Source artifacts | Target artifacts | Status | Reason / exact adaptation |
+| --- | --- | --- | --- |
+| `packages/oron-dispatcher/src/oron_dispatcher/dispatcher.py` | `packages/py/oron-dispatcher/src/oron_dispatcher/dispatcher.py` | behaviorally adapted/re-written | Preserves one-agent-per-room, DID-first inbound rejection, outbound/browser lifecycle, active calls, hangup, and finalization. Replaces best-effort persistence with a strict port, stable request/room identifiers, redacted logs, and provider preflight. Agent-specific imports are deferred to P5-010. |
+| `packages/oron-dispatcher/src/oron_dispatcher/webhook.py` | `packages/py/oron-dispatcher/src/oron_dispatcher/webhook.py`, `webhook_ledger.py` | behaviorally adapted/re-written | Preserves LiveKit signed-body verification and event routing. Replaces static outbound bearer auth with canonical short-lived service assertions and adds durable PostgreSQL claim/replay handling. |
+| `packages/oron-dispatcher/src/oron_dispatcher/sip_client.py` | `packages/py/oron-dispatcher/src/oron_dispatcher/sip_client.py` | adapted | Preserves LiveKit `CreateSIPParticipantRequest` behavior while adding mandatory configuration + explicit-approval checks both before orchestration and at the provider boundary. |
+| `packages/oron-dispatcher/src/oron_dispatcher/tenancy_client.py` | `packages/py/oron-dispatcher/src/oron_dispatcher/tenancy_client.py` | behaviorally adapted/re-written | Preserves fail-closed DID resolution and bounded httpx behavior; points at the canonical versioned API contract and accepts injected service-auth headers. |
+| `packages/oron-dispatcher/src/oron_dispatcher/config.py`, `app.py` | `packages/py/oron-dispatcher/src/oron_dispatcher/config.py`, `services/py/dispatcher/src/dispatcher_runtime/` | behaviorally adapted/re-written | Preserves typed process configuration and DI composition while removing Firebase/admin console fields/routes and making incomplete engine wiring honestly not ready. |
+| `packages/oron-dispatcher/src/oron_dispatcher/admin.py`, `auth.py` | not imported | required removal | Firebase console verification and the standalone admin BFF are replaced by Phase 3 canonical identity/RBAC/CSRF and same-origin web routes. |
+| `packages/oron-dispatcher/src/oron_dispatcher/launcher.py` | deferred to P5-010 | deferred | Depends on the retained Pipecat agent and Hebrew model, which are integrated under their separate compatibility/model-license gate. |

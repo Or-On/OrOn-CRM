@@ -1,9 +1,13 @@
 [project]
 name = "or-on-dispatcher-runtime"
 version = "0.1.0"
-description = "Future host entrypoint for the retained Or-on dispatcher"
+description = "Host entrypoint for the retained Or-on dispatcher"
 requires-python = ">=3.14,<3.15"
-dependencies = ["or-on-platform-integration==0.1.0"]
+dependencies = [
+  "or-on-platform-integration==0.1.0",
+  "oron-dispatcher==0.1.0",
+  "uvicorn[standard]==0.52.4",
+]
 
 [project.scripts]
 or-on-dispatcher-runtime = "dispatcher_runtime.main:main"
@@ -14,6 +18,7 @@ build-backend = "uv_build"
 
 [tool.uv.sources]
 or-on-platform-integration = { workspace = true }
+oron-dispatcher = { workspace = true }
 
 [tool.uv.build-backend]
 module-name = "dispatcher_runtime"
