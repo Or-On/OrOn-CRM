@@ -14,7 +14,7 @@ Last updated: 2026-09-02 (Asia/Jerusalem)
 - Phase 4 status: **COMPLETE**
 - Phase 5 status: **COMPLETE — SIMULATOR-FIRST ACCEPTANCE PASSED**
 - Phase 6 status: **IN PROGRESS — WORKER COMPLETION AND RUNTIME PARITY; OPENLIVE DEFERRED**
-- Active task: P6-010 worker complete; next implement/verify P6-011 voice-job consumption and retained-runtime adapter parity
+- Active task: P6-011 worker complete; verify retained-runtime adapters and final Phase 6 acceptance
 - Phase 2B clean baseline commit: `830a8371836ea7922fca5c320624bf3bd32ec229`
 - Phase 3 exact baseline commit: `9ca3a022c2fb18a5d416b39aa7d1404f7910ae1b`
 - Phase 4 exact baseline commit: `fdaabedfe0c6dd3586261a338f2fd82f904023d8`
@@ -39,7 +39,7 @@ messaging agent/flow adapters. The authoritative scope is
 | P6-003–P6-006 | Canonical agent/flow schema, validation, publishing, immutability, RBAC, RLS, and audit | complete | `a6aa0c1`, `7fb1b74` | Two generated Alembic revisions; one head; live PostgreSQL catalog/RLS/immutability tests pass | Complete. |
 | P6-007–P6-009 | Retained voice/messaging adapters and cross-channel coordinator | in progress | `7fb1b74` | Deterministic channel-filtered artifacts exist; they do not yet prove execution through retained engines | Verify configuration preservation and runtime parity. |
 | P6-010 | Call-outcome-to-WhatsApp simulator workflow | complete | successor to `34a14ac` | Worker now consumes the job atomically; four isolated PostgreSQL tests cover runtime-role RLS, concurrency/replay, consent/opt-out, malformed mode and foreign-tenant contact; workspace tests/typecheck/build pass | P6-011 voice-job consumer. |
-| P6-011 | WhatsApp-to-CRM-to-call simulator workflow | in progress | `7fb1b74` | Admission exists; no consumer for `cross_channel.voice_call.simulated` was found | Implement a thin bridge to the retained voice simulator, with end-to-end worker evidence. |
+| P6-011 | WhatsApp-to-CRM-to-call simulator workflow | complete | successor to `7a9657f` | Nine isolated PostgreSQL consumer tests and cross-language inbound→CRM→call→follow-up test pass; simulator sessions/events/outbox and completion share one transaction | Retained adapter execution parity and full acceptance. |
 | P6-012–P6-014 | Handoff, activity, usage, latency, and cost | implemented | `7fb1b74` | Existing domain/API tests; cost intentionally unpriced | Recheck in final cross-channel end-to-end acceptance. |
 | P6-015–P6-017 | Control API contracts and accessible responsive operator surfaces | complete | `7fb1b74`, `10ae55f` | Generated OpenAPI/client, strict typecheck, UI tests, and Next.js 16.3.3 production build pass | Complete. |
 | P6-018–P6-021 | Database/end-to-end verification, architecture, provenance, and clean checkpoint | reopened | successor to `34a14ac` | Earlier suite results did not exercise both queued cross-channel job consumers; previous completion claim was too broad | Finish remaining consumers/adapters before final acceptance. |
@@ -105,9 +105,29 @@ Local checkpoint verification:
 - CI is configured, not claimed to have run remotely. No upstream artifact was
   copied. All three upstreams remain clean at their locked SHAs.
 
-Next exact task: P6-011 — implement the consumer for
-`cross_channel.voice_call.simulated` through the retained voice simulator,
-rechecking consent and testing real PostgreSQL replay/tenant/lease behavior.
+### Phase 6 voice consumer completion
+
+Continuation baseline: clean `7a9657f92678b4b225221736b8a30d0f7003bf78`.
+All three upstream repositories verified clean at locked SHAs. New revision
+`3f6133842389` adds a voice-job-only claim function and restrictive role policy.
+The control API owns the simulator poller lifecycle, with cancellation before
+database disposal. A narrow eligibility function locks current consent,
+contact/conversation ownership, membership and account status; no messaging or
+identity table access is granted to the voice role. Historical jobs lacking
+actor attribution fail closed rather than impersonating an operator.
+
+Claim, retained simulator session/events, audit/outbox and job completion commit
+atomically. Failed effects roll back to a savepoint; bounded exponential retry
+with jitter persists only fixed safe error codes. Nine isolated PostgreSQL tests
+cover concurrency/replay, revoked consent, blocked contact, wrong tenant,
+disabled actor, malformed mode/missing actor, rollback/retry exhaustion and
+expired final-lease recovery. Six TypeScript worker integration tests include a
+real PostgreSQL cross-language inbound→CRM→Python call→WhatsApp follow-up chain.
+No external provider called; developer `.env`, credentials and queues untouched.
+Offline graph/SQL/security checks pass with one head and 22 preserved revisions.
+
+Next exact task: finish P6-007/P6-008 adapter configuration and runtime parity,
+then rerun final acceptance before starting Phase 7.
 
 ## Phase 5 implementation state
 

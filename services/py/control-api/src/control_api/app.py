@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import Literal, Protocol
 from uuid import uuid4
 
@@ -17,6 +18,7 @@ from pydantic import BaseModel
 from control_api.auth import ServiceAssertionVerifier
 from control_api.orchestration import create_orchestration_router
 from control_api.voice import PostgresVoiceRepository, VoiceRepository, create_voice_router
+from control_api.voice_jobs import run_voice_simulations
 
 
 class ReadinessProbe(Protocol):
@@ -81,9 +83,18 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         logger.info("service_started", extra={"fields": resolved_settings.diagnostics()})
+        worker = (
+            asyncio.create_task(run_voice_simulations(resolved_voice_repository, logger))
+            if isinstance(resolved_voice_repository, PostgresVoiceRepository)
+            else None
+        )
         try:
             yield
         finally:
+            if worker is not None:
+                worker.cancel()
+                with suppress(asyncio.CancelledError):
+                    await worker
             if resolved_voice_repository is not None:
                 await resolved_voice_repository.close()
             await resolved_probe.close()

@@ -61,8 +61,13 @@ tenant-local PostgreSQL transaction.
   job prevent duplicates on replay. Neither provider adapter is invoked. No
   inbound message is fabricated and inbox unread counts are preserved.
 - WhatsApp → CRM → call: the conversation supplies the canonical contact; a call
-  job is denied unless `voice_consent = 'granted'`. The voice-job consumer is
-  still pending P6-011; admission alone is not execution.
+  job is denied unless voice consent is granted and the contact is active.
+  The control API's process-owned simulator consumer claims only voice-simulation
+  jobs under `platform_voice`. It rechecks/locks membership, consent and ownership
+  through a narrow PostgreSQL function. Retained simulator session/events,
+  audit/outbox and job completion share one transaction; retries roll back effects.
+  It has no selectable carrier/provider port. Stop/restart the control API after
+  applying migration `3f6133842389` to enable the new lifecycle hook locally.
 - Handoff: request keys are tenant-idempotent and accept/resolve/cancel updates
   use compare-and-set status predicates. Concurrent accepts yield one winner.
 

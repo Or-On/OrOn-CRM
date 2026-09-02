@@ -1,5 +1,5 @@
 {
-  "alembic_head": "9d3038bec65e",
+  "alembic_head": "3f6133842389",
   "expected_functions": [
     "automation.protect_published_flow_version",
     "messaging.adjust_broadcast_counts",
@@ -7,6 +7,7 @@
     "ops.claim_inbound_events",
     "ops.claim_jobs",
     "ops.claim_jobs_all_tenants",
+    "ops.claim_voice_simulation",
     "ops.complete_inbound_event",
     "ops.fail_inbound_event",
     "ops.fail_job",
@@ -21,6 +22,7 @@
     "platform.current_tenant_id",
     "platform.current_tenant_team",
     "platform.current_user_id",
+    "platform.voice_simulation_eligible",
     "platform.resolve_api_key",
     "platform.protect_last_tenant_owner"
   ],

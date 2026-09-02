@@ -5,6 +5,8 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Annotated, Any, Literal, Protocol, cast
 from uuid import NAMESPACE_URL, UUID, uuid5
 from zoneinfo import ZoneInfo
@@ -21,6 +23,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import bindparam, func, select, text
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from sqlmodel import col
 
 from control_api.auth import (
@@ -244,9 +247,9 @@ class VoiceRepository(Protocol):
 class PostgresVoiceRepository:
     """One role-scoped repository; every request sets transaction-local identity."""
 
-    def __init__(self, database_url: str) -> None:
+    def __init__(self, database_url: str, *, engine: AsyncEngine | None = None) -> None:
         normalized = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
-        self._engine = make_engine(normalized)
+        self._engine = engine if engine is not None else make_engine(normalized)
         self._sessionmaker = make_sessionmaker(self._engine)
 
     async def list_sessions(self, principal: ServicePrincipal) -> list[VoiceSessionSummary]:
@@ -340,8 +343,23 @@ class PostgresVoiceRepository:
             },
         )
 
+    @asynccontextmanager
+    async def simulation_transaction(
+        self, existing: AsyncSession | None = None
+    ) -> AsyncIterator[AsyncSession]:
+        """Allow a durable job and its simulator effects to commit atomically."""
+        if existing is not None:
+            yield existing
+        else:
+            async with self._sessionmaker() as database, database.begin():
+                yield database
+
     async def simulate_call(
-        self, principal: ServicePrincipal, command: SimulatedCallRequest
+        self,
+        principal: ServicePrincipal,
+        command: SimulatedCallRequest,
+        *,
+        transaction: AsyncSession | None = None,
     ) -> SimulatedCallResult:
         session_id = uuid5(
             NAMESPACE_URL,
@@ -395,7 +413,7 @@ class PostgresVoiceRepository:
             "failed": "simulator_failure",
             "cancelled": "cancelled",
         }[command.scenario]
-        async with self._sessionmaker() as database, database.begin():
+        async with self.simulation_transaction(transaction) as database:
             await set_tenant(database, principal.tenant_id)
             await database.execute(
                 select(func.set_config("app.current_user", str(principal.user_id), True))

@@ -47,7 +47,7 @@ must not import or implement them. Schema/contracts may reserve a disabled
 | P6-008 | WACRM messaging-automation compiler/adapter | runtime parity pending |
 | P6-009 | Cross-channel trigger and execution coordinator | consumer verification in progress |
 | P6-010 | Call-outcome-to-WhatsApp simulator workflow | complete |
-| P6-011 | WhatsApp-to-CRM-to-call simulator workflow | admission exists; consumer pending |
+| P6-011 | WhatsApp-to-CRM-to-call simulator workflow | complete; isolated worker and cross-language round-trip tests pass |
 | P6-012 | Human handoff and ownership/escalation state | complete |
 | P6-013 | Unified contact activity query/projection | complete |
 | P6-014 | Unified audit, usage, latency, and cost views | complete |

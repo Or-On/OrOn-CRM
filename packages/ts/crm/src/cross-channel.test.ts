@@ -29,6 +29,31 @@ const crossChannelFlow: CanonicalFlow = {
 };
 
 describe("canonical cross-channel flow", () => {
+  it("preserves detached configuration through parsing and compilation", () => {
+    const configuration = {
+      text: "Fictional {{vars.greeting}}",
+      language: "he",
+      variables: { "2": "b", "10": "c", "1": "a" },
+    };
+    const flow = parseCanonicalFlow({
+      ...crossChannelFlow,
+      nodes: crossChannelFlow.nodes.map((node) =>
+        node.type === "message.send" ? { ...node, configuration } : node,
+      ),
+    });
+    configuration.text = "changed";
+    expect(
+      compileCanonicalFlow(flow).whatsapp?.nodes.find(
+        (node) => node.id === "message",
+      )?.configuration,
+    ).toEqual({ ...configuration, text: "Fictional {{vars.greeting}}" });
+    expect(() =>
+      parseCanonicalFlow({
+        ...crossChannelFlow,
+        nodes: [{ id: "bad", type: "start", configuration: [] }],
+      }),
+    ).toThrow("configuration");
+  });
   it("compiles deterministically into retained voice and messaging adapters", () => {
     const first = compileCanonicalFlow(crossChannelFlow);
     const second = compileCanonicalFlow({

@@ -12,6 +12,9 @@ import {
   listQuickReplies,
   listTeamMembers,
   queueCallOutcomeWhatsAppFollowup,
+  queueWhatsAppTriggeredCall,
+  ingestSimulatedInbound,
+  listContactActivity,
 } from "@or-on/crm";
 import { createMessagingStore } from "../src/database.js";
 
@@ -28,6 +31,7 @@ describe.skipIf(sourceUrl === undefined)("isolated call-outcome worker", () => {
   let admin: postgres.Sql;
   let web: postgres.Sql;
   let workerUrl: string;
+  let testDatabaseUrl: string;
   const cleanup: (() => Promise<void>)[] = [];
   const send = vi.fn(() =>
     Promise.reject(new Error("provider must not be invoked")),
@@ -47,6 +51,7 @@ describe.skipIf(sourceUrl === undefined)("isolated call-outcome worker", () => {
       await maintenance.unsafe(`DROP DATABASE "${databaseName}" WITH (FORCE)`);
     });
     url.pathname = `/${databaseName}`;
+    testDatabaseUrl = url.toString();
     const environment = {
       ...process.env,
       DATABASE_URL: url.toString(),
@@ -115,6 +120,87 @@ describe.skipIf(sourceUrl === undefined)("isolated call-outcome worker", () => {
     `;
     return { contactId, sessionId };
   }
+
+  it("completes inbound WhatsApp → CRM → voice worker → WhatsApp follow-up without providers", async () => {
+    const key = randomUUID();
+    const inbound = await web.begin(async (tx) => {
+      await tx`SELECT set_config('app.current_tenant', ${tenantId}, true),
+                      set_config('app.current_user', ${userId}, true)`;
+      return ingestSimulatedInbound(tx, userId, {
+        providerEventId: key,
+        providerMessageId: key,
+        from: "+12025550189",
+        profileName: "Fictional cross-channel caller",
+        text: "Please call the simulator",
+      });
+    });
+    const contactId = (
+      await admin`SELECT contact_id FROM messaging.conversations
+      WHERE id = ${inbound.conversationId}::uuid`
+    )[0]?.contact_id as string;
+    await admin`UPDATE crm.contacts SET voice_consent='granted', whatsapp_consent='granted'
+      WHERE id=${contactId}::uuid`;
+    const admit = () =>
+      web.begin(async (tx) => {
+        await tx`SELECT set_config('app.current_tenant', ${tenantId}, true),
+                      set_config('app.current_user', ${userId}, true)`;
+        return queueWhatsAppTriggeredCall(
+          tx,
+          userId,
+          inbound.conversationId,
+          key,
+        );
+      });
+    const job = await admit();
+    expect((await admit()).queued).toBe(false);
+    const script = `
+import asyncio, os
+from sqlalchemy.ext.asyncio import create_async_engine
+from control_api.voice import PostgresVoiceRepository
+from control_api.voice_jobs import consume_voice_simulation
+async def main():
+    url = os.environ['TEST_DATABASE_URL']
+    engine = create_async_engine(url.replace('postgresql://', 'postgresql+asyncpg://', 1), connect_args={'server_settings': {'role': 'platform_voice'}})
+    repository = PostgresVoiceRepository(url, engine=engine)
+    try:
+        assert await consume_voice_simulation(repository, 'cross-language-fixture')
+    finally:
+        await repository.close()
+asyncio.run(main())
+`;
+    execFileSync("uv", ["run", "--no-sync", "python", "-c", script], {
+      cwd: root,
+      stdio: "pipe",
+      env: {
+        ...process.env,
+        TEST_DATABASE_URL: testDatabaseUrl,
+        ENABLE_REAL_TELEPHONY: "false",
+        ENABLE_REAL_WHATSAPP: "false",
+        ENABLE_REAL_VOICE_PROVIDERS: "false",
+      },
+    });
+    expect(
+      (await admin`SELECT status FROM ops.jobs WHERE id=${job.jobId}::uuid`)[0]
+        ?.status,
+    ).toBe("succeeded");
+    const session = (
+      await admin`SELECT session_id FROM sessions WHERE contact_id=${contactId}::uuid`
+    )[0];
+    expect(session).toBeDefined();
+    const followup = await enqueue(session?.session_id as string);
+    await runWorker("cross-language-followup");
+    expect(
+      (
+        await admin`SELECT status FROM ops.jobs WHERE id=${followup.jobId}::uuid`
+      )[0]?.status,
+    ).toBe("succeeded");
+    const activity = await web.begin(async (tx) => {
+      await tx`SELECT set_config('app.current_tenant', ${tenantId}, true)`;
+      return listContactActivity(tx, contactId);
+    });
+    expect(activity.length).toBeGreaterThanOrEqual(3);
+    expect(send).not.toHaveBeenCalled();
+  }, 30_000);
 
   async function enqueue(sessionId: string, key = randomUUID()) {
     return web.begin(async (tx) => {

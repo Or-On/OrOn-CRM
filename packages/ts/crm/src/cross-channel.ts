@@ -63,7 +63,25 @@ export function parseCanonicalFlow(value: unknown): CanonicalFlow {
       !flowNodeTypes.includes(candidate.type as FlowNodeType)
     )
       throw new TypeError("flow node id/type is invalid");
-    return { id: candidate.id, type: candidate.type as FlowNodeType };
+    const configuration = candidate.configuration;
+    if (
+      configuration !== undefined &&
+      (configuration === null ||
+        typeof configuration !== "object" ||
+        Array.isArray(configuration))
+    )
+      throw new TypeError("node configuration must be an object");
+    // JSON round-trip detaches the persisted immutable version from caller objects.
+    const encoded = JSON.stringify(configuration ?? {});
+    if (encoded.length > 64_000)
+      throw new TypeError("node configuration is too large");
+    return {
+      id: candidate.id,
+      type: candidate.type as FlowNodeType,
+      ...(configuration === undefined
+        ? {}
+        : { configuration: JSON.parse(encoded) as Record<string, JsonValue> }),
+    };
   });
   const edges = record.edges.map((edge) => {
     if (edge === null || typeof edge !== "object")
@@ -535,10 +553,12 @@ export async function queueWhatsAppTriggeredCall(
   idempotencyKey: string,
 ): Promise<SimulatedCommand> {
   const eligible = await sql<{ contact_id: string; eligible: boolean }[]>`
-    SELECT conversation.contact_id, contact.voice_consent = 'granted' AS eligible
+    SELECT conversation.contact_id, (contact.voice_consent = 'granted'
+      AND contact.lifecycle_status = 'active') AS eligible
     FROM messaging.conversations conversation
     JOIN crm.contacts contact ON contact.id = conversation.contact_id
     WHERE conversation.id = ${conversationId}::uuid
+    FOR SHARE OF contact, conversation
   `;
   const candidate = eligible[0];
   if (candidate?.eligible !== true)
@@ -550,7 +570,7 @@ export async function queueWhatsAppTriggeredCall(
     "cross_channel.voice_call.simulated",
     candidate.contact_id,
     idempotencyKey,
-    { contactId: candidate.contact_id, conversationId },
+    { contactId: candidate.contact_id, conversationId, actorUserId },
   );
 }
 
