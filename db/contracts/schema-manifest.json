@@ -1,5 +1,5 @@
 {
-  "alembic_head": "7beb64e1ff33",
+  "alembic_head": "a1a71d1f7a03",
   "expected_functions": [
     "automation.protect_published_flow_version",
     "messaging.adjust_broadcast_counts",
@@ -36,6 +36,7 @@
     "ix_live_chats_tenant_updated",
     "ix_live_messages_chat_cursor",
     "ix_messages_conversation_cursor",
+    "ix_outbound_requests_status",
     "ix_session_events_cursor",
     "ix_sessions_contact_cursor",
     "ix_sessions_tenant_cursor",
@@ -58,6 +59,8 @@
   ],
   "expected_tables": {
     "agents": [
+      "agent_profile_versions",
+      "agent_profiles",
       "knowledge_chunks",
       "knowledge_documents",
       "knowledge_sources",
@@ -69,7 +72,8 @@
       "flow_definitions",
       "flow_runs",
       "flow_step_runs",
-      "flow_versions"
+      "flow_versions",
+      "handoffs"
     ],
     "crm": [
       "contact_channel_identities",
@@ -103,6 +107,7 @@
       "message_templates",
       "messages",
       "notifications",
+      "outbound_requests",
       "quick_replies"
     ],
     "objects": ["object_metadata"],
@@ -154,6 +159,8 @@
   ],
   "tenant_rls_tables": [
     "agents.knowledge_chunks",
+    "agents.agent_profile_versions",
+    "agents.agent_profiles",
     "agents.knowledge_documents",
     "agents.knowledge_sources",
     "agents.model_configurations",
@@ -163,6 +170,7 @@
     "automation.flow_runs",
     "automation.flow_step_runs",
     "automation.flow_versions",
+    "automation.handoffs",
     "crm.contact_channel_identities",
     "crm.contact_custom_field_values",
     "crm.contact_tags",
@@ -190,6 +198,7 @@
     "messaging.message_templates",
     "messaging.messages",
     "messaging.notifications",
+    "messaging.outbound_requests",
     "messaging.quick_replies",
     "objects.object_metadata",
     "ops.idempotency_keys",
