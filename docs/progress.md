@@ -12,8 +12,8 @@ Last updated: 2026-09-02 (Asia/Jerusalem)
 - Live status: **PHASE 2B LIVE POSTGRESQL VALIDATION COMPLETE**
 - Phase 3 status: **COMPLETE**
 - Phase 4 status: **COMPLETE**
-- Phase 5 status: **FINAL VERIFICATION IN PROGRESS**
-- Active task: P5-020 — documentation consolidation, then P5-021 full gate
+- Phase 5 status: **COMPLETE — SIMULATOR-FIRST ACCEPTANCE PASSED**
+- Active task: none — Phase 5 is complete
 - Phase 2B clean baseline commit: `830a8371836ea7922fca5c320624bf3bd32ec229`
 - Phase 3 exact baseline commit: `9ca3a022c2fb18a5d416b39aa7d1404f7910ae1b`
 - Phase 4 exact baseline commit: `fdaabedfe0c6dd3586261a338f2fd82f904023d8`
@@ -160,8 +160,38 @@ Status values: `pending`, `active`, `complete`, `blocked`.
 | P5-017 | Observability, audit, provider diagnostics, and security controls | complete | `a246bf3`, `7b45140` | Correlated control API, safe audit metadata, read-only provider diagnostics, bounded policy values, scenario/idempotency conflicts, and default-off provider gates pass | Full production telemetry export is a later deployment concern. |
 | P5-018 | Unit, contract, PostgreSQL, RLS, simulator, and concurrency tests | complete | `a246bf3`, `7b45140` | 41 live PostgreSQL tests plus control contract and web render suites pass; retained runner/dispatcher/concurrency suites remain in the full gate | Run consolidated P5-021 verification. |
 | P5-019 | UI accessibility, responsive, keyboard, English/Hebrew/RTL checks | complete | `7b45140` | Semantic labels, status text, keyboard-native controls, responsive grids, reduced-motion inherited tokens, direction strategy, and explicit LTR phone rendering are covered | Broader WCAG certification remains out of scope. |
-| P5-020 | Provenance, parity, architecture, runbook, and threat-model updates | active | documentation checkpoint | No new copied upstream artifact; target-owned migration/API/UI documented; parity claims distinguish simulator verification from deferred carrier smoke | Commit documentation, then run P5-021. |
-| P5-021 | Full Phase 5 verification and clean checkpoint | pending | — | Focused Python/TypeScript, one-head offline SQL, PostgreSQL 18.6, and Next production build gates already pass | Run the entire developer, security, container, and upstream-integrity gate. |
+| P5-020 | Provenance, parity, architecture, runbook, and threat-model updates | complete | `7f1164c` | Source map, parity matrix, telephony architecture/package boundaries, threat model, README, and runbook distinguish simulator proof from deferred carrier activation | Re-review before any real-provider approval. |
+| P5-021 | Full Phase 5 verification and clean checkpoint | complete | `73b4553`, `413ba21`, final checkpoint | Doctor/bootstrap/migrate, deterministic offline database gate, 41-test live PostgreSQL 18.6 gate, 634 Python tests, all TypeScript suites, strict lint/type checks, generated contracts, Next production build, production images/core health, read-only LiveKit/SIP smoke, dependency audits, guards, and upstream integrity pass | Prepare Phase 6 scope without enabling a provider. |
+
+## Phase 5 final verification snapshot
+
+- Host/runtime: Git, Docker Engine 29.7.2, Compose 5.5.0, Node 24.20.0,
+  pnpm 11.24.0, Python 3.14.7, uv 0.12.7, and GNU Make 4.4.1 pass
+  `make doctor`. `make bootstrap`, `make migrate`, and
+  `make migration-check` pass idempotently.
+- Database: PostgreSQL 18.6 is healthy. The canonical Alembic graph has 34
+  revisions, root `0001`, branch point `8eda5976c920`, and sole head
+  `7beb64e1ff33`. Deterministic offline SQL is 128,470 bytes with SHA-256
+  `581c17f523fb48e99e8e917113d8df5bf62068003db2c5b55c5ace9eab14b9c5`;
+  18 offline database tests and all 41 isolated live PostgreSQL tests pass.
+- Application: the consolidated `make verify` passes Prettier, ESLint, Ruff,
+  strict TypeScript, Pyrefly, 634 Python tests with 42 intentional live/external
+  skips, every TypeScript suite, deterministic OpenAPI/client freshness, all
+  workspace builds, and the Next.js 16.3.3 production build with 33 routes.
+- Containers: final control API and web production images build successfully;
+  PostgreSQL, control API, and web are healthy on loopback-only host bindings.
+- Voice profile: `make voice-up` generated ignored localhost-only credentials,
+  brought Redis/LiveKit/LiveKit SIP healthy, and the read-only SDK probe reported
+  zero inbound trunks, zero outbound trunks, and zero dispatch rules.
+  `make voice-check` repeated the result and `make voice-down` stopped only the
+  optional voice containers. No create/update/delete/dial/transfer API ran.
+- Supply chain and boundaries: pnpm and pip audits report no known
+  vulnerabilities; repository, secret, documentation, PostgreSQL-only,
+  Alembic-only, generated-contract, package-boundary, and sibling-independence
+  checks pass.
+- Safety: all real-provider flags remained false. No telephone call, WhatsApp
+  message, provider webhook mutation, carrier/DID/trunk/rule provisioning,
+  external model download, or `terraform apply` occurred.
 
 ## Phase 3 starting state
 
@@ -484,7 +514,7 @@ file precedence and provider flags remain false.
 
 ## Next exact task
 
-Complete P5-020 documentation, then execute P5-021: run the consolidated
-format/lint/type/test/contract/migration/PostgreSQL/container/security/license/
-provenance/upstream-integrity gate. Keep real provider flags false and do not
-create a trunk, dispatch rule, DID, participant, or telephone call.
+Prepare an explicit Phase 6 scope for the OpenLive live-agent/Live Lab
+integration. Begin with locked-source protocol, provider-harness, browser-local
+speech, WebSocket authentication, desktop, and persistence-adapter parity maps;
+do not port features or enable external providers until that scope is approved.
