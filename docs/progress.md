@@ -14,7 +14,7 @@ Last updated: 2026-09-03 (Asia/Jerusalem)
 - Phase 4 status: **COMPLETE**
 - Phase 5 status: **COMPLETE — SIMULATOR-FIRST ACCEPTANCE PASSED**
 - Phase 6 status: **COMPLETE — ACCEPTED SIX-NODE SIMULATOR SCOPE; OPENLIVE DEFERRED**
-- Active task: P7-001–P7-004, safe preview, shared design foundation and Inbox reliability
+- Active task: Phase 7 first UI checkpoint implemented; remaining screen polish and full acceptance pending
 - Phase 7 exact baseline commit: `305eb6258435545033343106c19d6479b0cbf97e`
 - Phase 2B clean baseline commit: `830a8371836ea7922fca5c320624bf3bd32ec229`
 - Phase 3 exact baseline commit: `9ca3a022c2fb18a5d416b39aa7d1404f7910ae1b`
@@ -33,10 +33,43 @@ remain untouched; use a separate fictional database for interactive acceptance.
 
 | Task          | Status      | Commit / evidence                                                                  | Next exact task                              |
 | ------------- | ----------- | ---------------------------------------------------------------------------------- | -------------------------------------------- |
-| P7-001        | in progress | Clean `305eb62`, new phase branch, upstream locks verified; local UI not listening | Isolated browser baseline                    |
-| P7-002–P7-004 | planned     | Detailed source audit and approved plan                                            | Shell/tokens, real Overview, race-safe Inbox |
+| P7-001        | complete | `7041417` plan/tooling + UI checkpoint; owned PostgreSQL preview, six isolation-tool tests, upstream locks verified | Preserve isolation during remaining browser acceptance |
+| P7-002 | implemented; partial acceptance | UI checkpoint: compact tokens, labelled/grouped navigation, mobile disclosure, command search, light/dark desktop inspection | Mobile/keyboard/zoom matrix in P7-008/P7-009 |
+| P7-003 | complete for Overview scope | UI checkpoint: full tenant-scoped counts, recent conversations, actionable links, truthful provider mode; PostgreSQL query and production build pass | Integrate remaining demo context without fake metrics |
+| P7-004 | implemented; core checks passed | UI checkpoint: race-safe threads, scoped drafts, queue/result routing, microsecond-safe keyset history, sender/template detail and two-stage real confirmation; nine DOM interaction tests + live 303-message regression | Broader viewport/accessibility and rehearsal gates remain |
 | P7-005–P7-008 | planned     | Contacts/pipeline, operation capabilities, voice context, Hebrew/a11y              | Follow core screen verification              |
 | P7-009–P7-010 | planned     | Browser regressions, performance and rehearsal                                     | Final Phase 7 acceptance; not yet passed     |
+
+### First Phase 7 UI checkpoint evidence
+
+- Pinned Node 24.20.0/pnpm 11.24.0 used; installed host PATH versions were older,
+  so existing ignored local toolchains were prepended without changing the baseline.
+- Workspace ESLint, strict TypeScript, Prettier, build (including Next.js 16.3.3),
+  and all 104 default TypeScript tests passed; 16 explicitly live tests skipped.
+- `uv run --no-sync python scripts/preview_ui.py --check-db`: 25 CRM tests passed
+  (24 units plus the new live test); the existing cross-channel test needs its
+  separate voice-outcome fixtures and remains skipped in this focused runner.
+  An initial attempt exposed that fixture requirement; it was not reported passed.
+- The live pagination regression found driver timestamp serialization lost
+  microseconds. Binding cursor text before PostgreSQL casts fixes the real issue;
+  303 rows including identical timestamps now traverse with no gaps/duplicates.
+  Runtime-role, missing-tenant and cross-tenant reads also pass.
+- All 32 Python script tests passed; targeted Ruff lint/format passed. No claim
+  that the entire retained Python/voice suite was rerun for this UI checkpoint.
+- OpenAPI/generated-client freshness, repository/secret/docs guards, one-head
+  migration graph and deterministic offline SQL passed (39 revisions, head
+  `50a6befe7903`). No new migration was added. Preview databases actually migrated.
+- `pnpm audit --audit-level=critical`: no known vulnerabilities found.
+- Browser skill used for real desktop Overview/Inbox visual inspection in both
+  themes, authenticated with the user-approved temporary fictional account.
+  Complete responsive, keyboard, Hebrew and performance acceptance is still pending.
+- No real provider request, worker start, `.env` edit, developer login change,
+  developer queue mutation, upstream change or cloud operation. Test databases
+  and generated login roles are removed on runner shutdown. The optional review
+  preview is separate from normal port 3000 and contains fictional data only.
+
+See [Inbox implementation notes](architecture/phase-7-inbox.md) and
+[isolated preview runbook](runbooks/local-development.md#isolated-ui-review-phase-7).
 
 ## Phase 6 implementation state
 
@@ -677,8 +710,7 @@ file precedence and provider flags remain false.
 
 ## Next exact task
 
-Prepare Phase 7 — UI/UX polish: inventory visual consistency and legacy fragments,
-accessibility/keyboard coverage, Hebrew/RTL, responsive desktop/tablet/mobile
-layouts, loading/bundle boundaries and honest live/call status visualization.
-Do not begin Phase 7 implementation in this checkpoint. OpenLive/Live Lab remains
-deferred to Phase 9 by explicit user direction, not the next phase.
+Continue P7-005: repair contact/pipeline form recovery and currency-aware values,
+then P7-006/P7-007 operation/voice/handoff presentation. Complete the outstanding
+mobile/keyboard, actual Hebrew, performance and three-rehearsal gates before
+declaring Phase 7 complete. OpenLive/Live Lab remains deferred to Phase 9.

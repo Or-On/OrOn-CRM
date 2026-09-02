@@ -1,5 +1,42 @@
 # Local development runbook
 
+## Isolated UI review (Phase 7)
+
+Use this when the developer `.env` enables real providers. Run from the repository
+root with the pinned Node/pnpm toolchain available and localhost PostgreSQL running:
+
+```powershell
+uv run --no-sync python scripts/preview_ui.py
+```
+
+Open `http://127.0.0.1:3100`. The temporary fictional login is in ignored
+`.artifacts/phase7-preview-login.json`; do not share or commit it. This is **not**
+your usual port-3000 server or its login. The tool reads only the localhost
+migration connection from `.env`, creates an owned UUID-named database and a
+non-superuser login inheriting `platform_web`, applies migrations and fictional
+seeds there, then starts only the web process. Real-provider flags are false,
+provider credentials are not forwarded, and no messaging/voice consumer starts.
+Queued simulator replies therefore stay queued; this does not prove delivery.
+Stop with Ctrl+C to remove the owned database/login and temporary login file.
+The developer database, existing login passwords, `.env`, and queues are untouched.
+Do not force-kill the runner if graceful cleanup is possible.
+
+For the new history/Overview SQL regression test, without starting web:
+
+```powershell
+uv run --no-sync python scripts/preview_ui.py --check-db
+```
+
+This creates and removes a separate database; the new test refuses ordinary
+developer database names. It exercises 303 fictional messages, microsecond/tied
+timestamp pagination, current-sender projection, role-scoped reads and missing/
+other-tenant isolation. Existing cross-channel CRM/worker integration suites need
+their dedicated voice fixtures and are not replaced by this focused check.
+
+If your machine has another Node/pnpm on PATH, use the versions in the root
+manifest. Existing local `.artifacts/toolchains/` installations can be prepended
+for the shell session. No upstream dependency installation is necessary.
+
 ## Normal workflow
 
 ```bash

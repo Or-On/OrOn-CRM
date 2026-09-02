@@ -2,7 +2,11 @@ import { randomUUID } from "node:crypto";
 
 import { NextResponse } from "next/server";
 
-import { listMessages, queueWhatsAppOutbound } from "@or-on/crm";
+import {
+  listMessagePage,
+  parseMessageCursor,
+  queueWhatsAppOutbound,
+} from "@or-on/crm";
 import { loadConfig } from "@or-on/config";
 
 import { jsonObject, withCurrentTenant } from "../../../../../../features/auth";
@@ -12,15 +16,20 @@ import {
 } from "../../../../../../features/crm-route";
 
 export async function GET(
-  _request: Request,
+  request: Request,
   context: RouteContext<"/api/messaging/conversations/[id]/messages">,
 ) {
   try {
     const { id } = await context.params;
-    const messages = await withCurrentTenant("crm:read", (sql) =>
-      listMessages(sql, id),
+    const parameters = new URL(request.url).searchParams;
+    const before = parseMessageCursor(
+      parameters.get("before"),
+      parameters.get("beforeId"),
     );
-    return NextResponse.json({ messages });
+    const page = await withCurrentTenant("crm:read", (sql) =>
+      listMessagePage(sql, id, before === undefined ? {} : { before }),
+    );
+    return NextResponse.json(page);
   } catch (error) {
     return crmErrorResponse(error);
   }

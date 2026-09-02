@@ -11,6 +11,7 @@
   --or-text-muted: #91a0b5;
   --or-accent: #76e4ce;
   --or-accent-strong: #4fcbb5;
+  --or-on-accent: #04130f;
   --or-info: #72a7ff;
   --or-positive: #67d6a3;
   --or-warning: #efbf6c;
@@ -20,7 +21,7 @@
   --or-shadow-2: 0 24px 72px rgb(0 0 0 / 42%);
   --or-radius-sm: 0.5rem;
   --or-radius-md: 0.85rem;
-  --or-radius-lg: 1.25rem;
+  --or-radius-lg: 1rem;
   --or-space-1: 0.25rem;
   --or-space-2: 0.5rem;
   --or-space-3: 0.75rem;
@@ -28,8 +29,8 @@
   --or-space-6: 1.5rem;
   --or-space-8: 2rem;
   --or-font-sans:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-    "Segoe UI", sans-serif;
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
   --or-font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 }
 
@@ -46,6 +47,11 @@
   --or-text-muted: #5e6a79;
   --or-accent: #087f70;
   --or-accent-strong: #05685c;
+  --or-on-accent: #ffffff;
+  --or-info: #245cb0;
+  --or-positive: #126c48;
+  --or-warning: #875409;
+  --or-critical: #b52f44;
   --or-focus: #006f60;
   --or-shadow-1: 0 12px 34px rgb(28 45 65 / 12%);
   --or-shadow-2: 0 24px 72px rgb(28 45 65 / 20%);
@@ -63,7 +69,7 @@
 }
 
 .or-button {
-  min-height: 2.5rem;
+  min-height: 2.75rem;
   padding: 0.625rem 0.9rem;
   border: 1px solid transparent;
   border-radius: var(--or-radius-sm);
@@ -85,11 +91,11 @@
 }
 
 .or-button--primary {
-  color: #04130f;
+  color: var(--or-on-accent);
   background: var(--or-accent);
 }
 
-.or-button--primary:hover {
+.or-button--primary:not(:disabled):hover {
   background: var(--or-accent-strong);
 }
 
@@ -158,9 +164,7 @@
   background: var(--or-bg-raised);
   border: 1px solid var(--or-border);
   border-radius: 999px;
-  font: 650 0.7rem/1 var(--or-font-sans);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font: 650 0.75rem/1.2 var(--or-font-sans);
 }
 
 .or-badge__marker {

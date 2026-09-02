@@ -29,7 +29,7 @@ export async function crmMutation<T>(
     headers,
     body: JSON.stringify(body),
   });
-  const payload: unknown = await response.json();
+  const payload = await responsePayload(response);
   if (!response.ok) {
     const message =
       payload !== null &&
@@ -40,5 +40,42 @@ export async function crmMutation<T>(
         : "Operation failed";
     throw new Error(message);
   }
+  return payload as T;
+}
+
+export async function responsePayload(response: Response): Promise<unknown> {
+  if (!response.headers.get("content-type")?.includes("application/json")) {
+    throw new Error(
+      response.status === 401
+        ? "Your session expired. Sign in again."
+        : "The server returned an unexpected response. Refresh and try again; your draft has been kept.",
+    );
+  }
+  try {
+    return (await response.json()) as unknown;
+  } catch {
+    throw new Error(
+      "The server response could not be read. Your draft has been kept.",
+    );
+  }
+}
+
+export async function crmRead<T>(
+  url: string,
+  signal?: AbortSignal,
+): Promise<T> {
+  const response = await fetch(
+    url,
+    signal === undefined
+      ? { cache: "no-store" }
+      : { signal, cache: "no-store" },
+  );
+  const payload = await responsePayload(response);
+  if (!response.ok)
+    throw new Error(
+      response.status === 401
+        ? "Your session expired. Sign in again."
+        : "Could not refresh this view. Please try again.",
+    );
   return payload as T;
 }

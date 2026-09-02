@@ -9,6 +9,9 @@ import type {
   SimulatedInboundInput,
   SimulatedOutboundInput,
   QuickReply,
+  MessageCursor,
+  MessagePage,
+  TemplateSummary,
 } from "./types.js";
 import type { WhatsAppInboundEnvelope } from "./webhook.js";
 import type { WhatsAppStatusEnvelope } from "./webhook.js";
@@ -23,6 +26,13 @@ interface ConversationRow {
   last_message_preview: string | null;
   assigned_user_id: string | null;
   channel_kind: string;
+  provider: string;
+  sender_address: string | null;
+  provider_account_id: string | null;
+  recipient_address: string | null;
+  whatsapp_consent: string;
+  whatsapp_opted_out_at: Date | null;
+  customer_service_window_expires_at: Date | null;
 }
 
 interface MessageRow {
@@ -37,6 +47,44 @@ interface MessageRow {
   created_at: Date;
   reactions: unknown;
   delivery_events: unknown;
+  structured_content: unknown;
+  cursor_created_at: string;
+}
+
+/** Project only the submitted template fields, never arbitrary provider payloads. */
+export function templateSummary(value: unknown): TemplateSummary | null {
+  if (value === null || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.templateName !== "string" ||
+    typeof record.language !== "string" ||
+    !Array.isArray(record.parameters) ||
+    !record.parameters.every(
+      (parameter: unknown) => typeof parameter === "string",
+    )
+  )
+    return null;
+  return {
+    name: record.templateName,
+    language: record.language,
+    parameters: record.parameters,
+  };
+}
+
+export function parseMessageCursor(
+  createdAt: string | null,
+  id: string | null,
+): MessageCursor | undefined {
+  if (createdAt === null && id === null) return undefined;
+  if (
+    createdAt === null ||
+    id === null ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3,6}Z$/u.test(createdAt) ||
+    !Number.isFinite(Date.parse(createdAt)) ||
+    !/^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/iu.test(id)
+  )
+    throw new TypeError("Invalid message history cursor");
+  return { createdAt, id };
 }
 
 function deliveryEvents(value: unknown): Message["deliveryEvents"] {
@@ -62,6 +110,14 @@ function mapConversation(row: ConversationRow): ConversationSummary {
     lastMessagePreview: row.last_message_preview,
     assignedUserId: row.assigned_user_id,
     channelKind: row.channel_kind,
+    provider: row.provider,
+    senderAddress: row.sender_address,
+    providerAccountId: row.provider_account_id,
+    recipientAddress: row.recipient_address,
+    whatsAppConsent: row.whatsapp_consent,
+    whatsAppOptedOutAt: row.whatsapp_opted_out_at?.toISOString() ?? null,
+    customerServiceWindowExpiresAt:
+      row.customer_service_window_expires_at?.toISOString() ?? null,
   };
 }
 
@@ -82,19 +138,34 @@ function mapMessage(row: MessageRow): Message {
         )
       : [],
     deliveryEvents: deliveryEvents(row.delivery_events),
+    template: templateSummary(row.structured_content),
+    historyCursor: { id: row.id, createdAt: row.cursor_created_at },
   };
 }
 
 export async function listConversations(
   sql: postgres.TransactionSql,
+  conversationId?: string,
 ): Promise<readonly ConversationSummary[]> {
   const rows = await sql<ConversationRow[]>`
     SELECT c.id, c.contact_id, contact.name AS contact_name, c.status,
            c.unread_count, c.last_message_at, c.last_message_preview,
-           c.assigned_user_id, channel.kind AS channel_kind
+           c.assigned_user_id, channel.kind AS channel_kind, channel.provider,
+           channel.display_address AS sender_address, channel.provider_account_id,
+           recipient.normalized_value AS recipient_address,
+           contact.whatsapp_consent, contact.whatsapp_opted_out_at,
+           c.customer_service_window_expires_at
     FROM messaging.conversations c
     JOIN crm.contacts contact ON contact.id = c.contact_id
     JOIN messaging.channels channel ON channel.id = c.channel_id
+    LEFT JOIN LATERAL (
+      SELECT normalized_value FROM crm.contact_channel_identities
+      WHERE contact_id = c.contact_id AND tenant_id = c.tenant_id
+        AND channel = 'whatsapp' AND validation_status = 'valid'
+        AND normalized_value IS NOT NULL
+      ORDER BY is_primary DESC, created_at, id LIMIT 1
+    ) recipient ON true
+    WHERE (${conversationId ?? null}::uuid IS NULL OR c.id = ${conversationId ?? null}::uuid)
     ORDER BY c.last_message_at DESC NULLS LAST, c.id DESC
     LIMIT 100
   `;
@@ -105,10 +176,28 @@ export async function listMessages(
   sql: postgres.TransactionSql,
   conversationId: string,
 ): Promise<readonly Message[]> {
+  return (await listMessagePage(sql, conversationId, { limit: 250 })).messages;
+}
+
+export async function listMessagePage(
+  sql: postgres.TransactionSql,
+  conversationId: string,
+  options: { readonly before?: MessageCursor; readonly limit?: number } = {},
+): Promise<MessagePage> {
+  const limit = options.limit ?? 50;
+  if (!Number.isInteger(limit) || limit < 1 || limit > 250)
+    throw new TypeError("Message page size must be 1–250");
+  const before = parseMessageCursor(
+    options.before?.createdAt ?? null,
+    options.before?.id ?? null,
+  );
+  // Bind the timestamp as text, then cast in PostgreSQL. Driver timestamptz
+  // serialization via JavaScript Date would discard microsecond cursor precision.
   const rows = await sql<MessageRow[]>`
     SELECT message.id, message.conversation_id, message.direction,
            message.sender_type, message.content_type, message.content_text,
-           message.status, message.provider_message_id, message.created_at,
+           message.status, message.provider_message_id, message.created_at, message.structured_content,
+           to_char(message.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_created_at,
            COALESCE((SELECT jsonb_agg(reaction.emoji ORDER BY reaction.created_at)
                      FROM messaging.message_reactions reaction
                      WHERE reaction.message_id = message.id), '[]') AS reactions
@@ -120,10 +209,17 @@ export async function listMessages(
                      WHERE delivery.message_id = message.id), '[]') AS delivery_events
     FROM messaging.messages message
     WHERE message.conversation_id = ${conversationId}::uuid
-    ORDER BY created_at ASC, id ASC
-    LIMIT 250
+      AND (${before?.createdAt ?? null}::text::timestamptz IS NULL OR
+           (message.created_at, message.id) < (${before?.createdAt ?? null}::text::timestamptz, ${before?.id ?? null}::uuid))
+    ORDER BY message.created_at DESC, message.id DESC
+    LIMIT ${limit + 1}
   `;
-  return rows.map(mapMessage);
+  const messages = rows.slice(0, limit).reverse().map(mapMessage);
+  return {
+    messages,
+    nextCursor:
+      rows.length > limit ? (messages[0]?.historyCursor ?? null) : null,
+  };
 }
 
 async function simulatorChannelId(

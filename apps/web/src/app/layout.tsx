@@ -6,11 +6,11 @@ import "./globals.css";
 import { AppShell } from "../features/shell";
 import { currentPublicSession } from "../features/auth";
 import { Providers } from "./providers";
+import { product } from "../branding";
 
 export const metadata: Metadata = {
-  title: { default: "Or-On Platform", template: "%s · Or-On Platform" },
-  description:
-    "Unified operator platform foundation for voice, messaging, CRM, and live agents.",
+  title: { default: product.name, template: `%s · ${product.name}` },
+  description: product.description,
 };
 
 export default async function RootLayout({

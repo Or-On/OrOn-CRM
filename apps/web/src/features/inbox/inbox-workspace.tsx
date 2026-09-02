@@ -1,433 +1,350 @@
 "use client";
 
-import { MessageCircle, Send, Sparkles } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useEffect, useState, type SyntheticEvent } from "react";
-
+import { MessageCircle, Search, Sparkles } from "lucide-react";
+import { useEffect, useRef, useState, type SyntheticEvent } from "react";
 import type {
   ConversationSummary,
   Message,
+  MessageCursor,
+  QueuedWhatsAppOutbound,
   QuickReply,
   TeamMember,
 } from "@or-on/crm";
 import { Badge, Button, EmptyState, Input, Surface } from "@or-on/ui";
-
-import { crmMutation } from "../crm";
+import { crmMutation, crmRead } from "../crm";
+import { ConversationThread } from "./conversation-thread";
+import { emptyReply, ReplyIntentKeys, type ReplyDraft } from "./reply-intent";
 
 export function InboxWorkspace({
   conversations,
   initialMessages,
+  initialConversationId,
+  initialNextCursor = null,
   quickReplies,
   realWhatsAppEnabled,
+  metaSenderId,
   teamMembers,
+  canOperate = false,
 }: {
   readonly conversations: readonly ConversationSummary[];
   readonly initialMessages: readonly Message[];
+  readonly initialConversationId?: string | undefined;
+  readonly initialNextCursor?: MessageCursor | null;
   readonly quickReplies: readonly QuickReply[];
   readonly realWhatsAppEnabled: boolean;
+  readonly metaSenderId?: string | undefined;
   readonly teamMembers: readonly TeamMember[];
+  readonly canOperate?: boolean;
 }) {
-  const router = useRouter();
-  const [selectedId, setSelectedId] = useState(conversations[0]?.id);
-  const [messages, setMessages] = useState(initialMessages);
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string>();
-  const [replyText, setReplyText] = useState("");
-  const [provider, setProvider] = useState<"simulator" | "meta">("simulator");
-  const [messageKind, setMessageKind] = useState<"text" | "template">("text");
-  const selected = conversations.find(
-    (conversation) => conversation.id === selectedId,
+  const initialId = initialConversationId ?? conversations[0]?.id;
+  const [items, setItems] = useState(conversations);
+  const [selectedId, setSelectedId] = useState(initialId);
+  const [mobileThread, setMobileThread] = useState(false);
+  const [query, setQuery] = useState("");
+  const [drafts, setDrafts] = useState<Readonly<Record<string, ReplyDraft>>>(
+    {},
   );
+  const [keys] = useState(() => new ReplyIntentKeys());
+  const [listError, setListError] = useState<string>();
+  const [simulationError, setSimulationError] = useState<string>();
+  const [simulating, setSimulating] = useState(false);
+  const [notice, setNotice] = useState<string>();
+  const selected = items.find((item) => item.id === selectedId);
+  const alive = useRef(true);
+  const refreshRevision = useRef(0);
 
   useEffect(() => {
-    if (selectedId === undefined) return;
-    const timer = window.setInterval(() => {
-      void fetch(`/api/messaging/conversations/${selectedId}/messages`)
-        .then((response) => response.json())
-        .then((payload: { messages?: Message[] }) =>
-          setMessages(payload.messages ?? []),
-        )
-        .catch(() => undefined);
-    }, 5000);
-    return () => window.clearInterval(timer);
-  }, [selectedId]);
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      refreshRevision.current += 1;
+    };
+  }, []);
+  // Route/tenant refreshes reconcile server data without discarding local drafts.
+  useEffect(() => setItems(conversations), [conversations]);
 
-  async function selectConversation(id: string) {
-    setSelectedId(id);
-    setError(undefined);
-    const response = await fetch(`/api/messaging/conversations/${id}/messages`);
-    const payload = (await response.json()) as { messages?: Message[] };
-    setMessages(payload.messages ?? []);
-  }
-
-  function formText(data: FormData, key: string): string {
-    const value = data.get(key);
-    return typeof value === "string" ? value : "";
-  }
-
-  async function reply(event: SyntheticEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (selectedId === undefined) return;
-    const form = event.currentTarget;
-    const data = new FormData(form);
-    const text = formText(data, "text");
-    const real = provider === "meta";
-    if (
-      real &&
-      !window.confirm(
-        "Send this message to the real recipient through Meta WhatsApp Cloud API? This cannot be undone.",
-      )
-    )
-      return;
-    setPending(true);
-    setError(undefined);
-    try {
-      await crmMutation<{ queued: boolean }>(
-        `/api/messaging/conversations/${selectedId}/messages`,
-        {
-          provider,
-          kind: messageKind,
-          text,
-          templateName: formText(data, "templateName"),
-          language: formText(data, "language"),
-          parameters: formText(data, "parameters")
-            .split("|")
-            .map((value) => value.trim())
-            .filter(Boolean),
-          confirmReal: real && data.get("confirmReal") === "yes",
-        },
-        { idempotencyKey: crypto.randomUUID() },
+  async function refreshItems(ensureId?: string) {
+    const revision = ++refreshRevision.current;
+    const result = await crmRead<{ conversations: ConversationSummary[] }>(
+      "/api/messaging/conversations",
+    );
+    if (!Array.isArray(result.conversations))
+      throw new Error("Conversation list could not be read.");
+    let next = result.conversations;
+    if (ensureId && !next.some((item) => item.id === ensureId)) {
+      const specific = await crmRead<{ conversations: ConversationSummary[] }>(
+        `/api/messaging/conversations?id=${encodeURIComponent(ensureId)}`,
       );
-      setReplyText("");
-      form.reset();
-      router.refresh();
-      await selectConversation(selectedId);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Reply failed");
-    } finally {
-      setPending(false);
+      next = [...specific.conversations, ...next];
+    }
+    if (alive.current && revision === refreshRevision.current) {
+      setItems(next);
+      setListError(undefined);
+    }
+  }
+
+  async function queued(result: QueuedWhatsAppOutbound, originId: string) {
+    setNotice(
+      result.queued
+        ? "Message queued. Follow its status in the destination conversation."
+        : "Existing request found. No duplicate message was queued.",
+    );
+    // Queue success must not become a send failure just because refresh failed.
+    try {
+      await refreshItems(result.conversationId);
+      if (alive.current)
+        setSelectedId((current) =>
+          current === originId ? result.conversationId : current,
+        );
+    } catch {
+      if (alive.current)
+        setListError(
+          "Message queued, but the conversation list could not refresh. Refresh the page; do not send it again.",
+        );
     }
   }
 
   async function simulate(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!canOperate || simulating) return;
     const form = event.currentTarget;
     const data = new FormData(form);
-    setPending(true);
-    setError(undefined);
+    setSimulating(true);
+    setSimulationError(undefined);
     try {
       const result = await crmMutation<{ conversationId: string }>(
         "/api/messaging/simulate/inbound",
         {
-          from: formText(data, "from"),
-          profileName: formText(data, "profileName"),
-          text: formText(data, "text"),
+          from: data.get("from"),
+          profileName: data.get("profileName"),
+          text: data.get("text"),
         },
       );
       form.reset();
-      router.refresh();
-      await selectConversation(result.conversationId);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Simulation failed");
+      setNotice(
+        "Fictional inbound message created. No external provider was contacted.",
+      );
+      try {
+        await refreshItems(result.conversationId);
+        setSelectedId(result.conversationId);
+        setMobileThread(true);
+      } catch {
+        setListError(
+          "Fictional message created, but the list could not refresh. Refresh the page; do not create it again.",
+        );
+      }
+    } catch (error) {
+      setSimulationError(
+        error instanceof Error
+          ? error.message
+          : "Could not create the fictional message.",
+      );
     } finally {
-      setPending(false);
+      setSimulating(false);
     }
   }
 
-  async function changeStatus(status: ConversationSummary["status"]) {
-    if (selectedId === undefined) return;
-    await crmMutation(
-      `/api/messaging/conversations/${selectedId}`,
-      { status },
-      { method: "PATCH" },
-    );
-    router.refresh();
-  }
-
-  async function assign(userId: string) {
-    if (selectedId === undefined) return;
-    await crmMutation(
-      `/api/messaging/conversations/${selectedId}`,
-      { assignedUserId: userId || null },
-      { method: "PATCH" },
-    );
-    router.refresh();
-  }
-
-  async function react(messageId: string, emoji: string) {
-    await crmMutation(`/api/messaging/messages/${messageId}/reactions`, {
-      emoji,
-    });
-    if (selectedId !== undefined) await selectConversation(selectedId);
-  }
-
+  const filtered = items.filter((item) =>
+    `${item.contactName} ${item.recipientAddress ?? ""} ${item.provider}`
+      .toLocaleLowerCase()
+      .includes(query.toLocaleLowerCase().trim()),
+  );
   return (
-    <div className="inbox-layout">
+    <div
+      className={`inbox-layout ${mobileThread ? "inbox-layout--thread" : ""}`}
+    >
       <Surface className="inbox-list">
         <div className="inbox-list__heading">
-          <h2>Conversations</h2>
+          <h2>
+            Conversations <span>{items.length}</span>
+          </h2>
+          <Button
+            aria-label="Refresh conversations"
+            variant="quiet"
+            onClick={() =>
+              void refreshItems(selectedId).catch(() =>
+                setListError(
+                  "Could not refresh conversations. Please try again.",
+                ),
+              )
+            }
+          >
+            ↻
+          </Button>
+        </div>
+        <label className="inbox-search">
+          <Search aria-hidden="true" size={16} />
+          <span className="or-visually-hidden">
+            Search loaded conversations
+          </span>
+          <input
+            placeholder="Search conversations…"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </label>
+        {listError ? (
+          <p className="form-error" role="alert">
+            {listError}
+          </p>
+        ) : null}
+        <div className="conversation-list" aria-label="Conversations">
+          {filtered.length === 0 ? (
+            <div className="list-empty">
+              <MessageCircle aria-hidden="true" size={24} />
+              <h3>
+                {query ? "No matching conversations" : "Your Inbox is clear"}
+              </h3>
+              <p>
+                {query
+                  ? "Try another name or clear the search."
+                  : "New customer conversations will appear here."}
+              </p>
+            </div>
+          ) : (
+            filtered.map((conversation) => (
+              <button
+                className={`conversation-row ${selectedId === conversation.id ? "conversation-row--active" : ""}`}
+                aria-current={
+                  selectedId === conversation.id ? "true" : undefined
+                }
+                key={conversation.id}
+                onClick={() => {
+                  setSelectedId(conversation.id);
+                  setMobileThread(true);
+                  setNotice(undefined);
+                }}
+                type="button"
+              >
+                <span className="contact-avatar" aria-hidden="true">
+                  {conversation.contactName.slice(0, 1)}
+                </span>
+                <span className="conversation-row__copy">
+                  <strong>{conversation.contactName}</strong>
+                  <small>
+                    {conversation.lastMessagePreview ??
+                      "No text preview available"}
+                  </small>
+                  <span className="conversation-row__channel">
+                    {conversation.provider === "meta"
+                      ? "Meta WhatsApp"
+                      : conversation.provider === "simulator"
+                        ? "Simulator"
+                        : conversation.channelKind}
+                  </span>
+                </span>
+                {conversation.unreadCount > 0 ? (
+                  <span
+                    className="unread-count"
+                    aria-label={`${String(conversation.unreadCount)} unread`}
+                  >
+                    {conversation.unreadCount}
+                  </span>
+                ) : null}
+              </button>
+            ))
+          )}
+        </div>
+        <div className="inbox-list__footer">
           <Badge
             label={
-              realWhatsAppEnabled
-                ? "Simulator + Meta enabled"
-                : "Simulator default"
+              realWhatsAppEnabled ? "Real delivery available" : "Simulator only"
             }
             tone={realWhatsAppEnabled ? "warning" : "info"}
           />
+          <small>
+            Latest {Math.min(items.length, 100)} conversations · search covers
+            this list
+          </small>
         </div>
-        {conversations.length === 0 ? (
-          <EmptyState
-            description="Inject the first fictional message below."
-            title="Inbox is clear"
-          />
-        ) : (
-          conversations.map((conversation) => (
-            <button
-              className={`conversation-row ${selectedId === conversation.id ? "conversation-row--active" : ""}`}
-              key={conversation.id}
-              onClick={() => void selectConversation(conversation.id)}
-              type="button"
+        {canOperate ? (
+          <details className="demo-tools">
+            <summary>
+              <Sparkles aria-hidden="true" size={14} /> Fictional demo tools
+            </summary>
+            <form
+              className="simulator-form"
+              onSubmit={(event) => void simulate(event)}
             >
-              <span className="conversation-row__avatar" aria-hidden="true">
-                <MessageCircle size={16} />
-              </span>
-              <span className="conversation-row__copy">
-                <strong>{conversation.contactName}</strong>
-                <small>
-                  {conversation.lastMessagePreview ?? "No message preview"}
-                </small>
-              </span>
-              {conversation.unreadCount > 0 ? (
-                <span
-                  className="unread-count"
-                  aria-label={`${String(conversation.unreadCount)} unread`}
-                >
-                  {conversation.unreadCount}
-                </span>
+              <p>
+                Local fixture only. This does not open a real Meta
+                customer-service window.
+              </p>
+              <Input
+                id="sim-name"
+                label="Contact name"
+                name="profileName"
+                placeholder="Maya Cohen"
+                required
+              />
+              <Input
+                id="sim-from"
+                label="E.164 number"
+                name="from"
+                placeholder="+972501234567"
+                required
+                dir="ltr"
+              />
+              <Input
+                id="sim-text"
+                label="Fictional message"
+                name="text"
+                placeholder="Can you help me?"
+                required
+              />
+              {simulationError ? (
+                <p className="form-error" role="alert">
+                  {simulationError}
+                </p>
               ) : null}
-            </button>
-          ))
-        )}
-        <form
-          className="simulator-form"
-          onSubmit={(event) => void simulate(event)}
-        >
-          <div className="simulator-form__title">
-            <Sparkles aria-hidden="true" size={15} /> Inject fictional inbound
-          </div>
-          <Input
-            id="sim-name"
-            label="Contact name"
-            name="profileName"
-            placeholder="Maya Cohen"
-            required
-          />
-          <Input
-            id="sim-from"
-            label="E.164 number"
-            name="from"
-            placeholder="+972501234567"
-            required
-          />
-          <Input
-            id="sim-text"
-            label="Message"
-            name="text"
-            placeholder="Can you help me?"
-            required
-          />
-          <Button disabled={pending} type="submit" variant="secondary">
-            Simulate inbound
-          </Button>
-        </form>
+              <Button disabled={simulating} type="submit" variant="secondary">
+                {simulating ? "Creating…" : "Simulate inbound"}
+              </Button>
+            </form>
+          </details>
+        ) : null}
       </Surface>
-
       <Surface className="message-panel" level="raised">
         {selected === undefined ? (
           <EmptyState
-            description="Select or simulate a conversation."
-            title="No active conversation"
+            description="Select a conversation to see its history and customer context."
+            title="A little context goes a long way"
           />
         ) : (
-          <>
-            <header className="message-panel__heading">
-              <div>
-                <p className="eyebrow">
-                  {selected.channelKind === "whatsapp"
-                    ? "WhatsApp"
-                    : selected.channelKind}
-                </p>
-                <h2>{selected.contactName}</h2>
-              </div>
-              <Badge
-                label={selected.status}
-                tone={selected.status === "open" ? "positive" : "neutral"}
-              />
-              <select
-                aria-label="Conversation status"
-                onChange={(event) =>
-                  void changeStatus(
-                    event.target.value as ConversationSummary["status"],
-                  )
-                }
-                value={selected.status}
-              >
-                <option value="open">Open</option>
-                <option value="pending">Pending</option>
-                <option value="resolved">Resolved</option>
-                <option value="closed">Closed</option>
-              </select>
-              <small>
-                Real delivery requires the checkbox below and a final browser
-                confirmation.
-              </small>
-              <select
-                aria-label="Conversation assignee"
-                onChange={(event) => void assign(event.target.value)}
-                value={selected.assignedUserId ?? ""}
-              >
-                <option value="">Unassigned</option>
-                {teamMembers.map((member) => (
-                  <option key={member.userId} value={member.userId}>
-                    {member.email} · {member.role}
-                  </option>
-                ))}
-              </select>
-            </header>
-            <div aria-live="polite" className="message-thread">
-              {messages.map((message) => (
-                <div
-                  className={`message-bubble message-bubble--${message.direction}`}
-                  key={message.id}
-                >
-                  <p>{message.contentText ?? `[${message.contentType}]`}</p>
-                  <small>
-                    {message.direction} · {message.status}
-                  </small>
-                  {message.deliveryEvents.length === 0 ? null : (
-                    <small aria-label="Delivery history">
-                      {message.deliveryEvents
-                        .map((event) => event.status)
-                        .join(" → ")}
-                    </small>
-                  )}
-                  <div className="reaction-row">
-                    {message.reactions.map((reaction) => (
-                      <span key={reaction}>{reaction}</span>
-                    ))}
-                    <button
-                      aria-label="React with thumbs up"
-                      onClick={() => void react(message.id, "👍")}
-                      type="button"
-                    >
-                      ＋👍
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <form className="composer" onSubmit={(event) => void reply(event)}>
-              <label htmlFor="delivery-provider">Delivery provider</label>
-              <select
-                id="delivery-provider"
-                onChange={(event) =>
-                  setProvider(event.target.value as "simulator" | "meta")
-                }
-                value={provider}
-              >
-                <option value="simulator">
-                  Simulator — no external delivery
-                </option>
-                <option disabled={!realWhatsAppEnabled} value="meta">
-                  REAL Meta WhatsApp delivery
-                  {realWhatsAppEnabled ? "" : " — disabled"}
-                </option>
-              </select>
-              <label htmlFor="message-kind">Message kind</label>
-              <select
-                id="message-kind"
-                onChange={(event) =>
-                  setMessageKind(event.target.value as "text" | "template")
-                }
-                value={messageKind}
-              >
-                <option value="text">
-                  Free-form text (24-hour window only)
-                </option>
-                <option value="template">Approved template</option>
-              </select>
-              <div className="quick-reply-row">
-                {quickReplies.map((quickReply) => (
-                  <button
-                    key={quickReply.id}
-                    onClick={() => setReplyText(quickReply.body)}
-                    type="button"
-                  >
-                    {quickReply.title}
-                  </button>
-                ))}
-              </div>
-              {messageKind === "template" ? (
-                <div className="feature-form">
-                  <Input
-                    id="template-name"
-                    label="Approved template name"
-                    name="templateName"
-                    required
-                  />
-                  <Input
-                    id="template-language"
-                    label="Template language"
-                    name="language"
-                    placeholder="he"
-                    required
-                  />
-                  <Input
-                    id="template-parameters"
-                    label="Body parameters (separate with |)"
-                    name="parameters"
-                  />
-                </div>
-              ) : null}
-              <div>
-                <textarea
-                  id="reply-text"
-                  name="text"
-                  onChange={(event) => setReplyText(event.target.value)}
-                  placeholder="Write a reply"
-                  required={messageKind === "text"}
-                  rows={2}
-                  value={replyText}
-                />
-                <Button
-                  aria-label="Send reply"
-                  disabled={pending}
-                  type="submit"
-                >
-                  <Send aria-hidden="true" size={16} />
-                </Button>
-              </div>
-              {provider === "meta" ? (
-                <label className="real-provider-confirmation">
-                  <input
-                    name="confirmReal"
-                    required
-                    type="checkbox"
-                    value="yes"
-                  />
-                  I understand this sends a real WhatsApp message to the
-                  selected contact.
-                </label>
-              ) : null}
-              {error === undefined ? null : (
-                <p className="form-error" role="alert">
-                  {error}
-                </p>
-              )}
-            </form>
-          </>
+          <ConversationThread
+            key={selected.id}
+            conversation={selected}
+            initialPage={
+              selected.id === initialId
+                ? {
+                    messages: initialMessages.filter(
+                      (message) => message.conversationId === selected.id,
+                    ),
+                    nextCursor: initialNextCursor,
+                  }
+                : undefined
+            }
+            draft={drafts[selected.id] ?? emptyReply}
+            setDraft={(draft) =>
+              setDrafts((current) => ({ ...current, [selected.id]: draft }))
+            }
+            keys={keys}
+            canOperate={canOperate}
+            realWhatsAppEnabled={realWhatsAppEnabled}
+            metaSenderId={metaSenderId}
+            quickReplies={quickReplies}
+            teamMembers={teamMembers}
+            onBack={() => setMobileThread(false)}
+            onQueued={(result) => queued(result, selected.id)}
+            onChanged={() => refreshItems(selected.id)}
+          />
         )}
       </Surface>
+      {notice ? (
+        <div className="inbox-notice" role="status">
+          {notice}
+        </div>
+      ) : null}
     </div>
   );
 }

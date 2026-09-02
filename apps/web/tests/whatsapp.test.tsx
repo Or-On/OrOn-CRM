@@ -20,17 +20,27 @@ describe("WhatsApp delivery surface", () => {
             lastMessagePreview: null,
             assignedUserId: null,
             channelKind: "whatsapp",
+            provider: "simulator",
+            senderAddress: "WhatsApp simulator",
+            providerAccountId: null,
+            recipientAddress: "+972501234567",
+            whatsAppConsent: "unknown",
+            whatsAppOptedOutAt: null,
+            customerServiceWindowExpiresAt: null,
           },
         ]}
         initialMessages={[]}
         quickReplies={[]}
         realWhatsAppEnabled
+        canOperate
         teamMembers={[]}
       />,
     );
     expect(markup).toContain("Simulator — no external delivery");
     expect(markup).toContain("REAL Meta WhatsApp delivery");
     expect(markup).toContain("Free-form text (24-hour window only)");
-    expect(markup).toContain("final browser confirmation");
+    expect(markup).toContain("Confirm real WhatsApp delivery");
+    expect(markup).toContain("Queue simulator reply");
+    expect(markup).toContain("Reply message");
   });
 });

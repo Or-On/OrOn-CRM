@@ -88,6 +88,13 @@ export interface ConversationSummary {
   readonly lastMessagePreview: string | null;
   readonly assignedUserId: string | null;
   readonly channelKind: string;
+  readonly provider: string;
+  readonly senderAddress: string | null;
+  readonly providerAccountId: string | null;
+  readonly recipientAddress: string | null;
+  readonly whatsAppConsent: string;
+  readonly whatsAppOptedOutAt: string | null;
+  readonly customerServiceWindowExpiresAt: string | null;
 }
 
 export interface Message {
@@ -102,6 +109,24 @@ export interface Message {
   readonly createdAt: string;
   readonly reactions: readonly string[];
   readonly deliveryEvents: readonly MessageDeliveryEvent[];
+  readonly template?: TemplateSummary | null;
+  readonly historyCursor?: MessageCursor;
+}
+
+export interface TemplateSummary {
+  readonly name: string;
+  readonly language: string;
+  readonly parameters: readonly string[];
+}
+
+export interface MessageCursor {
+  readonly createdAt: string;
+  readonly id: string;
+}
+
+export interface MessagePage {
+  readonly messages: readonly Message[];
+  readonly nextCursor: MessageCursor | null;
 }
 
 export interface MessageDeliveryEvent {
