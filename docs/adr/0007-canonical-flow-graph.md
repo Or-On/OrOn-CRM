@@ -22,7 +22,7 @@ contract covers its supported behavior.
 
 ## Consequences
 
-Phase 1 defines direction only. Phase 7 owns the complete model/adapters. UI editor
+Phase 1 defines direction only. Phase 6 owns the complete model/adapters. UI editor
 selection remains evidence-based and can reuse both source component sets.
 
 ## Verification

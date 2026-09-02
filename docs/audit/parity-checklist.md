@@ -26,7 +26,7 @@ Status values for later phases: **Unstarted**, **Mapped**, **Ported**, **Verifie
 | O-18 | Usage, cost and latency | session fields/observers | Retain | Usage and provider-latency event persistence plus call/detail metrics pass | Verified |
 | O-19 | Outcomes/answer/no-answer states | later Alembic revisions | Retain | Completed/no-answer/failed/cancelled simulator lifecycle tests pass | Verified |
 | O-20 | Voice campaigns/calling windows/retries | campaigns package/migrations | Retain/adapt | Explicit consent, IANA window, bounds and per-contact idempotency pass | Verified |
-| O-21 | Flow composition/components/runtime | `oron-flows`, agent bindings | Retain behind canonical adapter | Typed catalog, validation, immutable publish and retained fixtures pass; Phase 7 compiler deferred | Verified |
+| O-21 | Flow composition/components/runtime | `oron-flows`, agent bindings | Retain behind canonical adapter | Typed catalog, validation, immutable publish and retained fixtures pass; Phase 6 compiler pending | Verified |
 | O-22 | Telephony flow editor | `apps/console` | Port behavior into unified Flow Studio | Unified JSON author/validate/publish adapter is keyboard operable; visual graph compiler deferred | Verified |
 | O-23 | Console calls/sessions/campaign diagnostics | `apps/console` | Port into unified voice features | Unified calls/detail/DID/campaign diagnostics render responsively in English/Hebrew direction | Verified |
 | O-24 | GCP Secret Manager/KMS/GCS | secrets/session/deploy code | Retain/adapt | Local/GCP config tests, encrypted secret/object path | Mapped |

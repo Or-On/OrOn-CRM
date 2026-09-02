@@ -1609,18 +1609,7 @@ PHASE 5 — TELEPHONY
 - Add telephony simulator and E2E tests.
 - Keep real provider smoke tests opt-in.
 
-PHASE 6 — OPENLIVE LIVE LAB
-
-- Port OpenLive web experience into the unified application.
-- Retain the Hono/WebSocket live-agent as a bounded service.
-- Preserve on-device media/model execution.
-- Integrate unified auth and agent profiles.
-- Migrate all runtime persistence to PostgreSQL.
-- Provide legacy import tooling.
-- Keep desktop build working.
-- Complete Live Lab persistence/reconnect tests.
-
-PHASE 7 — CROSS-CHANNEL PLATFORM
+PHASE 6 — CROSS-CHANNEL PLATFORM
 
 - Implement shared agent versions.
 - Implement unified contact activity.
@@ -1632,7 +1621,7 @@ PHASE 7 — CROSS-CHANNEL PLATFORM
 - Add unified audit, analytics, and usage/cost views.
 - Complete cross-channel E2E tests.
 
-PHASE 8 — UI/UX POLISH
+PHASE 7 — UI/UX POLISH
 
 - Complete visual consistency.
 - Remove legacy visual fragments.
@@ -1643,7 +1632,7 @@ PHASE 8 — UI/UX POLISH
 - Test desktop, tablet, and mobile layouts.
 - Run accessibility and production-build performance checks.
 
-PHASE 9 — GCP DEVELOPMENT DEPLOYMENT
+PHASE 8 — GCP DEVELOPMENT DEPLOYMENT
 
 - Create Terraform.
 - Create GCP Compose profile.
@@ -1655,6 +1644,17 @@ PHASE 9 — GCP DEVELOPMENT DEPLOYMENT
 - Create keyless GitHub Actions deployment.
 - Implement health-based rollback.
 - Deploy and run dev smoke tests.
+
+PHASE 9 — OPENLIVE LIVE LAB AND VISUAL AGENT — FINAL INTEGRATION
+
+- Port OpenLive web experience into the unified application last.
+- Retain the Hono/WebSocket live-agent as a bounded service.
+- Preserve on-device media/model execution.
+- Integrate unified auth, agent profiles, and cross-channel flows.
+- Use the canonical PostgreSQL persistence and existing legacy import tooling.
+- Keep the desktop build working.
+- Complete Live Lab persistence/reconnect, accessibility, performance, and GCP
+  routing/deployment tests.
 
 PHASE 10 — FINAL HARDENING
 

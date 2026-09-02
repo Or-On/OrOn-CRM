@@ -31,7 +31,7 @@ tenant-scoped safe metadata in the same call transaction.
 - `/voice/calls/[id]` shows ordered lifecycle, outcome, artifact references,
   usage, and safe latency information.
 - `/flows` exposes the retained typed component catalog and validates then
-  publishes immutable Pipecat-compatible flow versions. It is not the Phase 7
+  publishes immutable Pipecat-compatible flow versions. It is not the Phase 6
   cross-channel compiler.
 - `/voice/campaigns` selects active CRM contacts with an explicit `granted`
   voice-consent state and a validated phone/WhatsApp E.164 identity. Simulator
@@ -59,6 +59,6 @@ profile exposes only loopback LiveKit control ports; Redis and SIP stay private.
 
 - carrier DID purchase, trunk/dispatch-rule mutation, public SIP/RTP exposure,
   and real calls;
-- the Phase 7 cross-channel flow compiler and call-outcome WhatsApp automation;
+- the Phase 6 cross-channel flow compiler and call-outcome WhatsApp automation;
 - OpenLive Live Lab and browser-local media integration;
 - production deployment, compliance, and scale claims.

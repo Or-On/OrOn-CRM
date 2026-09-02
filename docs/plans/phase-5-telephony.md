@@ -193,7 +193,7 @@ per-tenant concurrency before work can be claimed.
 The retained Or-on graph, component catalog, validation, publishing, and
 Pipecat execution semantics remain the Phase 5 voice-flow engine. Unified web
 screens may author and inspect this voice capability, but Phase 5 does not claim
-the Phase 7 cross-channel canonical graph/compiler is complete. No working
+the Phase 6 cross-channel canonical graph/compiler is complete. No working
 Or-on runtime is deleted or rewritten.
 
 ### Transcript, recording, outcome, and cost
@@ -278,7 +278,7 @@ PostgreSQL outbox state. At minimum:
 - `voice.call.outcome.recorded.v1`
 
 LISTEN/NOTIFY may wake consumers but is never the durable record. Cross-channel
-automation consumption remains Phase 7; Phase 5 only proves the event contract
+automation consumption remains Phase 6; Phase 5 only proves the event contract
 and persistence.
 
 ## Provider safety model
@@ -347,7 +347,7 @@ stores authoritative call, campaign, contact, session, job, or transcript state.
 10. Integrate phone-number registration, flow binding, drift reconciliation,
     and provider-disabled diagnostics.
 11. Integrate voice flows/component catalog/validation/publishing into the
-    authenticated shell without claiming the Phase 7 canonical compiler.
+    authenticated shell without claiming the Phase 6 canonical compiler.
 12. Integrate canonical voice campaigns and CRM audiences with consent,
     idempotent claiming, retry, calling-window, and progress behavior.
 13. Add calls overview/detail, contact launch action, simulator test-call,
@@ -479,8 +479,8 @@ Phase 5 does not include:
 - real provider webhook/trunk/firewall provisioning;
 - claiming warm SIP transfer/human handoff parity (the locked Or-on README marks
   warm transfer unimplemented even though low-level transfer code/tests exist);
-- Phase 6 OpenLive Live Lab integration;
-- Phase 7 cross-channel flow compiler, shared agent-version model, call-outcome
+- final-phase OpenLive Live Lab/visual-agent integration;
+- Phase 6 cross-channel flow compiler, shared agent-version model, call-outcome
   WhatsApp automation, or complete unified activity timeline;
 - replacing LiveKit, SIP, Pipecat, the Python voice system, or browser OpenLive;
 - deleting historical Or-on tables, migrations, package identities, or source

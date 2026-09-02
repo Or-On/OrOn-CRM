@@ -4,8 +4,8 @@ Last updated: 2026-09-02 (Asia/Jerusalem)
 
 ## Current checkpoint
 
-- Phase: Phase 5 — Telephony integration
-- Branch: `codex/phase-5-telephony`
+- Phase: Phase 6 — Cross-channel platform
+- Branch: `codex/phase-6-cross-channel`
 - Phase 0 baseline: `93eb808e65f8edb1754c1940afe1949e7e18223a`
 - Phase 1 baseline: `20b46159078ec533a9891e6768d47595e35b7a7c`
 - Phase 2A status: **OFFLINE IMPLEMENTATION COMPLETE**
@@ -13,12 +13,30 @@ Last updated: 2026-09-02 (Asia/Jerusalem)
 - Phase 3 status: **COMPLETE**
 - Phase 4 status: **COMPLETE**
 - Phase 5 status: **COMPLETE — SIMULATOR-FIRST ACCEPTANCE PASSED**
-- Active task: none — Phase 5 is complete
+- Phase 6 status: **IMPLEMENTATION STARTING — OPENLIVE DEFERRED**
+- Active task: P6-002 — canonical agent/profile and flow parity inventory
 - Phase 2B clean baseline commit: `830a8371836ea7922fca5c320624bf3bd32ec229`
 - Phase 3 exact baseline commit: `9ca3a022c2fb18a5d416b39aa7d1404f7910ae1b`
 - Phase 4 exact baseline commit: `fdaabedfe0c6dd3586261a338f2fd82f904023d8`
 - Phase 5 exact baseline commit: `e6d2e303c07a3a0df35e39d30baf1f5584564464`
+- Phase 6 exact baseline commit: `946b08a1c418567f56df87cbe17a97b143596a01`
 - Provider safety: no real telephone call, WhatsApp message, webhook mutation, or provider provisioning performed
+
+## Phase 6 implementation state
+
+Phase 6 starts from clean Phase 5 head
+`946b08a1c418567f56df87cbe17a97b143596a01`. By explicit product decision,
+OpenLive, Live Lab, browser-local voice/vision, WebGPU, ACP, and the desktop
+wrapper are deferred to the final integration phase. Phase 6 now owns the
+formerly planned cross-channel work and may implement only canonical voice and
+messaging agent/flow adapters. The authoritative scope is
+[`phase-6-cross-channel.md`](plans/phase-6-cross-channel.md).
+
+| ID | Task | Status | Commit | Verification evidence | Next exact task |
+| --- | --- | --- | --- | --- | --- |
+| P6-001 | Baseline, instruction, upstream-integrity, and scope verification | complete | preparation checkpoint | Clean Phase 5 baseline `946b08a`; all locked upstreams clean; roadmap reordered by explicit user direction | Inventory retained voice and messaging profile/flow semantics. |
+| P6-002 | Canonical agent/profile and flow source-parity inventory | active | — | Phase 5 voice and Phase 4 messaging contracts identified; detailed compatibility matrix pending | Inspect actual retained models, adapters, migrations, and fixtures before schema design. |
+| P6-003–P6-021 | Canonical schema, adapters, workflows, UI, tests, documentation, and full gate | pending | — | See authoritative Phase 6 plan | Begin only after P6-002 fixes the compatibility contract. |
 
 ## Phase 5 implementation state
 
@@ -153,7 +171,7 @@ Status values: `pending`, `active`, `complete`, `blocked`.
 | P5-010 | Import/adapt Hebrew and Pipecat voice-agent packages | complete | `34a62e2` | 349 passed/3 explicit P5-011 skips; full Python suite 622 passed/45 intentional skips; Ruff and strict Pyrefly pass; model path/hash, secret redaction, default-off provider gate, launcher injection, base/voice dependency isolation, repository and secret guards verified | Keep all real provider execution denied while building the opt-in control-plane profile. |
 | P5-011 | LiveKit/SIP/Redis opt-in Compose voice profile | complete | `5eef886` | Digest pins verified; Redis/LiveKit/SIP healthy; read-only SIP lists returned 0 inbound, 0 outbound, 0 rules; Redis/SIP have no host bindings; 63 focused and 632 full Python tests pass; TypeScript strict/test/build gate passes | Keep this profile mutation-free while adding canonical DID admission APIs. |
 | P5-012 | Phone-number/DID admission and reconciliation | complete | `a246bf3`, `7b45140` | Authenticated simulator admission requires a published flow and restricted non-empty ACL; catch-all denial and read-only provider-disabled reconciliation pass; no provider mutation | Keep real DID/trunk changes behind a separate approved action. |
-| P5-013 | Voice flow catalog, validation, publishing, and adapter UI | complete | `a246bf3`, `7b45140` | Retained component catalog, typed validation, immutable PostgreSQL versions, generated client, and unified authoring surface pass | Phase 7 cross-channel compiler remains explicitly deferred. |
+| P5-013 | Voice flow catalog, validation, publishing, and adapter UI | complete | `a246bf3`, `7b45140` | Retained component catalog, typed validation, immutable PostgreSQL versions, generated client, and unified authoring surface pass | Phase 6 owns the cross-channel compiler. |
 | P5-014 | Canonical voice campaigns and CRM audience integration | complete | `a246bf3`, `7b45140` | Explicit voice consent, usable E.164 identity, IANA calling window, DB concurrency/attempt bounds, and per-campaign/contact idempotency pass on PostgreSQL 18.6 | Real dialing remains disabled. |
 | P5-015 | Calls overview/detail and contact call action | complete | `a246bf3`, `7b45140` | Authenticated calls/detail routes and consent-gated contact simulator action render through same-origin BFF contracts | No carrier fallback exists. |
 | P5-016 | Transcript, outcome, artifacts, usage, latency, and analytics | complete | `a246bf3`, `7b45140` | Ordered lifecycle includes transcript/outcome/usage/latency; deterministic object metadata and overview/detail metrics persist under tenant RLS | Binary recording/media remains object-storage work, never PostgreSQL bytes. |

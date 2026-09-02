@@ -148,7 +148,7 @@ phone, transcript, credential, or provider payload content.
 The authenticated unified shell now owns `/voice`, `/voice/calls/[id]`,
 `/voice/campaigns`, and `/flows`, plus the consent-gated contact simulator
 action. These replace the Phase 5 operator use cases without copying the
-standalone console. The Phase 7 cross-channel compiler remains explicitly
+standalone console. The Phase 6 cross-channel compiler remains explicitly
 deferred.
 
 P5-010 imports the retained Hebrew and Pipecat agent packages and supplies a

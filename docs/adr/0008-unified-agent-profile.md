@@ -20,9 +20,10 @@ knowledge, locale, voice, WhatsApp, telephony, OpenLive, and escalation behavior
 Provider credentials are referenced by opaque secret IDs and never embedded in a
 profile document.
 
-Retained voice, messaging, and live-agent engines receive thin adapters from a
-published profile version. Phase 1 defines the direction only; it does not create
-the final persistence schema or replace source agent implementations.
+Retained voice and messaging engines receive thin adapters from a published
+profile version in Phase 6. OpenLive receives its adapter only in the final
+integration phase. Phase 1 defined the direction only; it did not create the
+final persistence schema or replace source agent implementations.
 
 ## Consequences
 
