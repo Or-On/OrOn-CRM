@@ -1,11 +1,11 @@
 # Or-On Platform progress
 
-Last updated: 2026-09-02 (Asia/Jerusalem)
+Last updated: 2026-09-03 (Asia/Jerusalem)
 
 ## Current checkpoint
 
-- Phase: Phase 6 — Cross-channel platform
-- Branch: `codex/phase-6-cross-channel`
+- Phase: Phase 7 — UI/UX polish (in progress)
+- Branch: `codex/phase-7-ui-polish`
 - Phase 0 baseline: `93eb808e65f8edb1754c1940afe1949e7e18223a`
 - Phase 1 baseline: `20b46159078ec533a9891e6768d47595e35b7a7c`
 - Phase 2A status: **OFFLINE IMPLEMENTATION COMPLETE**
@@ -14,13 +14,29 @@ Last updated: 2026-09-02 (Asia/Jerusalem)
 - Phase 4 status: **COMPLETE**
 - Phase 5 status: **COMPLETE — SIMULATOR-FIRST ACCEPTANCE PASSED**
 - Phase 6 status: **COMPLETE — ACCEPTED SIX-NODE SIMULATOR SCOPE; OPENLIVE DEFERRED**
-- Active task: Phase 6 handoff; Phase 7 UI/UX polish is next, not started
+- Active task: P7-001–P7-004, safe preview, shared design foundation and Inbox reliability
+- Phase 7 exact baseline commit: `305eb6258435545033343106c19d6479b0cbf97e`
 - Phase 2B clean baseline commit: `830a8371836ea7922fca5c320624bf3bd32ec229`
 - Phase 3 exact baseline commit: `9ca3a022c2fb18a5d416b39aa7d1404f7910ae1b`
 - Phase 4 exact baseline commit: `fdaabedfe0c6dd3586261a338f2fd82f904023d8`
 - Phase 5 exact baseline commit: `e6d2e303c07a3a0df35e39d30baf1f5584564464`
 - Phase 6 exact baseline commit: `946b08a1c418567f56df87cbe17a97b143596a01`
 - Provider safety: no real telephone call, WhatsApp message, webhook mutation, or provider provisioning performed
+
+## Phase 7 implementation state
+
+Approved plan: [`phase-7-ui-polish.md`](plans/phase-7-ui-polish.md).
+All three upstreams were verified clean at their locked SHAs before branching.
+The referenced workspace `BOOST.md` is absent; root/scoped instructions and the
+complete master prompt govern this work. Developer `.env`, login and queues must
+remain untouched; use a separate fictional database for interactive acceptance.
+
+| Task          | Status      | Commit / evidence                                                                  | Next exact task                              |
+| ------------- | ----------- | ---------------------------------------------------------------------------------- | -------------------------------------------- |
+| P7-001        | in progress | Clean `305eb62`, new phase branch, upstream locks verified; local UI not listening | Isolated browser baseline                    |
+| P7-002–P7-004 | planned     | Detailed source audit and approved plan                                            | Shell/tokens, real Overview, race-safe Inbox |
+| P7-005–P7-008 | planned     | Contacts/pipeline, operation capabilities, voice context, Hebrew/a11y              | Follow core screen verification              |
+| P7-009–P7-010 | planned     | Browser regressions, performance and rehearsal                                     | Final Phase 7 acceptance; not yet passed     |
 
 ## Phase 6 implementation state
 

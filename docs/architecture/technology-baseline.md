@@ -205,3 +205,21 @@ merge major upgrades without those gates.
 
 No upstream dependency installation, provider call, model download, real message,
 real telephone call, or Terraform apply occurred during discovery.
+
+## Phase 7 interaction-test tooling — 2026-09-03
+
+Additive development dependencies only; no production framework/runtime upgrade:
+
+| Package | Previous target | Selected stable | Verification |
+| --- | --- | --- | --- |
+| `@testing-library/react` | absent | 16.3.3 | npm registry version/peers inspected; React 19.2.8 interaction tests pass |
+| `@testing-library/dom` | absent | 10.4.1 | npm registry inspected; satisfies React Testing Library peer |
+| `jsdom` | absent | 30.0.1 | npm engine constraint accepts pinned Node 24.20.0; DOM interaction tests pass |
+
+Authoritative discovery used `pnpm view <package> version engines peerDependencies`
+against the [npm registry](https://registry.npmjs.org/). The three packages are
+test-only and do not replace any upstream technology. Frozen lockfile updated;
+`pnpm audit --audit-level=critical` reported no known vulnerabilities. The pinned
+Node 24.20.0 / pnpm 11.24.0 toolchain, strict TypeScript checks, and Next.js 16.3.3
+production build pass. DOM tests are not evidence of browser layout, accessibility
+certification, real provider correctness, or production performance.
