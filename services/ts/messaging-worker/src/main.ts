@@ -6,18 +6,32 @@ import { randomUUID } from "node:crypto";
 
 import { createMessagingStore } from "./database.js";
 import { runWorker } from "./worker.js";
+import {
+  MetaWhatsAppProvider,
+  SimulatorWhatsAppProvider,
+} from "./providers.js";
 
 async function main(): Promise<void> {
   const config = loadConfig(process.env, {
-    requireDatabase: true,
+    requireMessagingDatabase: true,
+    requireWhatsApp: true,
     service: "messaging-worker",
   });
-  if (config.databaseUrl === undefined) {
-    throw new Error("messaging-worker requires DATABASE_URL");
+  if (config.messagingDatabaseUrl === undefined) {
+    throw new Error("messaging-worker requires MESSAGING_DATABASE_URL");
   }
   const store = createMessagingStore(
-    config.databaseUrl,
+    config.messagingDatabaseUrl,
     `messaging-${randomUUID()}`,
+    {
+      simulator: new SimulatorWhatsAppProvider(),
+      meta: new MetaWhatsAppProvider({
+        enabled: config.enableRealWhatsApp,
+        accessToken: config.secrets.whatsappAccessToken,
+        graphApiVersion: config.whatsApp.graphApiVersion,
+        phoneNumberId: config.whatsApp.phoneNumberId,
+      }),
+    },
   );
   const logger = createLogger({
     service: config.service,

@@ -18,10 +18,7 @@ export async function runWorker(
         "messaging-worker is not ready: PostgreSQL is unavailable",
       );
     }
-    dependencies.logger.info(
-      { whatsappEnabled: false, messagesSent: 0 },
-      "worker_ready",
-    );
+    dependencies.logger.info({ messagesSent: 0 }, "worker_ready");
     let signal: string;
     for (;;) {
       const outcome = await Promise.race([

@@ -11,6 +11,7 @@ import type {
   QuickReply,
 } from "./types.js";
 import type { WhatsAppInboundEnvelope } from "./webhook.js";
+import type { WhatsAppStatusEnvelope } from "./webhook.js";
 
 interface ConversationRow {
   id: string;
@@ -292,13 +293,24 @@ export async function ingestWhatsAppInbound(
     `;
   }
 
+  await sql`
+    UPDATE crm.contacts
+    SET whatsapp_consent = CASE
+          WHEN whatsapp_consent = 'unknown' AND whatsapp_opted_out_at IS NULL THEN 'granted'
+          ELSE whatsapp_consent END,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE id = ${contactId}::uuid
+  `;
+
   const conversationRows = await sql<{ id: string }[]>`
     INSERT INTO messaging.conversations
-      (tenant_id, channel_id, contact_id, status, unread_count)
+      (tenant_id, channel_id, contact_id, status, unread_count,
+       customer_service_window_expires_at)
     VALUES (platform.current_tenant_id(), ${channelId}::uuid, ${contactId}::uuid,
-            'open', 0)
+            'open', 0, CURRENT_TIMESTAMP + interval '24 hours')
     ON CONFLICT (tenant_id, channel_id, contact_id)
-    DO UPDATE SET status = 'open', updated_at = CURRENT_TIMESTAMP
+    DO UPDATE SET status = 'open', updated_at = CURRENT_TIMESTAMP,
+                  customer_service_window_expires_at = CURRENT_TIMESTAMP + interval '24 hours'
     RETURNING id
   `;
   const conversationId = conversationRows[0]?.id;
@@ -335,6 +347,61 @@ export async function ingestWhatsAppInbound(
     WHERE id = ${conversationId}::uuid
   `;
   return { conversationId, inserted: true };
+}
+
+export async function ingestWhatsAppStatus(
+  sql: postgres.TransactionSql,
+  input: WhatsAppStatusEnvelope,
+): Promise<boolean> {
+  const messages = await sql<{ id: string }[]>`
+    SELECT message.id
+    FROM messaging.messages message
+    JOIN messaging.conversations conversation ON conversation.id = message.conversation_id
+      AND conversation.tenant_id = message.tenant_id
+    JOIN messaging.channels channel ON channel.id = conversation.channel_id
+      AND channel.tenant_id = conversation.tenant_id
+    WHERE message.provider = 'meta' AND message.provider_message_id = ${input.providerMessageId}
+      AND channel.provider_account_id = ${input.providerAccountId}
+    LIMIT 1
+  `;
+  const messageId = messages[0]?.id;
+  if (messageId === undefined)
+    throw new TypeError("status references an unknown Meta message");
+  const inserted = await sql<{ id: string }[]>`
+    INSERT INTO messaging.message_delivery_events
+      (tenant_id, message_id, provider_event_id, status, occurred_at, payload)
+    VALUES (platform.current_tenant_id(), ${messageId}::uuid, ${input.providerEventId},
+            ${input.status}, ${input.occurredAt},
+            ${sql.json(input.errorCode === undefined ? {} : { errorCode: input.errorCode })})
+    ON CONFLICT (tenant_id, provider_event_id) WHERE provider_event_id IS NOT NULL
+    DO NOTHING RETURNING id
+  `;
+  if (inserted.length === 0) return false;
+  await sql`
+    UPDATE messaging.messages SET status = CASE
+      WHEN ${input.status} = 'failed' THEN 'failed'
+      WHEN status = 'read' THEN status
+      WHEN ${input.status} = 'read' THEN 'read'
+      WHEN status = 'delivered' THEN status
+      WHEN ${input.status} = 'delivered' THEN 'delivered'
+      ELSE 'sent' END,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = ${messageId}::uuid
+  `;
+  await sql`
+    UPDATE messaging.outbound_requests SET status = CASE
+      WHEN ${input.status} = 'failed' THEN 'failed'
+      WHEN status = 'read' THEN status
+      WHEN ${input.status} = 'read' THEN 'read'
+      WHEN status = 'delivered' THEN status
+      WHEN ${input.status} = 'delivered' THEN 'delivered'
+      ELSE 'sent' END,
+      last_error_code = ${input.errorCode ?? null},
+      completed_at = CASE WHEN ${input.status} IN ('read', 'failed') THEN CURRENT_TIMESTAMP ELSE completed_at END,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE message_id = ${messageId}::uuid
+  `;
+  return true;
 }
 
 export async function sendSimulatedReply(

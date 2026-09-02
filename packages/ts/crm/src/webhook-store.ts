@@ -2,6 +2,7 @@ import postgres from "postgres";
 
 import {
   parseWhatsAppTextEnvelopes,
+  parseWhatsAppStatusEnvelopes,
   verifyWhatsAppSignature,
 } from "./webhook.js";
 
@@ -35,6 +36,7 @@ export async function acceptWhatsAppWebhook(
     });
   }
   const envelopes = parseWhatsAppTextEnvelopes(payload);
+  const statuses = parseWhatsAppStatusEnvelopes(payload);
   const sql = postgres(databaseUrl, { max: 1, prepare: false });
   try {
     const eventIds = await sql.begin(async (transaction) => {
@@ -57,9 +59,30 @@ export async function acceptWhatsAppWebhook(
         if (id === undefined) throw new Error("webhook event insert failed");
         ids.push(id);
       }
+      for (const status of statuses) {
+        const rows = await transaction<AcceptedEventRow[]>`
+          SELECT (ops.accept_whatsapp_inbound(
+            ${status.providerAccountId}, ${status.providerEventId},
+            'whatsapp.message.status', ${transaction.json({
+              providerAccountId: status.providerAccountId,
+              providerEventId: status.providerEventId,
+              providerMessageId: status.providerMessageId,
+              status: status.status,
+              occurredAt: status.occurredAt,
+              ...(status.errorCode === undefined
+                ? {}
+                : { errorCode: status.errorCode }),
+            })}
+          )).id
+        `;
+        const id = rows[0]?.id;
+        if (id === undefined)
+          throw new Error("webhook status event insert failed");
+        ids.push(id);
+      }
       return ids;
     });
-    return { eventIds, envelopes: envelopes.length };
+    return { eventIds, envelopes: envelopes.length + statuses.length };
   } finally {
     await sql.end({ timeout: 2 });
   }

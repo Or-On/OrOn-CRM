@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 
 import { NextResponse } from "next/server";
 
-import { listMessages, sendSimulatedReply } from "@or-on/crm";
+import { listMessages, queueWhatsAppOutbound } from "@or-on/crm";
+import { loadConfig } from "@or-on/config";
 
 import { jsonObject, withCurrentTenant } from "../../../../../../features/auth";
 import {
@@ -33,8 +34,8 @@ export async function POST(
     await assertCrmMutation(request);
     const { id } = await context.params;
     const body = await jsonObject(request);
-    if (typeof body.text !== "string")
-      throw new TypeError("reply text is required");
+    const provider = body.provider === "meta" ? "meta" : "simulator";
+    const kind = body.kind === "template" ? "template" : "text";
     const suppliedIdempotencyKey = request.headers
       .get("idempotency-key")
       ?.trim();
@@ -42,17 +43,58 @@ export async function POST(
       suppliedIdempotencyKey === undefined || suppliedIdempotencyKey === ""
         ? randomUUID()
         : suppliedIdempotencyKey;
-    const message = await withCurrentTenant(
+    const config = loadConfig(process.env, {
+      requireWhatsApp: true,
+      service: "web",
+    });
+    const result = await withCurrentTenant(
       "messaging:operate",
-      (sql, session) =>
-        sendSimulatedReply(sql, {
+      (sql, session) => {
+        const common = {
           conversationId: id,
           senderUserId: session.userId,
-          text: body.text as string,
+          provider,
+          explicitlyConfirmed: body.confirmReal === true,
+          realProviderEnabled: config.enableRealWhatsApp,
           idempotencyKey,
-        }),
+        } as const;
+        return queueWhatsAppOutbound(
+          sql,
+          kind === "template"
+            ? {
+                ...common,
+                kind,
+                templateName:
+                  typeof body.templateName === "string"
+                    ? body.templateName
+                    : "",
+                language:
+                  typeof body.language === "string" ? body.language : "",
+                parameters: Array.isArray(body.parameters)
+                  ? body.parameters.filter(
+                      (value): value is string => typeof value === "string",
+                    )
+                  : [],
+              }
+            : {
+                ...common,
+                kind,
+                text: typeof body.text === "string" ? body.text : "",
+              },
+          provider === "meta" &&
+            config.whatsApp.graphApiVersion !== undefined &&
+            config.whatsApp.phoneNumberId !== undefined &&
+            config.whatsApp.wabaId !== undefined
+            ? {
+                graphApiVersion: config.whatsApp.graphApiVersion,
+                phoneNumberId: config.whatsApp.phoneNumberId,
+                wabaId: config.whatsApp.wabaId,
+              }
+            : undefined,
+        );
+      },
     );
-    return NextResponse.json({ message }, { status: 201 });
+    return NextResponse.json(result, { status: result.queued ? 202 : 200 });
   } catch (error) {
     return crmErrorResponse(error);
   }

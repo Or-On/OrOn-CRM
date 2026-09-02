@@ -26,9 +26,26 @@ describe("loadConfig", () => {
     ).toThrow("must be a PostgreSQL URL");
   });
 
+  it("requires the dedicated messaging PostgreSQL connection when requested", () => {
+    expect(() => loadConfig({}, { requireMessagingDatabase: true })).toThrow(
+      "MESSAGING_DATABASE_URL",
+    );
+    expect(
+      loadConfig(
+        {
+          MESSAGING_DATABASE_URL:
+            "postgresql://platform_messaging:secret@localhost/platform",
+        },
+        { requireMessagingDatabase: true },
+      ).messagingDatabaseUrl,
+    ).toContain("platform_messaging");
+  });
+
   it("redacts connection strings and provider secrets from diagnostics", () => {
     const config = loadConfig({
       DATABASE_URL: "postgresql://platform:do-not-print@localhost/platform",
+      MESSAGING_DATABASE_URL:
+        "postgresql://platform_messaging:also-do-not-print@localhost/platform",
       LIVEKIT_API_SECRET: "livekit-secret",
       WHATSAPP_ACCESS_TOKEN: "whatsapp-secret",
       AI_API_KEY: "ai-secret",
@@ -39,6 +56,7 @@ describe("loadConfig", () => {
 
     const rendered = JSON.stringify(configDiagnostics(config));
     expect(rendered).not.toContain("do-not-print");
+    expect(rendered).not.toContain("also-do-not-print");
     expect(rendered).not.toContain("livekit-secret");
     expect(rendered).not.toContain("whatsapp-secret");
     expect(rendered).not.toContain("ai-secret");
@@ -51,6 +69,32 @@ describe("loadConfig", () => {
     expect(() => loadConfig({}, { requireAuth: true })).toThrow(
       "AUTH_TOKEN_PEPPER",
     );
+  });
+
+  it("refuses incomplete real WhatsApp configuration", () => {
+    expect(() =>
+      loadConfig(
+        { ENABLE_REAL_WHATSAPP: "true", WHATSAPP_ACCESS_TOKEN: "token" },
+        { requireWhatsApp: true },
+      ),
+    ).toThrow("real WhatsApp requires");
+  });
+
+  it("accepts explicit complete real WhatsApp configuration", () => {
+    const config = loadConfig(
+      {
+        ENABLE_REAL_WHATSAPP: "true",
+        WHATSAPP_ACCESS_TOKEN: "token",
+        WHATSAPP_APP_SECRET: "1234567890123456",
+        WHATSAPP_WEBHOOK_VERIFY_TOKEN: "verify-token-long-enough",
+        WHATSAPP_PHONE_NUMBER_ID: "1312069101984418",
+        WHATSAPP_WABA_ID: "1507601250680263",
+        WHATSAPP_GRAPH_API_VERSION: "v26.0",
+      },
+      { requireWhatsApp: true },
+    );
+    expect(config.enableRealWhatsApp).toBe(true);
+    expect(config.whatsApp.phoneNumberId).toBe("1312069101984418");
   });
 
   it("normalizes the shared Python-style log level", () => {

@@ -20,6 +20,8 @@ interface ContactRow {
   company: string | null;
   lifecycle_status: ContactSummary["lifecycleStatus"];
   voice_consent: ContactSummary["voiceConsent"];
+  whatsapp_consent: ContactSummary["whatsAppConsent"];
+  whatsapp_opted_out_at: Date | null;
   last_activity_at: Date | null;
   created_at: Date;
   identities: unknown;
@@ -43,6 +45,8 @@ function mapContact(row: ContactRow): ContactSummary {
     company: row.company,
     lifecycleStatus: row.lifecycle_status,
     voiceConsent: row.voice_consent,
+    whatsAppConsent: row.whatsapp_consent,
+    whatsAppOptedOutAt: row.whatsapp_opted_out_at?.toISOString() ?? null,
     lastActivityAt: row.last_activity_at?.toISOString() ?? null,
     createdAt: row.created_at.toISOString(),
     identities: safeArray(row.identities).flatMap((identity) =>
@@ -81,6 +85,7 @@ function mapContact(row: ContactRow): ContactSummary {
 
 const contactProjection = `
   SELECT c.id, c.name, c.email, c.company, c.lifecycle_status, c.voice_consent,
+         c.whatsapp_consent, c.whatsapp_opted_out_at,
          c.last_activity_at, c.created_at,
          COALESCE((SELECT jsonb_agg(jsonb_build_object(
            'id', i.id, 'channel', i.channel,

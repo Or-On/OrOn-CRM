@@ -22,6 +22,13 @@ const sourceSchema = z.object({
       message: "must be a PostgreSQL URL",
     })
     .optional(),
+  MESSAGING_DATABASE_URL: z
+    .string()
+    .trim()
+    .refine((value) => /^postgres(?:ql)?:\/\//u.test(value), {
+      message: "must be a PostgreSQL URL",
+    })
+    .optional(),
   CONTROL_API_URL: z.url().default("http://127.0.0.1:8000"),
   LOG_LEVEL: z
     .string()
@@ -34,6 +41,13 @@ const sourceSchema = z.object({
   LIVEKIT_API_SECRET: optionalSecret,
   WHATSAPP_ACCESS_TOKEN: optionalSecret,
   WHATSAPP_APP_SECRET: optionalSecret,
+  WHATSAPP_WEBHOOK_VERIFY_TOKEN: optionalSecret,
+  WHATSAPP_PHONE_NUMBER_ID: z.string().regex(/^\d+$/u).optional(),
+  WHATSAPP_WABA_ID: z.string().regex(/^\d+$/u).optional(),
+  WHATSAPP_GRAPH_API_VERSION: z
+    .string()
+    .regex(/^v\d+\.0$/u)
+    .optional(),
   AI_API_KEY: optionalSecret,
   AUTH_TOKEN_PEPPER: z.preprocess(
     (value) => (value === "" ? undefined : value),
@@ -58,7 +72,9 @@ export class ConfigurationError extends Error {
 
 export interface LoadConfigOptions {
   readonly requireDatabase?: boolean;
+  readonly requireMessagingDatabase?: boolean;
   readonly requireAuth?: boolean;
+  readonly requireWhatsApp?: boolean;
   readonly service?: string;
 }
 
@@ -66,14 +82,21 @@ export interface PlatformConfig {
   readonly environment: "development" | "test" | "production";
   readonly service: string;
   readonly databaseUrl: string | undefined;
+  readonly messagingDatabaseUrl: string | undefined;
   readonly controlApiUrl: string;
   readonly logLevel: "trace" | "debug" | "info" | "warn" | "error" | "fatal";
   readonly enableRealTelephony: boolean;
   readonly enableRealWhatsApp: boolean;
+  readonly whatsApp: {
+    readonly graphApiVersion: string | undefined;
+    readonly phoneNumberId: string | undefined;
+    readonly wabaId: string | undefined;
+  };
   readonly secrets: {
     readonly livekitApiSecret: string | undefined;
     readonly whatsappAccessToken: string | undefined;
     readonly whatsappAppSecret: string | undefined;
+    readonly whatsappWebhookVerifyToken: string | undefined;
     readonly aiApiKey: string | undefined;
     readonly authTokenPepper: string | undefined;
     readonly authServiceSecret: string | undefined;
@@ -105,6 +128,32 @@ export function loadConfig(
   }
 
   if (
+    options.requireMessagingDatabase === true &&
+    result.data.MESSAGING_DATABASE_URL === undefined
+  ) {
+    throw new ConfigurationError(
+      "Invalid platform configuration: MESSAGING_DATABASE_URL is required for this service",
+    );
+  }
+
+  if (
+    options.requireWhatsApp === true &&
+    result.data.ENABLE_REAL_WHATSAPP &&
+    (result.data.WHATSAPP_ACCESS_TOKEN === undefined ||
+      result.data.WHATSAPP_APP_SECRET === undefined ||
+      result.data.WHATSAPP_APP_SECRET.length < 16 ||
+      result.data.WHATSAPP_WEBHOOK_VERIFY_TOKEN === undefined ||
+      result.data.WHATSAPP_WEBHOOK_VERIFY_TOKEN.length < 16 ||
+      result.data.WHATSAPP_PHONE_NUMBER_ID === undefined ||
+      result.data.WHATSAPP_WABA_ID === undefined ||
+      result.data.WHATSAPP_GRAPH_API_VERSION === undefined)
+  ) {
+    throw new ConfigurationError(
+      "Invalid platform configuration: real WhatsApp requires access token, app secret, webhook verify token, phone number ID, WABA ID, and Graph API version",
+    );
+  }
+
+  if (
     options.requireAuth === true &&
     (result.data.AUTH_TOKEN_PEPPER === undefined ||
       result.data.AUTH_SERVICE_SECRET === undefined ||
@@ -120,14 +169,21 @@ export function loadConfig(
     service:
       options.service ?? result.data.PLATFORM_SERVICE ?? "unknown-service",
     databaseUrl: result.data.DATABASE_URL,
+    messagingDatabaseUrl: result.data.MESSAGING_DATABASE_URL,
     controlApiUrl: result.data.CONTROL_API_URL,
     logLevel: result.data.LOG_LEVEL,
     enableRealTelephony: result.data.ENABLE_REAL_TELEPHONY,
     enableRealWhatsApp: result.data.ENABLE_REAL_WHATSAPP,
+    whatsApp: {
+      graphApiVersion: result.data.WHATSAPP_GRAPH_API_VERSION,
+      phoneNumberId: result.data.WHATSAPP_PHONE_NUMBER_ID,
+      wabaId: result.data.WHATSAPP_WABA_ID,
+    },
     secrets: {
       livekitApiSecret: result.data.LIVEKIT_API_SECRET,
       whatsappAccessToken: result.data.WHATSAPP_ACCESS_TOKEN,
       whatsappAppSecret: result.data.WHATSAPP_APP_SECRET,
+      whatsappWebhookVerifyToken: result.data.WHATSAPP_WEBHOOK_VERIFY_TOKEN,
       aiApiKey: result.data.AI_API_KEY,
       authTokenPepper: result.data.AUTH_TOKEN_PEPPER,
       authServiceSecret: result.data.AUTH_SERVICE_SECRET,
@@ -143,6 +199,8 @@ export function configDiagnostics(
     environment: config.environment,
     service: config.service,
     databaseUrl: config.databaseUrl === undefined ? "unset" : "[REDACTED]",
+    messagingDatabaseUrl:
+      config.messagingDatabaseUrl === undefined ? "unset" : "[REDACTED]",
     controlApiUrl: config.controlApiUrl,
     logLevel: config.logLevel,
     enableRealTelephony: config.enableRealTelephony,
@@ -153,6 +211,15 @@ export function configDiagnostics(
       config.secrets.whatsappAccessToken === undefined ? "unset" : "[REDACTED]",
     whatsappAppSecret:
       config.secrets.whatsappAppSecret === undefined ? "unset" : "[REDACTED]",
+    whatsappWebhookVerifyToken:
+      config.secrets.whatsappWebhookVerifyToken === undefined
+        ? "unset"
+        : "[REDACTED]",
+    whatsappGraphApiVersion: config.whatsApp.graphApiVersion ?? "unset",
+    whatsappPhoneNumberId:
+      config.whatsApp.phoneNumberId === undefined ? "unset" : "configured",
+    whatsappWabaId:
+      config.whatsApp.wabaId === undefined ? "unset" : "configured",
     aiApiKey: config.secrets.aiApiKey === undefined ? "unset" : "[REDACTED]",
     authTokenPepper:
       config.secrets.authTokenPepper === undefined ? "unset" : "[REDACTED]",

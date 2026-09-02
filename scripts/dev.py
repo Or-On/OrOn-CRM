@@ -108,6 +108,17 @@ def _require_provider_safety(environment: dict[str, str]) -> None:
         raise RuntimeError(f"Phase 1 refuses real-provider flags: {names} must be false")
 
 
+def _require_non_whatsapp_provider_safety(environment: dict[str, str]) -> None:
+    enabled = {
+        key
+        for key in ("ENABLE_REAL_TELEPHONY", "ENABLE_REAL_VOICE_PROVIDERS")
+        if environment.get(key, "false").strip().lower() != "false"
+    }
+    if enabled:
+        names = ", ".join(sorted(enabled))
+        raise RuntimeError(f"development refuses unsafe provider flags: {names} must be false")
+
+
 def _compose(*arguments: str, profile: str = "core") -> list[str]:
     return [
         "docker",
@@ -488,7 +499,9 @@ def voice_down() -> None:
 
 def dev() -> None:
     environment = _load_environment()
-    _require_provider_safety(environment)
+    # Real WhatsApp may be explicitly enabled for the guarded Phase 6 queue/UI.
+    # Telephony and AI providers remain prohibited on this command surface.
+    _require_non_whatsapp_provider_safety(environment)
     if not ENV_FILE.exists():
         raise RuntimeError(".env is missing; run `make bootstrap` first")
     _run(_compose("up", "-d", "--wait", "postgres"), environment=environment)
@@ -586,7 +599,9 @@ def help_text() -> None:
   lint / format / typecheck / test / verify
                    run target-repository quality gates
 
-No command enables real telephony, WhatsApp, provider webhooks, or Terraform apply.
+No command enables providers automatically. Real WhatsApp is accepted by `dev`
+only when the ignored environment explicitly opts in; every send still requires
+RBAC, consent, confirmation, durable admission, and the worker boundary switch.
 """
     )
 

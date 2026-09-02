@@ -132,10 +132,16 @@ export async function issueLiveAgentGrant(
 
 export async function issueControlApiGrant(
   session: AuthSession,
-  capability: "voice:read" | "voice:write",
+  capability:
+    "voice:read" | "voice:write" | "orchestration:read" | "orchestration:write",
 ): Promise<string> {
-  const permission =
-    capability === "voice:read" ? "voice:read" : "voice:operate";
+  const permission: Permission = capability.startsWith("voice:")
+    ? capability === "voice:read"
+      ? "voice:read"
+      : "voice:operate"
+    : capability === "orchestration:read"
+      ? "crm:read"
+      : "flows:manage";
   if (!hasPermission(session.tenant.role, permission)) {
     throw new ForbiddenError("Forbidden");
   }

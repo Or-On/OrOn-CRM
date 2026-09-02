@@ -36,6 +36,43 @@ export interface WhatsAppInboundEnvelope {
   readonly text: string;
 }
 
+export interface WhatsAppStatusEnvelope {
+  readonly providerAccountId: string;
+  readonly providerEventId: string;
+  readonly providerMessageId: string;
+  readonly status: "sent" | "delivered" | "read" | "failed";
+  readonly occurredAt: string;
+  readonly errorCode?: string;
+}
+
+export function parseStoredWhatsAppStatusEnvelope(
+  value: unknown,
+): WhatsAppStatusEnvelope | undefined {
+  const envelope = record(value);
+  const status = envelope?.status;
+  if (
+    typeof envelope?.providerAccountId !== "string" ||
+    typeof envelope.providerEventId !== "string" ||
+    typeof envelope.providerMessageId !== "string" ||
+    typeof envelope.occurredAt !== "string" ||
+    (status !== "sent" &&
+      status !== "delivered" &&
+      status !== "read" &&
+      status !== "failed")
+  )
+    return undefined;
+  const errorCode =
+    typeof envelope.errorCode === "string" ? envelope.errorCode : undefined;
+  return {
+    providerAccountId: envelope.providerAccountId,
+    providerEventId: envelope.providerEventId,
+    providerMessageId: envelope.providerMessageId,
+    status,
+    occurredAt: envelope.occurredAt,
+    ...(errorCode === undefined ? {} : { errorCode }),
+  };
+}
+
 export function parseStoredWhatsAppEnvelope(
   value: unknown,
 ): WhatsAppInboundEnvelope | undefined {
@@ -109,6 +146,65 @@ export function parseWhatsAppTextEnvelopes(
           from: `+${from.replace(/^\+/u, "")}`,
           profileName,
           text: body,
+        });
+      }
+    }
+  }
+  return results;
+}
+
+export function parseWhatsAppStatusEnvelopes(
+  payload: unknown,
+): readonly WhatsAppStatusEnvelope[] {
+  const root = record(payload);
+  if (root === undefined) return [];
+  const results: WhatsAppStatusEnvelope[] = [];
+  for (const entryValue of array(root.entry)) {
+    const entry = record(entryValue);
+    if (entry === undefined) continue;
+    const entryId = typeof entry.id === "string" ? entry.id : "unknown";
+    for (const changeValue of array(entry.changes)) {
+      const value = record(record(changeValue)?.value);
+      const metadata = record(value?.metadata);
+      const accountId =
+        typeof metadata?.phone_number_id === "string"
+          ? metadata.phone_number_id
+          : undefined;
+      for (const statusValue of array(value?.statuses)) {
+        const statusRecord = record(statusValue);
+        const messageId =
+          typeof statusRecord?.id === "string" ? statusRecord.id : undefined;
+        const status = statusRecord?.status;
+        const timestamp =
+          typeof statusRecord?.timestamp === "string"
+            ? statusRecord.timestamp
+            : undefined;
+        const timestampSeconds = Number(timestamp);
+        if (
+          accountId === undefined ||
+          messageId === undefined ||
+          timestamp === undefined ||
+          !Number.isSafeInteger(timestampSeconds) ||
+          timestampSeconds <= 0 ||
+          (status !== "sent" &&
+            status !== "delivered" &&
+            status !== "read" &&
+            status !== "failed")
+        )
+          continue;
+        const firstError = record(array(statusRecord?.errors)[0]);
+        const rawErrorCode = firstError?.code;
+        const errorCode =
+          typeof rawErrorCode === "number" || typeof rawErrorCode === "string"
+            ? String(rawErrorCode)
+            : undefined;
+        results.push({
+          providerAccountId: accountId,
+          providerMessageId: messageId,
+          providerEventId: `${entryId}:${messageId}:${status}:${timestamp}`,
+          status,
+          occurredAt: new Date(timestampSeconds * 1000).toISOString(),
+          ...(errorCode === undefined ? {} : { errorCode }),
         });
       }
     }

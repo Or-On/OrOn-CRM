@@ -7,9 +7,36 @@ import {
 } from "@or-on/crm";
 import { loadConfig } from "@or-on/config";
 
+export function GET(request: Request) {
+  const config = loadConfig(process.env, {
+    requireWhatsApp: true,
+    service: "web",
+  });
+  if (
+    !config.enableRealWhatsApp ||
+    config.secrets.whatsappWebhookVerifyToken === undefined
+  )
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const url = new URL(request.url);
+  const mode = url.searchParams.get("hub.mode");
+  const token = url.searchParams.get("hub.verify_token");
+  const challenge = url.searchParams.get("hub.challenge");
+  if (
+    mode !== "subscribe" ||
+    token !== config.secrets.whatsappWebhookVerifyToken ||
+    challenge === null
+  )
+    return NextResponse.json({ error: "Verification failed" }, { status: 403 });
+  return new Response(challenge, {
+    status: 200,
+    headers: { "content-type": "text/plain" },
+  });
+}
+
 export async function POST(request: Request) {
   const config = loadConfig(process.env, {
     requireDatabase: true,
+    requireWhatsApp: true,
     service: "web",
   });
   if (!config.enableRealWhatsApp) {

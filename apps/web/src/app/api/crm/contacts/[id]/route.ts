@@ -4,6 +4,7 @@ import {
   archiveContact,
   getContactDetail,
   setVoiceConsent,
+  setWhatsAppConsent,
   updateContact,
 } from "@or-on/crm";
 
@@ -44,6 +45,7 @@ export async function PATCH(
     const email = optional("email");
     const company = optional("company");
     const voiceConsent = body.voiceConsent;
+    const whatsAppConsent = body.whatsAppConsent;
     if (
       voiceConsent !== undefined &&
       voiceConsent !== "unknown" &&
@@ -52,14 +54,26 @@ export async function PATCH(
     ) {
       throw new TypeError("invalid voice consent");
     }
+    if (
+      whatsAppConsent !== undefined &&
+      whatsAppConsent !== "unknown" &&
+      whatsAppConsent !== "granted" &&
+      whatsAppConsent !== "revoked"
+    ) {
+      throw new TypeError("invalid WhatsApp consent");
+    }
     const contact = await withCurrentTenant("crm:write", async (sql) => {
       const updated = await updateContact(sql, id, {
         ...(name === undefined ? {} : { name }),
         ...(email === undefined ? {} : { email }),
         ...(company === undefined ? {} : { company }),
       });
-      if (updated === undefined || voiceConsent === undefined) return updated;
-      return setVoiceConsent(sql, id, voiceConsent);
+      if (updated === undefined) return updated;
+      if (voiceConsent !== undefined)
+        await setVoiceConsent(sql, id, voiceConsent);
+      if (whatsAppConsent !== undefined)
+        await setWhatsAppConsent(sql, id, whatsAppConsent);
+      return getContactDetail(sql, id);
     });
     return contact === undefined
       ? NextResponse.json({ error: "Not found" }, { status: 404 })

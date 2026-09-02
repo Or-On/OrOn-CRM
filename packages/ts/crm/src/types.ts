@@ -14,6 +14,8 @@ export interface ContactSummary {
   readonly company: string | null;
   readonly lifecycleStatus: "active" | "archived" | "blocked";
   readonly voiceConsent: "unknown" | "granted" | "revoked";
+  readonly whatsAppConsent: "unknown" | "granted" | "revoked";
+  readonly whatsAppOptedOutAt: string | null;
   readonly lastActivityAt: string | null;
   readonly createdAt: string;
   readonly identities: readonly ContactIdentity[];

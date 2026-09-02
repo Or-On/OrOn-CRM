@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   parseWhatsAppTextEnvelopes,
+  parseWhatsAppStatusEnvelopes,
   verifyWhatsAppSignature,
 } from "./webhook.js";
 
@@ -53,5 +54,38 @@ describe("WhatsApp webhook boundary", () => {
       },
     ]);
     expect(parseWhatsAppTextEnvelopes({ unexpected: true })).toEqual([]);
+  });
+
+  it("normalizes delivery statuses with stable deduplication identifiers", () => {
+    const payload = {
+      entry: [
+        {
+          id: "waba",
+          changes: [
+            {
+              value: {
+                metadata: { phone_number_id: "1312069101984418" },
+                statuses: [
+                  {
+                    id: "wamid.status",
+                    status: "delivered",
+                    timestamp: "1788364800",
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+    expect(parseWhatsAppStatusEnvelopes(payload)).toEqual([
+      {
+        providerAccountId: "1312069101984418",
+        providerEventId: "waba:wamid.status:delivered:1788364800",
+        providerMessageId: "wamid.status",
+        status: "delivered",
+        occurredAt: "2026-09-02T16:00:00.000Z",
+      },
+    ]);
   });
 });
