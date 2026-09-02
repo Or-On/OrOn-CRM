@@ -13,7 +13,7 @@ Last updated: 2026-09-02 (Asia/Jerusalem)
 - Phase 3 status: **COMPLETE**
 - Phase 4 status: **COMPLETE**
 - Phase 5 status: **IMPLEMENTATION IN PROGRESS**
-- Active task: P5-004 — import/adapt tenancy, secrets, and sessions packages
+- Active task: P5-006 — canonical call/contact/campaign/object/event bridge migration
 - Phase 2B clean baseline commit: `830a8371836ea7922fca5c320624bf3bd32ec229`
 - Phase 3 exact baseline commit: `9ca3a022c2fb18a5d416b39aa7d1404f7910ae1b`
 - Phase 4 exact baseline commit: `fdaabedfe0c6dd3586261a338f2fd82f904023d8`
@@ -41,6 +41,18 @@ LLM cases skipped in the ordinary run. The RLS helper test separately passes
 against local PostgreSQL. No model, provider, LiveKit, SIP, or real-call path was
 activated.
 
+Checkpoint `5fc6391` imported and adapted `oron-secrets`, `oron-tenancy`, and
+`oron-sessions` while preserving their package identities and dependency
+direction. Provider identities now bind through
+`platform.identity_bindings`, roles match the canonical membership model, and
+the retained API-key model matches the Phase 4 table. Sensitive configuration
+uses redacted types, all real-telephony construction is denied unless the
+explicit flag is true, and the packages remain unmounted until the canonical
+Phase 5 API/auth boundary is ready. Verification passed with 249 offline Python
+tests, strict production-source type checking, all TypeScript tests/contracts,
+the Next.js production build, clean dependency/security guards, and 35 live
+PostgreSQL 18.6 tests at the sole Alembic head `b56eb0a0aca1`.
+
 The authoritative implementation scope and acceptance gate is
 [`phase-5-telephony.md`](plans/phase-5-telephony.md). It preserves the Or-on
 engine and package identities, makes the existing `sessions` table the canonical
@@ -56,9 +68,9 @@ Status values: `pending`, `active`, `complete`, `blocked`.
 | P5-001 | Baseline, instructions, locked-source inventory, and Phase 5 scope | complete | preparation checkpoint | Clean Phase 4 baseline `e6d2e303`; locked clean upstreams; actual Or-on packages/routes/models/tests/deployment inspected; authoritative scope recorded | Begin the compatibility/license gate without importing source yet. |
 | P5-002 | Or-on dependency/version/license compatibility gate | complete | `f2c966e` | Current registry/official-source discovery; Python 3.14 isolated imports for Pipecat/LiveKit/native stack; isolated and target `pip-audit` clean; model-license download boundary documented | Keep model assets blocked until immutable revision/hash/license records exist. |
 | P5-003 | Import `oron-common`, `oron-db`, and `oron-flows` | complete | `f2c966e` | Original package identities retained; 115 passed/2 intentional skips; Ruff, Pyrefly, imports, repository guard, and real-PostgreSQL RLS helper test pass | Preserve these dependency-direction anchors while integrating higher layers. |
-| P5-004 | Import/adapt tenancy, secrets, and sessions packages | active | — | Source and canonical boundary inspection underway | Replace target-incompatible identity/config boundaries only. |
-| P5-005 | Reconcile imported models with canonical identity/RLS/schema | pending | — | — | Prove no runtime schema mutation or Alembic drift. |
-| P5-006 | Canonical call/contact/campaign/object/event bridge migration | pending | — | — | Generate a target successor from the current sole head. |
+| P5-004 | Import/adapt tenancy, secrets, and sessions packages | complete | `5fc6391` | Package identities/direction preserved; provider-neutral identity binding, redacted secrets, default-off telephony, 249 offline Python tests, and dependency audit pass | Mount only through the later canonical API/service-auth boundary. |
+| P5-005 | Reconcile imported models with canonical identity/RLS/schema | complete | `5fc6391` | Retained identity, role, and API-key models match canonical tables; repository boundary guard passes; 35 live PostgreSQL tests pass at sole head `b56eb0a0aca1` | Add new behavior only through an Alembic successor. |
+| P5-006 | Canonical call/contact/campaign/object/event bridge migration | active | — | Existing retained and unified schemas are being mapped before migration generation | Generate one target successor from `b56eb0a0aca1` without altering retained history. |
 | P5-007 | Control API voice routes and generated TypeScript client | pending | — | — | Keep FastAPI/OpenAPI authoritative. |
 | P5-008 | Telephony simulator and real-provider denial boundary | pending | — | — | Prove deterministic lifecycle with real flags false. |
 | P5-009 | Import/adapt dispatcher and LiveKit webhook contracts | pending | — | — | Remove Firebase/admin coupling and add service auth/idempotency. |
@@ -396,7 +408,7 @@ file precedence and provider flags remain false.
 
 ## Next exact task
 
-Execute P5-004: import/adapt the locked Or-on tenancy, secrets, and sessions
-packages while preserving package identities, PostgreSQL RLS, encryption, and
-session lifecycle behavior. Bridge canonical Phase 3 identity and Phase 2 schema
-boundaries without enabling any provider or real-call path.
+Execute P5-006: map the retained `sessions`, contacts, campaigns, artifacts, and
+usage records to canonical CRM/object/audit/event ownership, then generate one
+reviewable Alembic successor from `b56eb0a0aca1`. Preserve retained history and
+keep every real-provider path disabled.
