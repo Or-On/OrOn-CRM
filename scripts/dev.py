@@ -576,7 +576,7 @@ def verify(environment: dict[str, str]) -> None:
     _run(["pnpm", "build"], environment=environment)
     _run(["pnpm", "peers", "check"])
     _run(["pnpm", "audit", "--audit-level", "critical"])
-    _run(["uv", "run", "pip-audit"])
+    _run(["uv", "run", "python", "scripts/pip_audit.py"])
 
 
 def help_text() -> None:

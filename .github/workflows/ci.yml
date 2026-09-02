@@ -65,7 +65,7 @@ jobs:
           services/py/dispatcher/src services/py/voice-agent/src db/importers
           db/alembic/env.py db/alembic/oron_migration_compat.py db/seeds scripts
       - run: uv run pytest -p no:cacheprovider
-      - run: uv run pip-audit
+      - run: uv run python scripts/pip_audit.py
 
   database:
     name: PostgreSQL and Alembic
@@ -142,7 +142,7 @@ jobs:
       - run: uv run python scripts/check_docs.py
       - run: pnpm peers check
       - run: pnpm audit --audit-level critical
-      - run: uv run pip-audit
+      - run: uv run python scripts/pip_audit.py
 
   containers:
     name: Container builds
