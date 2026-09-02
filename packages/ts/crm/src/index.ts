@@ -1,6 +1,7 @@
 export * from "./analytics.js";
 export * from "./api-keys.js";
 export * from "./automations.js";
+export * from "./cross-channel.js";
 export * from "./campaigns.js";
 export * from "./contacts.js";
 export * from "./csv.js";
@@ -11,4 +12,5 @@ export * from "./pipelines.js";
 export * from "./tools.js";
 export * from "./webhook.js";
 export * from "./webhook-store.js";
+export * from "./whatsapp-outbound.js";
 export type * from "./types.js";

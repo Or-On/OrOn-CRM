@@ -15,6 +15,7 @@ from or_on_platform.logging import configure_logging
 from pydantic import BaseModel
 
 from control_api.auth import ServiceAssertionVerifier
+from control_api.orchestration import create_orchestration_router
 from control_api.voice import PostgresVoiceRepository, VoiceRepository, create_voice_router
 
 
@@ -96,6 +97,7 @@ def create_app(
         redoc_url=None,
     )
     app.include_router(create_voice_router(resolved_voice_repository, resolved_assertion_verifier))
+    app.include_router(create_orchestration_router(resolved_assertion_verifier))
 
     @app.middleware("http")
     async def correlation_id(request: Request, call_next):  # type: ignore[no-untyped-def]

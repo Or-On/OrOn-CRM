@@ -58,6 +58,155 @@
         "title": "CallUsage",
         "type": "object"
       },
+      "CanonicalFlowContract": {
+        "properties": {
+          "channels": {
+            "items": {
+              "enum": ["voice", "whatsapp"],
+              "type": "string"
+            },
+            "title": "Channels",
+            "type": "array"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/CanonicalFlowEdge"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/CanonicalFlowNode"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "schemaVersion": {
+            "const": "1.0",
+            "title": "Schemaversion",
+            "type": "string"
+          }
+        },
+        "required": ["schemaVersion", "channels", "nodes", "edges"],
+        "title": "CanonicalFlowContract",
+        "type": "object"
+      },
+      "CanonicalFlowEdge": {
+        "properties": {
+          "id": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "source": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          },
+          "target": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": ["id", "source", "target"],
+        "title": "CanonicalFlowEdge",
+        "type": "object"
+      },
+      "CanonicalFlowNode": {
+        "properties": {
+          "configuration": {
+            "additionalProperties": true,
+            "title": "Configuration",
+            "type": "object"
+          },
+          "id": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "start",
+              "end",
+              "message.send",
+              "voice.call",
+              "crm.update",
+              "handoff"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": ["id", "type"],
+        "title": "CanonicalFlowNode",
+        "type": "object"
+      },
+      "CanonicalFlowValidationResult": {
+        "properties": {
+          "adapters": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/CompiledFlowAdapter"
+                },
+                "propertyNames": {
+                  "enum": ["voice", "whatsapp"]
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adapters"
+          },
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "valid": {
+            "title": "Valid",
+            "type": "boolean"
+          }
+        },
+        "required": ["valid", "errors"],
+        "title": "CanonicalFlowValidationResult",
+        "type": "object"
+      },
+      "CompiledFlowAdapter": {
+        "properties": {
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/CanonicalFlowEdge"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/CanonicalFlowNode"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "schemaVersion": {
+            "title": "Schemaversion",
+            "type": "string"
+          }
+        },
+        "required": ["schemaVersion", "nodes", "edges"],
+        "title": "CompiledFlowAdapter",
+        "type": "object"
+      },
       "ComponentCatalog": {
         "properties": {
           "components": {
@@ -885,6 +1034,50 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/orchestration/flows/validate": {
+      "post": {
+        "operationId": "validate_canonical_flow",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CanonicalFlowContract"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CanonicalFlowValidationResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Validate Canonical Flow",
+        "tags": ["orchestration"]
+      }
+    },
     "/api/v1/voice/campaigns": {
       "get": {
         "operationId": "list_voice_campaigns",

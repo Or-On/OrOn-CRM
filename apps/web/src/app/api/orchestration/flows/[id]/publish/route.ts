@@ -1,0 +1,29 @@
+import { NextResponse } from "next/server";
+
+import { publishCanonicalFlow } from "@or-on/crm";
+
+import { withCurrentTenant } from "../../../../../../features/auth";
+import {
+  assertCrmMutation,
+  crmErrorResponse,
+} from "../../../../../../features/crm-route";
+
+export async function POST(
+  request: Request,
+  context: RouteContext<"/api/orchestration/flows/[id]/publish">,
+) {
+  try {
+    await assertCrmMutation(request);
+    const { id } = await context.params;
+    const published = await withCurrentTenant("flows:manage", (sql, session) =>
+      publishCanonicalFlow(sql, session.userId, id),
+    );
+    if (!published)
+      throw new TypeError(
+        "publish the linked agent before publishing this flow",
+      );
+    return NextResponse.json({ published: true });
+  } catch (error) {
+    return crmErrorResponse(error);
+  }
+}

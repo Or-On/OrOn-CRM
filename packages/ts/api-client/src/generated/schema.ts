@@ -13,6 +13,38 @@ export interface CallUsage {
   readonly tts_model?: string;
 }
 
+export interface CanonicalFlowContract {
+  readonly channels: Array<"voice" | "whatsapp">;
+  readonly edges: Array<CanonicalFlowEdge>;
+  readonly nodes: Array<CanonicalFlowNode>;
+  readonly schemaVersion: "1.0";
+}
+
+export interface CanonicalFlowEdge {
+  readonly id: string;
+  readonly source: string;
+  readonly target: string;
+}
+
+export interface CanonicalFlowNode {
+  readonly configuration?: Record<string, unknown>;
+  readonly id: string;
+  readonly type:
+    "start" | "end" | "message.send" | "voice.call" | "crm.update" | "handoff";
+}
+
+export interface CanonicalFlowValidationResult {
+  readonly adapters?: Record<string, unknown> | null;
+  readonly errors: Array<string>;
+  readonly valid: boolean;
+}
+
+export interface CompiledFlowAdapter {
+  readonly edges: Array<CanonicalFlowEdge>;
+  readonly nodes: Array<CanonicalFlowNode>;
+  readonly schemaVersion: string;
+}
+
 export interface ComponentCatalog {
   readonly components: Array<Record<string, unknown>>;
   readonly spec_version: string;

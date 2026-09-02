@@ -13,6 +13,20 @@ import {
   listBroadcasts,
 } from "./campaigns.js";
 import {
+  createAgentProfileDraft,
+  createCanonicalFlowDraft,
+  listContactActivity,
+  listVoiceOutcomes,
+  publishAgentProfile,
+  publishCanonicalFlow,
+  queueCallOutcomeWhatsAppFollowup,
+  queueWhatsAppTriggeredCall,
+  requestHandoff,
+  summarizeCrossChannelUsage,
+  transitionHandoff,
+  type CanonicalFlow,
+} from "./cross-channel.js";
+import {
   addContactNote,
   getContactDetail,
   importContacts,
@@ -26,6 +40,10 @@ import {
   sendSimulatedReply,
 } from "./messaging.js";
 import { listPipelineBoards } from "./pipelines.js";
+import {
+  queueWhatsAppOutbound,
+  setWhatsAppConsent,
+} from "./whatsapp-outbound.js";
 
 const databaseUrl = process.env.CRM_TEST_DATABASE_URL;
 const tenantId = "10000000-0000-4000-8000-000000000001";
@@ -142,6 +160,94 @@ describe.skipIf(databaseUrl === undefined)(
               conversationId: inserted.conversationId,
               inserted: false,
             });
+            const simulatorOutbound = await queueWhatsAppOutbound(transaction, {
+              conversationId: inserted.conversationId,
+              senderUserId: userId,
+              provider: "simulator",
+              kind: "text",
+              text: "Durably queued simulator response",
+              explicitlyConfirmed: false,
+              realProviderEnabled: false,
+              idempotencyKey: "phase6-simulator-outbound",
+            });
+            expect(simulatorOutbound).toMatchObject({
+              provider: "simulator",
+              queued: true,
+            });
+            expect(
+              await queueWhatsAppOutbound(transaction, {
+                conversationId: inserted.conversationId,
+                senderUserId: userId,
+                provider: "simulator",
+                kind: "text",
+                text: "Durably queued simulator response",
+                explicitlyConfirmed: false,
+                realProviderEnabled: false,
+                idempotencyKey: "phase6-simulator-outbound",
+              }),
+            ).toMatchObject({
+              requestId: simulatorOutbound.requestId,
+              queued: false,
+            });
+            await expect(
+              queueWhatsAppOutbound(transaction, {
+                conversationId: inserted.conversationId,
+                senderUserId: userId,
+                provider: "meta",
+                kind: "text",
+                text: "Must not escape",
+                explicitlyConfirmed: true,
+                realProviderEnabled: false,
+                idempotencyKey: "phase6-disabled-real-outbound",
+              }),
+            ).rejects.toThrow("provider is disabled");
+            const contactForMessaging = (
+              await transaction<{ contact_id: string }[]>`
+              SELECT contact_id FROM messaging.conversations WHERE id = ${inserted.conversationId}::uuid
+            `
+            )[0]?.contact_id;
+            if (contactForMessaging === undefined)
+              throw new Error("contact fixture missing");
+            await setWhatsAppConsent(
+              transaction,
+              contactForMessaging,
+              "revoked",
+            );
+            await expect(
+              queueWhatsAppOutbound(
+                transaction,
+                {
+                  conversationId: inserted.conversationId,
+                  senderUserId: userId,
+                  provider: "meta",
+                  kind: "template",
+                  templateName: "approved_fixture",
+                  language: "he",
+                  parameters: [],
+                  explicitlyConfirmed: true,
+                  realProviderEnabled: true,
+                  idempotencyKey: "phase6-opted-out-real-outbound",
+                },
+                {
+                  graphApiVersion: "v26.0",
+                  phoneNumberId: "1312069101984418",
+                  wabaId: "1507601250680263",
+                },
+              ),
+            ).rejects.toThrow("opted out");
+            await expect(
+              queueWhatsAppTriggeredCall(
+                transaction,
+                userId,
+                inserted.conversationId,
+                "phase6-denied-call",
+              ),
+            ).rejects.toThrow("voice consent is required");
+            await transaction`
+              UPDATE crm.contacts SET voice_consent = 'granted'
+              WHERE id = (SELECT contact_id FROM messaging.conversations
+                            WHERE id = ${inserted.conversationId}::uuid)
+            `;
 
             const replyInput = {
               conversationId: inserted.conversationId,
@@ -160,8 +266,102 @@ describe.skipIf(databaseUrl === undefined)(
             expect(duplicateReply.id).toBe(firstReply.id);
             expect(
               await listMessages(transaction, inserted.conversationId),
-            ).toHaveLength(2);
+            ).toHaveLength(3);
             expect((await listConversations(transaction))[0]).toBeDefined();
+            const agentId = await createAgentProfileDraft(transaction, userId, {
+              name: "Fictional cross-channel agent",
+              systemPrompt: "Operate only through approved simulator paths.",
+              channels: ["voice", "whatsapp"],
+            });
+            expect(
+              await publishAgentProfile(transaction, userId, agentId),
+            ).toBe(true);
+            const profileVersion = await transaction<{ id: string }[]>`
+              SELECT id FROM agents.agent_profile_versions
+              WHERE agent_profile_id = ${agentId}::uuid
+            `;
+            const profileVersionId = profileVersion[0]?.id;
+            if (profileVersionId === undefined)
+              throw new Error("agent version was not created");
+            const flow: CanonicalFlow = {
+              schemaVersion: "1.0",
+              channels: ["voice", "whatsapp"],
+              nodes: [
+                { id: "start", type: "start" },
+                { id: "voice", type: "voice.call" },
+                { id: "message", type: "message.send" },
+                { id: "handoff", type: "handoff" },
+                { id: "end", type: "end" },
+              ],
+              edges: [
+                { id: "voice", source: "start", target: "voice" },
+                { id: "message", source: "start", target: "message" },
+                { id: "voice-handoff", source: "voice", target: "handoff" },
+                {
+                  id: "message-handoff",
+                  source: "message",
+                  target: "handoff",
+                },
+                { id: "end", source: "handoff", target: "end" },
+              ],
+            };
+            const flowId = await createCanonicalFlowDraft(
+              transaction,
+              userId,
+              "Fictional cross-channel flow",
+              profileVersionId,
+              flow,
+            );
+            expect(
+              await publishCanonicalFlow(transaction, userId, flowId),
+            ).toBe(true);
+
+            const voiceOutcome = (await listVoiceOutcomes(transaction))[0];
+            if (voiceOutcome === undefined)
+              throw new Error("seeded voice outcome is required");
+            const followup = await queueCallOutcomeWhatsAppFollowup(
+              transaction,
+              userId,
+              voiceOutcome.sessionId,
+              "phase6-call-followup",
+            );
+            const duplicateFollowup = await queueCallOutcomeWhatsAppFollowup(
+              transaction,
+              userId,
+              voiceOutcome.sessionId,
+              "phase6-call-followup",
+            );
+            expect(duplicateFollowup.jobId).toBe(followup.jobId);
+            expect(duplicateFollowup.queued).toBe(false);
+            const call = await queueWhatsAppTriggeredCall(
+              transaction,
+              userId,
+              inserted.conversationId,
+              "phase6-whatsapp-call",
+            );
+            expect(call.mode).toBe("simulator");
+
+            const requested = await requestHandoff(
+              transaction,
+              userId,
+              importedContact.id,
+              "whatsapp",
+              "Fictional customer requested a person",
+              "phase6-handoff",
+            );
+            const accepted = await transitionHandoff(
+              transaction,
+              requested.id,
+              userId,
+              "accept",
+            );
+            expect(accepted.status).toBe("accepted");
+            expect(
+              await listContactActivity(transaction, importedContact.id),
+            ).not.toHaveLength(0);
+            expect(
+              (await summarizeCrossChannelUsage(transaction)).estimatedCostUsd,
+            ).toBeNull();
             expect(
               (await dashboardMetrics(transaction)).contacts,
             ).toBeGreaterThan(1);

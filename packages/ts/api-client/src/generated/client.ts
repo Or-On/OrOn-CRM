@@ -1,6 +1,8 @@
 // Generated from control-api OpenAPI. Do not edit by hand.
 
 import type {
+  CanonicalFlowContract,
+  CanonicalFlowValidationResult,
   ComponentCatalog,
   FlowDocumentRequest,
   FlowList,
@@ -40,6 +42,19 @@ export class GeneratedControlApiClient {
     private readonly baseUrl: string,
     private readonly fetcher: FetchLike = fetch,
   ) {}
+
+  public async validateCanonicalFlow(
+    body: CanonicalFlowContract,
+  ): Promise<ApiResponse<CanonicalFlowValidationResult>> {
+    return this.request<CanonicalFlowValidationResult>(
+      "/api/v1/orchestration/flows/validate",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    );
+  }
 
   public async listVoiceCampaigns(): Promise<ApiResponse<VoiceCampaignList>> {
     return this.request<VoiceCampaignList>("/api/v1/voice/campaigns");

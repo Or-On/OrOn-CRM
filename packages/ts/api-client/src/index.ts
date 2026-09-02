@@ -5,6 +5,11 @@ export {
 } from "./generated/client";
 export type {
   CallUsage,
+  CanonicalFlowContract,
+  CanonicalFlowEdge,
+  CanonicalFlowNode,
+  CanonicalFlowValidationResult,
+  CompiledFlowAdapter,
   ComponentCatalog,
   DependencyStatus,
   Direction,
