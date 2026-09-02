@@ -4,7 +4,7 @@ Last updated: 2026-09-02 (Asia/Jerusalem)
 
 ## Current checkpoint
 
-- Phase: Phase 5 — Telephony preparation
+- Phase: Phase 5 — Telephony integration
 - Branch: `codex/phase-5-telephony`
 - Phase 0 baseline: `93eb808e65f8edb1754c1940afe1949e7e18223a`
 - Phase 1 baseline: `20b46159078ec533a9891e6768d47595e35b7a7c`
@@ -12,15 +12,15 @@ Last updated: 2026-09-02 (Asia/Jerusalem)
 - Live status: **PHASE 2B LIVE POSTGRESQL VALIDATION COMPLETE**
 - Phase 3 status: **COMPLETE**
 - Phase 4 status: **COMPLETE**
-- Phase 5 status: **PREPARED — APPLICATION IMPLEMENTATION NOT STARTED**
-- Active task: Await the explicit Phase 5 implementation request, then begin P5-002
+- Phase 5 status: **IMPLEMENTATION IN PROGRESS**
+- Active task: P5-004 — import/adapt tenancy, secrets, and sessions packages
 - Phase 2B clean baseline commit: `830a8371836ea7922fca5c320624bf3bd32ec229`
 - Phase 3 exact baseline commit: `9ca3a022c2fb18a5d416b39aa7d1404f7910ae1b`
 - Phase 4 exact baseline commit: `fdaabedfe0c6dd3586261a338f2fd82f904023d8`
 - Phase 5 exact baseline commit: `e6d2e303c07a3a0df35e39d30baf1f5584564464`
 - Provider safety: no real telephone call, WhatsApp message, webhook mutation, or provider provisioning performed
 
-## Phase 5 preparation state
+## Phase 5 implementation state
 
 Phase 5 was prepared from the clean Phase 4 head
 `e6d2e303c07a3a0df35e39d30baf1f5584564464` on
@@ -31,6 +31,15 @@ routes/models/tests, LiveKit/SIP deployment documentation, preserved target
 migrations, target Python service rules, and existing architecture decisions were
 reviewed. No application code, dependency, migration, provider configuration, or
 runtime state changed during preparation.
+
+The first implementation checkpoint `f2c966e` completed the compatibility and
+license gate and imported `oron-common`, `oron-db`, and `oron-flows` under their
+original package identities. The selected Python 3.14 dependency set imports,
+the isolated voice dependency set and target environment have no known audited
+vulnerabilities, and 115 low-level tests pass with only the live-DSN and external
+LLM cases skipped in the ordinary run. The RLS helper test separately passes
+against local PostgreSQL. No model, provider, LiveKit, SIP, or real-call path was
+activated.
 
 The authoritative implementation scope and acceptance gate is
 [`phase-5-telephony.md`](plans/phase-5-telephony.md). It preserves the Or-on
@@ -45,9 +54,9 @@ Status values: `pending`, `active`, `complete`, `blocked`.
 | ID | Task | Status | Commit | Verification evidence | Next exact task |
 | --- | --- | --- | --- | --- | --- |
 | P5-001 | Baseline, instructions, locked-source inventory, and Phase 5 scope | complete | preparation checkpoint | Clean Phase 4 baseline `e6d2e303`; locked clean upstreams; actual Or-on packages/routes/models/tests/deployment inspected; authoritative scope recorded | Begin the compatibility/license gate without importing source yet. |
-| P5-002 | Or-on dependency/version/license compatibility gate | pending | — | — | Verify selected stable Python/voice/native versions and asset licenses. |
-| P5-003 | Import `oron-common`, `oron-db`, and `oron-flows` | pending | — | — | Preserve identities/tests and enforce dependency direction. |
-| P5-004 | Import/adapt tenancy, secrets, and sessions packages | pending | — | — | Replace target-incompatible identity/config boundaries only. |
+| P5-002 | Or-on dependency/version/license compatibility gate | complete | `f2c966e` | Current registry/official-source discovery; Python 3.14 isolated imports for Pipecat/LiveKit/native stack; isolated and target `pip-audit` clean; model-license download boundary documented | Keep model assets blocked until immutable revision/hash/license records exist. |
+| P5-003 | Import `oron-common`, `oron-db`, and `oron-flows` | complete | `f2c966e` | Original package identities retained; 115 passed/2 intentional skips; Ruff, Pyrefly, imports, repository guard, and real-PostgreSQL RLS helper test pass | Preserve these dependency-direction anchors while integrating higher layers. |
+| P5-004 | Import/adapt tenancy, secrets, and sessions packages | active | — | Source and canonical boundary inspection underway | Replace target-incompatible identity/config boundaries only. |
 | P5-005 | Reconcile imported models with canonical identity/RLS/schema | pending | — | — | Prove no runtime schema mutation or Alembic drift. |
 | P5-006 | Canonical call/contact/campaign/object/event bridge migration | pending | — | — | Generate a target successor from the current sole head. |
 | P5-007 | Control API voice routes and generated TypeScript client | pending | — | — | Keep FastAPI/OpenAPI authoritative. |
@@ -387,8 +396,7 @@ file precedence and provider flags remain false.
 
 ## Next exact task
 
-After explicit approval to implement Phase 5, execute P5-002: verify the current
-selected Python/Pipecat/LiveKit/native dependency compatibility and relevant
-model/asset licenses, then import only `oron-common`, `oron-db`, and `oron-flows`
-with their original package identities and behavioral tests. Do not enable the
-voice Compose profile or any real provider path during this first slice.
+Execute P5-004: import/adapt the locked Or-on tenancy, secrets, and sessions
+packages while preserving package identities, PostgreSQL RLS, encryption, and
+session lifecycle behavior. Bridge canonical Phase 3 identity and Phase 2 schema
+boundaries without enabling any provider or real-call path.
