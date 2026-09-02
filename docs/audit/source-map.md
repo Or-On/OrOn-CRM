@@ -35,6 +35,26 @@ mapping row is required.
 
 Do not import: Firebase runtime dependency, GKE topology as target architecture, real customer/PII fixtures, or external Obsidian workflow dependency.
 
+## Phase 5 retained Or-on foundation packages
+
+Locked source SHA for every row:
+`cece174f4d590a1b8a283d539dd66e08cc689aa9`. Or-on has no repository license
+file and remains private/proprietary project code. No public license is inferred.
+
+| Source path | Target path | Status | Reason / exact adaptation |
+| --- | --- | --- | --- |
+| `packages/oron-common/src`, `tests` | `packages/py/oron-common/src`, `tests` | copied | Preserve call context, direction, E.164 validation, usage/cost behavior, and source tests. Content matches after line-ending normalization. |
+| `packages/oron-common/pyproject.toml` | `packages/py/oron-common/pyproject.toml` | adapted | Original name/version retained; target Python 3.14 range and verified exact Pydantic/phonenumbers pins replace broad source ranges. |
+| `packages/oron-db/src`, `tests/test_base.py` | `packages/py/oron-db/src`, `tests/test_base.py` | copied | Preserve SQLModel bases, async engine/session factory, runtime roles, and transaction-local tenant helper. Content matches after line-ending normalization. |
+| `packages/oron-db/tests/test_rls.py` | `packages/py/oron-db/tests/test_rls.py` | adapted | Assertion is preserved; target adds postgres/RLS markers, missing-server skip, and standard-URL-to-asyncpg normalization for the canonical local environment. |
+| `packages/oron-db/pyproject.toml` | `packages/py/oron-db/pyproject.toml` | adapted | Original identity retained; exact Python 3.14-compatible asyncpg, SQLAlchemy, and SQLModel pins selected. |
+| `packages/oron-flows/src`, `tests` | `packages/py/oron-flows/src`, `tests` | adapted | Preserve typed graph, component library, composition, validation, seeds, store seam, voice metadata, and 102 collected source tests/evaluations. Quoted annotations were modernized for Python 3.14 and long expressions/fixtures were wrapped for target lint limits; runtime values and assertions are unchanged. |
+| `packages/oron-flows/pyproject.toml` | `packages/py/oron-flows/pyproject.toml` | adapted | Original name/version and build layout retained; exact Pydantic pin and target workspace source are explicit. |
+
+No source console, deployment configuration, provider credential, customer data,
+model weight, Firebase integration, or runtime sibling dependency was imported in
+this slice.
+
 ## Planned WACRM reuse
 
 | Upstream source | Verified capability | Tentative target | Action |

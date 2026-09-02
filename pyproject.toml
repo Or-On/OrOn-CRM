@@ -8,7 +8,7 @@ dependencies = []
 [dependency-groups]
 dev = [
   "alembic==1.19.1",
-  "cryptography==50.0.0",
+  "cryptography==50.0.1",
   "httpx==0.28.1",
   "pip-audit==2.10.1",
   "pyrefly==1.2.0",
@@ -22,6 +22,9 @@ package = false
 
 [tool.uv.workspace]
 members = [
+  "packages/py/oron-common",
+  "packages/py/oron-db",
+  "packages/py/oron-flows",
   "packages/py/platform-integration",
   "services/py/control-api",
   "services/py/dispatcher",

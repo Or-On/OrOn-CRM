@@ -110,10 +110,12 @@ prevent later unreviewed upgrades.
 | Soniox / Google speech adapters | Pipecat extras | Provider/API managed | **Preserve adapters** | No provider traffic; fixture/contract tests required in Phase 5. |
 | OpenTelemetry/Phoenix instrumentation | OTel 1.44; OpenInference 2.0.1; Phoenix OTel 0.16.1 | OTel 1.44; OpenInference 2.0.3; Phoenix OTel 0.17.1 | **Latest listed patches** | Imported during the Python 3.14 voice gate; no telemetry exported. |
 
-The heavy gate installed an isolated 147-package environment and imported
+The Phase 5 recheck on 2026-09-02 installed an isolated 147-package environment and imported
 Pipecat, LiveKit API, Renikud, PyTorch, Torchaudio, ONNX Runtime,
 OpenTelemetry, and safetensors. It performed no model download, call, provider
-request, or upstream write.
+request, or upstream write. The isolated voice environment also passed a fresh
+`pip-audit` scan. Detailed selection and model-license boundaries are recorded in
+[`telephony-compatibility.md`](telephony-compatibility.md).
 
 ## OpenLive runtime baseline
 

@@ -1,0 +1,14 @@
+[project]
+name = "oron-db"
+version = "0.1.0"
+description = "SQLModel, SQLAlchemy, and tenant RLS foundations retained from Or-on"
+requires-python = ">=3.14,<3.15"
+dependencies = [
+  "asyncpg==0.31.0",
+  "sqlalchemy[asyncio]==2.0.52",
+  "sqlmodel==0.0.42",
+]
+
+[build-system]
+requires = ["hatchling==1.32.0"]
+build-backend = "hatchling.build"

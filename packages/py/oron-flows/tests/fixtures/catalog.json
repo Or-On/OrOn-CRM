@@ -1,0 +1,223 @@
+{
+  "spec_version": "4.0.0",
+  "components": [
+    {
+      "name": "announce",
+      "description": "End the call: read back a deterministic summary, then let the model close.",
+      "properties": [
+        {
+          "name": "say",
+          "type": "string",
+          "description": "Spoken verbatim before the model's closing turn. Supports ${session_var} interpolation, so a factual summary is deterministic rather than recalled by the model.",
+          "required": false,
+          "default": null
+        },
+        {
+          "name": "then",
+          "type": "string",
+          "description": "What the model should say to close, in English.",
+          "required": false,
+          "default": ""
+        }
+      ],
+      "exits": [],
+      "examples": [
+        {
+          "id": "done",
+          "use": "announce",
+          "say": "To summarise ${customer_name}, you are booked for ${slot_display}.",
+          "then": "Thank them, wish them a good day, and say goodbye."
+        }
+      ],
+      "default_exit": null
+    },
+    {
+      "name": "branch",
+      "description": "Route the call on what the customer said — a yes/no gate, a three-way close, which objection was raised. The outcomes and where each one goes are authored data, so this component declares no exits of its own.",
+      "properties": [
+        {
+          "name": "ask",
+          "type": "string",
+          "description": "What the model must determine, in English.",
+          "required": true,
+          "default": null
+        },
+        {
+          "name": "say",
+          "type": "string",
+          "description": "Optional line spoken verbatim before the model's turn. Set it when the question must be worded exactly; leave it out when the branch reads an answer the customer has already given.",
+          "required": false,
+          "default": null
+        },
+        {
+          "name": "choices",
+          "type": "mapping",
+          "description": "Outcome name -> when it applies and which node it goes to.",
+          "required": true,
+          "default": null
+        },
+        {
+          "name": "sets",
+          "type": "string",
+          "description": "Session variable to record the chosen outcome in.",
+          "required": false,
+          "default": null
+        }
+      ],
+      "exits": [],
+      "examples": [
+        {
+          "id": "has_a_moment",
+          "use": "branch",
+          "say": "Do you have a moment?",
+          "ask": "whether the customer agreed to continue the call now",
+          "choices": {
+            "yes": {
+              "describe": "They agreed to talk.",
+              "to": "pitch"
+            },
+            "no": {
+              "describe": "They declined or asked not to be called.",
+              "to": "sign_off"
+            }
+          },
+          "sets": "consent"
+        }
+      ],
+      "default_exit": null
+    },
+    {
+      "name": "converse",
+      "description": "Have a free-form exchange with the customer to accomplish one stated objective, then continue. Use when no more specific component fits.",
+      "properties": [
+        {
+          "name": "task",
+          "type": "string",
+          "description": "What the model should accomplish in this turn, in English.",
+          "required": true,
+          "default": null
+        },
+        {
+          "name": "say",
+          "type": "string",
+          "description": "Optional opening line, spoken verbatim before the model's turn. Set it when the wording must be exact; leave it out to let the model open.",
+          "required": false,
+          "default": null
+        },
+        {
+          "name": "collect",
+          "type": "list",
+          "description": "Values this turn must come away with. Each becomes a function parameter; a missing required one re-asks with its authored line instead of letting the flow move on incomplete.",
+          "required": false,
+          "default": []
+        },
+        {
+          "name": "max_attempts",
+          "type": "number",
+          "description": "How many times the customer may fail to supply a required value before the `exhausted` exit is taken.",
+          "required": false,
+          "default": 3
+        }
+      ],
+      "exits": [
+        {
+          "name": "done",
+          "description": "The objective was accomplished.",
+          "optional": false,
+          "requires": null
+        },
+        {
+          "name": "exhausted",
+          "description": "The customer did not supply a required value within max_attempts. Only reachable when the step collects something required.",
+          "optional": true,
+          "requires": {
+            "property": "collect",
+            "flag": "required"
+          }
+        }
+      ],
+      "examples": [
+        {
+          "id": "collect_reason",
+          "use": "converse",
+          "task": "Find out briefly why the caller is contacting us, and confirm you understood."
+        },
+        {
+          "id": "ask_size",
+          "use": "converse",
+          "task": "Ask what size they need and confirm it back.",
+          "collect": [
+            {
+              "name": "size",
+              "describe": "The size the customer asked for.",
+              "reask": "Sorry, which size was it?"
+            }
+          ],
+          "on": {
+            "exhausted": "handover"
+          }
+        }
+      ],
+      "default_exit": "done"
+    },
+    {
+      "name": "inform",
+      "description": "Tell the customer something and wait for them to acknowledge before continuing. There is nothing to extract.",
+      "properties": [
+        {
+          "name": "say",
+          "type": "string",
+          "description": "What to tell the customer, spoken verbatim.",
+          "required": true,
+          "default": null
+        }
+      ],
+      "exits": [
+        {
+          "name": "acknowledged",
+          "description": "The customer acknowledged.",
+          "optional": false,
+          "requires": null
+        }
+      ],
+      "examples": [
+        {
+          "id": "safety_notice",
+          "use": "inform",
+          "say": "Please keep the area clear before the visit. Is that clear?"
+        }
+      ],
+      "default_exit": "acknowledged"
+    },
+    {
+      "name": "transfer",
+      "description": "Hand the call to a human on another phone and end the agent's part. The caller hears one authored line, then the carrier moves the leg; whatever that number does with the call is its own business. Terminal — nothing runs after it and the conversation does not come back.",
+      "properties": [
+        {
+          "name": "say",
+          "type": "string",
+          "description": "Spoken verbatim before the handover, in the flow's language. Required: a caller moved to a ringing phone with no warning thinks they were cut off.",
+          "required": true,
+          "default": null
+        },
+        {
+          "name": "to",
+          "type": "string",
+          "description": "The human's number in E.164 (+972...). Validated at publish, because the alternative is a caller discovering it.",
+          "required": true,
+          "default": null
+        }
+      ],
+      "exits": [],
+      "examples": [
+        {
+          "id": "to_human",
+          "use": "transfer",
+          "say": "I am putting you through to a colleague now, one moment.",
+          "to": "+14155552671"
+        }
+      ],
+      "default_exit": null
+    }
+  ]
+}

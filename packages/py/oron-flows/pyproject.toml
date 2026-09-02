@@ -1,0 +1,19 @@
+[project]
+name = "oron-flows"
+version = "0.2.0"
+description = "Voice flow definitions, composition, validation, and storage retained from Or-on"
+requires-python = ">=3.14,<3.15"
+dependencies = [
+  "oron-common",
+  "pydantic==2.13.5",
+]
+
+[tool.uv.sources]
+oron-common = { workspace = true }
+
+[build-system]
+requires = ["hatchling==1.32.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/oron_flows"]
