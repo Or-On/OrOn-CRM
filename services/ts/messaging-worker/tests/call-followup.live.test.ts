@@ -5,7 +5,14 @@ import { fileURLToPath } from "node:url";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { queueCallOutcomeWhatsAppFollowup } from "@or-on/crm";
+import {
+  assignConversation,
+  listConversations,
+  listMessages,
+  listQuickReplies,
+  listTeamMembers,
+  queueCallOutcomeWhatsAppFollowup,
+} from "@or-on/crm";
 import { createMessagingStore } from "../src/database.js";
 
 // Explicit opt-in. Creates/drops only its own UUID-named database; no .env reads.
@@ -71,6 +78,26 @@ describe.skipIf(sourceUrl === undefined)("isolated call-outcome worker", () => {
 
   afterAll(async () => {
     for (const close of cleanup.reverse()) await close();
+  });
+
+  it("loads Inbox data and validates assignments using only platform_web privileges", async () => {
+    await web.begin(async (tx) => {
+      await tx`SELECT set_config('app.current_tenant', ${tenantId}, true),
+                      set_config('app.current_user', ${userId}, true)`;
+      const members = await listTeamMembers(tx);
+      expect(members.map((member) => member.userId)).toContain(userId);
+      const conversations = await listConversations(tx);
+      const conversation = conversations[0];
+      if (conversation === undefined)
+        throw new Error("seeded Inbox conversation required");
+      expect(await listMessages(tx, conversation.id)).not.toHaveLength(0);
+      expect(await listQuickReplies(tx)).not.toHaveLength(0);
+      expect(await assignConversation(tx, conversation.id, userId)).toBe(true);
+      await expect(
+        assignConversation(tx, conversation.id, randomUUID()),
+      ).rejects.toThrow("assignee must be a current tenant member");
+      expect(await assignConversation(tx, conversation.id, null)).toBe(true);
+    });
   });
 
   async function fixture(consent = "granted") {

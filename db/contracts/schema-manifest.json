@@ -1,5 +1,5 @@
 {
-  "alembic_head": "a1a71d1f7a03",
+  "alembic_head": "9d3038bec65e",
   "expected_functions": [
     "automation.protect_published_flow_version",
     "messaging.adjust_broadcast_counts",
@@ -19,6 +19,7 @@
     "platform.auth_revoke_session",
     "platform.auth_switch_session_tenant",
     "platform.current_tenant_id",
+    "platform.current_tenant_team",
     "platform.current_user_id",
     "platform.resolve_api_key",
     "platform.protect_last_tenant_owner"

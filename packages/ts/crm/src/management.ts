@@ -10,12 +10,9 @@ export async function listTeamMembers(
   sql: postgres.TransactionSql,
 ): Promise<readonly TeamMember[]> {
   return sql<TeamMember[]>`
-    SELECT membership.user_id AS "userId", user_account.email,
-           membership.role
-    FROM memberships membership
-    JOIN users user_account ON user_account.id = membership.user_id
-    WHERE membership.tenant_id = platform.current_tenant_id()
-    ORDER BY lower(user_account.email), membership.user_id
+    SELECT user_id AS "userId", email, role
+    FROM platform.current_tenant_team()
+    ORDER BY lower(email), user_id
   `;
 }
 

@@ -46,6 +46,29 @@ messaging agent/flow adapters. The authoritative scope is
 | P6-022 | Real Meta adapter, durable admission, consent/window/idempotency, and dual kill switches | complete | `956cf75` | Mocked 400/401/403/429/5xx/timeout/success tests; no network call; worker persists provider IDs outside request transactions | Complete. |
 | P6-023 | GET verification, exact-raw-body POST signature, status ingestion, and deduplication | complete | `956cf75` | API/parser tests and live durable worker test prove signed duplicate delivery updates once | Complete. |
 | P6-024 | Real-delivery UI, explicit confirmation, protected smoke command, and runbook | complete | `10ae55f`, Phase 6 docs checkpoint | Simulator remains default; REAL path is unmistakable and double-confirmed; smoke command is manual-only | User must finish Meta Dashboard configuration before the first authorized send. |
+| P6-025 | Repair Inbox team-directory and assignment privileges | complete | successor to `f75e492` | Narrow tenant/member-checked SQL function replaces forbidden direct identity reads; isolated and actual localhost Inbox queries pass as `platform_web`; migration `9d3038bec65e` applied locally; 47 database and 5 isolated TS integration tests pass | Resume P6-011. |
+
+### Inbox permission repair — 2026-09-02
+
+The configured web role correctly lacked direct SELECT on `memberships` and
+`users`, but `listTeamMembers` and `assignConversation` incorrectly queried
+those private tables. This was an application/privilege-boundary mismatch, not
+missing Meta credentials. A successor Alembic function now exposes only the
+active tenant's team to an active member, without granting table access.
+The new head is `9d3038bec65e`. No identity data, credentials, `.env`, provider
+configuration, or historical migration was changed. No provider action was
+performed. New source is platform-owned, with no upstream artifact copied.
+
+Verification: all 47 PostgreSQL tests passed, including successor
+downgrade/reupgrade and three new directory-security cases. All five isolated
+Inbox/cross-channel TypeScript integration tests passed, including team listing,
+assignment/unassignment and rejection of a non-member. The actual localhost
+Inbox query chain also passed with the `.env` runtime role `platform_web`.
+Workspace TypeScript tests/typechecking, ESLint, Prettier, Ruff, production
+workspace/Next.js build, offline SQL/graph/contract validation, and repository
+guards passed. Schema-manifest head/function inventory updated; existing
+Or-on migrations and dependency versions unchanged. Phase 6 as a whole remains
+in progress; this repair does not close P6-011 or adapter-parity work.
 
 ### Phase 6 continuation audit — 2026-09-02
 

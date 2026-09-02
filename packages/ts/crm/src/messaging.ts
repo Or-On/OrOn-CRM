@@ -551,8 +551,8 @@ export async function assignConversation(
   if (userId !== null) {
     const memberships = await sql<{ present: boolean }[]>`
       SELECT EXISTS(
-        SELECT 1 FROM memberships
-        WHERE tenant_id = platform.current_tenant_id() AND user_id = ${userId}::uuid
+        SELECT 1 FROM platform.current_tenant_team()
+        WHERE user_id = ${userId}::uuid
       ) AS present
     `;
     if (memberships[0]?.present !== true)
