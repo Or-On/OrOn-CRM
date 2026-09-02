@@ -38,6 +38,7 @@ erDiagram
 | CRM tags, custom fields/values, notes | **WACRM-adapted tables** | `tenant_id`, UUID | Notes/custom values can contain customer data | Tenant/name and contact/time indexes; join rows cascade, definitions restrict while referenced. |
 | Pipelines, stages, deals | **WACRM-adapted tables** | `tenant_id`, UUID | Deal value/currency/ownership | Tenant/status/stage and position indexes; stage/pipeline deletes restrict when deals exist. |
 | `platform.campaigns` plus historical `campaigns` | **New canonical parent + preserved Or-on voice projection** | `tenant_id`, UUID | Channel-neutral campaign lifecycle | Tenant/status/schedule keyset index; source execution rows retain domain FKs. |
+| `sessions`, `session_events`, `campaign_contacts` | **Preserved Or-on call records + new target-owned bridges/events** | `tenant_id`; session UUID and ordered event sequence | Encrypted phone fields remain on `sessions`; artifact bytes remain outside PostgreSQL; event payloads must be secret-free | Tenant/contact/time call cursors; provider/request/event idempotency; composite tenant FKs; session-event rows cascade only with their session. |
 | Messaging channels/conversations/messages/status events | **WACRM-adapted tables** | `tenant_id`, UUID | Message content/media refs/provider snapshots | Conversation activity, message `(conversation_id, created_at, id)`, unique provider IDs; message cascade only with conversation. |
 | Templates, quick replies, broadcasts/recipients | **WACRM-adapted tables** | `tenant_id`, UUID | Template variables and safe provider metadata | Provider template ID, campaign/status claim and recipient/provider message indexes. |
 | Flow definitions/versions/runs/step runs | **New unified tables**, WACRM-adapted; Or-on flows preserved | `tenant_id`, UUID | Versioned JSONB definition and safe errors | Unique version numbers; every published version is immutable; run/status/time indexes. |
@@ -63,3 +64,11 @@ before the retained call and automation adapters define their final columns. It
 will read domain records and will not become an authoritative event store. If
 measured workloads later require a projection, the outbox event ID becomes its
 idempotency key; that is a future measured change, not a Phase 2A assumption.
+
+Phase 5 keeps `sessions` as the authoritative call record. Nullable,
+tenant-consistent references link it to `crm.contacts`, `platform.campaigns`,
+and recording/transcript `objects.object_metadata`; historical calls are not
+assigned fabricated relationships. `session_events` stores ordered lifecycle
+detail and provider-event/request idempotency below a session. It is not a
+second call table and does not replace `ops.outbox_events`, which remains the
+durable delivery boundary.

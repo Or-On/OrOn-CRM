@@ -7,6 +7,7 @@ import sqlalchemy as sa
 from oron_common import CallUsage, Direction
 from oron_db import TenantScoped
 from pydantic import BaseModel, StringConstraints
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
 
@@ -122,6 +123,45 @@ class Session(SessionBase, TenantScoped, CallUsage, table=True):
     ended_at: dt.datetime | None = Field(
         default=None, sa_column=sa.Column(sa.DateTime(timezone=True))
     )
+    # Canonical integration references remain optional so preserved historical
+    # sessions do not need fabricated contacts, campaigns, actors, or objects.
+    contact_id: uuid.UUID | None = None
+    platform_campaign_id: uuid.UUID | None = None
+    initiated_by_user_id: uuid.UUID | None = None
+    initiated_by_service: str | None = None
+    provider_call_id: str | None = None
+    idempotency_key: str | None = None
+    recording_object_id: uuid.UUID | None = None
+    transcript_object_id: uuid.UUID | None = None
+
+
+class SessionEvent(SQLModel, table=True):
+    """Append-only ordered call lifecycle detail below the canonical session."""
+
+    __tablename__ = "session_events"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    tenant_id: uuid.UUID = Field(foreign_key="tenants.id", nullable=False)
+    session_id: uuid.UUID
+    sequence: int = Field(ge=0)
+    event_type: str = Field(min_length=1)
+    version: int = Field(default=1, ge=1)
+    provider: str | None = None
+    provider_event_id: str | None = None
+    idempotency_key: str | None = None
+    # pyrefly: ignore[no-matching-overload]  # sqlmodel's stubs omit sa_type here.
+    payload: dict = Field(default_factory=dict, sa_type=JSONB, nullable=False)
+    occurred_at: dt.datetime = Field(
+        default_factory=lambda: dt.datetime.now(dt.UTC),
+        sa_column=sa.Column(sa.DateTime(timezone=True), nullable=False),
+    )
+    # pyrefly: ignore[no-matching-overload]  # sqlmodel's stubs omit sa_type here.
+    created_at: dt.datetime | None = Field(
+        default=None,
+        sa_type=sa.DateTime(timezone=True),
+        nullable=False,
+        sa_column_kwargs={"server_default": sa.func.now()},
+    )
 
 
 # Usage is public so cost can be derived on read — a reader cannot re-price what
@@ -132,6 +172,8 @@ class SessionPublic(SessionBase, CallUsage):
     status: SessionStatus
     answered: bool | None = None
     outcome: str | None = None
+    contact_id: uuid.UUID | None = None
+    platform_campaign_id: uuid.UUID | None = None
     # Decrypted for the console. This is a deliberate loosening of design D4
     # ("the API never decrypts"): a call log that cannot say who was called, or
     # let the owner ring them back, is a list of timestamps. The numbers are

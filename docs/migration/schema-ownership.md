@@ -2,7 +2,7 @@
 
 | Schema/location | Owner | Authority / rule |
 | --- | --- | --- |
-| Historical public Or-on tables | Voice/control domains | Never relocated for neatness; historical Alembic revisions remain authoritative. |
+| Historical public Or-on tables and target-owned `session_events` child | Voice/control domains | Preserved tables are never relocated for neatness; successor bridges/events stay beside the authoritative `sessions` call record. |
 | `platform` | Cross-domain identity, campaign, credential metadata | Canonical integration records only. |
 | `crm` | Contacts, channel identities, tags, fields, notes, pipelines/deals | WACRM behavior adapted to `tenant_id`. |
 | `messaging` | Channels, conversations, messages, templates, broadcasts | WACRM messaging semantics without Supabase runtime services. |

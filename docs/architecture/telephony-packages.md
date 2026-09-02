@@ -68,7 +68,9 @@ flowchart TD
 
 The imported standalone routers are not yet exposed. P5-007 will mount selected
 capabilities behind canonical Phase 3 browser/service authentication and
-generated OpenAPI. P5-006 will add contact/campaign/object/event bridges. P5-008
-will add the simulator command path and second explicit approval gate. No real
+generated OpenAPI. P5-006 added tenant-consistent contact/campaign/object links,
+provider/request idempotency, and append-only session events at Alembic head
+`e24340ce81c8`. P5-008 will add the simulator command path and second explicit
+approval gate. No real
 telephone call, LiveKit/SIP mutation, model download, or provider request is a
 claim of this package-import checkpoint.

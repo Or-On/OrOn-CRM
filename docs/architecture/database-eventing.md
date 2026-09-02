@@ -33,6 +33,13 @@ Payloads are JSONB because event/job bodies are versioned, but tenant, type,
 status, aggregate/reference IDs, idempotency/provider IDs, and scheduling fields
 are normalized and indexed. Secrets and raw credentials are prohibited.
 
+Voice call lifecycle detail is retained in ordered `public.session_events`
+rows keyed by `(tenant_id, session_id, sequence)`. Provider event IDs and
+request idempotency keys have independent scoped uniqueness. These rows support
+call detail and replay-safe ingestion; publishable platform events are still
+written to `ops.outbox_events` in the same future application transaction.
+`session_events` is therefore a domain child record, not a transport queue.
+
 Phase 2B live tests prove atomic claims, concurrent `SKIP LOCKED` workers without
 double claims, stale-lease recovery, bounded retry/backoff, terminal failure,
 provider/event deduplication, and domain-mutation/outbox rollback atomicity on

@@ -9,9 +9,9 @@ def test_graph_has_preserved_oron_root_and_one_target_head() -> None:
     report = graph_report()
 
     assert report.bases == ("0001",)
-    assert report.heads == ("b56eb0a0aca1",)
+    assert report.heads == ("e24340ce81c8",)
     assert report.branch_points == ("8eda5976c920",)
-    assert report.revision_count == 31
+    assert report.revision_count == 32
 
 
 def test_rendered_postgresql_contract_passes_static_security_checks() -> None:

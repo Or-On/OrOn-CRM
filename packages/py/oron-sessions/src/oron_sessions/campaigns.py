@@ -126,6 +126,9 @@ class Campaign(CampaignBase, TenantScoped, table=True):
         default=CampaignStatus.DRAFT,
         sa_column=_enum_column(CampaignStatus, nullable=False),
     )
+    # Canonical channel-neutral campaign parent. Historical rows remain valid
+    # until an explicit migration/import maps them.
+    platform_campaign_id: uuid.UUID | None = None
 
 
 class CampaignContact(TenantScoped, table=True):
@@ -157,6 +160,9 @@ class CampaignContact(TenantScoped, table=True):
     # Deleting a campaign takes its contacts with it — an orphaned contact is a
     # number nothing will ever dial and nothing will ever clean up.
     campaign_id: uuid.UUID = Field(foreign_key="campaigns.id", ondelete="CASCADE")
+    # Optional canonical CRM entity; imported spreadsheet-only rows keep their
+    # protected snapshot without inventing a contact.
+    contact_id: uuid.UUID | None = None
     # Dial order = file order. Not created_at: every row of one upload shares a
     # transaction, and now() is transaction time, so they all tie.
     position: int = 0
@@ -191,6 +197,7 @@ class CampaignContact(TenantScoped, table=True):
 class CampaignPublic(CampaignBase):
     id: uuid.UUID
     tenant_id: uuid.UUID
+    platform_campaign_id: uuid.UUID | None = None
     status: CampaignStatus
     created_at: dt.datetime
     updated_at: dt.datetime
@@ -205,6 +212,7 @@ class ContactPublic(BaseModel):
     """
 
     id: uuid.UUID
+    contact_id: uuid.UUID | None = None
     phone_hint: str
     data: dict
     status: ContactStatus

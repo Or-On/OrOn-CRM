@@ -3,7 +3,7 @@ import uuid
 from oron_common import CallUsage
 from oron_common.context import Direction
 from oron_db import TenantScoped
-from oron_sessions.models import Session, SessionBase, SessionCreate, SessionPublic
+from oron_sessions.models import Session, SessionBase, SessionCreate, SessionEvent, SessionPublic
 
 
 def test_session_public_now_carries_the_caller_numbers():
@@ -24,6 +24,34 @@ def test_session_table_carries_caller_numbers_and_blind_index():
     assert "from_number" in Session.model_fields
     assert "to_number" in Session.model_fields
     assert "from_number_bidx" in Session.model_fields
+
+
+def test_session_table_carries_only_nullable_canonical_bridge_references():
+    fields = Session.model_fields
+    for name in (
+        "contact_id",
+        "platform_campaign_id",
+        "initiated_by_user_id",
+        "initiated_by_service",
+        "provider_call_id",
+        "idempotency_key",
+        "recording_object_id",
+        "transcript_object_id",
+    ):
+        assert name in fields
+        assert fields[name].default is None
+
+
+def test_session_event_is_ordered_and_provider_neutral():
+    event = SessionEvent(
+        tenant_id=uuid.uuid4(),
+        session_id=uuid.uuid4(),
+        sequence=0,
+        event_type="voice.call.started.v1",
+    )
+    assert event.version == 1
+    assert event.provider is None
+    assert event.payload == {}
 
 
 def test_session_carries_usage_counts_not_computed_cost():

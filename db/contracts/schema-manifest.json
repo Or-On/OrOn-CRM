@@ -1,5 +1,5 @@
 {
-  "alembic_head": "b56eb0a0aca1",
+  "alembic_head": "e24340ce81c8",
   "expected_functions": [
     "automation.protect_published_flow_version",
     "messaging.adjust_broadcast_counts",
@@ -35,6 +35,9 @@
     "ix_live_chats_tenant_updated",
     "ix_live_messages_chat_cursor",
     "ix_messages_conversation_cursor",
+    "ix_session_events_cursor",
+    "ix_sessions_contact_cursor",
+    "ix_sessions_tenant_cursor",
     "uq_contact_identity_normalized",
     "uq_inbound_provider_event",
     "uq_messages_provider_id"
@@ -126,6 +129,7 @@
       "flows",
       "memberships",
       "phone_numbers",
+      "session_events",
       "sessions",
       "tenants",
       "user_identities",
@@ -195,6 +199,7 @@
     "platform.campaigns",
     "platform.credential_records",
     "platform.tenant_invitations",
-    "public.api_keys"
+    "public.api_keys",
+    "public.session_events"
   ]
 }

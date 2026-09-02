@@ -6,6 +6,7 @@ from oron_sessions.models import (
     Session,
     SessionBase,
     SessionCreate,
+    SessionEvent,
     SessionPublic,
     SessionsPublic,
     SessionStatus,
@@ -15,6 +16,7 @@ from oron_sessions.models import (
 __all__ = [
     "Page",
     "Session",
+    "SessionEvent",
     "SessionBase",
     "SessionCreate",
     "SessionPublic",
