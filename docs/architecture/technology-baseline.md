@@ -84,6 +84,7 @@ library in the Phase 1 shell.
 | Alembic | 1.18.5 | 1.19.1 | **1.19.1** | Import passed; sole migration authority. |
 | httpx | 0.28.1 | 0.28.1 | **0.28.1** | Preserve Or-on HTTP-client convention. |
 | PyJWT | Not used by retained Or-on control routes | 2.13.0 | **2.13.0** | Phase 5 verifies short-lived HS256 BFF-to-control assertions with pinned issuer, audience, algorithm, required claims, and a 120-second maximum lifetime. |
+| tzdata | Implicit host database | 2026.3 | **2026.3** | Official PyPI stable fallback makes IANA calling windows deterministic on Windows and minimal containers; no host timezone database assumption. |
 | Uvicorn | 0.51.0 | 0.52.4 | **0.52.4** | Stable ASGI runtime for minimal service foundations. |
 | Ruff | 0.15.21 | 0.16.5 | **0.16.5** | Target `py314`; source-wide reformatting is prohibited. |
 | Pyrefly | 1.1.1 | 1.2.0 | **1.2.0** | Preserve Or-on's typing strategy; package paths are passed explicitly. |

@@ -6,29 +6,29 @@ Status values for later phases: **Unstarted**, **Mapped**, **Ported**, **Verifie
 
 | ID | Capability | Source evidence | Target treatment | Acceptance evidence | Status |
 | --- | --- | --- | --- | --- | --- |
-| O-01 | Self-hosted LiveKit SFU/SIP topology | `deploy/livekit`, README | Retain/adapt to VM Compose | Inbound/outbound simulator and protected real smoke; health checks | Mapped |
-| O-02 | DID registration, dispatch-rule provisioning and reconciliation | `oron-tenancy` routes/provisioner/admission | Retain | API/contract tests; reconciliation and empty-ACL negative tests | Mapped |
-| O-03 | Inbound LiveKit webhook dispatch | `oron-dispatcher/webhook.py` | Retain | Signed webhook fixture, idempotent call/session creation | Mapped |
-| O-04 | Outbound call orchestration | dispatcher `/calls` | Retain behind safe flag | Telephony simulator E2E; real action denied by default | Mapped |
-| O-05 | Pipecat LiveKit voice pipeline | `oron-agent` | Retain | Pipeline/turn/barge-in/cancellation tests; simulator transcript | Mapped |
+| O-01 | Self-hosted LiveKit SFU/SIP topology | `deploy/livekit`, README | Retain/adapt to VM Compose | Private digest-pinned voice profile and read-only SIP health pass; carrier smoke deferred | Verified |
+| O-02 | DID registration, dispatch-rule provisioning and reconciliation | `oron-tenancy` routes/provisioner/admission | Retain | Authenticated simulator API, read-only reconciliation and catch-all/empty ACL denial pass | Verified |
+| O-03 | Inbound LiveKit webhook dispatch | `oron-dispatcher/webhook.py` | Retain | Signed/tampered/replay fixtures and unknown-DID denial pass | Verified |
+| O-04 | Outbound call orchestration | dispatcher `/calls` | Retain behind safe flag | Complete/no-answer/failure/cancel simulator; both real-action gates deny by default | Verified |
+| O-05 | Pipecat LiveKit voice pipeline | `oron-agent` | Retain | Retained pipeline/turn/barge-in/cancellation suite and simulator transcript pass | Verified |
 | O-06 | Soniox STT/TTS and Gemini TTS/provider selection | agent config/tts tests | Retain adapters | Provider fixture/contract tests; no credential CI | Mapped |
 | O-07 | Vertex/Gemini and OpenAI-compatible LLM | agent LLM adapter | Retain/adapt to credential catalog | Provider adapter fixtures and timeout/cost tests | Mapped |
-| O-08 | Hebrew G2P/niqqud/normalization | `oron-hebrew` | Retain | Existing tests plus Hebrew speech manual gate | Mapped |
+| O-08 | Hebrew G2P/niqqud/normalization | `oron-hebrew` | Retain | Retained Hebrew suite passes; real speech evaluation remains model/provider-gated | Verified |
 | O-09 | Caller voice-gender inference | ECAPA pipeline | Retain only after license/accuracy review | Model license resolved; Hebrew telephony evaluation documented | Mapped |
-| O-10 | Turn-taking, interruption, idle/hangup behavior | agent tests/modules | Retain | State/timeout/barge-in tests | Mapped |
+| O-10 | Turn-taking, interruption, idle/hangup behavior | agent tests/modules | Retain | Retained state/timeout/barge-in tests pass | Verified |
 | O-11 | Warm SIP transfer | README says not implemented | Implement later, not source parity | Explicit handoff E2E before marking verified | Deferred |
 | O-12 | Tenant/user/membership model | tenancy models/migration | Retain/adapt | Auth/RBAC/RLS tests | Mapped |
 | O-13 | Firebase console identity binding | Firebase Admin/auth console | Replace | Unified auth migration and no Firebase runtime dependency | Replaced |
 | O-14 | Transaction-local RLS | `oron-db`, migrations/tests | Retain/extend | Cross-tenant/cross-role/fail-closed PostgreSQL tests | Mapped |
 | O-15 | Hashed tenant API keys | tenancy | Retain/adapt | Plaintext-once, hash, scope/revocation tests | Mapped |
-| O-16 | Sessions/transcripts/artifacts | sessions models/API | Retain and normalize voice model | Simulator call appears on canonical contact timeline | Mapped |
+| O-16 | Sessions/transcripts/artifacts | sessions models/API | Retain and normalize voice model | Canonical call/detail/contact simulator paths persist ordered transcript and object metadata | Verified |
 | O-17 | Encrypted phone fields/blind indexes | sessions/campaign migrations | Retain/adapt | Round-trip, key rotation, lookup and redaction tests | Mapped |
-| O-18 | Usage, cost and latency | session fields/observers | Retain | Metric and aggregation tests; analytics UI | Mapped |
-| O-19 | Outcomes/answer/no-answer states | later Alembic revisions | Retain | State machine and retry automation tests | Mapped |
-| O-20 | Voice campaigns/calling windows/retries | campaigns package/migrations | Retain/adapt | Job concurrency, consent, calling-window, retry E2E | Mapped |
-| O-21 | Flow composition/components/runtime | `oron-flows`, agent bindings | Retain behind canonical adapter | Canonical graph compiles and existing fixture behavior matches | Mapped |
-| O-22 | Telephony flow editor | `apps/console` | Port behavior into unified Flow Studio | Draft/validate/publish/version/simulate parity | Mapped |
-| O-23 | Console calls/sessions/campaign diagnostics | `apps/console` | Port into unified voice features | Route-by-route UI parity and keyboard/accessibility | Mapped |
+| O-18 | Usage, cost and latency | session fields/observers | Retain | Usage and provider-latency event persistence plus call/detail metrics pass | Verified |
+| O-19 | Outcomes/answer/no-answer states | later Alembic revisions | Retain | Completed/no-answer/failed/cancelled simulator lifecycle tests pass | Verified |
+| O-20 | Voice campaigns/calling windows/retries | campaigns package/migrations | Retain/adapt | Explicit consent, IANA window, bounds and per-contact idempotency pass | Verified |
+| O-21 | Flow composition/components/runtime | `oron-flows`, agent bindings | Retain behind canonical adapter | Typed catalog, validation, immutable publish and retained fixtures pass; Phase 7 compiler deferred | Verified |
+| O-22 | Telephony flow editor | `apps/console` | Port behavior into unified Flow Studio | Unified JSON author/validate/publish adapter is keyboard operable; visual graph compiler deferred | Verified |
+| O-23 | Console calls/sessions/campaign diagnostics | `apps/console` | Port into unified voice features | Unified calls/detail/DID/campaign diagnostics render responsively in English/Hebrew direction | Verified |
 | O-24 | GCP Secret Manager/KMS/GCS | secrets/session/deploy code | Retain/adapt | Local/GCP config tests, encrypted secret/object path | Mapped |
 | O-25 | OTel/Phoenix tracing | agent/deploy | Retain/standardize | Trace IDs/redaction/optional profile | Mapped |
 | O-26 | GKE deployment | deploy docs/scripts | Replace with one-VM Compose | VM deployment/rollback passes | Replaced |

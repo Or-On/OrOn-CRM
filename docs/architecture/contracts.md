@@ -35,6 +35,14 @@ storage locations.
 literal `simulator` mode, a canonical contact UUID, and a bounded idempotency
 key. The generated client serializes the request; the BFF applies the shared
 Origin/Fetch-Metadata/CSRF guard and requests a `voice:write` assertion. A first
+request persists the requested, started, answered, transcript, outcome, usage,
+and ended lifecycle atomically; replay returns the same logical call.
+
+Phase 5 also generates typed clients for phone-number listing/registration and
+read-only reconciliation, the typed component catalog, flow list/validation/
+immutable publishing, campaign list/create/simulator run, and session detail.
+All browser mutations remain same-origin and all control routes require a
+short-lived `voice:read` or `voice:write` service assertion.
 request returns `created=true`; a replay returns the same deterministic session
 with `created=false`. Reusing the key for another contact is a conflict.
 

@@ -268,3 +268,15 @@ Redis 8 image has its separately documented tri-license.
 | --- | --- | --- | --- |
 | `deploy/livekit/docker-compose.dev-sip.yml`, `livekit.dev-sip.yaml`, `sip/sip.dev.yaml` | `infra/compose/compose.yaml`, `infra/compose/livekit/*.yaml` | adapted | Preserves the required Redis-backed LiveKit/SIP bridge topology. Replaces floating images with exact tags and multi-platform digests, removes the public Redis/SIP/RTP bindings, injects local credentials from ignored environment state, adds dependency-aware health checks, and retains `use_external_ip: false`. |
 | Source control-plane readiness lesson (`sip not connected (redis required)`) | `scripts/verify_voice_profile.py`, `scripts/dev.py`, `Makefile` | behaviorally adapted/re-written | Uses only list-inbound, list-outbound, and list-dispatch-rule calls to prove SIP registration. Refuses missing/short/upstream-placeholder credentials and never invokes create/update/delete/participant/transfer APIs. |
+
+## Phase 5 canonical voice product adapters
+
+Locked Or-on source SHA:
+`cece174f4d590a1b8a283d539dd66e08cc689aa9`. The artifacts below are new
+target implementations over previously imported proprietary packages; no new
+upstream file was copied.
+
+| Source artifacts | Target artifacts | Status | Reason / exact adaptation |
+| --- | --- | --- | --- |
+| `packages/oron-tenancy` phone-number, flow-store and reconciliation behavior | `services/py/control-api/src/control_api/voice.py`; unified `/voice` and `/flows` features | behaviorally adapted/re-written | Preserves canonical DID/flow binding and typed component validation. Provider mutation is replaced by deterministic simulator admission and read-only diagnostics unless a later separately approved real action passes both gates. |
+| `packages/oron-sessions` session, event, campaign, calling-window and usage behavior | Alembic `7beb64e1ff33`; control API voice repository; unified call/campaign/contact surfaces | behaviorally adapted/re-written | Preserves `sessions` and retained flow runtime as authorities while adding canonical CRM consent/audience links, immutable version APIs, safe audit/outbox/object metadata, and same-origin UI. No standalone console source was copied. |

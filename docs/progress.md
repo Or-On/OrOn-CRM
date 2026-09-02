@@ -12,8 +12,8 @@ Last updated: 2026-09-02 (Asia/Jerusalem)
 - Live status: **PHASE 2B LIVE POSTGRESQL VALIDATION COMPLETE**
 - Phase 3 status: **COMPLETE**
 - Phase 4 status: **COMPLETE**
-- Phase 5 status: **IMPLEMENTATION IN PROGRESS**
-- Active task: P5-012 — phone-number/DID admission and reconciliation
+- Phase 5 status: **FINAL VERIFICATION IN PROGRESS**
+- Active task: P5-020 — documentation consolidation, then P5-021 full gate
 - Phase 2B clean baseline commit: `830a8371836ea7922fca5c320624bf3bd32ec229`
 - Phase 3 exact baseline commit: `9ca3a022c2fb18a5d416b39aa7d1404f7910ae1b`
 - Phase 4 exact baseline commit: `fdaabedfe0c6dd3586261a338f2fd82f904023d8`
@@ -152,16 +152,16 @@ Status values: `pending`, `active`, `complete`, `blocked`.
 | P5-009 | Import/adapt dispatcher and LiveKit webhook contracts | complete | `49c1d6d` | Signed fixture/tamper/replay tests; canonical assertion/capability tests; DID/persistence/trunk/default-off tests; sole head `315710614ae5`; 41 live PostgreSQL tests; no provider call | Keep runtime not-ready until the retained P5-010 agent launcher is injected. |
 | P5-010 | Import/adapt Hebrew and Pipecat voice-agent packages | complete | `34a62e2` | 349 passed/3 explicit P5-011 skips; full Python suite 622 passed/45 intentional skips; Ruff and strict Pyrefly pass; model path/hash, secret redaction, default-off provider gate, launcher injection, base/voice dependency isolation, repository and secret guards verified | Keep all real provider execution denied while building the opt-in control-plane profile. |
 | P5-011 | LiveKit/SIP/Redis opt-in Compose voice profile | complete | `5eef886` | Digest pins verified; Redis/LiveKit/SIP healthy; read-only SIP lists returned 0 inbound, 0 outbound, 0 rules; Redis/SIP have no host bindings; 63 focused and 632 full Python tests pass; TypeScript strict/test/build gate passes | Keep this profile mutation-free while adding canonical DID admission APIs. |
-| P5-012 | Phone-number/DID admission and reconciliation | active | — | P5-011 proves the Redis-backed SIP API is reachable without provider mutation | Mount canonical registration/reconciliation behind RBAC, enforce non-empty ACL, and use fakes until a separately approved provider mutation. |
-| P5-013 | Voice flow catalog, validation, publishing, and adapter UI | pending | — | — | Do not claim the Phase 7 canonical compiler. |
-| P5-014 | Canonical voice campaigns and CRM audience integration | pending | — | — | Enforce consent, calling windows, retries, and concurrency. |
-| P5-015 | Calls overview/detail and contact call action | pending | — | — | Use authenticated same-origin routes and simulator default. |
-| P5-016 | Transcript, outcome, artifacts, usage, latency, and analytics | pending | — | — | Preserve field protection and object metadata ownership. |
-| P5-017 | Observability, audit, provider diagnostics, and security controls | pending | — | — | Re-review the threat model before exposing any webhook. |
-| P5-018 | Unit, contract, PostgreSQL, RLS, simulator, and concurrency tests | pending | — | — | Use only fictional fixtures and real PostgreSQL where claimed. |
-| P5-019 | UI accessibility, responsive, keyboard, English/Hebrew/RTL checks | pending | — | — | Verify operational screens at desktop and mobile widths. |
-| P5-020 | Provenance, parity, architecture, runbook, and threat-model updates | pending | — | — | Keep implemented/deferred claims exact. |
-| P5-021 | Full Phase 5 verification and clean checkpoint | pending | — | — | Run the complete gate and preserve upstream integrity. |
+| P5-012 | Phone-number/DID admission and reconciliation | complete | `a246bf3`, `7b45140` | Authenticated simulator admission requires a published flow and restricted non-empty ACL; catch-all denial and read-only provider-disabled reconciliation pass; no provider mutation | Keep real DID/trunk changes behind a separate approved action. |
+| P5-013 | Voice flow catalog, validation, publishing, and adapter UI | complete | `a246bf3`, `7b45140` | Retained component catalog, typed validation, immutable PostgreSQL versions, generated client, and unified authoring surface pass | Phase 7 cross-channel compiler remains explicitly deferred. |
+| P5-014 | Canonical voice campaigns and CRM audience integration | complete | `a246bf3`, `7b45140` | Explicit voice consent, usable E.164 identity, IANA calling window, DB concurrency/attempt bounds, and per-campaign/contact idempotency pass on PostgreSQL 18.6 | Real dialing remains disabled. |
+| P5-015 | Calls overview/detail and contact call action | complete | `a246bf3`, `7b45140` | Authenticated calls/detail routes and consent-gated contact simulator action render through same-origin BFF contracts | No carrier fallback exists. |
+| P5-016 | Transcript, outcome, artifacts, usage, latency, and analytics | complete | `a246bf3`, `7b45140` | Ordered lifecycle includes transcript/outcome/usage/latency; deterministic object metadata and overview/detail metrics persist under tenant RLS | Binary recording/media remains object-storage work, never PostgreSQL bytes. |
+| P5-017 | Observability, audit, provider diagnostics, and security controls | complete | `a246bf3`, `7b45140` | Correlated control API, safe audit metadata, read-only provider diagnostics, bounded policy values, scenario/idempotency conflicts, and default-off provider gates pass | Full production telemetry export is a later deployment concern. |
+| P5-018 | Unit, contract, PostgreSQL, RLS, simulator, and concurrency tests | complete | `a246bf3`, `7b45140` | 41 live PostgreSQL tests plus control contract and web render suites pass; retained runner/dispatcher/concurrency suites remain in the full gate | Run consolidated P5-021 verification. |
+| P5-019 | UI accessibility, responsive, keyboard, English/Hebrew/RTL checks | complete | `7b45140` | Semantic labels, status text, keyboard-native controls, responsive grids, reduced-motion inherited tokens, direction strategy, and explicit LTR phone rendering are covered | Broader WCAG certification remains out of scope. |
+| P5-020 | Provenance, parity, architecture, runbook, and threat-model updates | active | documentation checkpoint | No new copied upstream artifact; target-owned migration/API/UI documented; parity claims distinguish simulator verification from deferred carrier smoke | Commit documentation, then run P5-021. |
+| P5-021 | Full Phase 5 verification and clean checkpoint | pending | — | Focused Python/TypeScript, one-head offline SQL, PostgreSQL 18.6, and Next production build gates already pass | Run the entire developer, security, container, and upstream-integrity gate. |
 
 ## Phase 3 starting state
 
@@ -484,8 +484,7 @@ file precedence and provider flags remain false.
 
 ## Next exact task
 
-Execute P5-012: expose canonical phone-number/DID admission and drift
-reconciliation through authenticated control API and same-origin boundaries.
-Preserve the retained `phone_numbers` authority, reject empty ACLs, report drift
-without silently mutating it, and use injected fakes/simulators. Do not create a
-real trunk, dispatch rule, DID, participant, or telephone call.
+Complete P5-020 documentation, then execute P5-021: run the consolidated
+format/lint/type/test/contract/migration/PostgreSQL/container/security/license/
+provenance/upstream-integrity gate. Keep real provider flags false and do not
+create a trunk, dispatch rule, DID, participant, or telephone call.

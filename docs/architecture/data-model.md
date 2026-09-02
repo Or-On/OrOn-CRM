@@ -72,3 +72,12 @@ assigned fabricated relationships. `session_events` stores ordered lifecycle
 detail and provider-event/request idempotency below a session. It is not a
 second call table and does not replace `ops.outbox_events`, which remains the
 durable delivery boundary.
+
+Alembic `7beb64e1ff33` adds `crm.contacts.voice_consent` with fail-safe
+`unknown` default and normalized voice policy columns on `platform.campaigns`:
+`voice_flow_id`, concurrency and attempt bounds, IANA timezone, weekday-hour
+configuration, and completion time. Historical canonical voice campaign rows
+may keep a null flow; new control-API campaigns require an existing visible
+published flow. Audience queries require active contacts, explicit `granted`
+consent, and a usable E.164 phone/WhatsApp identity. High-volume call lists keep
+the existing `(tenant_id, created_at, session_id)` cursor index.

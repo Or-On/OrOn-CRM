@@ -72,3 +72,25 @@ make voice-down
 
 This stops only the optional voice infrastructure. It does not remove the core
 PostgreSQL volume or alter provider state.
+
+## Unified operator workflow
+
+With the core stack running, sign in using the fictional development account
+and open `/flows`, `/voice`, and `/voice/campaigns`.
+
+1. Publish a versioned voice flow from `/flows`.
+2. Register a simulator DID with an explicit restricted documentation/test CIDR
+   from `/voice`. This does not create a LiveKit or carrier resource.
+3. Open a fictional contact, set voice consent to `granted`, and start a
+   simulator call; replay uses the submitted idempotency key.
+4. Inspect the call lifecycle, transcript event, outcome, artifact metadata,
+   usage, and latency on `/voice/calls/[id]`.
+5. Create and run a voice campaign. Only explicitly opted-in active contacts
+   with usable E.164 identities are selected.
+
+Use `make voice-check` (or `uv run python scripts/dev.py voice-check`) for the
+optional local SIP control plane. It lists resources only. Do not treat an empty
+provider inventory as drift repair authorization.
+
+Real calls remain out of scope. Never set `ENABLE_REAL_TELEPHONY=true` without a
+separate approved action and real-provider runbook.

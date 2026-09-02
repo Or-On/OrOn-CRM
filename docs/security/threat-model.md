@@ -112,6 +112,21 @@ until their boundary validates identity, integrity, authorization, type, and siz
 - The authenticated browser reaches voice operations only through same-origin
   BFF routes, canonical RBAC, short-lived audience-bound assertions, and the
   least-privilege `platform_voice` PostgreSQL role.
+- DID admission rejects empty, catch-all IPv4, and catch-all IPv6 ACLs. Phase 5
+  persists only deterministic simulator rules; reconciliation is read-only and
+  never repairs provider state implicitly.
+- Call commands are idempotent per tenant and reject reuse for a different
+  contact or simulator scenario. Campaign calls are idempotent per campaign and
+  contact, and only active contacts with explicit granted voice consent and a
+  validated E.164 channel identity are eligible.
+- Flow validation executes before persistence and published `(flow_id, version)`
+  content is immutable. Campaign concurrency and attempt counts have database
+  constraints; calling windows use named IANA time zones.
+- Audit records contain identifiers, simulator mode, scenario, and aggregate
+  counts only. Provider credentials, phone numbers, transcript content, and
+  provider payloads are not audit metadata.
+- Completed, no-answer, failed, and cancelled simulator lifecycles release their
+  logical resources without LiveKit, carrier, STT, TTS, or LLM traffic.
 - The simulator mutation is development-only, applies the shared Origin,
   Fetch-Metadata, and session-bound CSRF controls, and accepts only a literal
   simulator mode. It has no provider client, telephone number, trunk, or

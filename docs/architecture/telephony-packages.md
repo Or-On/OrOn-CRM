@@ -118,7 +118,7 @@ provider/request idempotency, and append-only session events at Alembic head
 
 P5-008 adds a development-only simulator command that never resolves a phone
 number or constructs a LiveKit/SIP adapter. One PostgreSQL transaction writes a
-terminal retained session, six ordered lifecycle records, six durable outbox
+terminal retained session, ordered lifecycle records, matching durable outbox
 events, and one safe audit record. A tenant-scoped deterministic session ID plus
 the database idempotency constraint makes replay return the same logical call.
 The real-action guard independently requires both
@@ -134,6 +134,22 @@ trunk, and default-off tests run without contacting LiveKit or SIP. Alembic head
 `315710614ae5` grants `platform_voice` only the select/insert/update privileges
 needed on the existing webhook ledger; it receives no job authority or delete
 privilege.
+
+P5-012 through P5-017 mount the retained data and flow engines behind the same
+canonical boundary. Alembic head `7beb64e1ff33` adds explicit CRM voice consent
+and normalized voice-campaign policy fields while preserving historical
+campaign rows. Simulator DID registration requires a published flow and a
+restricted ACL; reconciliation never mutates provider state. Flow versions are
+validated and immutable, campaigns select only eligible opted-in contacts, and
+session detail exposes ordered transcript/outcome/usage/latency events plus
+object metadata references. Every mutation writes safe audit metadata without
+phone, transcript, credential, or provider payload content.
+
+The authenticated unified shell now owns `/voice`, `/voice/calls/[id]`,
+`/voice/campaigns`, and `/flows`, plus the consent-gated contact simulator
+action. These replace the Phase 5 operator use cases without copying the
+standalone console. The Phase 7 cross-channel compiler remains explicitly
+deferred.
 
 P5-010 imports the retained Hebrew and Pipecat agent packages and supplies a
 target launcher adapter. The launcher owns exactly one asyncio task per call,

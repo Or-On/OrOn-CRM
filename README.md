@@ -29,13 +29,15 @@ deduplication, shared inbox, pipelines, durable simulator campaigns, versioned
 automation runs, team/settings, notifications, scoped API keys, and the
 PostgreSQL messaging worker.
 
-Phase 5 is in progress. The retained Or-on dispatcher, Hebrew processing, and
-Pipecat voice-agent packages are now target-local. The dispatcher receives the
-retained task launcher through dependency injection, while provider execution
-and model loading remain default-off and require explicit configuration. No
-real call path is enabled by this checkpoint.
+Phase 5 is simulator-complete. The retained Or-on dispatcher, Hebrew processing,
+Pipecat voice agent, sessions, tenancy, campaigns, flows, and SIP admission
+packages are target-local. The unified shell now provides voice flows, safe DID
+admission diagnostics, consent-aware simulator campaigns, calls, call detail,
+transcript/outcome/artifact/usage/latency views, and a contact call action backed
+by canonical PostgreSQL. Provider execution and model loading remain default-off;
+no real call path is enabled.
 
-It does **not** enable real WhatsApp delivery, telephony, public signup/OAuth/MFA,
+It does **not** enable real WhatsApp delivery or telephony, public signup/OAuth/MFA,
 the full OpenLive protocol, general canonical flow execution, agent-profile
 persistence, or production GCP infrastructure. Planned navigation is visibly
 unavailable rather than presented as finished functionality.
