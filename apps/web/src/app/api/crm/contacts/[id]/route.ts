@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 
-import { archiveContact, getContactDetail, updateContact } from "@or-on/crm";
+import {
+  archiveContact,
+  getContactDetail,
+  setVoiceConsent,
+  updateContact,
+} from "@or-on/crm";
 
 import { jsonObject, withCurrentTenant } from "../../../../../features/auth";
 import {
@@ -38,13 +43,24 @@ export async function PATCH(
     const name = optional("name");
     const email = optional("email");
     const company = optional("company");
-    const contact = await withCurrentTenant("crm:write", (sql) =>
-      updateContact(sql, id, {
+    const voiceConsent = body.voiceConsent;
+    if (
+      voiceConsent !== undefined &&
+      voiceConsent !== "unknown" &&
+      voiceConsent !== "granted" &&
+      voiceConsent !== "revoked"
+    ) {
+      throw new TypeError("invalid voice consent");
+    }
+    const contact = await withCurrentTenant("crm:write", async (sql) => {
+      const updated = await updateContact(sql, id, {
         ...(name === undefined ? {} : { name }),
         ...(email === undefined ? {} : { email }),
         ...(company === undefined ? {} : { company }),
-      }),
-    );
+      });
+      if (updated === undefined || voiceConsent === undefined) return updated;
+      return setVoiceConsent(sql, id, voiceConsent);
+    });
     return contact === undefined
       ? NextResponse.json({ error: "Not found" }, { status: 404 })
       : NextResponse.json({ contact });

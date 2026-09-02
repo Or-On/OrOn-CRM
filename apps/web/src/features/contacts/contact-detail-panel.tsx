@@ -7,6 +7,7 @@ import type { ContactDetail } from "@or-on/crm";
 import { Button, Input, Surface } from "@or-on/ui";
 
 import { crmMutation } from "../crm";
+import { voiceMutation } from "../voice";
 
 function fieldText(
   value: ContactDetail["customFields"][number]["value"],
@@ -70,6 +71,13 @@ export function ContactDetailPanel({
     form.reset();
   }
 
+  const callableIdentity = contact.identities.find(
+    (identity) =>
+      (identity.channel === "phone" || identity.channel === "whatsapp") &&
+      identity.normalizedValue !== null &&
+      identity.validationStatus !== "invalid",
+  );
+
   return (
     <div className="detail-grid">
       <Surface level="raised">
@@ -99,6 +107,47 @@ export function ContactDetailPanel({
             Save profile
           </Button>
         </form>
+        <div className="feature-form">
+          <label htmlFor="voice-consent">Voice consent</label>
+          <select
+            disabled={pending}
+            id="voice-consent"
+            onChange={(event) =>
+              void mutate(() =>
+                crmMutation(
+                  `/api/crm/contacts/${contact.id}`,
+                  { voiceConsent: event.target.value },
+                  { method: "PATCH" },
+                ),
+              )
+            }
+            value={contact.voiceConsent}
+          >
+            <option value="unknown">Unknown</option>
+            <option value="granted">Granted</option>
+            <option value="revoked">Revoked</option>
+          </select>
+          <Button
+            disabled={
+              pending ||
+              contact.voiceConsent !== "granted" ||
+              callableIdentity === undefined
+            }
+            onClick={() =>
+              void mutate(() =>
+                voiceMutation("/api/voice/simulated-calls", {
+                  contactId: contact.id,
+                  idempotencyKey: `contact:${contact.id}:${String(Date.now())}`,
+                }),
+              )
+            }
+            type="button"
+            variant="secondary"
+          >
+            Start simulator call
+          </Button>
+          <small>Real carrier dialing remains disabled.</small>
+        </div>
         <div className="detail-identities">
           <h3>Channel identities</h3>
           {contact.identities.map((identity) => (

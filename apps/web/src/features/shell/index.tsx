@@ -41,8 +41,14 @@ const navigation = [
   { href: "/pipelines", label: "Pipeline", icon: Columns3, available: true },
   { href: "/operations", label: "Campaigns", icon: Megaphone, available: true },
   { href: "/settings", label: "Settings", icon: Settings, available: true },
-  { href: "/flows", label: "Flows", icon: Workflow, available: false },
-  { href: "/voice", label: "Voice", icon: PhoneCall, available: false },
+  { href: "/flows", label: "Voice flows", icon: Workflow, available: true },
+  { href: "/voice", label: "Voice", icon: PhoneCall, available: true },
+  {
+    href: "/voice/campaigns",
+    label: "Voice campaigns",
+    icon: Megaphone,
+    available: true,
+  },
   { href: "/live", label: "Live agents", icon: Bot, available: false },
 ] as const;
 
