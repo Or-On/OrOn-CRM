@@ -1,3 +1,5 @@
+import { responsePayload } from "../crm";
+
 export function csrfToken(): string {
   const entry = document.cookie
     .split("; ")
@@ -17,7 +19,15 @@ export async function voiceMutation(
     },
     body: JSON.stringify(body),
   });
-  const payload = (await response.json()) as { error?: string };
-  if (!response.ok) throw new Error(payload.error ?? "Voice operation failed");
+  const payload = await responsePayload(response);
+  if (!response.ok)
+    throw new Error(
+      payload !== null &&
+        typeof payload === "object" &&
+        "error" in payload &&
+        typeof payload.error === "string"
+        ? payload.error
+        : "Voice operation failed",
+    );
   return payload;
 }

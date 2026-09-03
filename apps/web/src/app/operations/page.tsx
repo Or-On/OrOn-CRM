@@ -1,3 +1,6 @@
+import { productMetadata } from "../../i18n/product-metadata";
+import { AccessDenied } from "../../i18n/access-denied";
+import { ProductHeading } from "../../i18n/product-heading";
 import { redirect } from "next/navigation";
 
 import {
@@ -6,7 +9,11 @@ import {
   listBroadcasts,
 } from "@or-on/crm";
 
-import { UnauthenticatedError, withCurrentTenant } from "../../features/auth";
+import {
+  ForbiddenError,
+  UnauthenticatedError,
+  withCurrentTenant,
+} from "../../features/auth";
 import { OperationsPanel } from "../../features/operations";
 
 export default async function OperationsPage() {
@@ -18,14 +25,7 @@ export default async function OperationsPage() {
     }));
     return (
       <main className="page page--wide">
-        <header className="page-heading">
-          <p className="eyebrow">Orchestration</p>
-          <h1>Campaigns & automations</h1>
-          <p>
-            Safe simulator delivery and versioned automation drafts on canonical
-            PostgreSQL.
-          </p>
-        </header>
+        <ProductHeading page="operations" />
         <OperationsPanel
           automations={data.automations}
           broadcasts={data.broadcasts}
@@ -34,7 +34,10 @@ export default async function OperationsPage() {
       </main>
     );
   } catch (error) {
+    if (error instanceof ForbiddenError) return <AccessDenied />;
     if (error instanceof UnauthenticatedError) redirect("/login");
     throw error;
   }
 }
+
+export const generateMetadata = () => productMetadata("operations");

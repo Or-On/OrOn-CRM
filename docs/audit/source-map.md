@@ -281,6 +281,17 @@ upstream file was copied.
 | `packages/oron-tenancy` phone-number, flow-store and reconciliation behavior | `services/py/control-api/src/control_api/voice.py`; unified `/voice` and `/flows` features | behaviorally adapted/re-written | Preserves canonical DID/flow binding and typed component validation. Provider mutation is replaced by deterministic simulator admission and read-only diagnostics unless a later separately approved real action passes both gates. |
 | `packages/oron-sessions` session, event, campaign, calling-window and usage behavior | Alembic `7beb64e1ff33`; control API voice repository; unified call/campaign/contact surfaces | behaviorally adapted/re-written | Preserves `sessions` and retained flow runtime as authorities while adding canonical CRM consent/audience links, immutable version APIs, safe audit/outbox/object metadata, and same-origin UI. No standalone console source was copied. |
 
+## Phase 7 bilingual presentation provenance
+
+The bilingual public site, route localization, dictionaries, shared feedback,
+responsive shell refinements, typed form fixes and currency formatting added on
+2026-09-03 are original target code extending previously mapped platform features.
+No additional Or-on, WACRM or OpenLive artifact was copied. The CRM automation
+read-model classification is new target PostgreSQL query code; historical
+migrations and source engines are unchanged. Existing icon/UI dependencies and
+system fonts are reused; no downloaded model, font or image asset was introduced.
+Existing notices and the private/proprietary Or-on treatment remain unchanged.
+
 ## Phase 6 cross-channel adaptations
 
 Final simulator execution adapters (2026-09-02):

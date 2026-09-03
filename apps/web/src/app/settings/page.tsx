@@ -1,4 +1,9 @@
+import { productMetadata } from "../../i18n/product-metadata";
+import { AccessDenied } from "../../i18n/access-denied";
+import { ProductHeading } from "../../i18n/product-heading";
 import { redirect } from "next/navigation";
+import { loadConfig } from "@or-on/config";
+import { hasPermission } from "@or-on/auth";
 
 import {
   getTenantSettings,
@@ -7,7 +12,11 @@ import {
   listTeamMembers,
 } from "@or-on/crm";
 
-import { UnauthenticatedError, withCurrentTenant } from "../../features/auth";
+import {
+  ForbiddenError,
+  UnauthenticatedError,
+  withCurrentTenant,
+} from "../../features/auth";
 import { ManagementPanel } from "../../features/management";
 
 export default async function SettingsPage() {
@@ -19,23 +28,25 @@ export default async function SettingsPage() {
         members: await listTeamMembers(sql),
         notifications: await listNotifications(sql, session.userId),
         apiKeys: await listApiKeys(sql),
+        canManage: hasPermission(session.tenant.role, "tenant:manage"),
       }),
     );
     return (
       <main className="page page--wide">
-        <header className="page-heading">
-          <p className="eyebrow">Workspace administration</p>
-          <h1>Settings & team</h1>
-          <p>
-            Tenant preferences, canonical members, notifications, and provider
-            safety.
-          </p>
-        </header>
-        <ManagementPanel {...data} />
+        <ProductHeading page="settings" />
+        <ManagementPanel
+          {...data}
+          realWhatsAppEnabled={
+            loadConfig(process.env, { service: "web" }).enableRealWhatsApp
+          }
+        />
       </main>
     );
   } catch (error) {
+    if (error instanceof ForbiddenError) return <AccessDenied />;
     if (error instanceof UnauthenticatedError) redirect("/login");
     throw error;
   }
 }
+
+export const generateMetadata = () => productMetadata("settings");

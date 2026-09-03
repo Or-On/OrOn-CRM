@@ -14,7 +14,8 @@ Last updated: 2026-09-03 (Asia/Jerusalem)
 - Phase 4 status: **COMPLETE**
 - Phase 5 status: **COMPLETE — SIMULATOR-FIRST ACCEPTANCE PASSED**
 - Phase 6 status: **COMPLETE — ACCEPTED SIX-NODE SIMULATOR SCOPE; OPENLIVE DEFERRED**
-- Active task: Phase 7 first UI checkpoint implemented; remaining screen polish and full acceptance pending
+- Active task: Bilingual public/product redesign implemented; final expanded acceptance remains in progress
+- Bilingual brief exact clean baseline: `0408d5274af3c181aef32ec79352abfba1ed14be`
 - Phase 7 exact baseline commit: `305eb6258435545033343106c19d6479b0cbf97e`
 - Phase 2B clean baseline commit: `830a8371836ea7922fca5c320624bf3bd32ec229`
 - Phase 3 exact baseline commit: `9ca3a022c2fb18a5d416b39aa7d1404f7910ae1b`
@@ -24,6 +25,32 @@ Last updated: 2026-09-03 (Asia/Jerusalem)
 - Provider safety: no real telephone call, WhatsApp message, webhook mutation, or provider provisioning performed
 
 ## Phase 7 implementation state
+
+### Expanded bilingual brief — 2026-09-03
+
+The user requested a complete public/product bilingual implementation, extending
+the first UI checkpoint. [Scope and sitemap](plans/phase-7-bilingual-redesign.md)
+and [architecture](architecture/bilingual-experience.md) record the decisions.
+Existing accounts and engines remain authoritative; commercial offers, new auth
+providers and OpenLive are not invented to fill a design template.
+
+| Task | State | Commit / evidence | Next exact task |
+| --- | --- | --- | --- |
+| P7-B01 | implemented | Additive webpack 5.110.3 declaration dependency; stable next-intl request configuration, locale cookie/proxy, EN/HE ICU parity, real document direction | Complete expanded browser matrix |
+| P7-B02 | implemented | `/en`, `/he`, illustrated workflow, honest capabilities/security/FAQ and localized metadata; development and production browser checks | Legal/operator details are required before any public launch |
+| P7-B03 | implemented for existing-account scope | Bilingual login, access help, authenticated `/start`; production fictional login succeeds | No signup/recovery/SSO/MFA service was invented |
+| P7-B04 | implemented | Compact/mobile shell, palette focus/search/Escape, translated Overview/Inbox, draft/confirmation preservation and native validation | Expanded keyboard and assistive-technology matrix |
+| P7-B05 | implemented | Failed note/campaign retention, typed fields, partial CSV feedback, multi-board selection and exact currency-specific totals | Verify larger representative operator datasets |
+| P7-B06 | implemented for retained routes | Localized operation/voice/settings/detail surfaces, actual provider flags, flow-executor-aware actions, activity context | Full isolated voice-to-follow-up rehearsals still needed |
+| P7-B07 | core checks passed; acceptance partial | 42 web tests; default workspace typing/tests, Python suite, production build, real focused PostgreSQL regression, contracts and guards | Finish outstanding checks in acceptance record; do not declare Phase 7 complete |
+
+The dependency commit is intentionally separate from the presentation changes.
+Created commits: `7755114` supplies the verified development type dependency;
+`1d3e90a` adds typed public-origin configuration, executor-aware CRM projections
+and shared dialog/presentation primitives. The following bilingual experience
+checkpoint contains the working route changes, tests and acceptance documentation.
+Detailed commands, results and unexecuted gates are tracked in the
+[bilingual UI acceptance record](runbooks/bilingual-ui-acceptance.md).
 
 Approved plan: [`phase-7-ui-polish.md`](plans/phase-7-ui-polish.md).
 All three upstreams were verified clean at their locked SHAs before branching.
@@ -710,7 +737,9 @@ file precedence and provider flags remain false.
 
 ## Next exact task
 
-Continue P7-005: repair contact/pipeline form recovery and currency-aware values,
-then P7-006/P7-007 operation/voice/handoff presentation. Complete the outstanding
-mobile/keyboard, actual Hebrew, performance and three-rehearsal gates before
-declaring Phase 7 complete. OpenLive/Live Lab remains deferred to Phase 9.
+Continue P7-B07 / P7-009–P7-010: finish the expanded browser/accessibility matrix
+and three clean-session fictional voice-to-follow-up/handoff rehearsals against
+an explicitly owned complete simulator stack. Keep the developer queues and
+provider-enabled environment separate. The bilingual route implementation is
+available now; do not declare all Phase 7 acceptance passed prematurely.
+OpenLive/Live Lab remains deferred to Phase 9.

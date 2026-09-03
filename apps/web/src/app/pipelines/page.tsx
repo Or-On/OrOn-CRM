@@ -1,8 +1,15 @@
+import { productMetadata } from "../../i18n/product-metadata";
+import { AccessDenied } from "../../i18n/access-denied";
+import { ProductHeading } from "../../i18n/product-heading";
 import { redirect } from "next/navigation";
 
 import { listPipelineBoards } from "@or-on/crm";
 
-import { UnauthenticatedError, withCurrentTenant } from "../../features/auth";
+import {
+  ForbiddenError,
+  UnauthenticatedError,
+  withCurrentTenant,
+} from "../../features/auth";
 import { PipelineBoard } from "../../features/pipelines";
 
 export default async function PipelinesPage() {
@@ -12,16 +19,15 @@ export default async function PipelinesPage() {
     );
     return (
       <main className="page page--wide">
-        <header className="page-heading">
-          <p className="eyebrow">Revenue operations</p>
-          <h1>Pipeline</h1>
-          <p>Persisted deals organized by canonical tenant-owned stages.</p>
-        </header>
+        <ProductHeading page="pipelines" />
         <PipelineBoard boards={boards} />
       </main>
     );
   } catch (error) {
+    if (error instanceof ForbiddenError) return <AccessDenied />;
     if (error instanceof UnauthenticatedError) redirect("/login");
     throw error;
   }
 }
+
+export const generateMetadata = () => productMetadata("pipelines");

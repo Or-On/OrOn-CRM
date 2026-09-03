@@ -21,6 +21,27 @@ Stop with Ctrl+C to remove the owned database/login and temporary login file.
 The developer database, existing login passwords, `.env`, and queues are untouched.
 Do not force-kill the runner if graceful cleanup is possible.
 
+Public product pages are `/en` and `/he`; the authenticated Overview remains `/`.
+Language controls switch EN/HE and actual document direction. Workspace switches
+refresh in place to preserve reply drafts; public switches use a document
+navigation and retain the URL query/fragment. `/start` provides a guided route
+through the implemented product. Public canonical/social metadata uses optional
+`PUBLIC_SITE_URL` (documented in `.env.example`); no real credentials are needed.
+
+To inspect the built application instead of hot reload, first stop the preview,
+run `pnpm build`, then run:
+
+```powershell
+uv run --no-sync python scripts/preview_ui.py --production
+```
+
+This web-only preview deliberately cannot contact a developer control API;
+voice and system health show unavailable. Use a separately owned complete
+simulator stack for end-to-end voice acceptance, not a real-provider runner.
+New temporary login files also record the exact owned database/login role for
+recovery if a forced process termination bypasses cleanup. Do not use prefix-wide
+deletion. See [executed checks and remaining acceptance](bilingual-ui-acceptance.md).
+
 For the new history/Overview SQL regression test, without starting web:
 
 ```powershell

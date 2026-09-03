@@ -7,6 +7,16 @@ rewriting proven engines for uniformity.
 
 ## Current status
 
+Phase 7 now includes a bilingual public experience at `/en` and `/he`, localized
+existing-account sign-in, a `/start` guide, and EN/HE working screens with native
+RTL/LTR, light/dark themes and a collapsible operator shell. The authenticated
+Overview remains `/`. Existing workflows and safety boundaries are preserved.
+See the [experience architecture](docs/architecture/bilingual-experience.md),
+[safe isolated preview](docs/runbooks/local-development.md#isolated-ui-review-phase-7)
+and [acceptance record](docs/runbooks/bilingual-ui-acceptance.md). Expanded
+accessibility/performance and full demo rehearsals are still open; this is not
+a declaration of production readiness or completed Phase 7 acceptance.
+
 Phase 2A established the canonical PostgreSQL model while preserving the Or-on
 lineage and adapting WACRM/OpenLive persistence. Phase 2B live validation is
 complete on PostgreSQL 18.6: clean migration, catalog, roles, RLS, tenant

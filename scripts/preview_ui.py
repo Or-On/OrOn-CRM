@@ -55,7 +55,9 @@ def run(command: list[str], environment: dict[str, str], *, cwd: Path = ROOT) ->
     return completed.stdout.strip()
 
 
-async def main(*, check_db: bool = False) -> None:
+async def main(*, check_db: bool = False, production: bool = False) -> None:
+    if production and not (ROOT / "apps/web/.next/BUILD_ID").is_file():
+        raise ValueError("Production preview requires pnpm build first")
     if not check_db:
         with socket.socket() as probe:
             probe.bind(("127.0.0.1", 3100))
@@ -107,6 +109,10 @@ async def main(*, check_db: bool = False) -> None:
                 "DEV_AUTH_EMAIL": "demo@example.invalid",
                 "PREVIEW_PASSWORD": password,
                 "NEXT_TELEMETRY_DISABLED": "1",
+                "PUBLIC_SITE_URL": "http://127.0.0.1:3100",
+                # No connection to an independently running developer control API.
+                # Port 1 is deliberately unavailable; voice/health show unavailable.
+                "CONTROL_API_URL": "http://127.0.0.1:1",
             }
         )
         password_hash = run(
@@ -161,7 +167,14 @@ async def main(*, check_db: bool = False) -> None:
             return
         artifact.parent.mkdir(exist_ok=True)
         artifact.write_text(
-            json.dumps({"email": environment["DEV_AUTH_EMAIL"], "password": password}),
+            json.dumps(
+                {
+                    "email": environment["DEV_AUTH_EMAIL"],
+                    "password": password,
+                    "database": database,
+                    "login_role": login_role,
+                }
+            ),
             encoding="utf-8",
         )
         artifact.chmod(0o600)
@@ -180,7 +193,7 @@ async def main(*, check_db: bool = False) -> None:
                     "@or-on/web",
                     "exec",
                     "next",
-                    "dev",
+                    "start" if production else "dev",
                     "--hostname",
                     "127.0.0.1",
                     "--port",
@@ -224,9 +237,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--check-db", action="store_true", help="Run CRM tests in an owned fixture DB"
     )
+    parser.add_argument(
+        "--production", action="store_true", help="Preview existing Next production output"
+    )
     arguments = parser.parse_args()
     try:
-        asyncio.run(main(check_db=arguments.check_db))
+        asyncio.run(main(check_db=arguments.check_db, production=arguments.production))
     except KeyboardInterrupt:
         pass
     except Exception as error:

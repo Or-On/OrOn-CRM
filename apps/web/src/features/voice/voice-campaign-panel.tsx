@@ -1,5 +1,9 @@
 "use client";
 
+import { errorMessage } from "../../i18n/error-message";
+import { useCapability } from "../access";
+import { useTranslations } from "next-intl";
+
 import { useRouter } from "next/navigation";
 import { useState, type SyntheticEvent } from "react";
 
@@ -15,6 +19,8 @@ export function VoiceCampaignPanel({
   readonly campaigns: readonly VoiceCampaignSummary[];
   readonly flows: readonly FlowSummary[];
 }) {
+  const t = useTranslations();
+  const canEdit = useCapability("voice:operate");
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
@@ -24,10 +30,10 @@ export function VoiceCampaignPanel({
     try {
       await operation();
       router.refresh();
+      return true;
     } catch (caught) {
-      setError(
-        caught instanceof Error ? caught.message : "Campaign operation failed",
-      );
+      setError(errorMessage(caught, t, "voice.campaignFailed"));
+      return false;
     } finally {
       setPending(false);
     }
@@ -36,7 +42,7 @@ export function VoiceCampaignPanel({
     event.preventDefault();
     const form = event.currentTarget;
     const data = new FormData(form);
-    await run(() =>
+    const saved = await run(() =>
       voiceMutation("/api/voice/campaigns", {
         name: data.get("name"),
         flow_id: data.get("flowId"),
@@ -44,74 +50,89 @@ export function VoiceCampaignPanel({
         max_attempts: Number(data.get("maxAttempts")),
       }),
     );
-    form.reset();
+    if (saved) form.reset();
   }
   return (
     <div className="voice-grid">
       <Surface level="raised">
-        <p className="eyebrow">Consent-aware simulator</p>
-        <h2>Create voice campaign</h2>
+        <p className="eyebrow">{t("voice.consent")}</p>
+        <h2>{t("voice.createCampaign")}</h2>
         <form className="feature-form" onSubmit={(event) => void create(event)}>
-          <Input
-            id="voice-campaign-name"
-            label="Campaign name"
-            name="name"
-            required
-          />
-          <label htmlFor="voice-campaign-flow">Published flow</label>
-          <select id="voice-campaign-flow" name="flowId" required>
-            <option value="">Select flow</option>
-            {flows.map((flow) => (
-              <option key={flow.flow_id} value={flow.flow_id}>
-                {flow.name}
-              </option>
-            ))}
-          </select>
-          <Input
-            defaultValue="1"
-            id="voice-concurrency"
-            label="Concurrency (1–20)"
-            max={20}
-            min={1}
-            name="maxConcurrent"
-            type="number"
-          />
-          <Input
-            defaultValue="1"
-            id="voice-attempts"
-            label="Maximum attempts (1–5)"
-            max={5}
-            min={1}
-            name="maxAttempts"
-            type="number"
-          />
-          <Button disabled={pending || flows.length === 0} type="submit">
-            Create draft
-          </Button>
+          <fieldset className="form-fieldset" disabled={pending || !canEdit}>
+            {!canEdit ? (
+              <p className="public-note">{t("common.readOnly")}</p>
+            ) : null}
+            <Input
+              id="voice-campaign-name"
+              label={t("voice.campaignName")}
+              name="name"
+              required
+            />
+            <label htmlFor="voice-campaign-flow">{t("voice.flow")}</label>
+            <select id="voice-campaign-flow" name="flowId" required>
+              <option value="">{t("voice.select")}</option>
+              {flows.map((flow) => (
+                <option key={flow.flow_id} value={flow.flow_id}>
+                  {flow.name}
+                </option>
+              ))}
+            </select>
+            <Input
+              defaultValue="1"
+              id="voice-concurrency"
+              label={t("voice.concurrency")}
+              max={20}
+              min={1}
+              name="maxConcurrent"
+              type="number"
+            />
+            <Input
+              defaultValue="1"
+              id="voice-attempts"
+              label={t("voice.attempts")}
+              max={5}
+              min={1}
+              name="maxAttempts"
+              type="number"
+            />
+            <Button
+              disabled={pending || !canEdit || flows.length === 0}
+              type="submit"
+            >
+              {t("voice.draft")}
+            </Button>
+          </fieldset>
         </form>
       </Surface>
       <Surface>
-        <h2>Campaign progress</h2>
+        <h2>{t("voice.progress")}</h2>
         <div className="operation-list">
           {campaigns.length === 0 ? (
-            <p>No voice campaigns yet.</p>
+            <p>{t("voice.noCampaigns")}</p>
           ) : (
             campaigns.map((campaign) => (
               <article key={campaign.id}>
                 <div>
                   <strong>{campaign.name}</strong>
                   <p>
-                    {campaign.completed_calls}/{campaign.eligible_contacts}{" "}
-                    completed · concurrency {campaign.max_concurrent}
+                    {t("voice.counts", {
+                      completed: campaign.completed_calls,
+                      total: campaign.eligible_contacts,
+                      concurrency: campaign.max_concurrent,
+                    })}
                   </p>
                 </div>
                 <Badge
-                  label={campaign.status}
+                  label={
+                    t.has(`status.${campaign.status}`)
+                      ? t(`status.${campaign.status}`)
+                      : t("common.unknown")
+                  }
                   tone={campaign.status === "completed" ? "positive" : "info"}
                 />
                 {campaign.status !== "completed" ? (
                   <Button
-                    disabled={pending}
+                    disabled={pending || !canEdit}
                     onClick={() =>
                       void run(() =>
                         voiceMutation("/api/voice/campaigns/run", {
@@ -121,7 +142,7 @@ export function VoiceCampaignPanel({
                     }
                     variant="secondary"
                   >
-                    Run simulator
+                    {t("voice.run")}
                   </Button>
                 ) : null}
               </article>

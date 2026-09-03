@@ -1,6 +1,9 @@
+import { productMetadata } from "../../i18n/product-metadata";
+import { AccessDenied } from "../../i18n/access-denied";
+import { ProductHeading } from "../../i18n/product-heading";
 import { redirect } from "next/navigation";
 
-import { UnauthenticatedError } from "../../features/auth";
+import { ForbiddenError, UnauthenticatedError } from "../../features/auth";
 import { VoiceFlowPanel } from "../../features/voice";
 import { voiceClient } from "../../features/voice-server";
 
@@ -13,19 +16,15 @@ export default async function FlowsPage() {
     ]);
     return (
       <main className="page page--wide">
-        <header className="page-heading">
-          <p className="eyebrow">Versioned execution</p>
-          <h1>Voice flows</h1>
-          <p>
-            Author, validate, and publish immutable Pipecat-compatible voice
-            definitions.
-          </p>
-        </header>
+        <ProductHeading page="flows" />
         <VoiceFlowPanel catalog={catalog.data} flows={flows.data.items} />
       </main>
     );
   } catch (error) {
+    if (error instanceof ForbiddenError) return <AccessDenied />;
     if (error instanceof UnauthenticatedError) redirect("/login");
     throw error;
   }
 }
+
+export const generateMetadata = () => productMetadata("flows");

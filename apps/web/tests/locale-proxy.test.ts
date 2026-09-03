@@ -1,0 +1,44 @@
+import { describe, expect, it } from "vitest";
+import { NextRequest } from "next/server";
+import { proxy } from "../src/proxy";
+
+describe("server-rendered locale selection", () => {
+  it("overwrites untrusted locale metadata and persists a direct Hebrew public visit", () => {
+    const response = proxy(
+      new NextRequest("https://preview.example.invalid/he", {
+        headers: { "x-or-on-locale": "unsupported" },
+      }),
+    );
+    expect(response.headers.get("x-middleware-request-x-or-on-locale")).toBe(
+      "he",
+    );
+    expect(response.cookies.get("or_on_locale")).toMatchObject({
+      value: "he",
+      httpOnly: true,
+      secure: true,
+      sameSite: "lax",
+      path: "/",
+    });
+  });
+  it("uses the selected language on stable application URLs", () => {
+    const response = proxy(
+      new NextRequest("http://localhost/inbox?conversation=fixture", {
+        headers: { cookie: "or_on_locale=he", "x-or-on-locale": "en" },
+      }),
+    );
+    expect(response.headers.get("x-middleware-request-x-or-on-locale")).toBe(
+      "he",
+    );
+    expect(response.headers.get("location")).toBeNull();
+  });
+  it("falls back to English for unsupported cookie values", () => {
+    const response = proxy(
+      new NextRequest("http://localhost/login", {
+        headers: { cookie: "or_on_locale=unsupported" },
+      }),
+    );
+    expect(response.headers.get("x-middleware-request-x-or-on-locale")).toBe(
+      "en",
+    );
+  });
+});

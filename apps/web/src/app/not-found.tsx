@@ -1,17 +1,19 @@
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 
 import { EmptyState } from "@or-on/ui";
 
 export default function NotFound() {
+  const t = useTranslations("feedback");
   return (
     <EmptyState
       action={
         <Link className="or-button or-button--primary" href="/">
-          Return to foundation
+          {t("home")}
         </Link>
       }
-      description="This route is not part of the Phase 1 product shell."
-      title="Page unavailable"
+      description={t("notFoundDescription")}
+      title={t("notFoundTitle")}
     />
   );
 }

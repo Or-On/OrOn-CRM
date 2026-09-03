@@ -1,3 +1,6 @@
+import { productMetadata } from "../../i18n/product-metadata";
+import { AccessDenied } from "../../i18n/access-denied";
+import { ProductHeading } from "../../i18n/product-heading";
 import { redirect } from "next/navigation";
 
 import {
@@ -9,7 +12,11 @@ import {
 import { loadConfig } from "@or-on/config";
 import { hasPermission } from "@or-on/auth";
 
-import { UnauthenticatedError, withCurrentTenant } from "../../features/auth";
+import {
+  ForbiddenError,
+  UnauthenticatedError,
+  withCurrentTenant,
+} from "../../features/auth";
 import { InboxWorkspace } from "../../features/inbox";
 
 export default async function InboxPage({
@@ -58,11 +65,7 @@ export default async function InboxPage({
     });
     return (
       <main className="page page--inbox">
-        <header className="page-heading">
-          <p className="eyebrow">Customer conversations</p>
-          <h1>Inbox</h1>
-          <p>Every conversation, with the context to move it forward.</p>
-        </header>
+        <ProductHeading page="inbox" />
         <InboxWorkspace
           conversations={data.conversations}
           initialMessages={data.messages}
@@ -77,7 +80,10 @@ export default async function InboxPage({
       </main>
     );
   } catch (error) {
+    if (error instanceof ForbiddenError) return <AccessDenied />;
     if (error instanceof UnauthenticatedError) redirect("/login");
     throw error;
   }
 }
+
+export const generateMetadata = () => productMetadata("inbox");

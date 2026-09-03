@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations, useLocale } from "next-intl";
+
 import { useCallback, useEffect, useState } from "react";
 
 import { Badge, Button, ErrorState, LoadingSkeleton, Surface } from "@or-on/ui";
@@ -18,6 +20,8 @@ interface HealthSnapshot {
 }
 
 export function HealthPanel() {
+  const t = useTranslations();
+  const locale = useLocale();
   const [snapshot, setSnapshot] = useState<HealthSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -42,46 +46,55 @@ export function HealthPanel() {
   }, [refresh]);
 
   if (loading && snapshot === null)
-    return <LoadingSkeleton label="Checking service health" />;
+    return <LoadingSkeleton label={t("health.checking")} />;
   if (snapshot?.controlApi === null) {
     return (
       <ErrorState
-        action={<Button onClick={() => void refresh()}>Check again</Button>}
-        description="The control API could not be reached. Start the local Python service and PostgreSQL."
-        title="Control API unavailable"
+        action={
+          <Button onClick={() => void refresh()}>{t("health.again")}</Button>
+        }
+        description={t("health.hint")}
+        title={t("health.unavailable")}
       />
     );
   }
   if (snapshot === null) return null;
 
   const postgres = snapshot.controlApi.readiness.data.dependencies.postgres;
+  const ready = snapshot.controlApi.readiness.ok && postgres === "ready";
   return (
     <div aria-live="polite" className="health-stack">
       <Surface className="health-row" level="raised">
         <div>
-          <h2>Control API process</h2>
+          <h2>{t("health.process")}</h2>
           <p>
-            HTTP {snapshot.controlApi.liveness.status} · checked{" "}
-            {snapshot.checkedAt}
+            HTTP {snapshot.controlApi.liveness.status} ·{" "}
+            {t("health.checked", {
+              time: new Date(snapshot.checkedAt).toLocaleString(locale),
+            })}
           </p>
         </div>
         <Badge
-          label={snapshot.controlApi.liveness.ok ? "Alive" : "Unavailable"}
+          label={
+            snapshot.controlApi.liveness.ok
+              ? t("health.alive")
+              : t("health.unknown")
+          }
           tone={snapshot.controlApi.liveness.ok ? "positive" : "critical"}
         />
       </Surface>
       <Surface className="health-row" level="raised">
         <div>
-          <h2>PostgreSQL readiness</h2>
-          <p>Mandatory database dependency reported by control-api.</p>
+          <h2>{t("health.database")}</h2>
+          <p>{t("health.databaseHint")}</p>
         </div>
         <Badge
-          label={postgres === "ready" ? "Ready" : "Unavailable"}
-          tone={postgres === "ready" ? "positive" : "critical"}
+          label={ready ? t("health.ready") : t("health.notReady")}
+          tone={ready ? "positive" : "critical"}
         />
       </Surface>
       <Button onClick={() => void refresh()} variant="secondary">
-        Refresh status
+        {t("health.refresh")}
       </Button>
     </div>
   );

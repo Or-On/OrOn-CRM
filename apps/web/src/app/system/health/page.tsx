@@ -1,25 +1,23 @@
 import type { Metadata } from "next";
+import { getTranslations } from "next-intl/server";
+import { ProductHeading } from "../../../i18n/product-heading";
 import { redirect } from "next/navigation";
 
 import { HealthPanel } from "../../../features/system-health";
 import { currentPublicSession } from "../../../features/auth";
 
-export const metadata: Metadata = { title: "System health" };
+export async function generateMetadata(): Promise<Metadata> {
+  return {
+    title: (await getTranslations("pages"))("healthTitle"),
+    robots: { index: false, follow: false },
+  };
+}
 
 export default async function SystemHealthPage() {
   if ((await currentPublicSession()) === undefined) redirect("/login");
   return (
-    <main>
-      <header className="page-header">
-        <div>
-          <span className="eyebrow">Development diagnostics</span>
-          <h1>System health</h1>
-        </div>
-        <p>
-          Live data from the same-origin façade. Readiness fails when mandatory
-          PostgreSQL connectivity is unavailable.
-        </p>
-      </header>
+    <main className="page">
+      <ProductHeading page="health" />
       <HealthPanel />
     </main>
   );

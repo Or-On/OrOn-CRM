@@ -222,6 +222,26 @@ a release gate for the feature that needs it, not a documentation-only promise.
 
 ## Review triggers
 
+### Phase 7 public/bilingual presentation review
+
+Implemented: the locale proxy validates EN/HE and overwrites incoming locale
+metadata; locale is never identity/tenant authorization. Presentation permission
+checks only hide/disable inappropriate controls; all existing server RBAC,
+CSRF/session and PostgreSQL RLS checks remain authoritative. Public canonical
+origins reject embedded credentials and arbitrary paths. Translations and
+customer text render as React text, not raw HTML. UI failures use safe allowlisted
+messages, and no provider secrets enter page props. Native form validation is UX,
+not a substitute for server validation. Real-send review, consent and provider
+kill switches are retained.
+
+Public signup, commercial pricing, legal guarantees, external lead submissions,
+tracking and unimplemented authentication flows were not added. Production legal
+content, assistive-technology acceptance and complete simulator rehearsals remain
+open. The isolated UI preview removes real-provider environment values and cannot
+connect to the developer control API or consume developer queues.
+
+### Ongoing review
+
 Review this model before adding authentication, tenant tables/RLS, public
 webhooks, real provider adapters, uploads, WebSocket protocol messages, tool
 execution, GCP resources, backup automation, or any new externally reachable

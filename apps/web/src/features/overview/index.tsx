@@ -1,3 +1,4 @@
+import { useTranslations, useLocale } from "next-intl";
 import {
   ArrowRight,
   ContactRound,
@@ -21,52 +22,57 @@ export function Overview({
   readonly conversations: readonly ConversationSummary[];
   readonly realWhatsAppEnabled: boolean;
 }) {
+  const t = useTranslations();
+  const locale = useLocale();
   const indicators = [
     {
-      label: "Active contacts",
+      label: t("overview.contacts"),
       value: metrics.contacts,
       icon: ContactRound,
       href: "/contacts",
-      hint: "Your customer relationships",
+      hint: t("overview.contactsHint"),
     },
     {
-      label: "Open conversations",
+      label: t("overview.conversations"),
       value: metrics.openConversations,
       icon: MessagesSquare,
       href: "/inbox",
-      hint: "Open and pending, across channels",
+      hint: t("overview.conversationsHint"),
     },
     {
-      label: "Pending handoffs",
+      label: t("overview.handoffs"),
       value: metrics.pendingHandoffs,
       icon: Headset,
       href: "/orchestration",
-      hint: "Waiting for an operator",
+      hint: t("overview.handoffsHint"),
     },
   ];
   return (
     <main className="page overview-page">
       <header className="overview-heading">
         <div>
-          <p className="eyebrow">{tenantName}</p>
-          <h1>Your workspace, at a glance.</h1>
-          <p>Stay close to every conversation. Keep the next step in sight.</p>
+          <p className="eyebrow">
+            <bdi>{tenantName}</bdi>
+          </p>
+          <h1>{t("overview.title")}</h1>
+          <p>{t("overview.description")}</p>
         </div>
         <Link
           className="or-button or-button--primary action-link"
           href="/inbox"
         >
-          Open Inbox <ArrowRight aria-hidden="true" size={16} />
+          {t("overview.openInbox")}
+          <ArrowRight aria-hidden="true" size={16} />
         </Link>
       </header>
-      <section aria-label="Workspace totals" className="overview-metrics">
+      <section aria-label={t("overview.totals")} className="overview-metrics">
         {indicators.map(({ label, value, icon: Icon, href, hint }) => (
           <Link className="overview-metric" href={href} key={label}>
             <div>
               <span>{label}</span>
               <Icon aria-hidden="true" size={19} />
             </div>
-            <strong>{value.toLocaleString("en")}</strong>
+            <strong>{value.toLocaleString(locale)}</strong>
             <small>
               {hint}
               <ArrowRight aria-hidden="true" size={14} />
@@ -78,17 +84,18 @@ export function Overview({
         <Surface className="overview-conversations">
           <header className="section-heading">
             <div>
-              <p className="eyebrow">Stay in the loop</p>
-              <h2>Recent conversations</h2>
+              <p className="eyebrow">{t("overview.recentEyebrow")}</p>
+              <h2>{t("overview.recent")}</h2>
             </div>
             <Link href="/inbox">
-              View Inbox <ArrowRight aria-hidden="true" size={14} />
+              {t("overview.viewInbox")}
+              <ArrowRight aria-hidden="true" size={14} />
             </Link>
           </header>
           {conversations.length === 0 ? (
             <EmptyState
-              title="A clear start"
-              description="New conversations will appear here. Open the Inbox to explore the fictional simulator."
+              title={t("overview.emptyTitle")}
+              description={t("overview.emptyDescription")}
             />
           ) : (
             <ul className="overview-activity">
@@ -101,21 +108,22 @@ export function Overview({
                       {conversation.contactName.slice(0, 1)}
                     </span>
                     <div>
-                      <strong>{conversation.contactName}</strong>
-                      <p>
-                        {conversation.lastMessagePreview ??
-                          "No text preview available"}
+                      <strong>
+                        <bdi>{conversation.contactName}</bdi>
+                      </strong>
+                      <p dir="auto">
+                        {conversation.lastMessagePreview ?? t("common.noText")}
                       </p>
                       <small>
                         {conversation.provider === "meta"
                           ? "Meta WhatsApp"
                           : conversation.provider === "simulator"
-                            ? "Simulator"
+                            ? t("common.simulator")
                             : conversation.channelKind}
                       </small>
                     </div>
                     <Badge
-                      label={conversation.status}
+                      label={t(`status.${conversation.status}`)}
                       tone={conversation.status === "open" ? "info" : "neutral"}
                     />
                   </Link>
@@ -125,54 +133,48 @@ export function Overview({
           )}
         </Surface>
         <Surface className="overview-next">
-          <p className="eyebrow">One connected workspace</p>
-          <h2>Keep the conversation moving.</h2>
-          <p>
-            Customer context, a recorded call result, and a thoughtful
-            follow-up—all in one place.
-          </p>
+          <p className="eyebrow">{t("overview.nextEyebrow")}</p>
+          <h2>{t("overview.nextTitle")}</h2>
+          <p>{t("overview.nextDescription")}</p>
           <Link href="/contacts">
             <ContactRound aria-hidden="true" size={19} />
             <span>
-              <strong>Know your customer</strong>
-              <small>Identities, consent and activity</small>
+              <strong>{t("overview.customer")}</strong>
+              <small>{t("overview.customerHint")}</small>
             </span>
             <ArrowRight aria-hidden="true" size={16} />
           </Link>
           <Link href="/voice">
             <PhoneCall aria-hidden="true" size={19} />
             <span>
-              <strong>Review voice activity</strong>
-              <small>Call records and simulator results</small>
+              <strong>{t("overview.voice")}</strong>
+              <small>{t("overview.voiceHint")}</small>
             </span>
             <ArrowRight aria-hidden="true" size={16} />
           </Link>
           <Link href="/orchestration">
             <Workflow aria-hidden="true" size={19} />
             <span>
-              <strong>Connect the next step</strong>
-              <small>Versioned flows and human handoff</small>
+              <strong>{t("overview.flow")}</strong>
+              <small>{t("overview.flowHint")}</small>
             </span>
             <ArrowRight aria-hidden="true" size={16} />
           </Link>
         </Surface>
       </div>
-      <section className="overview-mode" aria-label="Delivery safety">
+      <section className="overview-mode" aria-label={t("overview.safety")}>
         <Badge
-          label={
-            realWhatsAppEnabled
-              ? "Real WhatsApp enabled"
-              : "Simulator-first workspace"
-          }
+          label={realWhatsAppEnabled ? t("overview.real") : t("overview.safe")}
           tone={realWhatsAppEnabled ? "warning" : "info"}
         />
         <p>
           {realWhatsAppEnabled
-            ? "Real delivery still requires an explicit choice and confirmation. Enabled configuration is not a provider health check."
-            : "Simulations never contact a real recipient. Voice results are labelled simulations; real delivery is not implied."}
+            ? t("overview.realHint")
+            : t("overview.safeHint")}
         </p>
         <Link href="/system/health">
-          System diagnostics <ArrowRight aria-hidden="true" size={14} />
+          {t("overview.diagnostics")}
+          <ArrowRight aria-hidden="true" size={14} />
         </Link>
       </section>
     </main>

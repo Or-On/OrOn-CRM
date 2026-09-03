@@ -1,25 +1,34 @@
 "use client";
 
+import { errorMessage } from "../../i18n/error-message";
+import { useCapability } from "../access";
+import { useTranslations } from "next-intl";
+
 import { Plus, Search, UsersRound } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type SyntheticEvent } from "react";
 
-import type { ContactSummary } from "@or-on/crm";
+import type { ContactSummary, ContactImportResult } from "@or-on/crm";
 import { Badge, Button, EmptyState, Input, Surface } from "@or-on/ui";
 
 import { crmMutation } from "../crm";
 
 export function ContactManager({
   contacts,
+  query = "",
 }: {
   readonly contacts: readonly ContactSummary[];
+  readonly query?: string;
 }) {
+  const t = useTranslations();
+  const canEdit = useCapability("crm:write");
   const router = useRouter();
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
+  const [importResult, setImportResult] = useState<ContactImportResult>();
 
   async function submit(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -36,9 +45,7 @@ export function ContactManager({
       setCreating(false);
       router.refresh();
     } catch (caught) {
-      setError(
-        caught instanceof Error ? caught.message : "Unable to add contact",
-      );
+      setError(errorMessage(caught, t, "contacts.addFailed"));
     } finally {
       setPending(false);
     }
@@ -51,14 +58,18 @@ export function ContactManager({
     const form = event.currentTarget;
     const data = new FormData(form);
     try {
-      await crmMutation("/api/crm/contacts/import", { csv: data.get("csv") });
-      form.reset();
-      setImporting(false);
+      const result = await crmMutation<ContactImportResult>(
+        "/api/crm/contacts/import",
+        { csv: data.get("csv") },
+      );
+      setImportResult(result);
+      if (result.errors.length === 0) {
+        form.reset();
+        setImporting(false);
+      }
       router.refresh();
     } catch (caught) {
-      setError(
-        caught instanceof Error ? caught.message : "Unable to import contacts",
-      );
+      setError(errorMessage(caught, t, "contacts.importFailed"));
     } finally {
       setPending(false);
     }
@@ -66,47 +77,92 @@ export function ContactManager({
 
   return (
     <div className="feature-stack">
+      {importResult ? (
+        <div role="status" className="import-result">
+          <p>
+            {t("contacts.importResult", {
+              created: importResult.created,
+              skipped: importResult.skipped,
+            })}
+          </p>
+          {importResult.errors.length ? (
+            <ul>
+              {importResult.errors.map((item) => (
+                <li key={item.row}>
+                  {t("contacts.importRow", {
+                    row: item.row,
+                    reason: errorMessage(item.reason, t, "validation.format"),
+                  })}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
       <div className="feature-toolbar">
         <form action="/contacts" className="feature-search" role="search">
           <Search aria-hidden="true" size={16} />
           <input
-            aria-label="Search contacts"
+            aria-label={t("contacts.search")}
             name="q"
-            placeholder="Search name, company, email or phone"
+            defaultValue={query}
+            placeholder={t("contacts.searchHint")}
           />
         </form>
         <div className="form-actions">
           <Button
+            disabled={!canEdit || pending}
             onClick={() => setImporting((value) => !value)}
             variant="secondary"
           >
-            Import CSV
+            {t("contacts.importCsv")}
           </Button>
-          <Button onClick={() => setCreating((value) => !value)}>
-            <Plus aria-hidden="true" size={16} /> Add contact
+          <Button
+            disabled={!canEdit || pending}
+            onClick={() => setCreating((value) => !value)}
+          >
+            <Plus aria-hidden="true" size={16} />
+            {t("contacts.add")}
           </Button>
         </div>
       </div>
 
+      <p className="public-note">
+        {t("contacts.count", { count: contacts.length })}
+        {contacts.length >= 100 ? " · " + t("contacts.limit") : ""}
+      </p>
+      {query ? (
+        <Link className="text-link" href="/contacts">
+          {t("contacts.searchClear")}
+        </Link>
+      ) : null}
+      {error && !creating ? (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
+      ) : null}
       {importing ? (
         <Surface className="feature-form" level="raised">
           <form onSubmit={(event) => void importCsv(event)}>
-            <label htmlFor="contacts-csv">
-              Paste CSV with name, phone, email, and company headers
-            </label>
-            <textarea id="contacts-csv" name="csv" required rows={7} />
-            <div className="form-actions">
-              <Button disabled={pending} type="submit">
-                Import contacts
-              </Button>
-              <Button
-                onClick={() => setImporting(false)}
-                type="button"
-                variant="quiet"
-              >
-                Cancel
-              </Button>
-            </div>
+            <fieldset className="form-fieldset" disabled={pending || !canEdit}>
+              {!canEdit ? (
+                <p className="public-note">{t("common.readOnly")}</p>
+              ) : null}
+              <label htmlFor="contacts-csv">{t("contacts.csvLabel")}</label>
+              <textarea id="contacts-csv" name="csv" required rows={7} />
+              <div className="form-actions">
+                <Button disabled={pending || !canEdit} type="submit">
+                  {t("contacts.importAction")}
+                </Button>
+                <Button
+                  onClick={() => setImporting(false)}
+                  type="button"
+                  variant="quiet"
+                >
+                  {t("common.cancel")}
+                </Button>
+              </div>
+            </fieldset>
           </form>
         </Surface>
       ) : null}
@@ -114,48 +170,64 @@ export function ContactManager({
       {creating ? (
         <Surface className="feature-form" level="raised">
           <form onSubmit={(event) => void submit(event)}>
-            <div className="form-grid">
-              <Input id="contact-name" label="Name" name="name" required />
-              <Input
-                id="contact-phone"
-                label="WhatsApp number"
-                name="phone"
-                placeholder="+14155550123"
-                required
-              />
-              <Input
-                id="contact-email"
-                label="Email"
-                name="email"
-                type="email"
-              />
-              <Input id="contact-company" label="Company" name="company" />
-            </div>
-            {error === undefined ? null : (
-              <p className="form-error" role="alert">
-                {error}
-              </p>
-            )}
-            <div className="form-actions">
-              <Button disabled={pending} type="submit">
-                {pending ? "Adding…" : "Add contact"}
-              </Button>
-              <Button
-                onClick={() => setCreating(false)}
-                type="button"
-                variant="quiet"
-              >
-                Cancel
-              </Button>
-            </div>
+            <fieldset className="form-fieldset" disabled={pending || !canEdit}>
+              {!canEdit ? (
+                <p className="public-note">{t("common.readOnly")}</p>
+              ) : null}
+              <div className="form-grid">
+                <Input
+                  id="contact-name"
+                  label={t("common.name")}
+                  name="name"
+                  required
+                />
+                <Input
+                  id="contact-phone"
+                  label={t("contacts.phone")}
+                  name="phone"
+                  type="tel"
+                  dir="ltr"
+                  placeholder="+14155550123"
+                  required
+                />
+                <Input
+                  id="contact-email"
+                  label={t("common.email")}
+                  name="email"
+                  type="email"
+                />
+                <Input
+                  id="contact-company"
+                  label={t("common.company")}
+                  name="company"
+                />
+              </div>
+              {error === undefined ? null : (
+                <p className="form-error" role="alert">
+                  {error}
+                </p>
+              )}
+              <div className="form-actions">
+                <Button disabled={pending || !canEdit} type="submit">
+                  {pending ? t("contacts.adding") : t("contacts.add")}
+                </Button>
+                <Button
+                  onClick={() => setCreating(false)}
+                  type="button"
+                  variant="quiet"
+                >
+                  {t("common.cancel")}
+                </Button>
+              </div>
+            </fieldset>
           </form>
         </Surface>
       ) : null}
 
       {contacts.length === 0 ? (
         <EmptyState
-          description="Add a fictional contact or inject a simulator message to begin."
-          title="No contacts yet"
+          description={t("contacts.emptyHint")}
+          title={t("contacts.empty")}
         />
       ) : (
         <div className="contact-grid">
@@ -171,10 +243,14 @@ export function ContactManager({
                   </span>
                   <div>
                     <h2>{contact.name}</h2>
-                    <p>{contact.company ?? "Independent contact"}</p>
+                    <p>{contact.company ?? t("contacts.independent")}</p>
                   </div>
                   <Badge
-                    label={contact.lifecycleStatus}
+                    label={
+                      t.has(`status.${contact.lifecycleStatus}`)
+                        ? t(`status.${contact.lifecycleStatus}`)
+                        : t("common.unknown")
+                    }
                     tone={
                       contact.lifecycleStatus === "blocked"
                         ? "critical"
@@ -184,12 +260,18 @@ export function ContactManager({
                 </div>
                 <dl className="contact-card__details">
                   <div>
-                    <dt>Channel</dt>
-                    <dd>{primary?.normalizedValue ?? "Not set"}</dd>
+                    <dt>{t("contacts.channel")}</dt>
+                    <dd>
+                      <bdi dir="ltr">
+                        {primary?.normalizedValue ?? t("common.notSet")}
+                      </bdi>
+                    </dd>
                   </div>
                   <div>
-                    <dt>Email</dt>
-                    <dd>{contact.email ?? "Not set"}</dd>
+                    <dt>{t("common.email")}</dt>
+                    <dd>
+                      <bdi dir="ltr">{contact.email ?? t("common.notSet")}</bdi>
+                    </dd>
                   </div>
                 </dl>
                 <div className="tag-row">
@@ -200,7 +282,7 @@ export function ContactManager({
                   ))}
                 </div>
                 <Link className="text-link" href={`/contacts/${contact.id}`}>
-                  Open contact
+                  {t("contacts.open")}
                 </Link>
               </Surface>
             );

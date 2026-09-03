@@ -1,4 +1,5 @@
 "use client";
+import { useTranslations } from "next-intl";
 
 import { useRouter } from "next/navigation";
 import { useState, type SyntheticEvent } from "react";
@@ -6,6 +7,7 @@ import { useState, type SyntheticEvent } from "react";
 import { Button, Input } from "@or-on/ui";
 
 export function LoginForm() {
+  const t = useTranslations();
   const router = useRouter();
   const [error, setError] = useState<string>();
   const [pending, setPending] = useState(false);
@@ -25,14 +27,19 @@ export function LoginForm() {
         }),
       });
       if (!response.ok) {
-        const result = (await response.json()) as { error?: string };
-        setError(result.error ?? "Sign in failed");
+        setError(
+          t(
+            response.status === 401 || response.status === 400
+              ? "auth.invalid"
+              : "auth.failed",
+          ),
+        );
         return;
       }
       router.replace("/");
       router.refresh();
     } catch {
-      setError("Authentication is temporarily unavailable");
+      setError(t("auth.failed"));
     } finally {
       setPending(false);
     }
@@ -43,15 +50,16 @@ export function LoginForm() {
       <Input
         autoComplete="email"
         id="email"
-        label="Email"
+        label={t("auth.email")}
         name="email"
         required
         type="email"
+        dir="ltr"
       />
       <Input
         autoComplete="current-password"
         id="password"
-        label="Password"
+        label={t("auth.password")}
         name="password"
         required
         type="password"
@@ -62,7 +70,7 @@ export function LoginForm() {
         </p>
       )}
       <Button disabled={pending} type="submit">
-        {pending ? "Signing in…" : "Sign in"}
+        {pending ? t("auth.pending") : t("auth.submit")}
       </Button>
     </form>
   );

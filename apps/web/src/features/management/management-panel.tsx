@@ -1,5 +1,8 @@
 "use client";
 
+import { errorMessage } from "../../i18n/error-message";
+import { useTranslations } from "next-intl";
+
 import { useRouter } from "next/navigation";
 import { useState, type SyntheticEvent } from "react";
 
@@ -18,12 +21,17 @@ export function ManagementPanel({
   notifications,
   settings,
   apiKeys,
+  realWhatsAppEnabled = false,
+  canManage = false,
 }: {
   readonly members: readonly TeamMember[];
   readonly notifications: readonly NotificationSummary[];
   readonly settings: TenantSettings;
   readonly apiKeys: readonly ApiKeySummary[];
+  readonly realWhatsAppEnabled?: boolean;
+  readonly canManage?: boolean;
 }) {
+  const t = useTranslations();
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string>();
@@ -45,12 +53,10 @@ export function ManagementPanel({
         },
         { method: "PATCH" },
       );
-      setMessage("Workspace settings saved.");
+      setMessage(t("management.saved"));
       router.refresh();
     } catch (error) {
-      setMessage(
-        error instanceof Error ? error.message : "Settings update failed",
-      );
+      setMessage(errorMessage(error, t, "management.failed"));
     } finally {
       setPending(false);
     }
@@ -58,6 +64,7 @@ export function ManagementPanel({
 
   async function issueKey(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
+    const form = event.currentTarget;
     setPending(true);
     try {
       const data = new FormData(event.currentTarget);
@@ -68,9 +75,12 @@ export function ManagementPanel({
           scopes: ["crm:read", "crm:write"],
         },
       );
+      setMessage(undefined);
       setIssuedToken(result.token);
-      event.currentTarget.reset();
+      form.reset();
       router.refresh();
+    } catch {
+      setMessage(t("management.failed"));
     } finally {
       setPending(false);
     }
@@ -79,66 +89,72 @@ export function ManagementPanel({
   return (
     <div className="operations-grid">
       <Surface level="raised">
-        <h2>Workspace settings</h2>
+        <h2>{t("management.title")}</h2>
         <form className="feature-form" onSubmit={(event) => void save(event)}>
-          <Input
-            defaultValue={settings.displayName ?? ""}
-            id="display-name"
-            label="Display name"
-            name="displayName"
-          />
-          <Input
-            defaultValue={settings.defaultCurrency}
-            id="currency"
-            label="Currency"
-            maxLength={3}
-            name="defaultCurrency"
-            required
-          />
-          <Input
-            defaultValue={settings.locale}
-            id="locale"
-            label="Locale"
-            name="locale"
-            required
-          />
-          <Input
-            defaultValue={settings.timezone}
-            id="timezone"
-            label="Timezone"
-            name="timezone"
-            required
-          />
-          <Button disabled={pending} type="submit">
-            Save settings
-          </Button>
-          {message === undefined ? null : <p aria-live="polite">{message}</p>}
+          <fieldset disabled={pending || !canManage} className="form-fieldset">
+            <Input
+              defaultValue={settings.displayName ?? ""}
+              id="display-name"
+              label={t("management.displayName")}
+              name="displayName"
+            />
+            <Input
+              defaultValue={settings.defaultCurrency}
+              id="currency"
+              label={t("management.currency")}
+              maxLength={3}
+              name="defaultCurrency"
+              required
+            />
+            <Input
+              defaultValue={settings.locale}
+              id="locale"
+              label={t("management.locale")}
+              name="locale"
+              required
+            />
+            <Input
+              defaultValue={settings.timezone}
+              id="timezone"
+              label={t("management.timezone")}
+              name="timezone"
+              required
+            />
+            <Button disabled={pending} type="submit">
+              {t("management.save")}
+            </Button>
+            {message === undefined ? null : <p aria-live="polite">{message}</p>}
+          </fieldset>
+          {!canManage ? (
+            <p className="public-note">{t("management.noPermission")}</p>
+          ) : null}
         </form>
       </Surface>
       <Surface>
-        <h2>Team</h2>
+        <h2>{t("management.team")}</h2>
         <div className="operation-list">
           {members.map((member) => (
             <article key={member.userId}>
               <strong>{member.email}</strong>
               <Badge
-                label={member.role}
+                label={
+                  t.has(`status.${member.role}`)
+                    ? t(`status.${member.role}`)
+                    : t("common.unknown")
+                }
                 tone={member.role === "owner" ? "positive" : "neutral"}
               />
             </article>
           ))}
         </div>
-        <p>
-          Membership changes remain owner/admin controlled through the canonical
-          identity boundary.
-        </p>
+        <p>{t("management.teamHint")}</p>
       </Surface>
       <Surface>
-        <h2>Notifications</h2>
+        <h2>{t("management.notifications")}</h2>
         {notifications.length === 0 ? (
           <EmptyState
-            title="No notifications"
-            description="Operational alerts will appear here."
+            title={t("management.empty")}
+            description={t("management.emptyHint")}
           />
         ) : (
           <div className="operation-list">
@@ -149,7 +165,7 @@ export function ManagementPanel({
                   <p>{notification.body}</p>
                 </div>
                 <Badge
-                  label={notification.read ? "read" : "unread"}
+                  label={t(notification.read ? "status.read" : "status.unread")}
                   tone={notification.read ? "neutral" : "info"}
                 />
               </article>
@@ -158,27 +174,42 @@ export function ManagementPanel({
         )}
       </Surface>
       <Surface>
-        <h2>WhatsApp provider safety</h2>
-        <Badge label="Simulator only" tone="positive" />
-        <p>
-          Real WhatsApp delivery remains disabled. No access token or app secret
-          is shown in the browser.
-        </p>
+        <h2>{t("management.safety")}</h2>
+        <Badge
+          label={t(
+            realWhatsAppEnabled
+              ? "management.realEnabled"
+              : "management.simulator",
+          )}
+          tone={realWhatsAppEnabled ? "warning" : "info"}
+        />
+        <p>{t("management.safetyHint")}</p>
       </Surface>
       <Surface>
-        <h2>Scoped API keys</h2>
+        <h2>{t("management.keys")}</h2>
         <form
           className="feature-form"
           onSubmit={(event) => void issueKey(event)}
         >
-          <Input id="api-key-name" label="Key name" name="name" required />
-          <Button disabled={pending} type="submit" variant="secondary">
-            Issue CRM key
+          <Input
+            disabled={!canManage || pending}
+            id="api-key-name"
+            label={t("management.keyName")}
+            name="name"
+            required
+          />
+          <Button
+            disabled={pending || !canManage}
+            type="submit"
+            variant="secondary"
+          >
+            {t("management.issue")}
           </Button>
         </form>
         {issuedToken === undefined ? null : (
           <p role="status">
-            <strong>Copy once:</strong> <code>{issuedToken}</code>
+            <strong>{t("management.copyOnce")}</strong>{" "}
+            <code>{issuedToken}</code>
           </p>
         )}
         <div className="operation-list">
@@ -191,7 +222,11 @@ export function ManagementPanel({
                 </p>
               </div>
               <Badge
-                label={key.status}
+                label={
+                  t.has(`status.${key.status}`)
+                    ? t(`status.${key.status}`)
+                    : t("common.unknown")
+                }
                 tone={key.status === "active" ? "positive" : "neutral"}
               />
             </article>

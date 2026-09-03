@@ -1,6 +1,9 @@
 "use client";
 
-import { MessageCircle, Search, Sparkles } from "lucide-react";
+import { errorMessage } from "../../i18n/error-message";
+import { useTranslations, useLocale } from "next-intl";
+
+import { MessageCircle, Search, FlaskConical, RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState, type SyntheticEvent } from "react";
 import type {
   ConversationSummary,
@@ -36,6 +39,8 @@ export function InboxWorkspace({
   readonly teamMembers: readonly TeamMember[];
   readonly canOperate?: boolean;
 }) {
+  const t = useTranslations();
+  const locale = useLocale();
   const initialId = initialConversationId ?? conversations[0]?.id;
   const [items, setItems] = useState(conversations);
   const [selectedId, setSelectedId] = useState(initialId);
@@ -69,7 +74,7 @@ export function InboxWorkspace({
       "/api/messaging/conversations",
     );
     if (!Array.isArray(result.conversations))
-      throw new Error("Conversation list could not be read.");
+      throw new Error(t("inbox.listInvalid"));
     let next = result.conversations;
     if (ensureId && !next.some((item) => item.id === ensureId)) {
       const specific = await crmRead<{ conversations: ConversationSummary[] }>(
@@ -84,11 +89,7 @@ export function InboxWorkspace({
   }
 
   async function queued(result: QueuedWhatsAppOutbound, originId: string) {
-    setNotice(
-      result.queued
-        ? "Message queued. Follow its status in the destination conversation."
-        : "Existing request found. No duplicate message was queued.",
-    );
+    setNotice(result.queued ? t("inbox.queued") : t("inbox.duplicate"));
     // Queue success must not become a send failure just because refresh failed.
     try {
       await refreshItems(result.conversationId);
@@ -97,10 +98,7 @@ export function InboxWorkspace({
           current === originId ? result.conversationId : current,
         );
     } catch {
-      if (alive.current)
-        setListError(
-          "Message queued, but the conversation list could not refresh. Refresh the page; do not send it again.",
-        );
+      if (alive.current) setListError(t("inbox.queuedRefresh"));
     }
   }
 
@@ -121,24 +119,16 @@ export function InboxWorkspace({
         },
       );
       form.reset();
-      setNotice(
-        "Fictional inbound message created. No external provider was contacted.",
-      );
+      setNotice(t("inbox.fictionalCreated"));
       try {
         await refreshItems(result.conversationId);
         setSelectedId(result.conversationId);
         setMobileThread(true);
       } catch {
-        setListError(
-          "Fictional message created, but the list could not refresh. Refresh the page; do not create it again.",
-        );
+        setListError(t("inbox.fictionalRefresh"));
       }
     } catch (error) {
-      setSimulationError(
-        error instanceof Error
-          ? error.message
-          : "Could not create the fictional message.",
-      );
+      setSimulationError(errorMessage(error, t, "inbox.fictionalFailed"));
     } finally {
       setSimulating(false);
     }
@@ -156,29 +146,25 @@ export function InboxWorkspace({
       <Surface className="inbox-list">
         <div className="inbox-list__heading">
           <h2>
-            Conversations <span>{items.length}</span>
+            {t("inbox.conversations")} <span>{items.length}</span>
           </h2>
           <Button
-            aria-label="Refresh conversations"
+            aria-label={t("inbox.refresh")}
             variant="quiet"
             onClick={() =>
               void refreshItems(selectedId).catch(() =>
-                setListError(
-                  "Could not refresh conversations. Please try again.",
-                ),
+                setListError(t("inbox.refreshFailed")),
               )
             }
           >
-            ↻
+            <RefreshCw aria-hidden="true" size={16} />
           </Button>
         </div>
         <label className="inbox-search">
           <Search aria-hidden="true" size={16} />
-          <span className="or-visually-hidden">
-            Search loaded conversations
-          </span>
+          <span className="or-visually-hidden">{t("inbox.search")}</span>
           <input
-            placeholder="Search conversations…"
+            placeholder={t("inbox.searchHint")}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
@@ -188,18 +174,15 @@ export function InboxWorkspace({
             {listError}
           </p>
         ) : null}
-        <div className="conversation-list" aria-label="Conversations">
+        <div
+          className="conversation-list"
+          aria-label={t("inbox.conversations")}
+        >
           {filtered.length === 0 ? (
             <div className="list-empty">
               <MessageCircle aria-hidden="true" size={24} />
-              <h3>
-                {query ? "No matching conversations" : "Your Inbox is clear"}
-              </h3>
-              <p>
-                {query
-                  ? "Try another name or clear the search."
-                  : "New customer conversations will appear here."}
-              </p>
+              <h3>{query ? t("inbox.noMatches") : t("inbox.empty")}</h3>
+              <p>{query ? t("inbox.searchHelp") : t("inbox.emptyHelp")}</p>
             </div>
           ) : (
             filtered.map((conversation) => (
@@ -220,25 +203,28 @@ export function InboxWorkspace({
                   {conversation.contactName.slice(0, 1)}
                 </span>
                 <span className="conversation-row__copy">
-                  <strong>{conversation.contactName}</strong>
-                  <small>
-                    {conversation.lastMessagePreview ??
-                      "No text preview available"}
+                  <strong>
+                    <bdi>{conversation.contactName}</bdi>
+                  </strong>
+                  <small dir="auto">
+                    {conversation.lastMessagePreview ?? t("common.noText")}
                   </small>
                   <span className="conversation-row__channel">
                     {conversation.provider === "meta"
                       ? "Meta WhatsApp"
                       : conversation.provider === "simulator"
-                        ? "Simulator"
+                        ? t("common.simulator")
                         : conversation.channelKind}
                   </span>
                 </span>
                 {conversation.unreadCount > 0 ? (
                   <span
                     className="unread-count"
-                    aria-label={`${String(conversation.unreadCount)} unread`}
+                    aria-label={t("inbox.unread", {
+                      count: conversation.unreadCount,
+                    })}
                   >
-                    {conversation.unreadCount}
+                    {conversation.unreadCount.toLocaleString(locale)}
                   </span>
                 ) : null}
               </button>
@@ -248,38 +234,35 @@ export function InboxWorkspace({
         <div className="inbox-list__footer">
           <Badge
             label={
-              realWhatsAppEnabled ? "Real delivery available" : "Simulator only"
+              realWhatsAppEnabled
+                ? t("inbox.realAvailable")
+                : t("inbox.simulatorOnly")
             }
             tone={realWhatsAppEnabled ? "warning" : "info"}
           />
-          <small>
-            Latest {Math.min(items.length, 100)} conversations · search covers
-            this list
-          </small>
+          <small>{t("inbox.loaded", { count: items.length })}</small>
         </div>
         {canOperate ? (
           <details className="demo-tools">
             <summary>
-              <Sparkles aria-hidden="true" size={14} /> Fictional demo tools
+              <FlaskConical aria-hidden="true" size={14} />
+              {t("inbox.demo")}
             </summary>
             <form
               className="simulator-form"
               onSubmit={(event) => void simulate(event)}
             >
-              <p>
-                Local fixture only. This does not open a real Meta
-                customer-service window.
-              </p>
+              <p>{t("inbox.demoHint")}</p>
               <Input
                 id="sim-name"
-                label="Contact name"
+                label={t("inbox.contactName")}
                 name="profileName"
-                placeholder="Maya Cohen"
+                placeholder={t("inbox.fictionalName")}
                 required
               />
               <Input
                 id="sim-from"
-                label="E.164 number"
+                label={t("inbox.phone")}
                 name="from"
                 placeholder="+972501234567"
                 required
@@ -287,9 +270,9 @@ export function InboxWorkspace({
               />
               <Input
                 id="sim-text"
-                label="Fictional message"
+                label={t("inbox.fictionalMessage")}
                 name="text"
-                placeholder="Can you help me?"
+                placeholder={t("inbox.fictionalHint")}
                 required
               />
               {simulationError ? (
@@ -298,7 +281,7 @@ export function InboxWorkspace({
                 </p>
               ) : null}
               <Button disabled={simulating} type="submit" variant="secondary">
-                {simulating ? "Creating…" : "Simulate inbound"}
+                {simulating ? t("inbox.creating") : t("inbox.simulate")}
               </Button>
             </form>
           </details>
@@ -307,8 +290,8 @@ export function InboxWorkspace({
       <Surface className="message-panel" level="raised">
         {selected === undefined ? (
           <EmptyState
-            description="Select a conversation to see its history and customer context."
-            title="A little context goes a long way"
+            description={t("inbox.select")}
+            title={t("inbox.context")}
           />
         ) : (
           <ConversationThread

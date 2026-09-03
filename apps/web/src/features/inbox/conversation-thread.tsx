@@ -1,6 +1,11 @@
 "use client";
 
+import { errorMessage } from "../../i18n/error-message";
+import { useTranslations, useLocale } from "next-intl";
+
 import {
+  ThumbsUp,
+  MessageCircle,
   ArrowLeft,
   ArrowUp,
   ChevronDown,
@@ -62,6 +67,8 @@ export function ConversationThread({
   readonly onQueued: (result: QueuedWhatsAppOutbound) => Promise<void>;
   readonly onChanged: () => Promise<void>;
 }) {
+  const t = useTranslations();
+  const locale = useLocale();
   const [page, setPage] = useState<MessagePage>(
     initialPage ?? { messages: [], nextCursor: null },
   );
@@ -97,20 +104,14 @@ export function ConversationThread({
               (message: Message) => message.conversationId !== conversation.id,
             )
           )
-            throw new Error(
-              "Conversation response did not match this view. Please refresh.",
-            );
+            throw new Error(t("inbox.mismatch"));
           setPage(latest);
           setLoadError(undefined);
           setLoading(false);
         }
       } catch (error) {
         if (!cancelled) {
-          setLoadError(
-            error instanceof Error
-              ? error.message
-              : "Could not load conversation.",
-          );
+          setLoadError(errorMessage(error, t, "inbox.loadFailed"));
           setLoading(false);
         }
       } finally {
@@ -123,7 +124,7 @@ export function ConversationThread({
       controller.abort();
       clearTimeout(timer);
     };
-  }, [conversation.id, refreshKey]);
+  }, [conversation.id, refreshKey, t]);
 
   useEffect(() => () => historyRequest.current?.abort(), []);
   useEffect(() => {
@@ -158,7 +159,7 @@ export function ConversationThread({
           (message: Message) => message.conversationId !== conversation.id,
         )
       )
-        throw new Error("History response did not match this conversation.");
+        throw new Error(t("inbox.historyMismatch"));
       setPage((current) => ({
         messages: [
           ...older.messages,
@@ -171,11 +172,7 @@ export function ConversationThread({
       setLoadError(undefined);
     } catch (error) {
       if (!controller.signal.aborted)
-        setLoadError(
-          error instanceof Error
-            ? error.message
-            : "Could not load earlier messages.",
-        );
+        setLoadError(errorMessage(error, t, "inbox.historyFailed"));
     } finally {
       if (!controller.signal.aborted) setLoading(false);
     }
@@ -219,18 +216,12 @@ export function ConversationThread({
       setConfirmed(false);
       setReview(undefined);
       setReceipt(
-        result.queued
-          ? "Message queued. Delivery is not yet confirmed."
-          : "This request was already queued. No duplicate was created.",
+        result.queued ? t("inbox.queueSuccess") : t("inbox.queueDuplicate"),
       );
       await onQueued(result);
       latest();
     } catch (error) {
-      setActionError(
-        error instanceof Error
-          ? error.message
-          : "Could not queue the message. Your draft is preserved.",
-      );
+      setActionError(errorMessage(error, t, "inbox.queueFailed"));
     } finally {
       setPending(false);
     }
@@ -259,11 +250,7 @@ export function ConversationThread({
       await onChanged();
       setRefreshKey((value) => value + 1);
     } catch (error) {
-      setActionError(
-        error instanceof Error
-          ? error.message
-          : "Could not update this conversation.",
-      );
+      setActionError(errorMessage(error, t, "inbox.updateFailed"));
     } finally {
       setPending(false);
     }
@@ -274,7 +261,7 @@ export function ConversationThread({
       <header className="message-panel__heading">
         <Button
           className="inbox-back"
-          aria-label="Back to conversations"
+          aria-label={t("inbox.back")}
           onClick={onBack}
           variant="quiet"
         >
@@ -288,39 +275,44 @@ export function ConversationThread({
             <h2>{conversation.contactName}</h2>
           </Link>
           <small>
-            <bdi>
-              {conversation.recipientAddress ?? "No validated recipient"}
-            </bdi>{" "}
-            · {conversation.provider === "meta" ? "Meta WhatsApp" : "Simulator"}
+            <bdi>{conversation.recipientAddress ?? t("inbox.noRecipient")}</bdi>{" "}
+            ·{" "}
+            {conversation.provider === "meta"
+              ? "Meta WhatsApp"
+              : t("common.simulator")}
           </small>
         </div>
         <Badge
-          label={conversation.status}
+          label={
+            t.has(`status.${conversation.status}`)
+              ? t(`status.${conversation.status}`)
+              : t("common.unknown")
+          }
           tone={conversation.status === "open" ? "info" : "neutral"}
         />
         <details className="conversation-details">
           <summary>
-            Details <ChevronDown aria-hidden="true" size={13} />
+            {t("common.details")}
+            <ChevronDown aria-hidden="true" size={13} />
           </summary>
           <div>
             <p>
-              Current channel: {conversation.senderAddress ?? "Unknown sender"}
+              {t("inbox.currentChannel")}
+              {conversation.senderAddress ?? t("inbox.unknownSender")}
             </p>
             {conversation.providerAccountId ? (
               <p>
-                Phone Number ID: <bdi>{conversation.providerAccountId}</bdi>
+                {t("inbox.senderId")}
+                <bdi>{conversation.providerAccountId}</bdi>
               </p>
             ) : null}
             <p>
-              WhatsApp consent: {conversation.whatsAppConsent}
-              {conversation.whatsAppOptedOutAt ? " · opted out" : ""}
+              {t("inbox.consent")} {t(`status.${conversation.whatsAppConsent}`)}
+              {conversation.whatsAppOptedOutAt ? t("inbox.optedOut") : ""}
             </p>
-            <p>
-              Free-form eligibility is checked against the selected sender’s
-              customer-service window when you submit.
-            </p>
+            <p>{t("inbox.eligibility")}</p>
             <label>
-              Status
+              {t("inbox.status")}
               <select
                 disabled={!canOperate || pending}
                 onChange={(event) =>
@@ -328,14 +320,14 @@ export function ConversationThread({
                 }
                 value={conversation.status}
               >
-                <option value="open">Open</option>
-                <option value="pending">Pending</option>
-                <option value="resolved">Resolved</option>
-                <option value="closed">Closed</option>
+                <option value="open">{t("status.open")}</option>
+                <option value="pending">{t("status.pending")}</option>
+                <option value="resolved">{t("status.resolved")}</option>
+                <option value="closed">{t("status.closed")}</option>
               </select>
             </label>
             <label>
-              Assigned operator
+              {t("inbox.assigned")}
               <select
                 disabled={!canOperate || pending}
                 onChange={(event) =>
@@ -343,10 +335,10 @@ export function ConversationThread({
                 }
                 value={conversation.assignedUserId ?? ""}
               >
-                <option value="">Unassigned</option>
+                <option value="">{t("inbox.unassigned")}</option>
                 {teamMembers.map((member) => (
                   <option key={member.userId} value={member.userId}>
-                    {member.email} · {member.role}
+                    {member.email} · {t(`status.${member.role}`)}
                   </option>
                 ))}
               </select>
@@ -357,14 +349,16 @@ export function ConversationThread({
       <div
         className="message-thread"
         ref={scrollArea}
-        aria-label={`Messages with ${conversation.contactName}`}
+        aria-label={t("inbox.threadLabel", {
+          contact: conversation.contactName,
+        })}
         aria-busy={loading}
       >
         {history ? (
           <div className="thread-notice">
-            Viewing history · live updates paused{" "}
+            {t("inbox.historyMode")}{" "}
             <Button onClick={latest} variant="quiet">
-              Back to latest
+              {t("inbox.latest")}
             </Button>
           </div>
         ) : null}
@@ -375,39 +369,46 @@ export function ConversationThread({
             onClick={() => void loadOlder()}
             variant="quiet"
           >
-            <ArrowUp aria-hidden="true" size={14} /> Earlier messages
+            <ArrowUp aria-hidden="true" size={14} />
+            {t("inbox.earlier")}
           </Button>
         ) : null}
         {loading ? (
           <p role="status" className="thread-notice">
-            Loading conversation…
+            {t("inbox.loading")}
           </p>
         ) : null}
         {loadError ? (
           <div className="thread-notice" role="alert">
             <p>{loadError}</p>
             <Button onClick={latest} variant="secondary">
-              Retry loading
+              {t("inbox.retry")}
             </Button>
           </div>
         ) : null}
         {!loading && !loadError && page.messages.length === 0 ? (
           <div className="thread-empty">
             <MessagesPlaceholder />
-            <h3>A conversation starts here</h3>
-            <p>Choose a delivery mode and write your first reply.</p>
+            <h3>{t("inbox.starts")}</h3>
+            <p>{t("inbox.startsHint")}</p>
           </div>
         ) : null}
         {page.messages.map((message) => (
           <article
             className={`message-bubble message-bubble--${message.direction}`}
             key={message.id}
-            aria-label={`${message.direction} ${message.status}`}
+            aria-label={`${t(`status.${message.direction}`)} ${t(`status.${message.status}`)}`}
           >
             {message.template ? (
               <div className="template-message">
-                <strong>Template · {message.template.name}</strong>
-                <small>Language: {message.template.language}</small>
+                <strong>
+                  {t("inbox.templatePrefix")}
+                  {message.template.name}
+                </strong>
+                <small>
+                  {t("inbox.language")}
+                  {message.template.language}
+                </small>
                 {message.template.parameters.length ? (
                   <ol>
                     {message.template.parameters.map((parameter, index) => (
@@ -415,12 +416,9 @@ export function ConversationThread({
                     ))}
                   </ol>
                 ) : (
-                  <p>No body parameters</p>
+                  <p>{t("inbox.noParams")}</p>
                 )}
-                <small>
-                  Submitted template reference—not a synchronized approval
-                  record.
-                </small>
+                <small>{t("inbox.templateHint")}</small>
               </div>
             ) : (
               <p dir="auto">
@@ -429,25 +427,29 @@ export function ConversationThread({
             )}
             <footer>
               <time dateTime={message.createdAt}>
-                {new Intl.DateTimeFormat("en", {
+                {new Intl.DateTimeFormat(locale, {
                   hour: "2-digit",
                   minute: "2-digit",
                   timeZone: "Asia/Jerusalem",
                 }).format(new Date(message.createdAt))}
               </time>
               <span>
-                {message.direction === "outbound" ? message.status : "Received"}
+                {message.direction === "outbound"
+                  ? t(`status.${message.status}`)
+                  : t("inbox.received")}
               </span>
             </footer>
             {message.deliveryEvents.length ? (
               <details className="delivery-history">
-                <summary>Delivery history</summary>
+                <summary>{t("inbox.deliveryHistory")}</summary>
                 <ul>
                   {message.deliveryEvents.map((event, index) => (
                     <li key={index}>
-                      {event.status} ·{" "}
+                      {t(`status.${event.status}`)} ·{" "}
                       <time dateTime={event.occurredAt}>
-                        {new Date(event.occurredAt).toISOString()}
+                        {new Date(event.occurredAt).toLocaleString(locale, {
+                          timeZone: "Asia/Jerusalem",
+                        })}
                       </time>
                     </li>
                   ))}
@@ -461,12 +463,12 @@ export function ConversationThread({
                 ))}
                 {canOperate ? (
                   <button
-                    aria-label="React with thumbs up"
+                    aria-label={t("inbox.react")}
                     disabled={pending}
                     onClick={() => void change({ emoji: "👍" }, message.id)}
                     type="button"
                   >
-                    ＋👍
+                    <ThumbsUp aria-hidden="true" size={14} />
                   </button>
                 ) : null}
               </div>
@@ -486,15 +488,12 @@ export function ConversationThread({
           </p>
         ) : null}
         {!canOperate ? (
-          <p className="thread-notice">
-            Read-only access. A messaging operator can reply or change this
-            conversation.
-          </p>
+          <p className="thread-notice">{t("inbox.readOnly")}</p>
         ) : (
           <>
             <div className="composer-controls">
               <label htmlFor="delivery-provider">
-                Delivery mode
+                {t("inbox.mode")}
                 <select
                   id="delivery-provider"
                   disabled={pending}
@@ -506,17 +505,15 @@ export function ConversationThread({
                     })
                   }
                 >
-                  <option value="simulator">
-                    Simulator — no external delivery
-                  </option>
+                  <option value="simulator">{t("inbox.simulator")}</option>
                   <option disabled={!realWhatsAppEnabled} value="meta">
-                    REAL Meta WhatsApp delivery
-                    {realWhatsAppEnabled ? "" : " — disabled"}
+                    {t("inbox.real")}
+                    {realWhatsAppEnabled ? "" : " " + t("inbox.disabled")}
                   </option>
                 </select>
               </label>
               <label htmlFor="message-kind">
-                Message type
+                {t("inbox.type")}
                 <select
                   id="message-kind"
                   disabled={pending}
@@ -528,30 +525,28 @@ export function ConversationThread({
                     })
                   }
                 >
-                  <option value="text">
-                    Free-form text (24-hour window only)
-                  </option>
-                  <option value="template">Template reference</option>
+                  <option value="text">{t("inbox.text")}</option>
+                  <option value="template">{t("inbox.template")}</option>
                 </select>
               </label>
             </div>
             {draft.provider === "meta" ? (
               <p className="sender-notice">
-                Real sender · Phone Number ID{" "}
-                <bdi>{metaSenderId ?? "not configured"}</bdi>. This identifies
-                the configured sender, not a verified business number.
+                {t("inbox.realSender")}{" "}
+                <bdi>{metaSenderId ?? t("inbox.notConfigured")}</bdi>
+                {t("inbox.senderHint")}
               </p>
             ) : (
               <p className="sender-notice">
-                <ShieldCheck aria-hidden="true" size={13} /> Simulator only. No
-                external message will be sent.
+                <ShieldCheck aria-hidden="true" size={13} />
+                {t("inbox.simulatorHint")}
               </p>
             )}
             {draft.kind === "template" ? (
               <div className="template-fields">
                 <Input
                   id="template-name"
-                  label="Meta-approved template name"
+                  label={t("inbox.templateName")}
                   required
                   disabled={pending}
                   value={draft.templateName}
@@ -561,8 +556,9 @@ export function ConversationThread({
                 />
                 <Input
                   id="template-language"
-                  label="Exact language code"
-                  placeholder="en_US or he"
+                  label={t("inbox.languageCode")}
+                  placeholder="en_US / he"
+                  dir="ltr"
                   required
                   disabled={pending}
                   value={draft.language}
@@ -572,17 +568,14 @@ export function ConversationThread({
                 />
                 <Input
                   id="template-parameters"
-                  label="Body parameters, in order (separate with |)"
+                  label={t("inbox.params")}
                   disabled={pending}
                   value={draft.parameters}
                   onChange={(event) =>
                     updateDraft({ parameters: event.target.value })
                   }
                 />
-                <p>
-                  Use a template approved for this sender in Meta. Approval and
-                  rendered wording are not synchronized here.
-                </p>
+                <p>{t("inbox.approvalHint")}</p>
               </div>
             ) : (
               <>
@@ -601,7 +594,7 @@ export function ConversationThread({
                   </div>
                 ) : null}
                 <label className="or-visually-hidden" htmlFor="reply-text">
-                  Reply message
+                  {t("inbox.reply")}
                 </label>
                 <textarea
                   id="reply-text"
@@ -611,7 +604,7 @@ export function ConversationThread({
                   onChange={(event) =>
                     updateDraft({ text: event.target.value })
                   }
-                  placeholder="Write a thoughtful reply…"
+                  placeholder={t("inbox.replyHint")}
                   required
                   rows={3}
                   value={draft.text}
@@ -627,16 +620,22 @@ export function ConversationThread({
                   disabled={pending}
                   onChange={(event) => setConfirmed(event.target.checked)}
                 />
-                I understand this sends a real WhatsApp message to{" "}
-                {conversation.contactName},{" "}
-                <bdi>{conversation.recipientAddress}</bdi>.
+                {t("inbox.confirm", {
+                  contact: conversation.contactName,
+                  recipient:
+                    "\u2068" +
+                    (conversation.recipientAddress ?? t("inbox.noRecipient")) +
+                    "\u2069",
+                })}
               </label>
             ) : null}
             <div className="composer-footer">
               <small>
-                {draft.kind === "text"
-                  ? `${String(draft.text.length)} / 4096`
-                  : "Template values are submitted exactly as entered"}
+                {draft.kind === "text" ? (
+                  <bdi dir="ltr">{draft.text.length} / 4096</bdi>
+                ) : (
+                  t("inbox.exactValues")
+                )}
               </small>
               <Button
                 disabled={
@@ -650,44 +649,42 @@ export function ConversationThread({
               >
                 <Send aria-hidden="true" size={15} />{" "}
                 {pending
-                  ? "Queuing…"
+                  ? t("inbox.queuing")
                   : draft.provider === "meta"
-                    ? "Review real message"
-                    : "Queue simulator reply"}
+                    ? t("inbox.review")
+                    : t("inbox.queueSimulator")}
               </Button>
             </div>
           </>
         )}
       </form>
       <Dialog
+        closeLabel={t("common.close")}
         open={review !== undefined}
         onClose={() => {
           if (!pending) setReview(undefined);
         }}
-        title="Confirm real WhatsApp delivery"
-        description="A real message cannot be recalled. Check the sender, recipient and content before continuing."
+        title={t("inbox.confirmTitle")}
+        description={t("inbox.confirmHint")}
       >
         <dl className="send-review">
-          <dt>Recipient</dt>
+          <dt>{t("inbox.recipient")}</dt>
           <dd>
             {conversation.contactName} ·{" "}
             <bdi>{conversation.recipientAddress}</bdi>
           </dd>
-          <dt>Configured sender Phone Number ID</dt>
+          <dt>{t("inbox.configuredSender")}</dt>
           <dd>
-            <bdi>{metaSenderId ?? "Not configured"}</bdi>
+            <bdi>{metaSenderId ?? t("inbox.notConfigured")}</bdi>
           </dd>
-          <dt>Message</dt>
+          <dt>{t("inbox.message")}</dt>
           <dd dir="auto">
             {review?.kind === "text"
               ? review.text
               : `${review?.templateName ?? ""} · ${review?.language ?? ""}\n${review?.parameters ?? ""}`}
           </dd>
         </dl>
-        <p>
-          Consent, opt-out, customer-service window and provider safety checks
-          still apply.
-        </p>
+        <p>{t("inbox.guardHint")}</p>
         {actionError && review !== undefined ? (
           <p role="alert" className="form-error">
             {actionError}
@@ -704,7 +701,7 @@ export function ConversationThread({
             if (review) void send(review);
           }}
         >
-          {pending ? "Queuing…" : "Send real WhatsApp"}
+          {pending ? t("inbox.queuing") : t("inbox.sendReal")}
         </Button>
       </Dialog>
     </>
@@ -714,7 +711,7 @@ export function ConversationThread({
 function MessagesPlaceholder() {
   return (
     <span aria-hidden="true" className="contact-avatar">
-      ↗
+      <MessageCircle size={20} />
     </span>
   );
 }

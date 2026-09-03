@@ -1,6 +1,9 @@
+import { productMetadata } from "../../i18n/product-metadata";
+import { AccessDenied } from "../../i18n/access-denied";
+import { ProductHeading } from "../../i18n/product-heading";
 import { redirect } from "next/navigation";
 
-import { UnauthenticatedError } from "../../features/auth";
+import { ForbiddenError, UnauthenticatedError } from "../../features/auth";
 import { VoiceOverview } from "../../features/voice";
 import { voiceClient } from "../../features/voice-server";
 
@@ -15,14 +18,7 @@ export default async function VoicePage() {
     ]);
     return (
       <main className="page page--wide">
-        <header className="page-heading">
-          <p className="eyebrow">Voice control plane</p>
-          <h1>Calls & phone numbers</h1>
-          <p>
-            Canonical PostgreSQL call state, safe SIP admission, and
-            deterministic simulator diagnostics.
-          </p>
-        </header>
+        <ProductHeading page="voice" />
         <VoiceOverview
           flows={flows.data.items}
           numbers={numbers.data.items}
@@ -32,7 +28,10 @@ export default async function VoicePage() {
       </main>
     );
   } catch (error) {
+    if (error instanceof ForbiddenError) return <AccessDenied />;
     if (error instanceof UnauthenticatedError) redirect("/login");
     throw error;
   }
 }
+
+export const generateMetadata = () => productMetadata("voice");

@@ -1,8 +1,12 @@
+import { productMetadata } from "../../../i18n/product-metadata";
+import { AccessDenied } from "../../../i18n/access-denied";
+import { ProductHeading } from "../../../i18n/product-heading";
 import { notFound, redirect } from "next/navigation";
 
 import { getContactDetail, listContactActivity } from "@or-on/crm";
 
 import {
+  ForbiddenError,
   UnauthenticatedError,
   withCurrentTenant,
 } from "../../../features/auth";
@@ -25,16 +29,15 @@ export default async function ContactDetailPage({
     if (contact === undefined) notFound();
     return (
       <main className="page page--wide">
-        <header className="page-heading">
-          <p className="eyebrow">Contact record</p>
-          <h1>{contact.name}</h1>
-          <p>Identity, notes, and tenant-owned relationship context.</p>
-        </header>
+        <ProductHeading page="contact" />
         <ContactDetailPanel activity={activity} contact={contact} />
       </main>
     );
   } catch (error) {
+    if (error instanceof ForbiddenError) return <AccessDenied />;
     if (error instanceof UnauthenticatedError) redirect("/login");
     throw error;
   }
 }
+
+export const generateMetadata = () => productMetadata("contact");

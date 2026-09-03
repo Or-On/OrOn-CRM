@@ -1,4 +1,4 @@
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderMarkup as renderToStaticMarkup } from "./localized";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({
@@ -52,7 +52,7 @@ describe("voice operator surfaces", () => {
     const campaignMarkup = renderToStaticMarkup(
       <VoiceCampaignPanel campaigns={[]} flows={[flow]} />,
     );
-    expect(flowMarkup).toContain("not the Phase 7 cross-channel compiler");
+    expect(flowMarkup).toContain("retained voice adapter");
     expect(campaignMarkup).toContain("Consent-aware simulator");
     expect(campaignMarkup).toContain("Maximum attempts");
   });

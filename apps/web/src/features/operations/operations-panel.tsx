@@ -1,6 +1,11 @@
 "use client";
 
+import { errorMessage } from "../../i18n/error-message";
+import { useCapability } from "../access";
+import { useTranslations } from "next-intl";
+
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useState, type SyntheticEvent } from "react";
 
 import type {
@@ -21,6 +26,8 @@ export function OperationsPanel({
   readonly automations: readonly AutomationSummary[];
   readonly runs: readonly AutomationRunSummary[];
 }) {
+  const t = useTranslations();
+  const canEdit = useCapability("campaigns:manage");
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
@@ -30,57 +37,66 @@ export function OperationsPanel({
     try {
       await operation();
       router.refresh();
+      return true;
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Operation failed");
+      setError(errorMessage(caught, t, "operations.failed"));
+      return false;
     } finally {
       setPending(false);
     }
   }
   async function createCampaign(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
-    const data = new FormData(event.currentTarget);
-    await run(() =>
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const saved = await run(() =>
       crmMutation("/api/campaigns", {
         name: data.get("name"),
         body: data.get("body"),
       }),
     );
-    event.currentTarget.reset();
+    if (saved) form.reset();
   }
   async function createAutomation(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
-    const data = new FormData(event.currentTarget);
-    await run(() =>
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const saved = await run(() =>
       crmMutation("/api/automations", {
         name: data.get("name"),
         description: data.get("description"),
       }),
     );
-    event.currentTarget.reset();
+    if (saved) form.reset();
   }
   return (
     <div className="operations-grid">
       <Surface level="raised">
-        <h2>WhatsApp simulator campaigns</h2>
+        <h2>{t("operations.campaigns")}</h2>
         <form
           className="feature-form"
           onSubmit={(event) => void createCampaign(event)}
         >
-          <Input
-            id="campaign-name"
-            label="Campaign name"
-            name="name"
-            required
-          />
-          <Input
-            id="campaign-body"
-            label="Message template"
-            name="body"
-            required
-          />
-          <Button disabled={pending} type="submit">
-            Create draft
-          </Button>
+          <fieldset className="form-fieldset" disabled={pending || !canEdit}>
+            {!canEdit ? (
+              <p className="public-note">{t("common.readOnly")}</p>
+            ) : null}
+            <Input
+              id="campaign-name"
+              label={t("operations.campaignName")}
+              name="name"
+              required
+            />
+            <Input
+              id="campaign-body"
+              label={t("operations.body")}
+              name="body"
+              required
+            />
+            <Button disabled={pending || !canEdit} type="submit">
+              {t("operations.draft")}
+            </Button>
+          </fieldset>
         </form>
         <div className="operation-list">
           {broadcasts.map((broadcast) => (
@@ -88,17 +104,23 @@ export function OperationsPanel({
               <div>
                 <strong>{broadcast.name}</strong>
                 <p>
-                  {broadcast.deliveredCount}/{broadcast.totalRecipients}{" "}
-                  delivered
+                  {t("operations.delivered", {
+                    delivered: broadcast.deliveredCount,
+                    total: broadcast.totalRecipients,
+                  })}
                 </p>
               </div>
               <Badge
-                label={broadcast.status}
+                label={
+                  t.has(`status.${broadcast.status}`)
+                    ? t(`status.${broadcast.status}`)
+                    : t("common.unknown")
+                }
                 tone={broadcast.status === "sent" ? "positive" : "info"}
               />
               {broadcast.status === "draft" ? (
                 <Button
-                  disabled={pending}
+                  disabled={pending || !canEdit}
                   onClick={() =>
                     void run(() =>
                       crmMutation(`/api/campaigns/${broadcast.id}/deliver`, {}),
@@ -106,7 +128,7 @@ export function OperationsPanel({
                   }
                   variant="secondary"
                 >
-                  Run simulator
+                  {t("operations.simulate")}
                 </Button>
               ) : null}
             </article>
@@ -114,25 +136,34 @@ export function OperationsPanel({
         </div>
       </Surface>
       <Surface>
-        <h2>Automation drafts</h2>
+        <h2>{t("operations.automations")}</h2>
         <form
           className="feature-form"
           onSubmit={(event) => void createAutomation(event)}
         >
-          <Input
-            id="automation-name"
-            label="Automation name"
-            name="name"
-            required
-          />
-          <Input
-            id="automation-description"
-            label="Description"
-            name="description"
-          />
-          <Button disabled={pending} type="submit" variant="secondary">
-            Create empty graph
-          </Button>
+          <fieldset className="form-fieldset" disabled={pending || !canEdit}>
+            {!canEdit ? (
+              <p className="public-note">{t("common.readOnly")}</p>
+            ) : null}
+            <Input
+              id="automation-name"
+              label={t("operations.name")}
+              name="name"
+              required
+            />
+            <Input
+              id="automation-description"
+              label={t("operations.description")}
+              name="description"
+            />
+            <Button
+              disabled={pending || !canEdit}
+              type="submit"
+              variant="secondary"
+            >
+              {t("operations.create")}
+            </Button>
+          </fieldset>
         </form>
         <div className="operation-list">
           {automations.map((automation) => (
@@ -140,17 +171,25 @@ export function OperationsPanel({
               <div>
                 <strong>{automation.name}</strong>
                 <p>
-                  Version {String(automation.version)} ·{" "}
-                  {automation.validationStatus}
+                  {t("operations.version", {
+                    version: automation.version,
+                    status: t(`status.${automation.validationStatus}`),
+                  })}
                 </p>
               </div>
               <Badge
-                label={automation.published ? "published" : "draft"}
+                label={t(
+                  automation.published ? "status.published" : "status.draft",
+                )}
                 tone={automation.published ? "positive" : "neutral"}
               />
-              {!automation.published ? (
+              {automation.executionKind !== "empty" ? (
+                <Link className="text-link" href="/orchestration">
+                  {t("operations.canonical")}
+                </Link>
+              ) : !automation.published ? (
                 <Button
-                  disabled={pending}
+                  disabled={pending || !canEdit}
                   onClick={() =>
                     void run(() =>
                       crmMutation(
@@ -161,11 +200,11 @@ export function OperationsPanel({
                   }
                   variant="quiet"
                 >
-                  Publish
+                  {t("operations.publish")}
                 </Button>
               ) : (
                 <Button
-                  disabled={pending}
+                  disabled={pending || !canEdit}
                   onClick={() =>
                     void run(() =>
                       crmMutation(`/api/automations/${automation.id}/run`, {}),
@@ -173,21 +212,27 @@ export function OperationsPanel({
                   }
                   variant="quiet"
                 >
-                  Run manually
+                  {t("operations.run")}
                 </Button>
               )}
             </article>
           ))}
         </div>
-        <div className="operation-list" aria-label="Recent automation runs">
+        <div className="operation-list" aria-label={t("operations.runs")}>
           {runs.map((automationRun) => (
             <article key={automationRun.id}>
               <div>
-                <strong>Manual execution</strong>
-                <p>{automationRun.id.slice(0, 8)} · trace retained</p>
+                <strong>{t("operations.manual")}</strong>
+                <p>
+                  {t("operations.trace", { id: automationRun.id.slice(0, 8) })}
+                </p>
               </div>
               <Badge
-                label={automationRun.status}
+                label={
+                  t.has(`status.${automationRun.status}`)
+                    ? t(`status.${automationRun.status}`)
+                    : t("common.unknown")
+                }
                 tone={
                   automationRun.status === "succeeded" ? "positive" : "info"
                 }

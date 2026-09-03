@@ -1,3 +1,4 @@
+import { localized } from "./localized";
 // @vitest-environment jsdom
 import {
   act,
@@ -62,15 +63,17 @@ const conversations = [alpha, beta];
 
 function mount(real = false, canOperate = true) {
   return render(
-    <InboxWorkspace
-      conversations={conversations}
-      initialMessages={messagesA}
-      quickReplies={[]}
-      teamMembers={[]}
-      realWhatsAppEnabled={real}
-      metaSenderId="fictional-sender-id"
-      canOperate={canOperate}
-    />,
+    localized(
+      <InboxWorkspace
+        conversations={conversations}
+        initialMessages={messagesA}
+        quickReplies={[]}
+        teamMembers={[]}
+        realWhatsAppEnabled={real}
+        metaSenderId="fictional-sender-id"
+        canOperate={canOperate}
+      />,
+    ),
   );
 }
 
@@ -106,6 +109,38 @@ afterEach(() => {
 });
 
 describe("Inbox interaction safety (no provider network)", () => {
+  it("preserves a draft when locale changes and keeps real confirmation in Hebrew", async () => {
+    const content = () => (
+      <InboxWorkspace
+        conversations={conversations}
+        initialMessages={messagesA}
+        quickReplies={[]}
+        teamMembers={[]}
+        realWhatsAppEnabled
+        canOperate
+        metaSenderId="fictional-sender-id"
+      />
+    );
+    const view = render(localized(content(), "en"));
+    await screen.findByText("Alpha private fixture");
+    fireEvent.change(screen.getByRole("textbox", { name: "Reply message" }), {
+      target: { value: "Fictional bilingual draft" },
+    });
+    view.rerender(localized(content(), "he"));
+    expect(
+      screen.getByRole<HTMLTextAreaElement>("textbox", { name: "הודעת תשובה" })
+        .value,
+    ).toBe("Fictional bilingual draft");
+    fireEvent.change(screen.getByRole("combobox", { name: "מצב שליחה" }), {
+      target: { value: "meta" },
+    });
+    expect(
+      screen.getByRole<HTMLButtonElement>("button", {
+        name: "בדיקת הודעה אמיתית לפני שליחה",
+      }).disabled,
+    ).toBe(true);
+    expect(transport.mutate).not.toHaveBeenCalled();
+  });
   it("ignores delayed Alpha results after selecting Beta and aborts the obsolete read", async () => {
     let resolveAlpha: ((value: MessagePage) => void) | undefined;
     let oldSignal: AbortSignal | undefined;
@@ -169,7 +204,9 @@ describe("Inbox interaction safety (no provider network)", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Queue simulator reply" }),
     );
-    await screen.findByText("Queue temporarily unavailable");
+    await screen.findByText(
+      "Could not queue the message. Your draft is preserved.",
+    );
     expect(
       screen.getByRole<HTMLTextAreaElement>("textbox", {
         name: "Reply message",
@@ -227,7 +264,7 @@ describe("Inbox interaction safety (no provider network)", () => {
       name: "Confirm real WhatsApp delivery",
     });
     expect(transport.mutate).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Close dialog" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Reply message" }), {
       target: { value: "Changed content" },
     });

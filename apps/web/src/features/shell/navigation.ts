@@ -67,9 +67,13 @@ export function activeDestination(pathname: string): string | undefined {
     .sort((a, b) => b.href.length - a.href.length)[0]?.href;
 }
 
-export function findDestinations(query: string) {
+export function findDestinations(
+  query: string,
+  searchable: (item: (typeof navigation)[number]) => string = (item) =>
+    `${item.label} ${item.group}`,
+) {
   const term = query.trim().toLocaleLowerCase("en");
-  return navigation.filter(({ label, group }) =>
-    `${label} ${group}`.toLocaleLowerCase("en").includes(term),
+  return navigation.filter((item) =>
+    searchable(item).toLocaleLowerCase("en").includes(term),
   );
 }

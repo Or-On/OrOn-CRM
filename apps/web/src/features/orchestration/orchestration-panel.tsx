@@ -1,12 +1,19 @@
 "use client";
 
+import { errorMessage } from "../../i18n/error-message";
+import { activityLabel } from "../../i18n/activity-label";
+import { useCapability } from "../access";
+import { useTranslations, useLocale } from "next-intl";
+
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useState, type SyntheticEvent } from "react";
 
 import type {
   AgentProfileSummary,
   AutomationSummary,
   ContactActivity,
+  ContactSummary,
   ConversationSummary,
   CrossChannelUsage,
   HandoffSummary,
@@ -28,6 +35,8 @@ export function OrchestrationPanel({
   handoffs,
   usage,
   voiceOutcomes,
+  contacts = [],
+  activityContactId,
 }: {
   readonly activity: readonly ContactActivity[];
   readonly agents: readonly AgentProfileSummary[];
@@ -36,7 +45,13 @@ export function OrchestrationPanel({
   readonly handoffs: readonly HandoffSummary[];
   readonly usage: CrossChannelUsage;
   readonly voiceOutcomes: readonly VoiceOutcomeSummary[];
+  readonly contacts?: readonly ContactSummary[];
+  readonly activityContactId?: string;
 }) {
+  const t = useTranslations();
+  const canEdit = useCapability("flows:manage");
+  const locale = useLocale();
+  const canHandoff = useCapability("messaging:operate");
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
@@ -47,8 +62,10 @@ export function OrchestrationPanel({
     try {
       await operation();
       router.refresh();
+      return true;
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Operation failed");
+      setError(errorMessage(caught, t, "orchestration.failed"));
+      return false;
     } finally {
       setPending(false);
     }
@@ -58,7 +75,7 @@ export function OrchestrationPanel({
     event.preventDefault();
     const form = event.currentTarget;
     const data = new FormData(form);
-    await run(() =>
+    const saved = await run(() =>
       crmMutation("/api/orchestration/agents", {
         name: data.get("name"),
         systemPrompt: data.get("systemPrompt"),
@@ -66,14 +83,14 @@ export function OrchestrationPanel({
         channels: ["voice", "whatsapp"],
       }),
     );
-    form.reset();
+    if (saved) form.reset();
   }
 
   async function createFlow(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
     const data = new FormData(form);
-    await run(() =>
+    const saved = await run(() =>
       crmMutation("/api/orchestration/flows", {
         name: data.get("name"),
         agentProfileVersionId: data.get("agentProfileVersionId"),
@@ -104,8 +121,7 @@ export function OrchestrationPanel({
               id: "handoff",
               type: "handoff",
               configuration: {
-                reason:
-                  "Canonical simulator completed; operator follow-up requested.",
+                reason: t("orchestration.reason"),
               },
             },
             { id: "end", type: "end" },
@@ -125,14 +141,16 @@ export function OrchestrationPanel({
         },
       }),
     );
-    form.reset();
+    if (saved) form.reset();
   }
 
   async function simulate(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
-    const data = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const data = new FormData(form);
     const kindValue = data.get("kind");
-    if (typeof kindValue !== "string") throw new TypeError("kind is required");
+    if (typeof kindValue !== "string")
+      throw new TypeError(t("orchestration.required"));
     const kind = kindValue;
     await run(() =>
       crmMutation(
@@ -151,7 +169,7 @@ export function OrchestrationPanel({
     event.preventDefault();
     const form = event.currentTarget;
     const data = new FormData(form);
-    await run(() =>
+    const saved = await run(() =>
       crmMutation(
         "/api/orchestration/handoffs",
         {
@@ -162,58 +180,73 @@ export function OrchestrationPanel({
         { idempotencyKey: idempotencyKey("handoff") },
       ),
     );
-    form.reset();
+    if (saved) form.reset();
   }
 
   return (
     <div className="feature-stack">
-      <div className="metric-grid" aria-label="Cross-channel usage summary">
+      <dl className="metric-grid" aria-label={t("orchestration.usage")}>
         <div>
-          <dt>Agent events</dt>
+          <dt>{t("orchestration.events")}</dt>
           <dd>{usage.agentEvents}</dd>
         </div>
         <div>
-          <dt>Token usage</dt>
+          <dt>{t("orchestration.tokens")}</dt>
           <dd>{usage.inputTokens + usage.outputTokens}</dd>
         </div>
         <div>
-          <dt>Voice sessions</dt>
+          <dt>{t("orchestration.sessions")}</dt>
           <dd>{usage.voiceSessions}</dd>
         </div>
         <div>
-          <dt>Latency / cost</dt>
+          <dt>{t("orchestration.latency")}</dt>
           <dd>
             {usage.averageLatencyMs === null
-              ? "No latency"
+              ? t("orchestration.noLatency")
               : `${usage.averageLatencyMs.toString()} ms`}{" "}
-            · {usage.unpricedEvents > 0 ? "unpriced" : "no usage"}
+            ·{" "}
+            {usage.unpricedEvents > 0
+              ? t("orchestration.unpriced")
+              : t("orchestration.noUsage")}
           </dd>
         </div>
-      </div>
+      </dl>
 
       <div className="operations-grid">
         <Surface level="raised">
-          <h2>Versioned agent profiles</h2>
-          <p className="feature-copy">
-            One profile, immutable releases, and explicit voice/WhatsApp
-            capabilities. Live visual agents remain deferred.
-          </p>
+          <h2>{t("orchestration.agents")}</h2>
+          <p className="feature-copy">{t("orchestration.agentsHint")}</p>
           <form
             className="feature-form"
             onSubmit={(event) => void createAgent(event)}
           >
-            <Input id="agent-name" label="Agent name" name="name" required />
-            <Input
-              id="agent-locale"
-              label="Locale"
-              name="locale"
-              placeholder="he-IL"
-            />
-            <label htmlFor="agent-prompt">System prompt</label>
-            <textarea id="agent-prompt" name="systemPrompt" required rows={4} />
-            <Button disabled={pending} type="submit">
-              Create draft
-            </Button>
+            <fieldset className="form-fieldset" disabled={pending || !canEdit}>
+              {!canEdit ? (
+                <p className="public-note">{t("common.readOnly")}</p>
+              ) : null}
+              <Input
+                id="agent-name"
+                label={t("orchestration.agentName")}
+                name="name"
+                required
+              />
+              <Input
+                id="agent-locale"
+                label={t("management.locale")}
+                name="locale"
+                placeholder="he-IL"
+              />
+              <label htmlFor="agent-prompt">{t("orchestration.prompt")}</label>
+              <textarea
+                id="agent-prompt"
+                name="systemPrompt"
+                required
+                rows={4}
+              />
+              <Button disabled={pending || !canEdit} type="submit">
+                {t("orchestration.draft")}
+              </Button>
+            </fieldset>
           </form>
           <div className="operation-list">
             {agents.map((agent) => (
@@ -225,12 +258,14 @@ export function OrchestrationPanel({
                   </p>
                 </div>
                 <Badge
-                  label={agent.published ? "published" : "draft"}
+                  label={t(
+                    agent.published ? "status.published" : "status.draft",
+                  )}
                   tone={agent.published ? "positive" : "neutral"}
                 />
                 {!agent.published ? (
                   <Button
-                    disabled={pending}
+                    disabled={pending || !canEdit}
                     onClick={() =>
                       void run(() =>
                         crmMutation(
@@ -241,7 +276,7 @@ export function OrchestrationPanel({
                     }
                     variant="quiet"
                   >
-                    Publish
+                    {t("orchestration.publish")}
                   </Button>
                 ) : null}
               </article>
@@ -250,72 +285,91 @@ export function OrchestrationPanel({
         </Surface>
 
         <Surface>
-          <h2>Canonical flows</h2>
-          <p className="feature-copy">
-            A single graph compiles deterministically into retained Or-on voice
-            and WACRM messaging adapters.
-          </p>
+          <h2>{t("orchestration.flows")}</h2>
+          <p className="feature-copy">{t("orchestration.flowsHint")}</p>
           <form
             className="feature-form"
             onSubmit={(event) => void createFlow(event)}
           >
-            <Input id="flow-name" label="Flow name" name="name" required />
-            <Input
-              id="flow-company"
-              label="CRM company value for this simulation"
-              name="company"
-              required
-            />
-            <Input
-              id="flow-message"
-              label="Simulator message text"
-              name="messageText"
-              required
-            />
-            <Input
-              id="flow-voice-id"
-              label="Published voice flow UUID (from Voice flows)"
-              name="voiceFlowId"
-              required
-            />
-            <Input
-              id="flow-voice-version"
-              label="Published voice flow version"
-              name="voiceFlowVersion"
-              type="number"
-              min="1"
-              defaultValue="1"
-              required
-            />
-            <label htmlFor="flow-agent">Published agent version</label>
-            <select id="flow-agent" name="agentProfileVersionId" required>
-              <option value="">Select agent</option>
-              {agents
-                .filter((agent) => agent.published && agent.versionId)
-                .map((agent) => (
-                  <option key={agent.id} value={agent.versionId ?? ""}>
-                    {agent.name} · v{agent.version}
-                  </option>
-                ))}
-            </select>
-            <Button disabled={pending} type="submit" variant="secondary">
-              Create cross-channel draft
-            </Button>
+            <fieldset className="form-fieldset" disabled={pending || !canEdit}>
+              {!canEdit ? (
+                <p className="public-note">{t("common.readOnly")}</p>
+              ) : null}
+              <Input
+                id="flow-name"
+                label={t("orchestration.flowName")}
+                name="name"
+                required
+              />
+              <Input
+                id="flow-company"
+                label={t("orchestration.company")}
+                name="company"
+                required
+              />
+              <Input
+                id="flow-message"
+                label={t("orchestration.message")}
+                name="messageText"
+                required
+              />
+              <Input
+                id="flow-voice-id"
+                label={t("orchestration.flowId")}
+                name="voiceFlowId"
+                required
+              />
+              <Input
+                id="flow-voice-version"
+                label={t("orchestration.flowVersion")}
+                name="voiceFlowVersion"
+                type="number"
+                min="1"
+                defaultValue="1"
+                required
+              />
+              <label htmlFor="flow-agent">
+                {t("orchestration.agentVersion")}
+              </label>
+              <select id="flow-agent" name="agentProfileVersionId" required>
+                <option value="">{t("orchestration.selectAgent")}</option>
+                {agents
+                  .filter((agent) => agent.published && agent.versionId)
+                  .map((agent) => (
+                    <option key={agent.id} value={agent.versionId ?? ""}>
+                      {agent.name} · v{agent.version}
+                    </option>
+                  ))}
+              </select>
+              <Button
+                disabled={pending || !canEdit}
+                type="submit"
+                variant="secondary"
+              >
+                {t("orchestration.createFlow")}
+              </Button>
+            </fieldset>
           </form>
           <div className="operation-list">
             {flows.map((flow) => (
               <article key={flow.id}>
                 <div>
                   <strong>{flow.name}</strong>
-                  <p>Version {flow.version}</p>
+                  <p>{t("common.version", { version: flow.version })}</p>
                 </div>
                 <Badge
-                  label={flow.published ? "published" : "draft"}
+                  label={t(
+                    flow.published ? "status.published" : "status.draft",
+                  )}
                   tone={flow.published ? "positive" : "neutral"}
                 />
-                {!flow.published ? (
+                {flow.executionKind !== "canonical" ? (
+                  <Link className="text-link" href="/operations">
+                    {t("operations.automations")}
+                  </Link>
+                ) : !flow.published ? (
                   <Button
-                    disabled={pending}
+                    disabled={pending || !canEdit}
                     onClick={() =>
                       void run(() =>
                         crmMutation(
@@ -326,14 +380,15 @@ export function OrchestrationPanel({
                     }
                     variant="quiet"
                   >
-                    Publish
+                    {t("orchestration.publish")}
                   </Button>
                 ) : null}
-                {flow.published ? (
+                {flow.published && flow.executionKind === "canonical" ? (
                   <form
                     onSubmit={(event) => {
                       event.preventDefault();
-                      const data = new FormData(event.currentTarget);
+                      const form = event.currentTarget;
+                      const data = new FormData(form);
                       void run(() =>
                         crmMutation(
                           `/api/orchestration/flows/${flow.id}/simulate`,
@@ -346,34 +401,43 @@ export function OrchestrationPanel({
                       );
                     }}
                   >
-                    <label htmlFor={`flow-conversation-${flow.id}`}>
-                      Simulator conversation
-                    </label>
-                    <select
-                      id={`flow-conversation-${flow.id}`}
-                      name="conversationId"
-                      required
+                    <fieldset
+                      className="form-fieldset"
+                      disabled={pending || !canEdit}
                     >
-                      {conversations.map((conversation) => (
-                        <option key={conversation.id} value={conversation.id}>
-                          {conversation.contactName}
+                      {!canEdit ? (
+                        <p className="public-note">{t("common.readOnly")}</p>
+                      ) : null}
+                      <label htmlFor={`flow-conversation-${flow.id}`}>
+                        {t("orchestration.conversation")}
+                      </label>
+                      <select
+                        id={`flow-conversation-${flow.id}`}
+                        name="conversationId"
+                        required
+                      >
+                        {conversations.map((conversation) => (
+                          <option key={conversation.id} value={conversation.id}>
+                            {conversation.contactName}
+                          </option>
+                        ))}
+                      </select>
+                      <label htmlFor={`flow-channel-${flow.id}`}>
+                        {t("orchestration.channel")}
+                      </label>
+                      <select id={`flow-channel-${flow.id}`} name="channel">
+                        <option value="voice">
+                          {t("orchestration.voice")}
                         </option>
-                      ))}
-                    </select>
-                    <label htmlFor={`flow-channel-${flow.id}`}>
-                      Simulator channel
-                    </label>
-                    <select id={`flow-channel-${flow.id}`} name="channel">
-                      <option value="voice">Voice</option>
-                      <option value="whatsapp">WhatsApp</option>
-                    </select>
-                    <Button disabled={pending} type="submit">
-                      Queue flow simulation
-                    </Button>
-                    <p>
-                      Local simulation only. View step completion under
-                      Automations.
-                    </p>
+                        <option value="whatsapp">
+                          {t("orchestration.whatsapp")}
+                        </option>
+                      </select>
+                      <Button disabled={pending || !canEdit} type="submit">
+                        {t("orchestration.queueFlow")}
+                      </Button>
+                      <p>{t("orchestration.flowHint")}</p>
+                    </fieldset>
                   </form>
                 ) : null}
               </article>
@@ -384,79 +448,98 @@ export function OrchestrationPanel({
 
       <div className="operations-grid">
         <Surface>
-          <h2>Safe cross-channel simulations</h2>
-          <p className="feature-copy">
-            Commands are durable and idempotent. They never contact providers.
-          </p>
+          <h2>{t("orchestration.simulations")}</h2>
+          <p className="feature-copy">{t("orchestration.simulationHint")}</p>
           <form
             className="feature-form"
             onSubmit={(event) => void simulate(event)}
           >
-            <label htmlFor="simulation-kind">Workflow</label>
-            <select id="simulation-kind" name="kind">
-              <option value="call-outcome-whatsapp">
-                Call outcome → WhatsApp follow-up
-              </option>
-              <option value="whatsapp-crm-call">
-                WhatsApp → CRM → consented call
-              </option>
-            </select>
-            <label htmlFor="simulation-session">Completed call outcome</label>
-            <select id="simulation-session" name="sessionId">
-              <option value="">Select for call follow-up</option>
-              {voiceOutcomes.map((outcome) => (
-                <option key={outcome.sessionId} value={outcome.sessionId}>
-                  {outcome.outcome} · {outcome.sessionId.slice(0, 8)}
+            <fieldset className="form-fieldset" disabled={pending || !canEdit}>
+              {!canEdit ? (
+                <p className="public-note">{t("common.readOnly")}</p>
+              ) : null}
+              <label htmlFor="simulation-kind">
+                {t("orchestration.workflow")}
+              </label>
+              <select id="simulation-kind" name="kind">
+                <option value="call-outcome-whatsapp">
+                  {t("orchestration.callFollowup")}
                 </option>
-              ))}
-            </select>
-            <label htmlFor="simulation-conversation">Conversation</label>
-            <select id="simulation-conversation" name="conversationId">
-              <option value="">Not required for follow-up</option>
-              {conversations.map((conversation) => (
-                <option key={conversation.id} value={conversation.id}>
-                  {conversation.contactName}
+                <option value="whatsapp-crm-call">
+                  {t("orchestration.messageCall")}
                 </option>
-              ))}
-            </select>
-            <Button
-              disabled={
-                pending ||
-                (voiceOutcomes.length === 0 && conversations.length === 0)
-              }
-              type="submit"
-            >
-              Queue simulator command
-            </Button>
+              </select>
+              <label htmlFor="simulation-session">
+                {t("orchestration.outcome")}
+              </label>
+              <select id="simulation-session" name="sessionId">
+                <option value="">{t("orchestration.selectCall")}</option>
+                {voiceOutcomes.map((outcome) => (
+                  <option key={outcome.sessionId} value={outcome.sessionId}>
+                    {outcome.outcome} · {outcome.sessionId.slice(0, 8)}
+                  </option>
+                ))}
+              </select>
+              <label htmlFor="simulation-conversation">
+                {t("orchestration.conversationLabel")}
+              </label>
+              <select id="simulation-conversation" name="conversationId">
+                <option value="">{t("orchestration.notRequired")}</option>
+                {conversations.map((conversation) => (
+                  <option key={conversation.id} value={conversation.id}>
+                    {conversation.contactName}
+                  </option>
+                ))}
+              </select>
+              <Button
+                disabled={
+                  pending ||
+                  (voiceOutcomes.length === 0 && conversations.length === 0)
+                }
+                type="submit"
+              >
+                {t("orchestration.queue")}
+              </Button>
+            </fieldset>
           </form>
         </Surface>
 
         <Surface>
-          <h2>Human handoff queue</h2>
+          <h2>{t("orchestration.handoffs")}</h2>
           <form
             className="feature-form"
             onSubmit={(event) => void createHandoff(event)}
           >
-            <label htmlFor="handoff-contact">WhatsApp conversation</label>
-            <select id="handoff-contact" name="contactId" required>
-              {conversations.map((conversation) => (
-                <option key={conversation.id} value={conversation.contactId}>
-                  {conversation.contactName}
-                </option>
-              ))}
-            </select>
-            <Input
-              id="handoff-reason"
-              label="Safe handoff reason"
-              name="reasonSafe"
-              required
-            />
-            <Button
-              disabled={pending || conversations.length === 0}
-              type="submit"
+            <fieldset
+              className="form-fieldset"
+              disabled={pending || !canHandoff}
             >
-              Request handoff
-            </Button>
+              {!canHandoff ? (
+                <p className="public-note">{t("common.readOnly")}</p>
+              ) : null}
+              <label htmlFor="handoff-contact">
+                {t("orchestration.whatsappConversation")}
+              </label>
+              <select id="handoff-contact" name="contactId" required>
+                {conversations.map((conversation) => (
+                  <option key={conversation.id} value={conversation.contactId}>
+                    {conversation.contactName}
+                  </option>
+                ))}
+              </select>
+              <Input
+                id="handoff-reason"
+                label={t("orchestration.handoffReason")}
+                name="reasonSafe"
+                required
+              />
+              <Button
+                disabled={pending || !canHandoff || conversations.length === 0}
+                type="submit"
+              >
+                {t("orchestration.request")}
+              </Button>
+            </fieldset>
           </form>
           <div className="operation-list">
             {handoffs.map((handoff) => (
@@ -464,16 +547,21 @@ export function OrchestrationPanel({
                 <div>
                   <strong>{handoff.reasonSafe}</strong>
                   <p>
-                    {handoff.sourceChannel} · {handoff.requestedAt}
+                    {handoff.sourceChannel} ·{" "}
+                    {new Date(handoff.requestedAt).toLocaleString(locale)}
                   </p>
                 </div>
                 <Badge
-                  label={handoff.status}
+                  label={
+                    t.has(`status.${handoff.status}`)
+                      ? t(`status.${handoff.status}`)
+                      : t("common.unknown")
+                  }
                   tone={handoff.status === "resolved" ? "positive" : "info"}
                 />
                 {handoff.status === "pending" ? (
                   <Button
-                    disabled={pending}
+                    disabled={pending || !canHandoff}
                     onClick={() =>
                       void run(() =>
                         crmMutation(
@@ -485,11 +573,11 @@ export function OrchestrationPanel({
                     }
                     variant="quiet"
                   >
-                    Accept
+                    {t("orchestration.accept")}
                   </Button>
                 ) : handoff.status === "accepted" ? (
                   <Button
-                    disabled={pending}
+                    disabled={pending || !canHandoff}
                     onClick={() =>
                       void run(() =>
                         crmMutation(
@@ -501,7 +589,7 @@ export function OrchestrationPanel({
                     }
                     variant="quiet"
                   >
-                    Resolve
+                    {t("orchestration.resolve")}
                   </Button>
                 ) : null}
               </article>
@@ -511,15 +599,39 @@ export function OrchestrationPanel({
       </div>
 
       <Surface>
-        <h2>Unified contact activity</h2>
+        <h2>{t("orchestration.activity")}</h2>
+        {contacts.length ? (
+          <form action="/orchestration" className="feature-toolbar">
+            <label>
+              {t("orchestration.contact")}
+              <select name="contact" defaultValue={activityContactId}>
+                {contacts.map((contact) => (
+                  <option key={contact.id} value={contact.id}>
+                    {contact.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <Button type="submit" variant="secondary">
+              {t("common.details")}
+            </Button>
+          </form>
+        ) : null}
+        {activity.length === 0 ? (
+          <p className="public-note">{t("orchestration.none")}</p>
+        ) : null}
         <ol className="timeline">
           {activity.map((item) => (
             <li key={`${item.sourceType}-${item.eventId}`}>
               <div>
-                <strong>{item.eventType}</strong>
-                <time>{item.occurredAt}</time>
+                <strong>{activityLabel(item.eventType, t)}</strong>
+                <time>{new Date(item.occurredAt).toLocaleString(locale)}</time>
               </div>
-              <pre>{JSON.stringify(item.metadata, null, 2)}</pre>
+              <details className="technical-details">
+                <summary>{t("contacts.technical")}</summary>
+                <code dir="ltr">{item.eventType}</code>
+                <pre>{JSON.stringify(item.metadata, null, 2)}</pre>
+              </details>
             </li>
           ))}
         </ol>

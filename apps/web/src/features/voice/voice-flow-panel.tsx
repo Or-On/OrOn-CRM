@@ -1,5 +1,9 @@
 "use client";
 
+import { errorMessage } from "../../i18n/error-message";
+import { useCapability } from "../access";
+import { useTranslations } from "next-intl";
+
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -37,6 +41,8 @@ export function VoiceFlowPanel({
   readonly catalog: ComponentCatalog;
   readonly flows: readonly FlowSummary[];
 }) {
+  const t = useTranslations();
+  const canEdit = useCapability("voice:operate");
   const router = useRouter();
   const [source, setSource] = useState(EXAMPLE);
   const [message, setMessage] = useState<string>();
@@ -52,7 +58,7 @@ export function VoiceFlowPanel({
         typeof parsed !== "object" ||
         Array.isArray(parsed)
       )
-        throw new TypeError("Flow source must be a JSON object");
+        throw new TypeError(t("voice.sourceInvalid"));
       const result = (await voiceMutation(path, { source: parsed })) as {
         valid?: boolean;
         errors?: string[];
@@ -61,14 +67,12 @@ export function VoiceFlowPanel({
         result.valid === false
           ? result.errors?.join("; ")
           : path.endsWith("publish")
-            ? "Immutable version published."
-            : "Flow is valid.",
+            ? t("voice.published")
+            : t("voice.valid"),
       );
       router.refresh();
     } catch (error) {
-      setMessage(
-        error instanceof Error ? error.message : "Flow operation failed",
-      );
+      setMessage(errorMessage(error, t, "voice.flowFailed"));
     } finally {
       setPending(false);
     }
@@ -79,12 +83,15 @@ export function VoiceFlowPanel({
       <Surface level="raised">
         <div className="feature-heading">
           <div>
-            <p className="eyebrow">Pipecat adapter</p>
-            <h2>Voice flows</h2>
+            <p className="eyebrow">{t("voice.adapter")}</p>
+            <h2>{t("voice.flows")}</h2>
           </div>
-          <Badge label={`Catalog ${catalog.spec_version}`} tone="info" />
+          <Badge
+            label={t("voice.catalogVersion", { version: catalog.spec_version })}
+            tone="info"
+          />
         </div>
-        <label htmlFor="flow-source">Versioned flow JSON</label>
+        <label htmlFor="flow-source">{t("voice.source")}</label>
         <textarea
           className="code-editor"
           dir="ltr"
@@ -96,27 +103,24 @@ export function VoiceFlowPanel({
         />
         <div className="action-row">
           <Button
-            disabled={pending}
+            disabled={pending || !canEdit}
             onClick={() => void act("/api/voice/flows/validate")}
             variant="secondary"
           >
-            Validate
+            {t("voice.validate")}
           </Button>
           <Button
-            disabled={pending}
+            disabled={pending || !canEdit}
             onClick={() => void act("/api/voice/flows/publish")}
           >
-            Publish version
+            {t("voice.publish")}
           </Button>
         </div>
         {message === undefined ? null : <p aria-live="polite">{message}</p>}
       </Surface>
       <Surface>
-        <h2>Published catalog</h2>
-        <p>
-          {catalog.components.length} retained typed components available. This
-          is the voice adapter, not the Phase 7 cross-channel compiler.
-        </p>
+        <h2>{t("voice.catalog")}</h2>
+        <p>{t("voice.components", { count: catalog.components.length })}</p>
         <div className="operation-list">
           {flows.map((flow) => (
             <article key={flow.flow_id}>
@@ -127,7 +131,7 @@ export function VoiceFlowPanel({
                 </p>
               </div>
               <Badge
-                label={flow.packaged ? "packaged" : "tenant"}
+                label={t(flow.packaged ? "voice.packaged" : "voice.tenant")}
                 tone="neutral"
               />
             </article>

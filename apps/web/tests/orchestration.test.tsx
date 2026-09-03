@@ -1,4 +1,4 @@
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderMarkup as renderToStaticMarkup } from "./localized";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const state = vi.hoisted(() => ({
   queue: vi.fn(),
@@ -85,6 +85,7 @@ describe("canonical simulator API and UI", () => {
             description: null,
             version: 1,
             published: true,
+            executionKind: "canonical",
             validationStatus: "valid",
             createdAt: "2026-09-02",
           },

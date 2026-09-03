@@ -1,5 +1,9 @@
 "use client";
 
+import { errorMessage } from "../../i18n/error-message";
+import { useCapability } from "../access";
+import { useTranslations, useLocale } from "next-intl";
+
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type SyntheticEvent } from "react";
@@ -25,6 +29,9 @@ export function VoiceOverview({
   readonly reconciliation: ReconciliationReport;
   readonly sessions: readonly VoiceSessionSummary[];
 }) {
+  const t = useTranslations();
+  const canEdit = useCapability("voice:operate");
+  const locale = useLocale();
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
@@ -37,7 +44,7 @@ export function VoiceOverview({
     const data = new FormData(form);
     const allowedAddress = data.get("allowedAddress");
     if (typeof allowedAddress !== "string") {
-      setError("Restricted carrier CIDR is required");
+      setError(t("voice.cidrRequired"));
       return;
     }
     setPending(true);
@@ -52,9 +59,7 @@ export function VoiceOverview({
       form.reset();
       router.refresh();
     } catch (caught) {
-      setError(
-        caught instanceof Error ? caught.message : "Registration failed",
-      );
+      setError(errorMessage(caught, t, "voice.registrationFailed"));
     } finally {
       setPending(false);
     }
@@ -65,51 +70,55 @@ export function VoiceOverview({
       <Surface level="raised">
         <div className="feature-heading">
           <div>
-            <p className="eyebrow">Simulator-first</p>
-            <h2>Call operations</h2>
+            <p className="eyebrow">{t("voice.simulatorFirst")}</p>
+            <h2>{t("voice.operations")}</h2>
           </div>
-          <Badge label="Real calls disabled" tone="neutral" />
+          <Badge label={t("voice.disabled")} tone="neutral" />
         </div>
         <dl className="metric-grid">
           <div>
-            <dt>Calls</dt>
+            <dt>{t("voice.calls")}</dt>
             <dd>{sessions.length}</dd>
           </div>
           <div>
-            <dt>Completed</dt>
+            <dt>{t("voice.completed")}</dt>
             <dd>{completed}</dd>
           </div>
           <div>
-            <dt>Answered</dt>
+            <dt>{t("voice.answered")}</dt>
             <dd>{answered}</dd>
           </div>
           <div>
-            <dt>DIDs</dt>
+            <dt>{t("voice.dids")}</dt>
             <dd>{numbers.length}</dd>
           </div>
         </dl>
-        <div className="operation-list" aria-label="Recent calls">
+        <div className="operation-list" aria-label={t("voice.recent")}>
           {sessions.length === 0 ? (
-            <p>No calls yet.</p>
+            <p>{t("voice.empty")}</p>
           ) : (
             sessions.map((session) => (
               <article key={session.session_id}>
                 <div>
                   <strong>{session.session_id.slice(0, 8)}</strong>
                   <p>
-                    {new Date(session.created_at).toLocaleString()} ·{" "}
+                    {new Date(session.created_at).toLocaleString(locale)} ·{" "}
                     {session.provider}
                   </p>
                 </div>
                 <Badge
-                  label={session.status}
+                  label={
+                    t.has(`status.${session.status}`)
+                      ? t(`status.${session.status}`)
+                      : t("common.unknown")
+                  }
                   tone={session.status === "ended" ? "positive" : "info"}
                 />
                 <Link
                   className="text-link"
                   href={`/voice/calls/${session.session_id}`}
                 >
-                  Inspect
+                  {t("voice.inspect")}
                 </Link>
               </article>
             ))
@@ -120,13 +129,11 @@ export function VoiceOverview({
       <Surface>
         <div className="feature-heading">
           <div>
-            <p className="eyebrow">SIP admission</p>
-            <h2>Phone numbers</h2>
+            <p className="eyebrow">{t("voice.sip")}</p>
+            <h2>{t("voice.numbers")}</h2>
           </div>
           <Badge
-            label={
-              reconciliation.ok ? "Canonical state coherent" : "Drift detected"
-            }
+            label={reconciliation.ok ? t("voice.coherent") : t("voice.drift")}
             tone={reconciliation.ok ? "positive" : "warning"}
           />
         </div>
@@ -134,32 +141,40 @@ export function VoiceOverview({
           className="feature-form"
           onSubmit={(event) => void register(event)}
         >
-          <Input
-            id="did-e164"
-            label="DID in E.164"
-            name="e164"
-            placeholder="+15550101010"
-            required
-          />
-          <label htmlFor="did-flow">Published voice flow</label>
-          <select id="did-flow" name="flowId" required>
-            <option value="">Select flow</option>
-            {flows.map((flow) => (
-              <option key={flow.flow_id} value={flow.flow_id}>
-                {flow.name} · v{flow.latest_version}
-              </option>
-            ))}
-          </select>
-          <Input
-            id="did-acl"
-            label="Restricted carrier CIDR"
-            name="allowedAddress"
-            placeholder="203.0.113.0/24"
-            required
-          />
-          <Button disabled={pending || flows.length === 0} type="submit">
-            Register simulator DID
-          </Button>
+          <fieldset className="form-fieldset" disabled={pending || !canEdit}>
+            {!canEdit ? (
+              <p className="public-note">{t("common.readOnly")}</p>
+            ) : null}
+            <Input
+              id="did-e164"
+              label={t("voice.did")}
+              name="e164"
+              placeholder="+15550101010"
+              required
+            />
+            <label htmlFor="did-flow">{t("voice.flow")}</label>
+            <select id="did-flow" name="flowId" required>
+              <option value="">{t("voice.select")}</option>
+              {flows.map((flow) => (
+                <option key={flow.flow_id} value={flow.flow_id}>
+                  {flow.name} · v{flow.latest_version}
+                </option>
+              ))}
+            </select>
+            <Input
+              id="did-acl"
+              label={t("voice.cidr")}
+              name="allowedAddress"
+              placeholder="203.0.113.0/24"
+              required
+            />
+            <Button
+              disabled={pending || !canEdit || flows.length === 0}
+              type="submit"
+            >
+              {t("voice.register")}
+            </Button>
+          </fieldset>
         </form>
         <div className="operation-list">
           {numbers.map((number) => (
@@ -168,7 +183,14 @@ export function VoiceOverview({
                 <strong>{number.e164}</strong>
                 <p>{number.dispatch_rule_id}</p>
               </div>
-              <Badge label={number.admission} tone="info" />
+              <Badge
+                label={
+                  t.has(`status.${number.admission}`)
+                    ? t(`status.${number.admission}`)
+                    : t("common.unknown")
+                }
+                tone="info"
+              />
             </article>
           ))}
         </div>

@@ -1,7 +1,10 @@
 "use client";
+import { useTranslations } from "next-intl";
 
 import {
   Activity,
+  PanelLeftClose,
+  PanelLeftOpen,
   Bot,
   ContactRound,
   Columns3,
@@ -27,6 +30,7 @@ import { Button, Dialog, Input } from "@or-on/ui";
 import type { PublicSession } from "@or-on/auth";
 
 import { product } from "../../branding";
+import { LanguageControl } from "../../i18n/language-control";
 import { crmMutation } from "../crm";
 import { activeDestination, findDestinations, navigation } from "./navigation";
 
@@ -51,18 +55,30 @@ export function AppShell({
   readonly children: ReactNode;
   readonly session: PublicSession | undefined;
 }) {
+  const t = useTranslations();
   const pathname = usePathname();
   const router = useRouter();
   const { resolvedTheme, setTheme } = useTheme();
   const [themeMounted, setThemeMounted] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const menuButton = useRef<HTMLButtonElement>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [commandIndex, setCommandIndex] = useState(0);
   const [sessionPending, setSessionPending] = useState(false);
   const [sessionError, setSessionError] = useState<string>();
-  const commands = findDestinations(query);
+  const navKey = (href: string, icon: string) =>
+    href === "/voice/campaigns" ? "voiceCampaigns" : icon;
+  const groupLabel = (group: string) =>
+    t(
+      `shell.${group === "Workspace" ? "workspace" : group === "Operations" ? "operations" : "tools"}`,
+    );
+  const commands = findDestinations(
+    query,
+    (item) =>
+      `${t(`shell.${navKey(item.href, item.icon)}`)} ${groupLabel(item.group)} ${item.label}`,
+  );
   const active = activeDestination(pathname);
 
   useEffect(() => setThemeMounted(true), []);
@@ -99,9 +115,7 @@ export function AppShell({
       if (url.endsWith("logout")) router.replace("/login");
       router.refresh();
     } catch {
-      setSessionError(
-        "We couldn't confirm the session change. Refresh the page to check your current workspace.",
-      );
+      setSessionError(t("shell.sessionFailed"));
     } finally {
       setSessionPending(false);
     }
@@ -113,13 +127,13 @@ export function AppShell({
     router.push(href);
   }
 
-  if (session === undefined)
+  if (session === undefined || /^\/(en|he)(\/|$)/u.test(pathname))
     return <div className="auth-layout">{children}</div>;
 
   return (
-    <div className="shell">
+    <div className={`shell ${collapsed ? "shell--compact" : ""}`}>
       <a className="skip-link" href="#workspace-content">
-        Skip to workspace
+        {t("shell.skip")}
       </a>
       <header className="shell__mobile-header">
         <Link href="/" className="mobile-brand">
@@ -128,7 +142,7 @@ export function AppShell({
         <Button
           aria-controls="workspace-navigation"
           aria-expanded={menuOpen}
-          aria-label={menuOpen ? "Close navigation" : "Open navigation"}
+          aria-label={menuOpen ? t("shell.closeNav") : t("shell.openNav")}
           onClick={() => setMenuOpen((value) => !value)}
           ref={menuButton}
           variant="quiet"
@@ -142,44 +156,55 @@ export function AppShell({
       </header>
       <aside
         id="workspace-navigation"
-        aria-label="Workspace navigation"
+        aria-label={t("shell.navigation")}
         className={`shell__rail ${menuOpen ? "shell__rail--open" : ""}`}
       >
-        <Link
-          aria-label={`${product.name} overview`}
-          className="brand"
-          href="/"
-        >
+        <Link aria-label={t("shell.brandHome")} className="brand" href="/">
           <span aria-hidden="true" className="brand__mark">
             O<span />
           </span>
           <span className="brand__copy">
             <span className="brand__name">{product.name}</span>
-            <span className="brand__phase">Customer operations</span>
+            <span className="brand__phase">{t("shell.brandLine")}</span>
           </span>
         </Link>
         <Button
-          aria-label="Open command palette"
+          className="rail-collapse"
+          aria-label={t(collapsed ? "shell.expand" : "shell.collapse")}
+          aria-expanded={!collapsed}
+          onClick={() => setCollapsed((value) => !value)}
+          variant="quiet"
+        >
+          {collapsed ? (
+            <PanelLeftOpen aria-hidden="true" size={17} />
+          ) : (
+            <PanelLeftClose aria-hidden="true" size={17} />
+          )}
+        </Button>
+        <Button
+          aria-label={t("shell.openCommands")}
           className="shortcut"
           onClick={openPalette}
           variant="quiet"
         >
           <Search aria-hidden="true" size={15} />
-          <span>Search workspace</span>
+          <span>{t("shell.search")}</span>
           <kbd>Ctrl K</kbd>
         </Button>
-        <nav aria-label="Platform modules" className="nav">
+        <nav aria-label={t("shell.modules")} className="nav">
           {groups.map((group) => (
             <div className="nav__group" key={group}>
-              <p className="nav__group-label">{group}</p>
+              <p className="nav__group-label">{groupLabel(group)}</p>
               {navigation
                 .filter((item) => item.group === group)
-                .map(({ href, icon, label }) => {
+                .map(({ href, icon }) => {
                   const Icon = icons[icon];
+                  const label = t(`shell.${navKey(href, icon)}`);
                   return (
                     <Link
                       aria-current={active === href ? "page" : undefined}
                       aria-label={label}
+                      title={label}
                       className={`nav__item ${active === href ? "nav__item--active" : ""}`}
                       href={href}
                       key={href}
@@ -195,7 +220,7 @@ export function AppShell({
         </nav>
         <div className="shell__rail-footer">
           <label className="tenant-switcher" htmlFor="active-tenant">
-            <span>Workspace</span>
+            <span>{t("shell.workspace")}</span>
             <select
               disabled={sessionPending}
               id="active-tenant"
@@ -208,7 +233,7 @@ export function AppShell({
             >
               {session.memberships.map((membership) => (
                 <option key={membership.tenantId} value={membership.tenantId}>
-                  {membership.tenantName} · {membership.role}
+                  {membership.tenantName} · {t(`status.${membership.role}`)}
                 </option>
               ))}
             </select>
@@ -216,7 +241,7 @@ export function AppShell({
           <div className="identity-summary">
             <span dir="ltr">{session.user.email}</span>
             <Button
-              aria-label="Sign out"
+              aria-label={t("shell.signOut")}
               disabled={sessionPending}
               onClick={() => void postSession("/api/auth/logout")}
               variant="quiet"
@@ -226,8 +251,8 @@ export function AppShell({
             <Button
               aria-label={
                 themeMounted
-                  ? `Switch to ${resolvedTheme === "dark" ? "light" : "dark"} theme`
-                  : "Toggle color theme"
+                  ? t(resolvedTheme === "dark" ? "shell.light" : "shell.dark")
+                  : t("shell.themeToggle")
               }
               disabled={!themeMounted}
               onClick={() =>
@@ -242,6 +267,10 @@ export function AppShell({
               )}
             </Button>
           </div>
+          <LanguageControl />
+          <Link className="text-link" href="/start">
+            {t("common.guide")}
+          </Link>
           {sessionError ? (
             <p className="form-error" role="alert">
               {sessionError}
@@ -258,15 +287,16 @@ export function AppShell({
         {children}
       </div>
       <Dialog
-        description="Find a destination. Use the arrow keys to choose and Enter to open."
+        closeLabel={t("common.close")}
+        description={t("shell.commandsHint")}
         onClose={() => setPaletteOpen(false)}
         open={paletteOpen}
-        title="Your workspace, one shortcut away"
+        title={t("shell.commandsTitle")}
       >
         <Input
-          autoFocus
+          data-dialog-initial-focus
           id="command-search"
-          label="Find a destination"
+          label={t("shell.destination")}
           onChange={(event) => {
             setQuery(event.target.value);
             setCommandIndex(0);
@@ -297,14 +327,14 @@ export function AppShell({
               ? `command-${String(commandIndex)}`
               : undefined
           }
-          placeholder="Inbox, contacts, calls…"
+          placeholder={t("shell.searchHint")}
           value={query}
         />
         <div
           className="command-list"
           id="command-results"
           role="listbox"
-          aria-label="Destinations"
+          aria-label={t("shell.destinations")}
         >
           {commands.map((item, index) => (
             <button
@@ -318,8 +348,8 @@ export function AppShell({
               type="button"
             >
               <span>
-                {item.label}
-                <small>{item.group}</small>
+                {t(`shell.${navKey(item.href, item.icon)}`)}
+                <small>{groupLabel(item.group)}</small>
               </span>
               <ArrowUpRight aria-hidden="true" size={16} />
             </button>
@@ -327,7 +357,7 @@ export function AppShell({
         </div>
         {commands.length === 0 ? (
           <p role="status" className="muted">
-            No destinations found. Try “Inbox” or “Voice”.
+            {t("shell.noResults")}
           </p>
         ) : null}
       </Dialog>
