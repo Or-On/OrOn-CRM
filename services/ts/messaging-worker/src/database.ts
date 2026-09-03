@@ -8,6 +8,8 @@ import {
   ingestWhatsAppStatus,
   parseStoredWhatsAppEnvelope,
   parseStoredWhatsAppStatusEnvelope,
+  messageDeliveryFailure,
+  type MessageDeliveryFailure,
 } from "@or-on/crm";
 
 import type { WhatsAppProvider, WhatsAppSendRequest } from "./providers.js";
@@ -91,9 +93,12 @@ async function processJob(
   workerId: string,
   job: JobRow,
   providers: Readonly<Record<"simulator" | "meta", WhatsAppProvider>>,
+  reportFailure:
+    | ((failure: MessageDeliveryFailure & { readonly jobId: string }) => void)
+    | undefined,
 ): Promise<void> {
   if (job.job_type === "whatsapp.outbound.send" && job.reference_id !== null) {
-    await processWhatsAppOutbound(sql, workerId, job, providers);
+    await processWhatsAppOutbound(sql, workerId, job, providers, reportFailure);
     return;
   }
   try {
@@ -239,6 +244,9 @@ async function processWhatsAppOutbound(
   workerId: string,
   job: JobRow,
   providers: Readonly<Record<"simulator" | "meta", WhatsAppProvider>>,
+  reportFailure:
+    | ((failure: MessageDeliveryFailure & { readonly jobId: string }) => void)
+    | undefined,
 ): Promise<void> {
   let work: OutboundWork | undefined;
   try {
@@ -264,7 +272,8 @@ async function processWhatsAppOutbound(
       `;
       await transaction`
         UPDATE messaging.messages
-        SET status = ${status}, provider_message_id = ${result.messageId}, updated_at = CURRENT_TIMESTAMP
+        SET status = ${status}, provider_message_id = ${result.messageId}, updated_at = CURRENT_TIMESTAMP,
+            provider_payload = provider_payload - 'whatsappSendDiagnostic'
         WHERE id = ${outboundWork.messageId}::uuid
       `;
       await transaction`
@@ -292,10 +301,13 @@ async function processWhatsAppOutbound(
     });
   } catch (error) {
     const retryable = error instanceof WhatsAppProviderError && error.retryable;
-    const code =
+    const failure = messageDeliveryFailure(
       error instanceof WhatsAppProviderError
         ? error.code
-        : "outbound_processing_failed";
+        : "outbound_processing_failed",
+      error instanceof WhatsAppProviderError ? error.diagnostic : null,
+    ) ?? { code: "outbound_processing_failed", diagnostic: null };
+    const code = failure.code;
     await sql.begin(async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
       if (!retryable) {
@@ -322,11 +334,14 @@ async function processWhatsAppOutbound(
           UPDATE messaging.messages SET status = CASE
             WHEN (SELECT status FROM ops.jobs WHERE id = ${job.id}::uuid) = 'dead'
               THEN 'failed' ELSE 'queued' END,
-            updated_at = CURRENT_TIMESTAMP
+            updated_at = CURRENT_TIMESTAMP,
+            provider_payload = jsonb_set(COALESCE(provider_payload, '{}'::jsonb),
+              '{whatsappSendDiagnostic}', COALESCE(${transaction.json(failure.diagnostic === null ? null : { ...failure.diagnostic })}::jsonb, 'null'::jsonb), true)
           WHERE id = ${work.messageId}::uuid
         `;
       }
     });
+    reportFailure?.({ ...failure, jobId: job.id });
   }
 }
 
@@ -334,6 +349,9 @@ export function createMessagingStore(
   databaseUrl: string,
   workerId: string,
   providers: Readonly<Record<"simulator" | "meta", WhatsAppProvider>>,
+  reportFailure?: (
+    failure: MessageDeliveryFailure & { readonly jobId: string },
+  ) => void,
 ): MessagingStore {
   const sql = postgres(databaseUrl, {
     connect_timeout: 2,
@@ -364,7 +382,8 @@ export function createMessagingStore(
         SELECT id, tenant_id, job_type, reference_id, payload
         FROM ops.claim_jobs_all_tenants(${workerId}, 'messaging', 25, 60)
       `;
-      for (const job of jobs) await processJob(sql, workerId, job, providers);
+      for (const job of jobs)
+        await processJob(sql, workerId, job, providers, reportFailure);
       return events.length + jobs.length;
     },
   };

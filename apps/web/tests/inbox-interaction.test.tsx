@@ -109,6 +109,34 @@ afterEach(() => {
 });
 
 describe("Inbox interaction safety (no provider network)", () => {
+  it("renders a polled send failure in the actual thread without resubmitting", async () => {
+    transport.read.mockResolvedValue({
+      messages: [
+        {
+          ...message("alpha", "Fictional failed reply"),
+          direction: "outbound",
+          status: "failed",
+          deliveryFailure: {
+            code: "meta_100",
+            diagnostic: {
+              version: 1,
+              httpStatus: 400,
+              metaCode: 100,
+              metaSubcode: 33,
+              reason: "resource_access",
+              retryable: false,
+            },
+          },
+        },
+      ],
+      nextCursor: null,
+    });
+    mount();
+    await screen.findByText("Delivery issue");
+    expect(screen.getByText("meta_100")).toBeTruthy();
+    expect(screen.getByText(/unavailable or inaccessible/)).toBeTruthy();
+    expect(transport.mutate).not.toHaveBeenCalled();
+  });
   it("preserves a draft when locale changes and keeps real confirmation in Hebrew", async () => {
     const content = () => (
       <InboxWorkspace

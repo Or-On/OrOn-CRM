@@ -60,6 +60,16 @@ for the shell session. No upstream dependency installation is necessary.
 
 ## Normal workflow
 
+For a provider-free check of the Inbox's new failure diagnostics:
+
+```powershell
+uv run --no-sync python scripts/preview_ui.py --check-messaging
+```
+
+This uses an owned fictional PostgreSQL database and mocked Meta HTTP; it does
+not start the development worker or consume its queues. See the
+[diagnostic behavior and restart precautions](whatsapp-cloud-api.md#send-diagnostics-in-the-inbox).
+
 ```bash
 make doctor
 make bootstrap

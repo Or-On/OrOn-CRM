@@ -240,6 +240,22 @@ content, assistive-technology acceptance and complete simulator rehearsals remai
 open. The isolated UI preview removes real-provider environment values and cannot
 connect to the developer control API or consume developer queues.
 
+### WhatsApp diagnostic disclosure
+
+Implemented: provider error code fields accept bounded numbers only. HTTP error
+descriptions are mapped to fixed safe reason enums, never persisted verbatim or
+logged. The parser drops arbitrary fields at both provider and database/API
+boundaries, including provider trace strings. The Inbox renders localized text
+and numeric codes, not raw HTML. Existing tenant RLS and `crm:read` protect reads;
+diagnostic controls cannot requeue/send. Mocked HTTP and isolated PostgreSQL tests
+cover token/recipient/body omission, tenant isolation and clearing stale details
+after success. No existing developer failures or queues are mutated by this work.
+
+Limit: unknown provider wording is intentionally unavailable, so a numeric code
+alone may still be insufficient for a definitive root cause. Future recognized
+reason additions require redaction regression fixtures; never switch to logging
+the complete Meta error object to bypass this limitation.
+
 ### Ongoing review
 
 Review this model before adding authentication, tenant tables/RLS, public

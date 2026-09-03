@@ -1,5 +1,7 @@
 "use client";
 
+import { DeliveryFailure } from "./delivery-failure";
+
 import { errorMessage } from "../../i18n/error-message";
 import { useTranslations, useLocale } from "next-intl";
 
@@ -439,6 +441,9 @@ export function ConversationThread({
                   : t("inbox.received")}
               </span>
             </footer>
+            {message.status === "failed" || message.deliveryFailure ? (
+              <DeliveryFailure failure={message.deliveryFailure} />
+            ) : null}
             {message.deliveryEvents.length ? (
               <details className="delivery-history">
                 <summary>{t("inbox.deliveryHistory")}</summary>

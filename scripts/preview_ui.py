@@ -44,7 +44,10 @@ def run(command: list[str], environment: dict[str, str], *, cwd: Path = ROOT) ->
         capture_output=True,
     )
     if completed.returncode:
-        if command == ["pnpm", "--filter", "@or-on/crm", "test"]:
+        if (
+            command == ["pnpm", "--filter", "@or-on/crm", "test"]
+            or command[-1] == "tests/diagnostics.live.test.ts"
+        ):
             diagnostic = completed.stdout + completed.stderr
             for key, value in environment.items():
                 if any(word in key for word in ("URL", "PASSWORD", "SECRET", "PEPPER")) and value:
@@ -55,10 +58,12 @@ def run(command: list[str], environment: dict[str, str], *, cwd: Path = ROOT) ->
     return completed.stdout.strip()
 
 
-async def main(*, check_db: bool = False, production: bool = False) -> None:
+async def main(
+    *, check_db: bool = False, check_messaging: bool = False, production: bool = False
+) -> None:
     if production and not (ROOT / "apps/web/.next/BUILD_ID").is_file():
         raise ValueError("Production preview requires pnpm build first")
-    if not check_db:
+    if not check_db and not check_messaging:
         with socket.socket() as probe:
             probe.bind(("127.0.0.1", 3100))
     source = _load_environment().get("MIGRATION_DATABASE_URL", "")
@@ -149,13 +154,36 @@ async def main(*, check_db: bool = False, production: bool = False) -> None:
             "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS"
         )
         role_created = True
-        await admin.execute(f'GRANT platform_web TO "{login_role}"')
+        runtime_role = "platform_messaging" if check_messaging else "platform_web"
+        await admin.execute(f'GRANT {runtime_role} TO "{login_role}"')
         parsed = urlsplit(target)
         host = f"[{parsed.hostname}]" if parsed.hostname == "::1" else parsed.hostname
         environment["DATABASE_URL"] = (
             f"postgresql://{login_role}:{quote(role_password)}@{host}:"
             f"{parsed.port or 5432}/{database}"
         )
+        if check_messaging:
+            environment["MESSAGING_DIAGNOSTICS_TEST_DATABASE_URL"] = target
+            environment["MESSAGING_DIAGNOSTICS_RUNTIME_DATABASE_URL"] = environment["DATABASE_URL"]
+            result = run(
+                [
+                    "pnpm",
+                    "--filter",
+                    "@or-on/messaging-worker",
+                    "exec",
+                    "vitest",
+                    "run",
+                    "tests/diagnostics.live.test.ts",
+                ],
+                environment,
+            )
+            for line in result.splitlines():
+                if "Test Files" in line or "Tests " in line:
+                    print(line, flush=True)
+            print(
+                "Isolated messaging diagnostics passed. All provider HTTP was mocked.", flush=True
+            )
+            return
         if check_db:
             environment["UI_TEST_DATABASE_URL"] = environment["DATABASE_URL"]
             result = run(["pnpm", "--filter", "@or-on/crm", "test"], environment)
@@ -224,7 +252,7 @@ async def main(*, check_db: bool = False, production: bool = False) -> None:
         if role_created:
             await admin.execute(f'DROP ROLE "{login_role}"')
         await admin.close()
-        if not check_db:
+        if not check_db and not check_messaging:
             artifact.unlink(missing_ok=True)
         print(
             "Owned preview database/login removed; developer database and .env untouched.",
@@ -240,9 +268,22 @@ if __name__ == "__main__":
     parser.add_argument(
         "--production", action="store_true", help="Preview existing Next production output"
     )
+    parser.add_argument(
+        "--check-messaging",
+        action="store_true",
+        help="Run mocked-provider diagnostics on an owned database as platform_messaging",
+    )
     arguments = parser.parse_args()
     try:
-        asyncio.run(main(check_db=arguments.check_db, production=arguments.production))
+        if sum((arguments.check_db, arguments.check_messaging, arguments.production)) > 1:
+            parser.error("Choose only one of --check-db, --check-messaging, or --production")
+        asyncio.run(
+            main(
+                check_db=arguments.check_db,
+                check_messaging=arguments.check_messaging,
+                production=arguments.production,
+            )
+        )
     except KeyboardInterrupt:
         pass
     except Exception as error:

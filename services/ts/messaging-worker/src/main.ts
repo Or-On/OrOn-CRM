@@ -20,6 +20,11 @@ async function main(): Promise<void> {
   if (config.messagingDatabaseUrl === undefined) {
     throw new Error("messaging-worker requires MESSAGING_DATABASE_URL");
   }
+  const logger = createLogger({
+    service: config.service,
+    environment: config.environment,
+    level: config.logLevel,
+  });
   const store = createMessagingStore(
     config.messagingDatabaseUrl,
     `messaging-${randomUUID()}`,
@@ -32,12 +37,8 @@ async function main(): Promise<void> {
         phoneNumberId: config.whatsApp.phoneNumberId,
       }),
     },
+    (failure) => logger.warn({ ...failure }, "whatsapp_outbound_failed"),
   );
-  const logger = createLogger({
-    service: config.service,
-    environment: config.environment,
-    level: config.logLevel,
-  });
   const abortController = new AbortController();
   const stop = Promise.race([
     once(process, "SIGINT", { signal: abortController.signal }).then(

@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import type { WhatsAppSendDiagnostic } from "@or-on/crm";
+import { metaDiagnostic } from "./meta-diagnostics.js";
 
 export type WhatsAppDelivery =
   | { readonly kind: "text"; readonly text: string }
@@ -29,6 +31,7 @@ export class WhatsAppProviderError extends Error {
     public readonly code: string,
     public readonly retryable: boolean,
     public readonly status?: number,
+    public readonly diagnostic?: WhatsAppSendDiagnostic,
   ) {
     super(`WhatsApp provider request failed (${code})`);
     this.name = "WhatsAppProviderError";
@@ -126,18 +129,6 @@ function metaPayload(delivery: WhatsAppDelivery, recipient: string): object {
   };
 }
 
-function responseCode(payload: unknown): string {
-  if (payload === null || typeof payload !== "object" || !("error" in payload))
-    return "meta_http_error";
-  const error = payload.error;
-  if (error === null || typeof error !== "object" || !("code" in error))
-    return "meta_http_error";
-  const code = error.code;
-  return typeof code === "number" || typeof code === "string"
-    ? `meta_${String(code)}`
-    : "meta_http_error";
-}
-
 export class MetaWhatsAppProvider implements WhatsAppProvider {
   public readonly name = "meta" as const;
   readonly #options: MetaWhatsAppProviderOptions;
@@ -195,10 +186,13 @@ export class MetaWhatsAppProvider implements WhatsAppProvider {
           .json()
           .catch(() => undefined)) as unknown;
         if (response.ok) {
-          const record = payload as {
-            readonly messages?: readonly { readonly id?: unknown }[];
-          };
-          const id = record.messages?.[0]?.id;
+          const record = payload as
+            | {
+                readonly messages?: readonly { readonly id?: unknown }[];
+              }
+            | null
+            | undefined;
+          const id = record?.messages?.[0]?.id;
           if (typeof id !== "string" || id.length === 0)
             throw new WhatsAppProviderError(
               "invalid_meta_response",
@@ -208,12 +202,21 @@ export class MetaWhatsAppProvider implements WhatsAppProvider {
           return { messageId: id };
         }
         const retryable = response.status === 429 || response.status >= 500;
-        if (!retryable || attempt === maxAttempts)
+        if (!retryable || attempt === maxAttempts) {
+          const diagnostic = metaDiagnostic(
+            payload,
+            response.status,
+            retryable,
+          );
           throw new WhatsAppProviderError(
-            responseCode(payload),
+            diagnostic.metaCode === null
+              ? "meta_http_error"
+              : `meta_${String(diagnostic.metaCode)}`,
             retryable,
             response.status,
+            diagnostic,
           );
+        }
       } catch (error) {
         if (error instanceof WhatsAppProviderError) throw error;
         if (attempt === maxAttempts) {

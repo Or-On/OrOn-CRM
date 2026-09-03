@@ -1,3 +1,5 @@
+import type { MessageDeliveryFailure } from "./whatsapp-diagnostics.js";
+
 export interface ContactIdentity {
   readonly id: string;
   readonly channel: "phone" | "whatsapp" | "email" | "sip" | "external";
@@ -109,6 +111,7 @@ export interface Message {
   readonly createdAt: string;
   readonly reactions: readonly string[];
   readonly deliveryEvents: readonly MessageDeliveryEvent[];
+  readonly deliveryFailure?: MessageDeliveryFailure | null;
   readonly template?: TemplateSummary | null;
   readonly historyCursor?: MessageCursor;
 }

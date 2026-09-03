@@ -31,6 +31,115 @@ function provider(
 }
 
 describe("WhatsApp providers", () => {
+  it.each([
+    [{ code: 100, error_subcode: 33 }, 400, "resource_access"],
+    [
+      {
+        code: 100,
+        message: "Allows the endpoint to be called by apps with the capability",
+      },
+      400,
+      "app_capability",
+    ],
+    [
+      {
+        code: 100,
+        error_data: {
+          details: "Only test phone numbers can use the hello_world template",
+        },
+      },
+      400,
+      "test_template",
+    ],
+    [{ code: 132001 }, 400, "template_missing"],
+    [{ code: 132000 }, 400, "template_parameters"],
+    [{ code: 131047 }, 400, "customer_service_window"],
+    [{ code: 190 }, 401, "authentication"],
+    [{ code: 131005 }, 403, "permission"],
+    [{ code: 100 }, 400, "invalid_parameter"],
+    [{ code: 130429 }, 429, "rate_limit"],
+    [{ code: 131000 }, 503, "provider_unavailable"],
+  ] as const)("retains safe details for %j", async (error, status, reason) => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockImplementation(() =>
+        Promise.resolve(new Response(JSON.stringify({ error }), { status })),
+      );
+    await expect(
+      provider(fetcher, { maxAttempts: 2 }).send(request),
+    ).rejects.toMatchObject({
+      diagnostic: {
+        version: 1,
+        httpStatus: status,
+        metaCode: error.code,
+        reason,
+        retryable: status >= 500 || status === 429,
+      },
+    });
+    expect(fetcher).toHaveBeenCalledTimes(
+      status >= 500 || status === 429 ? 2 : 1,
+    );
+  });
+
+  it("cannot echo secrets or PII through any provider error field", async () => {
+    const privateText =
+      "never-log-token private-message-body +972501234567 private@example.invalid <script>alert(1)</script>";
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: privateText,
+            error_subcode: privateText,
+            message: privateText,
+            error_user_title: privateText,
+            error_user_msg: privateText,
+            fbtrace_id: privateText,
+            error_data: { details: privateText },
+          },
+        }),
+        { status: 400 },
+      ),
+    );
+    const error: unknown = await provider(fetcher)
+      .send(request)
+      .catch((value: unknown) => value);
+    expect(error).toMatchObject({
+      code: "meta_http_error",
+      diagnostic: {
+        metaCode: null,
+        metaSubcode: null,
+        reason: "unknown",
+        httpStatus: 400,
+      },
+    });
+    const output = JSON.stringify(error) + String(error);
+    for (const value of privateText.split(" "))
+      expect(output).not.toContain(value);
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
+  it("handles non-JSON rejections without retaining their body", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        new Response("<html>private-token</html>", { status: 403 }),
+      );
+    await expect(provider(fetcher).send(request)).rejects.toMatchObject({
+      code: "meta_http_error",
+      diagnostic: { httpStatus: 403, metaCode: null, reason: "unknown" },
+    });
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
+  it("maps a null successful response to an invalid response, not a network retry", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response("null", { status: 200 }));
+    await expect(provider(fetcher).send(request)).rejects.toMatchObject({
+      code: "invalid_meta_response",
+    });
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
   it("keeps simulator deterministic and network-free", async () => {
     const simulator = new SimulatorWhatsAppProvider();
     expect(await simulator.send(request)).toEqual(

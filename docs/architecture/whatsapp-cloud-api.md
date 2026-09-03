@@ -64,6 +64,35 @@ idempotency key prevents duplicate admission/claims, but Meta's messages edge
 does not expose a platform idempotency-key contract. Operational retry of an
 ambiguous send must inspect Meta delivery evidence first.
 
+## Safe outbound diagnostics (2026-09-03)
+
+The worker records version-1 `WhatsAppSendDiagnostic` metadata in the existing
+`messaging.messages.provider_payload.whatsappSendDiagnostic` JSONB key, in the
+same transaction as failure/retry state. No schema migration or provider change
+is needed. Other payload keys remain intact, including on non-HTTP failures;
+successful retry clears the diagnostic and the existing outbound error code.
+
+Numeric HTTP/code/subcode and a fixed reason enum are the complete contract.
+The adapter inspects bounded `error.message` and `error_data.details` only to
+recognize explanations such as test-template, resource-access, or app-capability
+restrictions. It never persists or logs those strings, user-facing provider
+titles, raw response objects, or trace strings. Unknown explanations stay unknown.
+Numeric code values are validated even if Meta supplies strings; arbitrary strings
+cannot become error codes or log data.
+
+The shared CRM projection explicitly reconstructs the safe DTO instead of
+spreading provider JSON. The existing tenant/RLS-protected message-page query
+joins `outbound_requests` through its unique `(tenant_id, message_id)` index for
+legacy codes. English/Hebrew inbox details and the structured worker log consume
+this projection. No new authorization bypass, automatic resend, provider request,
+or retry policy is introduced. Old errors cannot be retroactively reconstructed.
+
+The isolated `preview_ui.py --check-messaging` gate uses PostgreSQL and the
+`platform_messaging` runtime role with mocked HTTP. It verifies persistence,
+secret/PII omission, tenant-scoped `platform_web` projection, permanent duplicate
+processing refusal, transient exhaustion, successful retry cleanup, and that
+provider requests happen outside a database transaction.
+
 ## Webhook boundary
 
 GET verification compares `hub.verify_token` with the env-only verify token and

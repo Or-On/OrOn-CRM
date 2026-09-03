@@ -3,10 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const state = vi.hoisted(() => ({
   enabled: false,
   queue: vi.fn(),
+  page: vi.fn(),
+  permission: vi.fn(),
 }));
 
 vi.mock("@or-on/crm", () => ({
-  listMessages: vi.fn(() => Promise.resolve([])),
+  listMessagePage: state.page,
+  parseMessageCursor: () => undefined,
   queueWhatsAppOutbound: state.queue,
 }));
 vi.mock("@or-on/config", () => ({
@@ -28,7 +31,10 @@ vi.mock("../src/features/auth", () => ({
   withCurrentTenant: (
     _permission: string,
     operation: (...args: unknown[]) => unknown,
-  ) => operation({}, { userId: "20000000-0000-4000-8000-000000000001" }),
+  ) => {
+    state.permission(_permission);
+    return operation({}, { userId: "20000000-0000-4000-8000-000000000001" });
+  },
 }));
 vi.mock("../src/features/crm-route", () => ({
   assertCrmMutation: () => Promise.resolve(),
@@ -39,7 +45,10 @@ vi.mock("../src/features/crm-route", () => ({
     ),
 }));
 
-import { POST } from "../src/app/api/messaging/conversations/[id]/messages/route";
+import {
+  GET,
+  POST,
+} from "../src/app/api/messaging/conversations/[id]/messages/route";
 import { GET as verifyWebhook } from "../src/app/api/webhooks/whatsapp/route";
 
 const context = {
@@ -49,6 +58,8 @@ const context = {
 describe("WhatsApp outbound API", () => {
   beforeEach(() => {
     state.enabled = false;
+    state.page.mockReset();
+    state.permission.mockClear();
     state.queue.mockReset().mockResolvedValue({
       conversationId: "conversation",
       messageId: "message",
@@ -56,6 +67,27 @@ describe("WhatsApp outbound API", () => {
       queued: true,
       requestId: "request",
     });
+  });
+
+  it("returns projected diagnostics through the existing authenticated tenant read", async () => {
+    const page = {
+      messages: [
+        {
+          id: "fixture",
+          deliveryFailure: { code: "meta_100", diagnostic: null },
+        },
+      ],
+      nextCursor: null,
+    };
+    state.page.mockResolvedValue(page);
+    const response = await GET(
+      new Request("http://localhost/api/messages"),
+      context,
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(page);
+    expect(state.permission).toHaveBeenCalledWith("crm:read");
+    expect(state.queue).not.toHaveBeenCalled();
   });
 
   it("defaults admission to the simulator", async () => {

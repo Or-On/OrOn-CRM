@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type postgres from "postgres";
 
 import { normalizeE164 } from "./phone.js";
+import { messageDeliveryFailure } from "./whatsapp-diagnostics.js";
 import type {
   ConversationSummary,
   Message,
@@ -49,6 +50,8 @@ interface MessageRow {
   delivery_events: unknown;
   structured_content: unknown;
   cursor_created_at: string;
+  outbound_error_code: unknown;
+  outbound_diagnostic: unknown;
 }
 
 /** Project only the submitted template fields, never arbitrary provider payloads. */
@@ -138,6 +141,13 @@ function mapMessage(row: MessageRow): Message {
         )
       : [],
     deliveryEvents: deliveryEvents(row.delivery_events),
+    deliveryFailure:
+      row.status === "failed" || row.status === "queued"
+        ? messageDeliveryFailure(
+            row.outbound_error_code,
+            row.outbound_diagnostic,
+          )
+        : null,
     template: templateSummary(row.structured_content),
     historyCursor: { id: row.id, createdAt: row.cursor_created_at },
   };
@@ -197,6 +207,8 @@ export async function listMessagePage(
     SELECT message.id, message.conversation_id, message.direction,
            message.sender_type, message.content_type, message.content_text,
            message.status, message.provider_message_id, message.created_at, message.structured_content,
+           outbound.last_error_code AS outbound_error_code,
+           message.provider_payload -> 'whatsappSendDiagnostic' AS outbound_diagnostic,
            to_char(message.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_created_at,
            COALESCE((SELECT jsonb_agg(reaction.emoji ORDER BY reaction.created_at)
                      FROM messaging.message_reactions reaction
@@ -208,6 +220,8 @@ export async function listMessagePage(
                      FROM messaging.message_delivery_events delivery
                      WHERE delivery.message_id = message.id), '[]') AS delivery_events
     FROM messaging.messages message
+    LEFT JOIN messaging.outbound_requests outbound
+      ON outbound.message_id = message.id AND outbound.tenant_id = message.tenant_id
     WHERE message.conversation_id = ${conversationId}::uuid
       AND (${before?.createdAt ?? null}::text::timestamptz IS NULL OR
            (message.created_at, message.id) < (${before?.createdAt ?? null}::text::timestamptz, ${before?.id ?? null}::uuid))

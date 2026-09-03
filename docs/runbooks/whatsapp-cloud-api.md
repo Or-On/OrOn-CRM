@@ -73,6 +73,42 @@ normal testing.
 
 ## Troubleshooting and shutdown
 
+### Send diagnostics in the Inbox
+
+Failed messages (and queued retries with a recorded error) now show **Delivery
+issue → Safe diagnostic details**, in English or Hebrew. This includes the
+saved code, HTTP status, numeric Meta subcode when supplied, the existing
+transient/permanent classification, and an allowlisted explanation derived from
+recognized provider errors. The worker logs the same safe fields under
+`whatsapp_outbound_failed`, with a job ID for correlation.
+
+No raw Meta error text, provider trace strings, access tokens, recipient numbers,
+message bodies, or template parameter values are included in these diagnostics.
+Unknown wording is deliberately omitted instead of relying on a best-effort
+secret regex. An unrecognized error remains explicitly unexplained. Code `100`
+alone does not prove a template, credential, or permission problem.
+
+Historical failures retain their saved code but cannot acquire details that were
+never recorded. This change does not requeue them. After restarting your own
+development runner, a future explicitly confirmed send will capture the new
+diagnostic; the diagnostic panel itself has no send/retry action. Review any
+existing queued real work before restarting, because the normal worker may
+process it. Neither environment values nor provider permissions need to be
+changed just to enable this local diagnostic feature. No migration is required.
+
+Run isolated PostgreSQL diagnostics with **mocked provider HTTP only**:
+
+```powershell
+uv run --no-sync python scripts/preview_ui.py --check-messaging
+```
+
+Use the pinned Node/pnpm workspace toolchain and build `@or-on/crm` first if its
+generated `dist` is stale. This runner creates/removes its own fictional database
+and login role, inherits no provider credentials, and exercises the store as
+`platform_messaging`. It does not start the real worker or consume developer jobs.
+Default unit suites keep these database tests explicitly skipped until this
+isolated test environment is supplied.
+
 - `provider_disabled`: flag is not exactly `true` in the process environment.
 - `provider_not_configured`: one of the six required WhatsApp env values is
   absent/invalid.

@@ -26,6 +26,44 @@ Last updated: 2026-09-03 (Asia/Jerusalem)
 
 ## Phase 7 implementation state
 
+### WhatsApp diagnostic checkpoint — 2026-09-03
+
+User-authorized follow-up to an uninformative `meta_100` send failure. Exact clean
+baseline: `54affdc30fb14ad2b7e02bb8865bddf40cff304f`. The user stopped the hot-reload
+development runner before worker edits, preventing incidental real-queue execution.
+
+| Task | State | Commit / evidence | Next exact task |
+| --- | --- | --- | --- |
+| P7-MD01 | complete | This diagnostic checkpoint: bounded Meta numeric codes/subcodes, fixed reason classifications, transactional JSONB persistence, redacted structured logging, tenant-scoped message projection, bilingual Inbox disclosure, backward-compatible historical-code display; no migration | User may restart after reviewing queued real work and inspect a future explicitly confirmed send; no resend performed by the agent |
+
+Four new tests passed against a newly migrated, owned PostgreSQL database with
+`platform_messaging` writes and `platform_web` reads: safe failure persistence and
+cross-/missing-tenant isolation, bounded retry exhaustion, successful retry
+cleanup, and disabled-provider refusal. All HTTP was mocked. The regression
+caught and corrected JSON-null serialization so non-HTTP failure metadata does
+not erase unrelated message payload keys. The CRM isolated regression also
+passed (38 tests, one unrelated cross-channel fixture skip). Both owned databases
+and generated login roles were removed. The developer database and `.env` were
+not mutated and no real message, worker restart, webhook or provider mutation
+was performed during implementation/testing.
+
+Raw Meta error strings and trace strings are intentionally not retained. Only
+recognized explanations are available, and historic failures cannot be enriched
+retroactively. No delivery guarantee or root cause for the prior send is claimed.
+
+Final local verification: all 155 default TypeScript tests passed (48 web,
+28 messaging worker, 37 CRM, 42 other workspace tests; 20 database tests remain
+explicitly separated from the default run). The four new live diagnostics tests
+and the 38-test focused CRM/PostgreSQL gate passed separately. All 32 Python
+script tests plus two migration-graph tests passed; Ruff and Pyrefly passed for
+the touched Python runner. Workspace Prettier, ESLint, strict TypeScript, all
+package builds, the Next.js production build, generated HTTP/event freshness,
+repository boundaries, documentation and secret guards passed. The CI database
+job now includes the isolated diagnostics gate; remote CI was not executed here.
+No dependency versions, schema revisions or provider settings changed. Broader
+voice rehearsals/accessibility acceptance remain the existing Phase 7 follow-up,
+not prerequisites newly claimed passed by this diagnostic checkpoint.
+
 ### Expanded bilingual brief — 2026-09-03
 
 The user requested a complete public/product bilingual implementation, extending
