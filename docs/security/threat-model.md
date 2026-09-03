@@ -258,6 +258,22 @@ the complete Meta error object to bypass this limitation.
 
 ### Ongoing review
 
+User-authorized local WhatsApp tunnel: the separate Caddy edge permits only the
+exact webhook route and GET/POST, caps body size at 1 MB and applies timeouts.
+Everything else is 404; PostgreSQL/core networks are not exposed. Containers run
+non-root/read-only without provider credentials, with pinned images, limited
+resources and no persisted request logs. The official Caddy executable's
+NET_BIND_SERVICE file capability is retained; all other capabilities are dropped.
+Next development request logging excludes callback URLs to protect verification
+query tokens. The app remains the signature/flag/deduplication authority.
+
+Cloudflare processes HTTPS callback traffic; quick tunnels are temporary and have
+no uptime guarantee. No claim is made about Cloudflare-side logging, production
+DoS resistance, dedicated per-sender rate limiting or WAF controls. Stop the
+explicit tunnel after development testing. Actual Meta subscription/inbound
+delivery remains a separate user-performed acceptance step. See the
+[webhook runbook](../runbooks/whatsapp-webhook-local.md).
+
 Review this model before adding authentication, tenant tables/RLS, public
 webhooks, real provider adapters, uploads, WebSocket protocol messages, tool
 execution, GCP resources, backup automation, or any new externally reachable

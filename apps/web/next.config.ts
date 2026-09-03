@@ -7,6 +7,10 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   transpilePackages: ["@or-on/api-client", "@or-on/config", "@or-on/ui"],
   typedRoutes: true,
+  logging: {
+    // Meta verifies callbacks with a secret in the query string.
+    incomingRequests: { ignore: [/^\/api\/webhooks\/whatsapp(?:[/?]|$)/] },
+  },
 };
 
 export default createNextIntlPlugin()(nextConfig);

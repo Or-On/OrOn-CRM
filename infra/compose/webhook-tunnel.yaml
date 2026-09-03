@@ -1,0 +1,81 @@
+# Opt-in localhost development only. No .env, provider credentials, or app/DB services.
+name: or-on-webhook-tunnel
+
+services:
+  gateway:
+    image: caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+    command:
+      [
+        "caddy",
+        "run",
+        "--config",
+        "/etc/caddy/Caddyfile",
+        "--adapter",
+        "caddyfile",
+      ]
+    user: "65532:65532"
+    read_only: true
+    cap_drop: [ALL]
+    # The official Caddy executable carries this file capability, even on high ports.
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
+    restart: "no"
+    mem_limit: 128m
+    pids_limit: 100
+    logging:
+      driver: none
+    tmpfs: [/config, /data]
+    volumes:
+      - ../caddy/Caddyfile.webhook-local:/etc/caddy/Caddyfile:ro
+    ports:
+      - "127.0.0.1:18787:8080"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "-q",
+          "-O",
+          "/dev/null",
+          "http://127.0.0.1:8081/health/live",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+    stop_grace_period: 10s
+    networks: [webhook-edge]
+
+  tunnel:
+    image: cloudflare/cloudflared:2026.8.3@sha256:51c9cefcb4569df44e1ad403ab1d3d8065aa8e84339bcfc6aee75502e1140339
+    command:
+      - tunnel
+      - --no-autoupdate
+      - --url
+      - http://gateway:8080
+      - --protocol
+      - http2
+      - --metrics
+      - 0.0.0.0:20241
+      - --loglevel
+      - fatal
+    user: "65532:65532"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: "no"
+    mem_limit: 128m
+    pids_limit: 100
+    # URLs can contain Meta's verification token; never persist tunnel request logs.
+    logging:
+      driver: none
+    ports:
+      - "127.0.0.1:18788:20241"
+    depends_on:
+      gateway:
+        condition: service_healthy
+    stop_grace_period: 10s
+    networks: [webhook-edge]
+
+networks:
+  webhook-edge:
+    driver: bridge

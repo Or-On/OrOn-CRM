@@ -26,6 +26,30 @@ Last updated: 2026-09-03 (Asia/Jerusalem)
 
 ## Phase 7 implementation state
 
+### Local webhook edge — 2026-09-03
+
+| Task | State | Commit / evidence | Next exact task |
+| --- | --- | --- | --- |
+| P7-WH01 | setup complete; Meta acceptance pending | This checkpoint, baseline `486eeaf`: user-authorized, dedicated pinned Caddy/cloudflared Compose stack; no worker restarts/provider credentials in edge. Public verification 200, wrong token 403, unsigned/tampered POST 401, signed empty envelope 200/zero events, oversized body 413, other paths/methods 404 | User configures Meta callback/messages/WABA subscription and sends a fresh personal inbound |
+
+No outbound message/call, Meta resource/subscription mutation, `.env` change,
+application queue modification or Terraform action was performed. The temporary
+Cloudflare edge was started with user authorization; real Meta inbound acceptance
+is not claimed. Only Next.js webhook request logging changed in application code
+to keep verification query tokens out of development logs; the worker was not
+restarted. Start/stop/URL discovery and template limitations are documented in
+`docs/runbooks/whatsapp-webhook-local.md`.
+
+Verification passed: Caddy configuration and container health, Compose validation,
+49 web unit tests (including webhook logging exclusion), affected ESLint/Prettier,
+strict web TypeScript and Next.js production build, repository/docs/secret guards.
+The public HTTP probes used no customer payload and no Meta Graph mutation/send;
+the signed empty envelope generated zero durable events. All upstream worktrees
+remained clean at locked SHAs. Image vulnerability scanning was not performed;
+image versions/digests were verified against official releases and registry pulls.
+The first gateway port (8787) was occupied; the committed configuration uses
+loopback 18787/18788 without stopping or modifying the existing listener.
+
 ### WhatsApp diagnostic checkpoint — 2026-09-03
 
 User-authorized follow-up to an uninformative `meta_100` send failure. Exact clean

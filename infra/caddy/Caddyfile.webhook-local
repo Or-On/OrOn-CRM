@@ -1,0 +1,51 @@
+{
+	admin off
+	auto_https off
+	persist_config off
+	# Even error logs can contain verification query strings. No request logging.
+	log default {
+		output discard
+	}
+	servers {
+		timeouts {
+			read_header 5s
+			read_body 15s
+			write 30s
+			idle 30s
+		}
+	}
+}
+
+:8080 {
+	header {
+		-Server
+		Cache-Control "no-store"
+		X-Content-Type-Options "nosniff"
+	}
+	@webhook {
+		path /api/webhooks/whatsapp
+		method GET POST
+	}
+	handle @webhook {
+		request_body {
+			max_size 1MB
+		}
+		reverse_proxy host.docker.internal:3000 {
+			header_up -Cookie
+			header_up -Authorization
+			transport http {
+				dial_timeout 3s
+				response_header_timeout 20s
+			}
+		}
+	}
+	handle {
+		respond "Not found" 404
+	}
+}
+
+# Container-only readiness listener. Neither tunnel nor host publishes this port.
+:8081 {
+	respond /health/live "alive" 200
+	respond "Not found" 404
+}

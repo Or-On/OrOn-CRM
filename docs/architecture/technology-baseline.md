@@ -240,3 +240,21 @@ adaptation was needed. Strict workspace TypeScript, all web tests and production
 build passed; `pnpm peers check` passed and `pnpm audit --audit-level high` reported
 no known vulnerabilities. The lockfile records the exact transitive resolution.
 All runtime/framework versions remain on their existing baseline.
+
+## Optional local webhook edge — 2026-09-03
+
+Official GitHub latest-release APIs reported stable Caddy `v2.11.4` and
+cloudflared `2026.8.3` (not prereleases). The separate, opt-in Docker Desktop
+webhook stack pins `caddy:2.11.4-alpine` and `cloudflare/cloudflared:2026.8.3` plus
+their registry SHA-256 manifest digests. Caddy preserves the existing selected
+proxy technology; cloudflared adds temporary HTTPS transport, not a runtime
+database, authentication framework or production deployment. No Node/Python
+dependency versions changed. Images pulled successfully on the local Linux
+Docker Engine; Caddy configuration/health, public callback verification, wrong
+token/unsigned-payload refusal and public path restrictions passed. A signed
+empty envelope was accepted with zero events. This is functional verification,
+not a fresh image vulnerability scan or proof of real Meta delivery.
+
+Sources: [Caddy releases](https://github.com/caddyserver/caddy/releases),
+[cloudflared releases](https://github.com/cloudflare/cloudflared/releases),
+[Cloudflare quick tunnels](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/trycloudflare/).

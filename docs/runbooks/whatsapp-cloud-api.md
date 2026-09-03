@@ -4,6 +4,9 @@ The safe default is the simulator. Complete these steps only for a development
 Meta app/account you control. Never paste secrets into source, commands, chat,
 screenshots, migrations, or logs.
 
+For localhost callbacks, use the opt-in [webhook-only tunnel guide](whatsapp-webhook-local.md).
+It includes exact Meta setup, shutdown/restart commands and approved-template usage.
+
 ## Meta Developer Dashboard
 
 1. Open Meta for Developers, select app `1438019764708355`, and confirm the
