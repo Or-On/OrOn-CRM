@@ -223,3 +223,20 @@ test-only and do not replace any upstream technology. Frozen lockfile updated;
 Node 24.20.0 / pnpm 11.24.0 toolchain, strict TypeScript checks, and Next.js 16.3.3
 production build pass. DOM tests are not evidence of browser layout, accessibility
 certification, real provider correctness, or production performance.
+
+## Bilingual UI tooling — 2026-09-03
+
+`webpack` is newly pinned as a **development-only** web dependency at `5.110.3`.
+The official npm registry (`pnpm view webpack version engines`) reported that
+stable version and Node `>=10.13.0`; the selected Node 24.20.0 satisfies it.
+next-intl 4.14.1's plugin type declarations reference webpack types which were not
+available from Next's private bundled implementation. This supplies the declared
+types without `skipLibCheck`, ignored type errors or a framework replacement.
+Next 16.3.3 still builds with its default **Turbopack**, not a switched bundler.
+
+Previous direct target version: absent. No upstream application depended on this
+new direct development entry. No source/runtime major upgrade or breaking API
+adaptation was needed. Strict workspace TypeScript, all web tests and production
+build passed; `pnpm peers check` passed and `pnpm audit --audit-level high` reported
+no known vulnerabilities. The lockfile records the exact transitive resolution.
+All runtime/framework versions remain on their existing baseline.
