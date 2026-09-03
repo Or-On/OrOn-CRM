@@ -3,6 +3,7 @@ import type postgres from "postgres";
 import type { AutomationRunSummary, AutomationSummary } from "./types.js";
 
 interface AutomationRow {
+  execution_kind: NonNullable<AutomationSummary["executionKind"]>;
   id: string;
   name: string;
   description: string | null;
@@ -18,10 +19,13 @@ export async function listAutomations(
   const rows = await sql<AutomationRow[]>`
     SELECT definition.id, definition.name, definition.description,
            version.version, version.published_at, version.validation_status,
-           definition.created_at
+           definition.created_at, version.execution_kind
     FROM automation.flow_definitions definition
     JOIN LATERAL (
-      SELECT flow.version, flow.published_at, flow.validation_status
+      SELECT flow.version, flow.published_at, flow.validation_status,
+             CASE WHEN flow.definition->'nodes' = '[]'::jsonb THEN 'empty'
+                  WHEN flow.definition->>'schemaVersion' = '1.0' THEN 'canonical'
+                  ELSE 'unsupported' END AS execution_kind
       FROM automation.flow_versions flow
       WHERE flow.flow_definition_id = definition.id
       ORDER BY flow.version DESC LIMIT 1
@@ -29,6 +33,7 @@ export async function listAutomations(
     ORDER BY definition.updated_at DESC, definition.id DESC
   `;
   return rows.map((row) => ({
+    executionKind: row.execution_kind,
     id: row.id,
     name: row.name,
     description: row.description,

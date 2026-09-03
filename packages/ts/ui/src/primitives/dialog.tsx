@@ -10,6 +10,7 @@ export interface DialogProps {
   readonly onClose: () => void;
   readonly open: boolean;
   readonly title: string;
+  readonly closeLabel?: string;
 }
 
 export function Dialog({
@@ -18,6 +19,7 @@ export function Dialog({
   onClose,
   open,
   title,
+  closeLabel = "Close",
 }: DialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const titleId = useId();
@@ -26,7 +28,10 @@ export function Dialog({
   useEffect(() => {
     const dialog = dialogRef.current;
     if (dialog === null) return;
-    if (open && !dialog.open) dialog.showModal();
+    if (open && !dialog.open) {
+      dialog.showModal();
+      dialog.querySelector<HTMLElement>("[data-dialog-initial-focus]")?.focus();
+    }
     if (!open && dialog.open) dialog.close();
   }, [open]);
 
@@ -46,8 +51,8 @@ export function Dialog({
             <p id={descriptionId}>{description}</p>
           )}
         </div>
-        <Button aria-label="Close dialog" onClick={onClose} variant="quiet">
-          Close
+        <Button aria-label={closeLabel} onClick={onClose} variant="quiet">
+          {closeLabel}
         </Button>
       </div>
       {children}

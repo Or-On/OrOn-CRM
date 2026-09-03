@@ -7,6 +7,22 @@ import {
 } from "../src/index.js";
 
 describe("loadConfig", () => {
+  it("validates the public metadata origin without credentials or paths", () => {
+    expect(loadConfig({}).publicSiteUrl).toBe("http://127.0.0.1:3000");
+    expect(
+      loadConfig({ PUBLIC_SITE_URL: "https://example.invalid" }).publicSiteUrl,
+    ).toBe("https://example.invalid");
+    for (const url of [
+      "javascript:alert(1)",
+      "https://user:secret@example.invalid",
+      "https://example.invalid/path",
+      "https://example.invalid/?token=x",
+    ]) {
+      expect(() => loadConfig({ PUBLIC_SITE_URL: url })).toThrow(
+        ConfigurationError,
+      );
+    }
+  });
   it("defaults every real-provider action to disabled", () => {
     const config = loadConfig({});
 

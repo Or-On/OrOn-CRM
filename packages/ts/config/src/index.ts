@@ -30,6 +30,30 @@ const sourceSchema = z.object({
     })
     .optional(),
   CONTROL_API_URL: z.url().default("http://127.0.0.1:8000"),
+  PUBLIC_SITE_URL: z
+    .url()
+    .refine(
+      (value) => {
+        try {
+          const url = new URL(value);
+          return (
+            ["http:", "https:"].includes(url.protocol) &&
+            !url.username &&
+            !url.password &&
+            !url.search &&
+            !url.hash &&
+            url.pathname === "/"
+          );
+        } catch {
+          return false;
+        }
+      },
+      {
+        message:
+          "must be an HTTP(S) origin without credentials, path, query or fragment",
+      },
+    )
+    .default("http://127.0.0.1:3000"),
   LOG_LEVEL: z
     .string()
     .trim()
@@ -79,6 +103,7 @@ export interface LoadConfigOptions {
 }
 
 export interface PlatformConfig {
+  readonly publicSiteUrl?: string;
   readonly environment: "development" | "test" | "production";
   readonly service: string;
   readonly databaseUrl: string | undefined;
@@ -171,6 +196,7 @@ export function loadConfig(
     databaseUrl: result.data.DATABASE_URL,
     messagingDatabaseUrl: result.data.MESSAGING_DATABASE_URL,
     controlApiUrl: result.data.CONTROL_API_URL,
+    publicSiteUrl: result.data.PUBLIC_SITE_URL,
     logLevel: result.data.LOG_LEVEL,
     enableRealTelephony: result.data.ENABLE_REAL_TELEPHONY,
     enableRealWhatsApp: result.data.ENABLE_REAL_WHATSAPP,

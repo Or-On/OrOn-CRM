@@ -1,6 +1,7 @@
 import postgres from "postgres";
 import { describe, expect, it } from "vitest";
 import { overviewMetrics } from "./analytics.js";
+import { createAutomationDraft, listAutomations } from "./automations.js";
 import {
   ingestSimulatedInbound,
   listConversations,
@@ -35,6 +36,28 @@ describe.skipIf(databaseUrl === undefined)(
             await transaction`SET LOCAL ROLE platform_web`;
             await transaction`SELECT set_config('app.current_tenant', ${tenant}, true), set_config('app.current_user', ${user}, true), set_config('app.current_role', 'owner', true)`;
             const baseline = await overviewMetrics(transaction);
+            const automationId = await createAutomationDraft(
+              transaction,
+              user,
+              "Fictional presentation adapter",
+            );
+            expect(
+              (await listAutomations(transaction)).find(
+                (item) => item.id === automationId,
+              )?.executionKind,
+            ).toBe("empty");
+            await transaction`UPDATE automation.flow_versions SET definition = '{"schemaVersion":"1.0","nodes":[{"id":"fixture"}]}'::jsonb WHERE flow_definition_id = ${automationId}::uuid`;
+            expect(
+              (await listAutomations(transaction)).find(
+                (item) => item.id === automationId,
+              )?.executionKind,
+            ).toBe("canonical");
+            await transaction`UPDATE automation.flow_versions SET definition = '{"nodes":[{"id":"fixture"}]}'::jsonb WHERE flow_definition_id = ${automationId}::uuid`;
+            expect(
+              (await listAutomations(transaction)).find(
+                (item) => item.id === automationId,
+              )?.executionKind,
+            ).toBe("unsupported");
             const created = await ingestSimulatedInbound(transaction, user, {
               from: "+972509999987",
               profileName: "Fictional Cursor Contact",

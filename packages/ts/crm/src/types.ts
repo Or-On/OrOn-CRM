@@ -216,6 +216,7 @@ export interface BroadcastSummary {
 }
 
 export interface AutomationSummary {
+  readonly executionKind?: "empty" | "canonical" | "unsupported";
   readonly id: string;
   readonly name: string;
   readonly description: string | null;
