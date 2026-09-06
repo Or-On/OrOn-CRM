@@ -31,6 +31,7 @@ export function Overview({
       icon: ContactRound,
       href: "/contacts",
       hint: t("overview.contactsHint"),
+      tone: "customer",
     },
     {
       label: t("overview.conversations"),
@@ -38,6 +39,7 @@ export function Overview({
       icon: MessagesSquare,
       href: "/inbox",
       hint: t("overview.conversationsHint"),
+      tone: "conversation",
     },
     {
       label: t("overview.handoffs"),
@@ -45,6 +47,7 @@ export function Overview({
       icon: Headset,
       href: "/orchestration",
       hint: t("overview.handoffsHint"),
+      tone: "handoff",
     },
   ];
   return (
@@ -56,6 +59,7 @@ export function Overview({
           </p>
           <h1>{t("overview.title")}</h1>
           <p>{t("overview.description")}</p>
+          <p className="overview-freshness">{t("overview.freshness")}</p>
         </div>
         <Link
           className="or-button or-button--primary action-link"
@@ -66,11 +70,18 @@ export function Overview({
         </Link>
       </header>
       <section aria-label={t("overview.totals")} className="overview-metrics">
-        {indicators.map(({ label, value, icon: Icon, href, hint }) => (
-          <Link className="overview-metric" href={href} key={label}>
+        {indicators.map(({ label, value, icon: Icon, href, hint, tone }) => (
+          <Link
+            className="overview-metric"
+            data-tone={tone}
+            href={href}
+            key={label}
+          >
             <div>
               <span>{label}</span>
-              <Icon aria-hidden="true" size={19} />
+              <span className="overview-metric__icon" aria-hidden="true">
+                <Icon size={18} />
+              </span>
             </div>
             <strong>{value.toLocaleString(locale)}</strong>
             <small>

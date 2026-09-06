@@ -1,24 +1,27 @@
 :root {
   color-scheme: dark;
-  --or-bg: #070a0f;
-  --or-bg-raised: #0d121a;
-  --or-surface: rgb(17 23 33 / 88%);
-  --or-surface-raised: rgb(22 30 42 / 94%);
-  --or-surface-floating: rgb(25 34 48 / 98%);
-  --or-border: rgb(152 176 207 / 18%);
-  --or-border-strong: rgb(152 176 207 / 32%);
-  --or-text: #edf4ff;
-  --or-text-muted: #91a0b5;
-  --or-accent: #76e4ce;
-  --or-accent-strong: #4fcbb5;
-  --or-on-accent: #04130f;
-  --or-info: #72a7ff;
-  --or-positive: #67d6a3;
-  --or-warning: #efbf6c;
-  --or-critical: #ff7d8f;
-  --or-focus: #b8ffe7;
-  --or-shadow-1: 0 12px 34px rgb(0 0 0 / 24%);
-  --or-shadow-2: 0 24px 72px rgb(0 0 0 / 42%);
+  --or-bg: #050b18;
+  --or-bg-raised: #081426;
+  --or-surface: rgb(9 24 46 / 88%);
+  --or-surface-raised: rgb(12 31 58 / 94%);
+  --or-surface-floating: rgb(14 37 68 / 98%);
+  --or-border: rgb(116 171 236 / 17%);
+  --or-border-strong: rgb(116 171 236 / 31%);
+  --or-control-border: #5577a3;
+  --or-text: #f3f8ff;
+  --or-text-muted: #91a9ca;
+  --or-accent: #176ff2;
+  --or-accent-strong: #0d57d6;
+  --or-on-accent: #ffffff;
+  --or-info: #7fc6ff;
+  --or-positive: #46d6a0;
+  --or-warning: #f4bd62;
+  --or-critical: #ff758d;
+  --or-focus: #9ed2ff;
+  --or-signal: #57a8ff;
+  --or-signal-soft: rgb(45 140 255 / 13%);
+  --or-shadow-1: 0 14px 38px rgb(0 6 18 / 30%);
+  --or-shadow-2: 0 28px 90px rgb(0 5 18 / 52%);
   --or-radius-sm: 0.5rem;
   --or-radius-md: 0.85rem;
   --or-radius-lg: 1rem;
@@ -28,33 +31,40 @@
   --or-space-4: 1rem;
   --or-space-6: 1.5rem;
   --or-space-8: 2rem;
+  --or-duration-fast: 120ms;
+  --or-duration-standard: 180ms;
+  --or-duration-context: 320ms;
+  --or-ease-standard: cubic-bezier(0.2, 0, 0, 1);
   --or-font-sans:
-    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Inter, "Segoe UI", "Noto Sans Hebrew", Arial, ui-sans-serif, system-ui,
     sans-serif;
   --or-font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 }
 
 [data-theme="light"] {
   color-scheme: light;
-  --or-bg: #eef3f8;
-  --or-bg-raised: #f7f9fc;
-  --or-surface: rgb(255 255 255 / 90%);
+  --or-bg: #edf5ff;
+  --or-bg-raised: #f8fbff;
+  --or-surface: rgb(255 255 255 / 92%);
   --or-surface-raised: #ffffff;
   --or-surface-floating: #ffffff;
-  --or-border: rgb(34 55 79 / 16%);
-  --or-border-strong: rgb(34 55 79 / 28%);
-  --or-text: #17202c;
-  --or-text-muted: #5e6a79;
-  --or-accent: #087f70;
-  --or-accent-strong: #05685c;
+  --or-border: rgb(31 78 130 / 15%);
+  --or-border-strong: rgb(31 78 130 / 27%);
+  --or-control-border: #7891ad;
+  --or-text: #0a1a31;
+  --or-text-muted: #536d91;
+  --or-accent: #155cff;
+  --or-accent-strong: #0d49d2;
   --or-on-accent: #ffffff;
-  --or-info: #245cb0;
-  --or-positive: #126c48;
+  --or-info: #1762ba;
+  --or-positive: #087a50;
   --or-warning: #875409;
-  --or-critical: #b52f44;
-  --or-focus: #006f60;
-  --or-shadow-1: 0 12px 34px rgb(28 45 65 / 12%);
-  --or-shadow-2: 0 24px 72px rgb(28 45 65 / 20%);
+  --or-critical: #b72944;
+  --or-focus: #0b5de8;
+  --or-signal: #176ff2;
+  --or-signal-soft: rgb(21 92 255 / 9%);
+  --or-shadow-1: 0 14px 38px rgb(20 58 103 / 11%);
+  --or-shadow-2: 0 28px 90px rgb(20 58 103 / 18%);
 }
 
 *,
@@ -76,9 +86,10 @@
   font: 650 0.875rem/1 var(--or-font-sans);
   cursor: pointer;
   transition:
-    background-color 150ms ease,
-    border-color 150ms ease,
-    transform 150ms ease;
+    background-color var(--or-duration-standard) var(--or-ease-standard),
+    border-color var(--or-duration-standard) var(--or-ease-standard),
+    box-shadow var(--or-duration-standard) var(--or-ease-standard),
+    transform var(--or-duration-fast) var(--or-ease-standard);
 }
 
 .or-button:disabled {
@@ -92,22 +103,33 @@
 
 .or-button--primary {
   color: var(--or-on-accent);
-  background: var(--or-accent);
+  background: linear-gradient(
+    135deg,
+    var(--or-accent),
+    var(--or-accent-strong)
+  );
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--or-accent) 24%, transparent);
 }
 
 .or-button--primary:not(:disabled):hover {
-  background: var(--or-accent-strong);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--or-accent) 92%, black),
+    var(--or-accent-strong)
+  );
+  box-shadow: 0 10px 30px color-mix(in srgb, var(--or-accent) 32%, transparent);
 }
 
 .or-button--secondary,
 .or-button--quiet {
   color: var(--or-text);
   background: var(--or-surface-raised);
-  border-color: var(--or-border);
+  border-color: var(--or-control-border);
 }
 
 .or-button--quiet {
   background: transparent;
+  border-color: var(--or-border);
 }
 
 .or-field {
@@ -127,14 +149,33 @@
   font-size: 0.75rem;
 }
 
+.or-field__error {
+  color: var(--or-critical);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
 .or-input {
   min-height: 2.75rem;
   padding: 0.65rem 0.75rem;
   color: var(--or-text);
   background: var(--or-bg-raised);
-  border: 1px solid var(--or-border);
+  border: 1px solid var(--or-control-border);
   border-radius: var(--or-radius-sm);
   font: inherit;
+  transition:
+    background-color var(--or-duration-standard) var(--or-ease-standard),
+    border-color var(--or-duration-standard) var(--or-ease-standard),
+    box-shadow var(--or-duration-standard) var(--or-ease-standard);
+}
+
+.or-input:hover:not(:disabled) {
+  border-color: var(--or-control-border);
+}
+
+.or-input[aria-invalid="true"] {
+  border-color: var(--or-critical);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--or-critical) 24%, transparent);
 }
 
 .or-surface {
@@ -217,7 +258,7 @@
 }
 
 .or-eyebrow {
-  color: var(--or-accent);
+  color: var(--or-info);
   font-size: 0.7rem;
   font-weight: 700;
   letter-spacing: 0.12em;

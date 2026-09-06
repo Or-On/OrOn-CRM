@@ -29,9 +29,9 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button, Dialog, Input } from "@or-on/ui";
 import type { PublicSession } from "@or-on/auth";
 
-import { product } from "../../branding";
 import { LanguageControl } from "../../i18n/language-control";
 import { crmMutation } from "../crm";
+import { BrandLockup } from "../brand";
 import { activeDestination, findDestinations, navigation } from "./navigation";
 
 const icons = {
@@ -63,6 +63,7 @@ export function AppShell({
   const [menuOpen, setMenuOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const menuButton = useRef<HTMLButtonElement>(null);
+  const navigationRail = useRef<HTMLElement>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [commandIndex, setCommandIndex] = useState(0);
@@ -83,6 +84,42 @@ export function AppShell({
 
   useEffect(() => setThemeMounted(true), []);
   useEffect(() => setMenuOpen(false), [pathname]);
+  useEffect(() => {
+    const drawerQuery = window.matchMedia("(max-width: 62rem)");
+    const closeAtDesktop = (event: MediaQueryListEvent) => {
+      if (!event.matches) setMenuOpen(false);
+    };
+    drawerQuery.addEventListener("change", closeAtDesktop);
+    return () => drawerQuery.removeEventListener("change", closeAtDesktop);
+  }, []);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const rail = navigationRail.current;
+    if (!rail) return;
+    const focusable = Array.from(
+      rail.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ),
+    );
+    const first = focusable.at(0);
+    const last = focusable.at(-1);
+    const frame = requestAnimationFrame(() => first?.focus());
+    const trapFocus = (event: KeyboardEvent) => {
+      if (event.key !== "Tab" || !first || !last) return;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    rail.addEventListener("keydown", trapFocus);
+    return () => {
+      cancelAnimationFrame(frame);
+      rail.removeEventListener("keydown", trapFocus);
+    };
+  }, [menuOpen]);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
@@ -136,8 +173,12 @@ export function AppShell({
         {t("shell.skip")}
       </a>
       <header className="shell__mobile-header">
-        <Link href="/" className="mobile-brand">
-          {product.name}
+        <Link
+          aria-label={t("shell.brandHome")}
+          href="/"
+          className="mobile-brand"
+        >
+          <BrandLockup markSize={30} />
         </Link>
         <Button
           aria-controls="workspace-navigation"
@@ -157,17 +198,27 @@ export function AppShell({
       <aside
         id="workspace-navigation"
         aria-label={t("shell.navigation")}
+        aria-modal={menuOpen ? true : undefined}
         className={`shell__rail ${menuOpen ? "shell__rail--open" : ""}`}
+        ref={navigationRail}
+        role={menuOpen ? "dialog" : undefined}
       >
-        <Link aria-label={t("shell.brandHome")} className="brand" href="/">
-          <span aria-hidden="true" className="brand__mark">
-            O<span />
-          </span>
-          <span className="brand__copy">
-            <span className="brand__name">{product.name}</span>
-            <span className="brand__phase">{t("shell.brandLine")}</span>
-          </span>
-        </Link>
+        <div className="rail-brand-row">
+          <Link aria-label={t("shell.brandHome")} className="brand" href="/">
+            <BrandLockup descriptor={t("shell.brandLine")} />
+          </Link>
+          <Button
+            aria-label={t("shell.closeNav")}
+            className="rail-mobile-close"
+            onClick={() => {
+              setMenuOpen(false);
+              requestAnimationFrame(() => menuButton.current?.focus());
+            }}
+            variant="quiet"
+          >
+            <X aria-hidden="true" size={20} />
+          </Button>
+        </div>
         <Button
           className="rail-collapse"
           aria-label={t(collapsed ? "shell.expand" : "shell.collapse")}
@@ -278,9 +329,22 @@ export function AppShell({
           ) : null}
         </div>
       </aside>
+      {menuOpen ? (
+        <button
+          aria-label={t("shell.closeNav")}
+          className="shell__scrim"
+          onClick={() => {
+            setMenuOpen(false);
+            menuButton.current?.focus();
+          }}
+          type="button"
+        />
+      ) : null}
       <div
+        aria-hidden={menuOpen ? true : undefined}
         className="shell__main"
         id="workspace-content"
+        inert={menuOpen ? true : undefined}
         tabIndex={-1}
         key={session.tenant.tenantId}
       >

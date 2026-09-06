@@ -7,9 +7,10 @@ import {
   ShieldCheck,
   Workflow,
 } from "lucide-react";
-import { product } from "../../branding";
 import { LanguageControl } from "../../i18n/language-control";
 import { ThemeControl } from "../../i18n/theme-control";
+import { BrandLockup, SignalBackdrop } from "../brand";
+import { MobileMarketingMenu } from "./mobile-menu";
 import { WorkflowPreview } from "./workflow-preview";
 
 export function MarketingPage() {
@@ -17,20 +18,21 @@ export function MarketingPage() {
   return (
     <div className="public-site">
       <a className="skip-link" href="#product-content">
-        {t("navProduct")}
+        {t("skipContent")}
       </a>
-      <header className="public-header">
-        <Link href="#product-content" className="brand">
-          <span className="brand__mark" aria-hidden="true">
-            O.
-          </span>
-          <span>{product.name}</span>
+      <header className="public-header" id="public-top">
+        <Link aria-label={t("brandHome")} href="#public-top" className="brand">
+          <BrandLockup markSize={38} />
         </Link>
-        <nav aria-label={t("navProduct")}>
+        <nav
+          aria-label={t("navProduct")}
+          className="public-nav public-nav--desktop"
+        >
           <a href="#workflow">{t("navWorkflow")}</a>
           <a href="#security">{t("navSecurity")}</a>
           <a href="#questions">{t("navFaq")}</a>
         </nav>
+        <MobileMarketingMenu />
         <div className="public-controls">
           <LanguageControl />
           <ThemeControl />
@@ -42,11 +44,14 @@ export function MarketingPage() {
           </Link>
         </div>
       </header>
-      <main id="product-content">
+      <main id="product-content" tabIndex={-1}>
         <section className="public-hero">
           <div className="public-hero__copy">
             <p className="eyebrow">{t("eyebrow")}</p>
-            <h1>{t("title")}</h1>
+            <h1>
+              <span>{t("titleLead")}</span>
+              <strong>{t("titleEmphasis")}</strong>
+            </h1>
             <p className="public-lede">{t("description")}</p>
             <div className="public-actions">
               <Link
@@ -66,9 +71,29 @@ export function MarketingPage() {
             </div>
             <p className="public-note">{t("note")}</p>
           </div>
-          <WorkflowPreview />
+          <div className="public-hero__visual">
+            <SignalBackdrop />
+            <WorkflowPreview />
+          </div>
         </section>
-        <section className="public-value" id="workflow">
+        <section className="public-proof" aria-label={t("proofLabel")}>
+          <dl>
+            {(
+              [
+                ["proofDatabaseValue", "proofDatabaseLabel"],
+                ["proofSafetyValue", "proofSafetyLabel"],
+                ["proofJobsValue", "proofJobsLabel"],
+                ["proofWebhooksValue", "proofWebhooksLabel"],
+              ] as const
+            ).map(([value, label]) => (
+              <div key={value}>
+                <dt>{t(label)}</dt>
+                <dd>{t(value)}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+        <section className="public-value" id="workflow" tabIndex={-1}>
           <div>
             <p className="eyebrow">{t("valueEyebrow")}</p>
             <h2>{t("valueTitle")}</h2>
@@ -91,7 +116,7 @@ export function MarketingPage() {
             </article>
           ))}
         </section>
-        <section className="public-trust" id="security">
+        <section className="public-trust" id="security" tabIndex={-1}>
           <ShieldCheck size={32} aria-hidden="true" />
           <div>
             <h2>{t("securityTitle")}</h2>
@@ -104,7 +129,7 @@ export function MarketingPage() {
           <h2>{t("integrationTitle")}</h2>
           <p>{t("integrationBody")}</p>
         </section>
-        <section className="public-faq" id="questions">
+        <section className="public-faq" id="questions" tabIndex={-1}>
           <h2>{t("faqTitle")}</h2>
           <div>
             {[1, 2, 3, 4].map((index) => (
