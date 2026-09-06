@@ -1,6 +1,6 @@
 # Or-On Platform progress
 
-Last updated: 2026-09-03 (Asia/Jerusalem)
+Last updated: 2026-09-06 (Asia/Jerusalem)
 
 ## Current checkpoint
 
@@ -14,7 +14,7 @@ Last updated: 2026-09-03 (Asia/Jerusalem)
 - Phase 4 status: **COMPLETE**
 - Phase 5 status: **COMPLETE — SIMULATOR-FIRST ACCEPTANCE PASSED**
 - Phase 6 status: **COMPLETE — ACCEPTED SIX-NODE SIMULATOR SCOPE; OPENLIVE DEFERRED**
-- Active task: Bilingual public/product redesign implemented; final expanded acceptance remains in progress
+- Active task: Phase 7 brand-system and cross-surface visual refinement implemented; final expanded acceptance remains in progress
 - Bilingual brief exact clean baseline: `0408d5274af3c181aef32ec79352abfba1ed14be`
 - Phase 7 exact baseline commit: `305eb6258435545033343106c19d6479b0cbf97e`
 - Phase 2B clean baseline commit: `830a8371836ea7922fca5c320624bf3bd32ec229`
@@ -25,6 +25,31 @@ Last updated: 2026-09-03 (Asia/Jerusalem)
 - Provider safety: no real telephone call, WhatsApp message, webhook mutation, or provider provisioning performed
 
 ## Phase 7 implementation state
+
+### Brand-system refinement — 2026-09-06
+
+The user approved [or-on.io](https://or-on.io/) as a visual reference. The target
+uses an original signal/core mark, navy/ice surfaces, electric-blue interaction
+color and conversation-path artwork; no reference asset, layout, copy, customer
+proof, performance figure or commercial claim was copied. Exact clean baseline:
+`fde2f4b51913fa9f6312b9e8201d9b5b5a6136d5`.
+
+| Task | State | Evidence | Next exact task |
+| --- | --- | --- | --- |
+| P7-V01 | implemented; acceptance partial | Shared semantic tokens/motion, original brand lockup, bilingual public hero and implemented-safeguard strip, accessible mobile product menu/drawer, branded app rail, action-oriented Overview treatment, safer Input/Surface/Dialog primitives | Run the remaining full viewport, assistive-technology and fictional workflow matrix before Phase 7 completion |
+| P7-V02 | complete | Exact `/en` and `/he` public roots no longer resolve a database session; forged/nested markers remain application paths; focused and full web tests pass | Keep authenticated/database boundaries unchanged |
+
+Pinned Node 24.20.0 and pnpm 11.24.0 verification passed: format, ESLint,
+workspace strict typechecking, 172 default TypeScript tests (20 explicitly
+separated live tests), all package/service builds and the Next.js 16.3.3
+production build. English dark, English light and Hebrew RTL desktop marketing
+were browser-inspected; a decorative-path horizontal overflow found during that
+inspection was removed. This is not a claim that the full responsive,
+screen-reader, zoom, contrast or clean-session rehearsal matrix has passed.
+
+No dependency, schema, provider setting or environment credential changed. No
+message, telephone call, webhook/provider mutation, provisioning or Terraform
+action occurred.
 
 ### Local webhook edge — 2026-09-03
 

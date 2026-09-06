@@ -80,6 +80,29 @@ used the user-approved fictional account, not developer/customer credentials.
    larger representative datasets remain refinements. Current failed-form and
    in-place locale recovery are implemented and tested, not universal draft saving.
 
+## Brand-system refinement evidence — 2026-09-06
+
+Starting from clean checkpoint `fde2f4b51913fa9f6312b9e8201d9b5b5a6136d5`,
+the public reference at [or-on.io](https://or-on.io/) informed a distinct owned
+navy/electric-blue visual direction. The implementation adds a code-native
+signal/core mark and signal path, a truthful implemented-safeguard strip, shared
+public/application branding, accessible mobile public and workspace navigation,
+a refined Overview and stronger shared form/dialog semantics. Reference assets,
+claims and layout were not copied.
+
+Public-route isolation now marks only exact `/en` and `/he` roots in the trusted
+proxy request. Those pages skip database-backed session lookup and rendered while
+PostgreSQL was unavailable; application and nested locale paths still use normal
+session resolution. Spoofed marker input is overwritten and covered by tests.
+
+Pinned Node 24.20.0 / pnpm 11.24.0 results: Prettier and ESLint pass; all
+workspaces typecheck; 172 default TypeScript tests pass with 20 live tests kept
+separate; all workspace packages/services and the Next.js 16.3.3 production app
+build. Browser inspection covered English dark, English light and Hebrew RTL on
+desktop. It found one horizontal overflow from decorative artwork, which was
+fixed and rechecked. The outstanding matrix above remains outstanding; this
+checkpoint is not a Phase 7 completion or accessibility certification.
+
 ## Safety and preview operation
 
 Use the [isolated preview runbook](local-development.md#isolated-ui-review-phase-7).

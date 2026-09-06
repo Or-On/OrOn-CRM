@@ -18,6 +18,10 @@ define the actual product scope, including deliberately absent commercial/auth f
   the public URL locale or an HTTP-only preference cookie. This is presentation
   metadata, never authorization or tenant context. Root layout renders real
   `html lang` and `dir`; no CSS transform mirrors the document.
+- The proxy also overwrites a public-route marker. Only exact `/en` and `/he`
+  roots can skip session resolution in the root layout, so the product narrative
+  remains available when PostgreSQL is unavailable. Nested and application paths
+  still resolve the normal authenticated session boundary.
 - Public routes `/en` and `/he` use localized title, description, canonical,
   language alternates and social metadata. `PUBLIC_SITE_URL` must be an explicit
   HTTP(S) origin without credentials, path, query or fragment. Development pages
@@ -40,12 +44,21 @@ readable channel state and a clear next action. Marketing's three-step example i
 labelled fictional, not fake live activity. No invented metrics, testimonials,
 customer logos, prices or certifications are published.
 
-Reuse `packages/ts/ui` semantic graphite/mint tokens, refined light surfaces,
-Button, Input, Surface, Badge, Skeleton, Empty/Error and native Dialog. Existing
-Latin/Hebrew-capable system fonts avoid a font download and preserve platform text
-scaling. Working views use compact headings and useful density; marketing has a
-larger narrative hierarchy. CSS uses logical spacing and intrinsic grids. Numbers,
-phones, email, code and identifiers use direction isolation where appropriate.
+Reuse `packages/ts/ui` semantic navy/ink and ice-light tokens, an electric-blue
+interaction signal, and positive/warning/critical colors only for their semantic
+states. Button, Input, Surface, Badge, Skeleton, Empty/Error and native Dialog
+remain the shared foundation. Existing Latin/Hebrew-capable system fonts avoid a
+font download and preserve platform text scaling. Working views use compact
+headings and useful density; marketing has a larger narrative hierarchy. CSS uses
+logical spacing and intrinsic grids. Numbers, phones, email, code and identifiers
+use direction isolation where appropriate.
+
+The owned brand mark depicts a signal crossing a stable boundary. The public hero
+uses original vector signal paths to connect conversation, context and next action.
+The public [OrOn site](https://or-on.io/) informed the navy/electric-blue technical
+tone, but no site asset, layout, statement, customer proof or performance number is
+copied. Product truth comes from implemented platform boundaries and is labelled as
+such.
 
 The desktop rail can collapse without losing accessible names. Mobile keeps a
 direction-aware menu and separate conversation-list/thread navigation. The command

@@ -6,10 +6,18 @@ Branch: `codex/phase-7-ui-polish`.
 
 ## Approved direction
 
-Preserve the graphite/mint design and working engines. Improve the existing
-product, not a replacement application. Overview and Inbox establish the visual
-direction before the remaining screens. Small tenant-authorized read-model and
-interaction corrections are in scope; new campaign/voice engines are not.
+Preserve the working engines and evolve the visual system to navy/ink, ice-light
+surfaces and an electric-blue conversation signal. Teal indicates positive state;
+it is no longer the generic primary accent. Improve the existing product, not a
+replacement application. Overview and Inbox establish the application direction
+before the remaining screens. Small tenant-authorized read-model and interaction
+corrections are in scope; new campaign/voice engines are not.
+
+The public [OrOn site](https://or-on.io/) is an approved reference for technical
+confidence and signal language. The platform uses its own code-native mark,
+conversation-path artwork, content and information architecture. Do not copy the
+reference logo, hero art, copy, layout, partner/customer marks, performance
+figures or commercial claims.
 
 The primary fictional demo journey is Overview → Inbox → contact context →
 recorded call simulation → durable WhatsApp follow-up → human handoff. Clearly
@@ -53,7 +61,8 @@ dependency. OpenLive remains Phase 9; GCP remains Phase 8.
 ## Visual and interaction contract
 
 - Compact 28–32px page titles; 14–16px body text; consistent spacing and surfaces.
-- Mint marks primary actions; semantic statuses include text, not color alone.
+- Electric blue marks primary actions and focus; semantic statuses include text,
+  not color alone.
 - Desktop Inbox uses a bounded list/thread layout; narrow screens navigate from
   list to thread instead of stacking the full list above the composer.
 - Actions expose pending/success/failure; preserve inputs on failure. No blind

@@ -49,7 +49,8 @@ contact → call simulation → outcome → durable follow-up → operator hando
 ## Design contract
 
 Signature motif: a readable conversation path with channel/status waypoints,
-not decorative circuitry. Graphite/mint and refined light surfaces remain shared.
+not decorative circuitry. Navy/ink, electric-blue interaction signals and refined
+ice-light surfaces are shared; teal is reserved for positive state.
 Marketing describes one workflow; the application prioritizes compact working
 surfaces. Use semantic tokens, logical CSS, readable Hebrew/Latin typography,
 short state transitions and reduced-motion support. No invented metrics/proof.

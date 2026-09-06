@@ -19,16 +19,24 @@ motion. Initial accessible primitives cover common controls and system states.
 Features own domain-specific components behind intentional public APIs.
 
 Preserve mature source-compatible UI libraries where useful. Establish a
-dark-first graphite/ink visual language with restrained luminous accents, strong
-contrast, responsive layouts, RTL capability, and Hebrew-ready direction. Avoid
-color-only status, excessive glass effects, and decorative motion. WCAG 2.2 AA is
-the target, not a Phase 1 certification claim.
+dark-first navy/ink visual language with an electric-blue interaction signal,
+ice-toned light surfaces, strong contrast, responsive layouts, RTL capability,
+and Hebrew-ready direction. Teal is reserved for positive state rather than used
+as the primary action color. Avoid color-only status, excessive glass effects,
+and decorative motion. WCAG 2.2 AA is the target, not a certification claim.
+
+The Phase 7 brand refinement uses an original code-native signal/core mark and a
+conversation-path motif. The public [OrOn site](https://or-on.io/) is a visual
+reference for technical confidence, deep navy and signal language only. Its logo,
+illustrations, layout, copy, customer marks, performance figures and commercial
+claims are not source assets and must not be copied into the platform.
 
 ## Consequences
 
-Shared primitives remain intentionally small. Source screens can later adapt
+Shared primitives remain intentionally focused. Source screens can adapt
 incrementally without wholesale UI rewrites or a global `components` dumping
-ground.
+ground. New shared primitives are added when at least one real workflow needs
+their accessibility and interaction contract.
 
 ## Verification
 
