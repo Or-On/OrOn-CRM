@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import type { ReactNode } from "react";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getTranslations } from "next-intl/server";
@@ -27,7 +28,9 @@ export default async function RootLayout({
 }: {
   readonly children: ReactNode;
 }) {
-  const session = await currentPublicSession();
+  const publicRoute =
+    (await headers()).get("x-or-on-public-route") === "localized-root";
+  const session = publicRoute ? undefined : await currentPublicSession();
   const locale = resolveLocale(await getLocale());
   return (
     <html

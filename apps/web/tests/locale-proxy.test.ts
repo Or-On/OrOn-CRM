@@ -12,6 +12,9 @@ describe("server-rendered locale selection", () => {
     expect(response.headers.get("x-middleware-request-x-or-on-locale")).toBe(
       "he",
     );
+    expect(
+      response.headers.get("x-middleware-request-x-or-on-public-route"),
+    ).toBe("localized-root");
     expect(response.cookies.get("or_on_locale")).toMatchObject({
       value: "he",
       httpOnly: true,
@@ -29,7 +32,22 @@ describe("server-rendered locale selection", () => {
     expect(response.headers.get("x-middleware-request-x-or-on-locale")).toBe(
       "he",
     );
+    expect(
+      response.headers.get("x-middleware-request-x-or-on-public-route"),
+    ).toBe("application");
     expect(response.headers.get("location")).toBeNull();
+  });
+  it("overwrites a spoofed public marker on application and nested locale paths", () => {
+    for (const path of ["/inbox", "/login", "/en/product", "/he/"]) {
+      const response = proxy(
+        new NextRequest(`http://localhost${path}`, {
+          headers: { "x-or-on-public-route": "localized-root" },
+        }),
+      );
+      expect(
+        response.headers.get("x-middleware-request-x-or-on-public-route"),
+      ).toBe("application");
+    }
   });
   it("falls back to English for unsupported cookie values", () => {
     const response = proxy(
