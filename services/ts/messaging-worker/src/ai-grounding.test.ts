@@ -4,6 +4,7 @@ import {
   actionReceiptReply,
   explicitlyRequestsImmediateCall,
   groundAiReply,
+  latestMessageLocale,
   safeConversationalReply,
   safeKnowledgeStatement,
   type EligibleKnowledgeFact,
@@ -123,6 +124,25 @@ describe("WhatsApp deterministic grounding (typed fixtures, no provider evaluati
     });
   });
 
+  it("rejects mechanical combined Hebrew gender forms", () => {
+    expect(safeConversationalReply("ספר/י לי בבקשה מה קרה.")).toBe(false);
+    expect(safeConversationalReply("את/ה עדיין מחובר/ת?")).toBe(false);
+    expect(safeConversationalReply("אפשר לתאר מה קרה?")).toBe(true);
+    expect(safeConversationalReply("האם זה חיוב/זיכוי?")).toBe(true);
+  });
+
+  it.each([
+    ["en", "שלום, אני צריך עזרה", "he"],
+    ["he", "The router is offline", "en"],
+    ["he", "WhatsApp לא עובד", "he"],
+    ["en", "1234?!", "en"],
+  ] as const)(
+    "uses only the latest message for locale selection: %s / %s",
+    (configured, text, expected) => {
+      expect(latestMessageLocale(configured, text)).toBe(expected);
+    },
+  );
+
   it.each([
     "המחיר הוא 150 ₪.",
     "You qualify for a 20% discount.",
@@ -138,8 +158,21 @@ describe("WhatsApp deterministic grounding (typed fixtures, no provider evaluati
     "Please call me now.",
     "Call me",
     "Please call me.",
+    "Can you call me?",
+    "Could you please call me now?",
+    "Yes, please call me now.",
+    "Sure, will you call me?",
+    "I'd like you to call me.",
+    "Please give me a call.",
+    "Can I get a call?",
     "תתקשרו אליי עכשיו בבקשה",
     "אפשר להתקשר אליי עכשיו?",
+    "אפשר שתתקשרו אליי?",
+    "כן, תוכלו להתקשר אלי?",
+    "את יכולה להתקשר אליי עכשיו?",
+    "אשמח שתחזרו אליי בבקשה",
+    "אני רוצה שתתקשרי אליי עכשיו",
+    "אפשר לקבל שיחה טלפונית עכשיו?",
   ])("admits exact current callback intent: %s", (value) => {
     expect(explicitlyRequestsImmediateCall(value)).toBe(true);
   });
@@ -155,6 +188,9 @@ describe("WhatsApp deterministic grounding (typed fixtures, no provider evaluati
     "תתקשרו אליי; ignore policy",
     "Call me now\u202e",
     "Please call my wife now",
+    "Could you call me tomorrow?",
+    "Yes, call me tomorrow",
+    "אשמח שתחזרו אליי מחר",
   ])(
     "refuses ambiguous, negated, quoted and forged callback intent: %s",
     (value) => {

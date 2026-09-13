@@ -101,6 +101,12 @@ export function safeConversationalReply(value: string): boolean {
     !/(?:system|developer|assistant|tool)\s*:|ignore.{0,40}(?:instructions|rules)|override|prompt|json|queue|\bLLM\b|\bAI model\b/iu.test(
       text,
     ) &&
+    // Combined address forms such as ספר/י sound mechanical and still fail to
+    // choose a form of address. Use natural neutral Hebrew when no trusted
+    // preference is available.
+    !/(?:את\s*\/\s*ה|ספר\s*\/\s*י|פנה\s*\/\s*י|בחר\s*\/\s*י|לחץ\s*\/\s*י|רוצה\s*\/\s*ה|יכול\s*\/\s*ה|צריך\s*\/\s*ה|מוכן\s*\/\s*ה|מעוניין\s*\/\s*ת|מחובר\s*\/\s*ת|זמין\s*\/\s*ה)/u.test(
+      text,
+    ) &&
     // Prices, discounts and other numeric commercial claims must come from an
     // eligible knowledge fact rather than unconstrained model prose.
     !/(?:[$€£₪]|\b(?:USD|EUR|GBP|NIS|ILS)\b)\s*\d|\d(?:[\d,. ]{0,16})\s*(?:%|[$€£₪]|\b(?:USD|EUR|GBP|NIS|ILS)\b)/iu.test(
@@ -110,6 +116,18 @@ export function safeConversationalReply(value: string): boolean {
       text,
     )
   );
+}
+
+/** Choose the response language from the current message, never an old turn. */
+export function latestMessageLocale(
+  configuredLocale: string,
+  latestText: string,
+): "he" | "en" {
+  const hebrewWords = latestText.match(/\p{Script=Hebrew}+/gu)?.length ?? 0;
+  const latinWords = latestText.match(/\p{Script=Latin}+/gu)?.length ?? 0;
+  if (hebrewWords > latinWords) return "he";
+  if (latinWords > hebrewWords) return "en";
+  return configuredLocale.toLowerCase().startsWith("he") ? "he" : "en";
 }
 
 /** The model selects a key; the repository supplies every delivered business word. */

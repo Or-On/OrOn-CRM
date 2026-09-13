@@ -415,11 +415,6 @@ describe.skipIf(sourceUrl === undefined)(
         .mockResolvedValueOnce({
           action: "reply",
           text: "Is the router light steady or blinking?",
-        })
-        .mockResolvedValueOnce({
-          action: "request_call",
-          reasonCode: "call_requested",
-          text: "I am starting the call you requested now.",
         });
       const metaSend = vi
         .fn<(request: WhatsAppSendRequest) => Promise<WhatsAppSendResult>>()
@@ -489,7 +484,7 @@ describe.skipIf(sourceUrl === undefined)(
         await store.close();
       }
 
-      expect(aiDecide).toHaveBeenCalledTimes(3);
+      expect(aiDecide).toHaveBeenCalledTimes(2);
       expect(metaSend).toHaveBeenCalledTimes(3);
       expect(automaticCall).toHaveBeenCalledTimes(1);
       const inboundNotifications = await admin<{ count: number }[]>`

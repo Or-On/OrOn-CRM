@@ -21,6 +21,7 @@ import type { WhatsAppProvider, WhatsAppSendRequest } from "./providers.js";
 import { WhatsAppProviderError } from "./providers.js";
 import {
   WhatsAppAiProviderError,
+  type WhatsAppAiDecision,
   type WhatsAppAiEscalationReason,
   type WhatsAppAiProvider,
 } from "./ai-provider.js";
@@ -34,6 +35,7 @@ import {
   explicitlyRequestsImmediateCall,
   factDigest,
   groundAiReply,
+  latestMessageLocale,
   safeConversationalReply,
   type EligibleKnowledgeFact,
   type GroundedReply,
@@ -439,8 +441,16 @@ async function loadAiWork(
             wabaId: config.wabaId,
           }
         : undefined;
-    if (!history.some((message) => message.id === triggerMessageId))
+    const triggerMessage = history.find(
+      (message) => message.id === triggerMessageId,
+    );
+    if (triggerMessage === undefined)
       throw new TypeError("AI conversation has no inbound trigger message");
+    const responseLocale = latestMessageLocale(
+      row.locale,
+      triggerMessage.content_text,
+    );
+    const orderedHistory = history.toReversed();
     const notes = await transaction<
       { content_text: string; created_at: Date }[]
     >`
@@ -509,11 +519,11 @@ async function loadAiWork(
           occurredAt: session.occurred_at.toISOString(),
         })),
       },
-      locale: row.locale,
+      locale: responseLocale,
       provider: row.provider,
       channelConfiguration,
       triggerMessageId,
-      messages: history.reverse().map((message) => ({
+      messages: orderedHistory.map((message) => ({
         id: message.id,
         role: message.direction === "inbound" ? "user" : "assistant",
         text: message.content_text.slice(0, 1800),
@@ -674,13 +684,24 @@ async function processWhatsAppAiReply(
   automation: MessagingAutomationOptions,
 ): Promise<void> {
   try {
-    if (automation.aiProvider === undefined)
-      throw new TypeError("WhatsApp AI is disabled");
     const work = await loadAiWork(sql, workerId, job);
     if (work.provider === "simulator" && automation.simulatorEnabled !== true)
       throw new TypeError("simulation_disabled");
-    // Model traffic intentionally runs outside every PostgreSQL transaction.
-    const decision = await automation.aiProvider.decide(work);
+    const triggerText =
+      work.messages.find((message) => message.id === work.triggerMessageId)
+        ?.text ?? "";
+    const explicitCallRequested = explicitlyRequestsImmediateCall(triggerText);
+    // Explicit callback consent is a deterministic action and must not wait on
+    // or depend on an LLM classification. The voice agent receives the bounded
+    // conversation history when the durable callback job is dispatched.
+    const decision: WhatsAppAiDecision = explicitCallRequested
+      ? {
+          action: "request_call",
+          reasonCode: "call_requested",
+          text: "",
+        }
+      : await (automation.aiProvider?.decide(work) ??
+          Promise.reject(new TypeError("WhatsApp AI is disabled")));
     await sql.begin(async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
       await requireOwnedJob(transaction, workerId, job.id);
@@ -722,7 +743,7 @@ async function processWhatsAppAiReply(
             resourceId: string;
           } = grounded.evidence;
       let automaticCallQueued = false;
-      if (decision.action === "handoff") {
+      if (decision.action === "handoff" && !explicitCallRequested) {
         const resourceId = await createAiHandoff(
           transaction,
           work,
@@ -732,15 +753,11 @@ async function processWhatsAppAiReply(
         evidence = { kind: "receipt", operation: "handoff", resourceId };
         responseText = actionReceiptReply("handoff", work.locale);
       }
-      if (decision.action === "request_call") {
+      if (decision.action === "request_call" || explicitCallRequested) {
         if (
           automation.automaticCallsEnabled === true &&
           automation.automaticCallProvider !== undefined &&
-          explicitlyRequestsImmediateCall(
-            work.messages.find(
-              (message) => message.id === work.triggerMessageId,
-            )?.text ?? "",
-          )
+          explicitCallRequested
         ) {
           try {
             const receipt = await queueWhatsAppAutomaticCall(
@@ -764,7 +781,7 @@ async function processWhatsAppAiReply(
                       'conversation.call_requested', 'conversation',
                       ${work.conversationId}::uuid,
                       ${transaction.json({
-                        reasonCode: decision.reasonCode,
+                        reasonCode: "call_requested",
                         routing: "automatic",
                       })})
             `;
@@ -774,7 +791,9 @@ async function processWhatsAppAiReply(
               transaction,
               work,
               job.id,
-              decision.reasonCode,
+              decision.action === "request_call"
+                ? decision.reasonCode
+                : "call_requested",
             );
             evidence = { kind: "receipt", operation: "handoff", resourceId };
             responseText = actionReceiptReply("handoff", work.locale);
@@ -784,7 +803,9 @@ async function processWhatsAppAiReply(
             transaction,
             work,
             job.id,
-            decision.reasonCode,
+            decision.action === "request_call"
+              ? decision.reasonCode
+              : "call_requested",
           );
           evidence = { kind: "receipt", operation: "handoff", resourceId };
           responseText = actionReceiptReply("handoff", work.locale);
@@ -828,7 +849,7 @@ async function processWhatsAppAiReply(
         if (
           decision.action === "reply" ||
           decision.action === "knowledge" ||
-          (decision.action === "request_call" && automaticCallQueued)
+          automaticCallQueued
         ) {
           await transaction`
             UPDATE messaging.conversations
