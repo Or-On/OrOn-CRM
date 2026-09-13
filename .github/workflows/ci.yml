@@ -194,8 +194,10 @@ jobs:
             cp "$template" "$config/$(basename "${template%.template}")"
           done
           printf '%s' 'ci-only-postgres-password' > "$config/postgres-password.txt"
+          printf '%s' 'ci-only-owner-password' > "$config/owner-password.txt"
           digest="sha256:$(printf 'a%.0s' {1..64})"
           DEPLOYMENT_CONFIG_DIR="$config" DEPLOYMENT_DATA_DIR="$data" \
+          DEPLOYMENT_DATABASE_NAME="dev_oron_ci" \
           PLATFORM_ORIGIN="https://deployment.example.invalid" \
           TLS_CONTACT_EMAIL="operator@example.invalid" \
           WEB_IMAGE="example.invalid/oron/web@$digest" \
