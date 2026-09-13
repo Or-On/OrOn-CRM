@@ -41,7 +41,10 @@ describe("Studio Admin replica contract", () => {
     expect(css).toMatch(
       /\.shell--inbox \.topbar-actions \.language-control\s*\{[^}]*display:\s*block;/u,
     );
-    expect(css).toContain("--or-header-height: 6.25rem");
+    expect(css).toMatch(
+      /\.shell--inbox \.shell__topbar\s*\{[^}]*display:\s*flex;[^}]*gap:\s*0\.4rem;/u,
+    );
+    expect(css).toContain("--or-header-height: 3.5rem");
   });
 
   it("isolates the root theme reveal and keeps reduced motion instantaneous", () => {
