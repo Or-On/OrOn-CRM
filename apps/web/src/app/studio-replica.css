@@ -1910,11 +1910,16 @@ textarea,
 
   .shell,
   .shell--expanded {
+    --or-mobile-header-height: calc(3rem + env(safe-area-inset-top));
+    --or-mobile-utility-height: 2.75rem;
+    --shell-sticky-offset: calc(
+      var(--or-mobile-header-height) + var(--or-mobile-utility-height)
+    );
     display: block;
   }
 
   .shell__mobile-header {
-    min-block-size: 3rem;
+    min-block-size: var(--or-mobile-header-height);
     padding-inline: 1rem;
     background: var(--or-bg);
     border-block-end: 1px solid var(--or-border);
@@ -1936,6 +1941,68 @@ textarea,
 
   .shell__workspace {
     padding: 1rem;
+  }
+
+  .shell:not(.shell--inbox) > .shell__main,
+  .shell:not(.shell--inbox) > .shell__main--with-context {
+    grid-template-rows: var(--or-mobile-utility-height) minmax(0, 1fr);
+  }
+
+  .shell:not(.shell--inbox) .shell__topbar {
+    position: sticky;
+    inset-block-start: var(--or-mobile-header-height);
+    z-index: 24;
+    display: flex;
+    justify-content: flex-end;
+    min-block-size: var(--or-mobile-utility-height);
+    padding-inline: 1rem;
+    background: color-mix(in srgb, var(--or-bg) 96%, transparent);
+    border-block-end: 1px solid var(--or-border);
+  }
+
+  .shell:not(.shell--inbox) .shell__topbar .topbar-leading {
+    display: none;
+  }
+
+  .shell:not(.shell--inbox) .topbar-actions {
+    inline-size: 100%;
+    justify-content: flex-end;
+  }
+
+  .shell:not(.shell--inbox) .topbar-actions .language-control {
+    min-inline-size: 0;
+    max-inline-size: 7rem;
+  }
+
+  .shell:not(.shell--inbox) .topbar-actions .language-control .or-select {
+    min-block-size: 2rem;
+    padding-block: 0.25rem;
+  }
+
+  .account-menu__panel {
+    inline-size: min(18rem, calc(100dvi - 2rem));
+    block-size: max-content;
+    padding: 0.75rem;
+  }
+
+  .account-menu__panel:popover-open {
+    grid-auto-rows: max-content;
+    align-content: start;
+    gap: 0.55rem;
+  }
+
+  .account-menu__panel .identity-summary__copy {
+    gap: 0.2rem;
+    padding-block-end: 0.65rem;
+  }
+
+  .account-menu__panel .tenant-switcher {
+    padding-block: 0.15rem;
+  }
+
+  .account-menu__panel > :is(.text-link, .or-button) {
+    min-block-size: 2.5rem;
+    padding: 0.5rem 0.6rem;
   }
 
   .login-body,

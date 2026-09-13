@@ -727,3 +727,30 @@
     animation: none !important;
   }
 }
+
+/* Phone-class devices should respond immediately instead of rasterizing and
+   staggering entire data-heavy workspaces on every route change. Small state
+   indicators remain live; only large entrance effects and hover movement are
+   removed. */
+@media (max-width: 62rem), (pointer: coarse) {
+  .page--workspace-premium > .page-heading--premium,
+  .page--workspace-premium > :not(.page-heading--premium),
+  .tenant-admin-hero,
+  .tenant-admin-summary > .or-surface,
+  .tenant-admin-directory,
+  .platform-admin-hero,
+  .platform-admin-summary > .or-surface,
+  .platform-admin-workspace
+    > :not(.platform-admin-hero, .platform-admin-summary) {
+    animation: none !important;
+  }
+
+  .nav__item:hover,
+  [dir="rtl"] .nav__item:hover {
+    transform: none;
+  }
+
+  .shell__workspace {
+    background: var(--or-bg);
+  }
+}

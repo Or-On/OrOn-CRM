@@ -712,11 +712,7 @@ export function AppShell({
                   <strong>
                     {session.user.displayName ?? session.user.email}
                   </strong>
-                  <small>
-                    {session.user.isSuperuser
-                      ? t("shell.platformAdmin")
-                      : t(`status.${session.tenant.role}`)}
-                  </small>
+                  <small>{session.user.email}</small>
                 </div>
                 <label
                   className={`tenant-switcher ${session.user.isSuperuser ? "tenant-switcher--platform-admin" : ""}`}
@@ -731,9 +727,10 @@ export function AppShell({
                   />
                   <span className="tenant-switcher__copy">
                     <span>
+                      {t("shell.workspace")} ·{" "}
                       {session.user.isSuperuser
                         ? t("shell.platformAdmin")
-                        : `${t("shell.workspace")} · ${t(`status.${session.tenant.role}`)}`}
+                        : t(`status.${session.tenant.role}`)}
                     </span>
                     <SelectInput
                       dir="auto"
