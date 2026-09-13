@@ -863,7 +863,10 @@ export async function queueWhatsAppAutomaticCall(
       )
     ORDER BY flow.published_at DESC, flow.version DESC
     LIMIT 1
-    FOR SHARE OF conversation, contact, trigger, voice_agent
+    -- Published agent versions are immutable and the messaging runtime is
+    -- intentionally read-only for this table. Lock only the mutable records
+    -- whose eligibility must stay stable while the durable call is queued.
+    FOR SHARE OF conversation, contact, trigger
   `;
   const candidate = candidates[0];
   if (candidate === undefined)
