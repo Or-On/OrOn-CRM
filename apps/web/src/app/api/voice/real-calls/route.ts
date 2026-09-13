@@ -102,6 +102,7 @@ export async function POST(request: Request) {
       },
       body: JSON.stringify({
         phone_number: destination,
+        contact_id: body.contactId,
         flow_id: body.flowId,
         caller_gender: body.callerGender,
         idempotency_key: body.idempotencyKey,

@@ -484,6 +484,9 @@ describe.skipIf(sourceUrl === undefined)(
       expect(callRequest?.conversationContext).toContain(
         "Customer report (unverified): Please call me.",
       );
+      expect(callRequest?.conversationContext).toContain(
+        "Tenant CRM contact: Fictional Customer.",
+      );
       const inboundCount = await admin<{ count: number }[]>`
       SELECT count(*)::integer AS count FROM messaging.messages
       WHERE conversation_id=${conversationId}::uuid AND direction='inbound'

@@ -53,6 +53,7 @@ class CallContext(BaseModel):
     caller_gender: Literal["male", "female"] | None = None
     # Optional cross-channel provenance. The transcript is bounded at admission
     # and treated as untrusted reference material by the voice agent.
+    contact_id: uuid.UUID | None = None
     source_conversation_id: uuid.UUID | None = None
     conversation_context: str | None = Field(default=None, max_length=4000)
     raw_metadata: dict = Field(default_factory=dict)

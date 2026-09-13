@@ -4,6 +4,7 @@ import {
   actionReceiptReply,
   explicitlyRequestsImmediateCall,
   groundAiReply,
+  safeConversationalReply,
   safeKnowledgeStatement,
   type EligibleKnowledgeFact,
 } from "./ai-grounding.js";
@@ -111,6 +112,26 @@ describe("WhatsApp deterministic grounding (typed fixtures, no provider evaluati
       expect(reply.text).not.toContain("forged");
       expect(reply.evidence).toEqual({ kind: "conversation", code: replyCode });
     }
+  });
+
+  it("allows a specific natural diagnostic question without reducing it to a generic fallback", () => {
+    const text = "האם נורית האינטרנט בממיר דולקת או מהבהבת?";
+    expect(safeConversationalReply(text)).toBe(true);
+    expect(groundAiReply({ action: "reply", text }, [], "he")).toMatchObject({
+      text,
+      evidence: { kind: "conversation" },
+    });
+  });
+
+  it.each([
+    "המחיר הוא 150 ₪.",
+    "You qualify for a 20% discount.",
+    "The service costs USD 49.",
+  ])("requires approved knowledge for commercial claims: %s", (text) => {
+    expect(safeConversationalReply(text)).toBe(false);
+    expect(groundAiReply({ action: "reply", text }, [], "he").text).not.toBe(
+      text,
+    );
   });
 
   it.each([

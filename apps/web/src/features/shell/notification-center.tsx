@@ -12,6 +12,8 @@ import { crmMutation, crmRead } from "../crm";
 const preferenceKey = "or-on.inbox-notifications";
 
 function notificationHref(notification: NotificationSummary): string {
+  if (notification.referenceType === "handoff" && notification.referenceId)
+    return "/orchestration?tab=handoffs";
   return notification.referenceType === "conversation" &&
     notification.referenceId
     ? `/inbox?conversation=${encodeURIComponent(notification.referenceId)}`

@@ -1,13 +1,22 @@
 .workspace {
   display: grid;
-  gap: 1rem;
+  gap: 1.5rem;
+  inline-size: 100%;
+  max-inline-size: none;
+  margin-inline: 0;
   min-inline-size: 0;
+}
+
+.workspace:global(.platform-admin-workspace) {
+  max-inline-size: none;
+  margin-inline: 0;
 }
 .walletCard {
   display: grid;
-  grid-template-columns: minmax(13rem, 0.8fr) minmax(18rem, 1.2fr);
-  gap: 1rem 1.5rem;
-  padding: 1.35rem;
+  grid-template-columns: minmax(16rem, 0.8fr) minmax(22rem, 1.2fr);
+  gap: 1.5rem 2.5rem;
+  min-block-size: 12rem;
+  padding: clamp(1.5rem, 3vw, 2.25rem);
   border: 1px solid var(--or-border);
   border-radius: 0.9rem;
   background: linear-gradient(
@@ -21,7 +30,8 @@
 }
 .walletCard > div:first-child {
   display: grid;
-  gap: 0.2rem;
+  align-content: center;
+  gap: 0.35rem;
 }
 .walletCard > div:first-child > span {
   display: flex;
@@ -31,13 +41,17 @@
   font-size: 0.75rem;
 }
 .walletCard > div:first-child > strong {
-  font-size: 1.5rem;
+  margin-block: 0.2rem;
+  font-size: clamp(2rem, 4vw, 3rem);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
   letter-spacing: -0.04em;
 }
 .walletCard > div:first-child > small,
 .walletCard > p {
   color: var(--or-text-muted);
-  font-size: 0.72rem;
+  font-size: 0.78rem;
+  line-height: 1.5;
 }
 .walletCard > p {
   grid-column: 1 / -1;
@@ -48,7 +62,8 @@
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.85rem;
+  min-block-size: 7.5rem;
+  padding: 1.25rem;
   background: var(--or-surface);
   border: 1px solid var(--or-border);
   border-radius: 0.6rem;
@@ -66,7 +81,7 @@
 }
 .paymentSource strong {
   color: var(--or-text-primary);
-  font-size: 0.78rem;
+  font-size: 0.9rem;
 }
 .paymentSource small {
   color: var(--or-text-muted);
@@ -167,36 +182,50 @@
 
 .overviewGrid {
   display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(18rem, 0.95fr);
-  gap: 1rem;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1.25rem;
   align-items: stretch;
 }
 
 .kpis {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  overflow: hidden;
-  background: var(--or-surface);
-  border: 1px solid var(--or-border);
-  border-radius: 0.9rem;
-  box-shadow: var(--or-shadow-1);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
 }
 
 .kpi {
+  position: relative;
+  overflow: hidden;
   display: flex;
-  min-block-size: 8.75rem;
+  min-block-size: 9.5rem;
   flex-direction: column;
   justify-content: space-between;
-  gap: 1.35rem;
-  padding: 1.15rem;
+  gap: 1.5rem;
+  padding: 1.35rem;
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--or-accent) 7%, transparent),
+      transparent 58%
+    ),
+    var(--or-surface);
+  border: 1px solid var(--or-border);
+  border-radius: 0.8rem;
+  box-shadow: var(--or-shadow-1);
 }
 
-.kpi:nth-child(odd) {
-  border-inline-end: 1px solid var(--or-divider);
-}
-
-.kpi:nth-child(-n + 2) {
-  border-block-end: 1px solid var(--or-divider);
+.kpi::after {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline: 1.35rem;
+  block-size: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--or-accent) 52%, transparent),
+    transparent
+  );
+  content: "";
 }
 
 .kpiLabel {
@@ -208,7 +237,7 @@
 .kpiValue {
   display: block;
   margin-block-end: 0.35rem;
-  font-size: clamp(1.7rem, 3vw, 2.1rem);
+  font-size: clamp(1.7rem, 2.6vw, 2.35rem);
   font-weight: 610;
   line-height: 1;
   letter-spacing: -0.045em;
@@ -221,8 +250,8 @@
 
 .sideStack {
   display: grid;
-  grid-template-rows: 1fr auto;
-  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.25rem;
 }
 
 .card,
@@ -236,7 +265,8 @@
 }
 
 .card {
-  padding: 1.15rem;
+  min-block-size: 12rem;
+  padding: 1.5rem;
 }
 
 .cardHeader,
@@ -294,7 +324,7 @@
 }
 
 .chartCard {
-  padding: 1.15rem 1.15rem 0.7rem;
+  padding: 1.5rem 1.5rem 1rem;
 }
 
 .chartControls {
@@ -328,14 +358,14 @@
 
 .chart {
   position: relative;
-  block-size: 13rem;
-  margin-block-start: 0.6rem;
+  block-size: 19rem;
+  margin-block-start: 1rem;
   overflow: hidden;
 }
 
 .chart svg {
   inline-size: 100%;
-  block-size: 10.5rem;
+  block-size: 16rem;
   overflow: visible;
 }
 
@@ -397,11 +427,12 @@
 }
 
 .ledger {
+  min-block-size: 18rem;
   overflow: hidden;
 }
 
 .ledgerHeader {
-  padding: 1.1rem 1.15rem;
+  padding: 1.5rem;
   border-block-end: 1px solid var(--or-divider);
 }
 
@@ -558,7 +589,7 @@
 
 .empty {
   display: grid;
-  min-block-size: 11rem;
+  min-block-size: 14rem;
   place-items: center;
   padding: 2rem;
   text-align: center;
@@ -618,6 +649,12 @@
   }
 }
 
+@media (max-width: 76rem) {
+  .kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 64rem) {
   .walletCard {
     grid-template-columns: minmax(0, 1fr);
@@ -626,13 +663,8 @@
   .walletCard > p {
     grid-column: 1;
   }
-  .overviewGrid {
-    grid-template-columns: 1fr;
-  }
-
   .sideStack {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    grid-template-rows: auto;
   }
 }
 
@@ -673,12 +705,6 @@
 
   .kpi:nth-child(n) {
     min-block-size: 7.5rem;
-    border-inline-end: 0;
-    border-block-end: 1px solid var(--or-divider);
-  }
-
-  .kpi:last-child {
-    border-block-end: 0;
   }
 
   .ledgerTools,

@@ -18,6 +18,11 @@
   max-inline-size: 96rem;
   margin-inline: auto;
 }
+.page--finance {
+  inline-size: 100%;
+  max-inline-size: 106rem;
+  margin-inline: auto;
+}
 .tenant-admin-hero {
   position: relative;
   isolation: isolate;

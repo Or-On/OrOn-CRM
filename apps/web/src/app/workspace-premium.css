@@ -468,6 +468,11 @@
   gap: 1rem;
 }
 
+.page--workspace-premium.page--finance {
+  max-inline-size: none;
+  margin-inline: 0;
+}
+
 .page--workspace-premium > .page-heading--premium {
   position: relative;
   isolation: isolate;

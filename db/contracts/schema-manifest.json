@@ -1,5 +1,5 @@
 {
-  "alembic_head": "143c59f3c8e2",
+  "alembic_head": "3cbd28bebf1a",
   "expected_functions": [
     "agents.protect_approved_knowledge",
     "automation.protect_published_flow_version",

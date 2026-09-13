@@ -249,7 +249,6 @@ private or proprietary source material.
 
 ## Contributing
 
-Read [AGENTS.md](AGENTS.md) and the relevant scoped instructions before making
-changes. Keep provider actions disabled during normal development, preserve
-tenant isolation, add tests for behavioral changes, and never include secrets or
-real customer information in commits.
+Keep provider actions disabled during normal development, preserve tenant
+isolation, add tests for behavioral changes, and never include secrets or real
+customer information in commits.

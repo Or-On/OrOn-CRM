@@ -23,6 +23,22 @@ class AgentTaskHandle(BaseModel):
 
     task: asyncio.Task[None]
 
+    def observe_completion(self, callback: Callable[[BaseException | None], None]) -> None:
+        """Report an unexpected runtime exit to the owning dispatcher.
+
+        A detached task can fail after admission but before the transport has
+        joined the room.  Without this hook the SIP leg can keep running in
+        silence while the canonical session remains falsely ``started``.
+        """
+
+        def completed(task: asyncio.Task[None]) -> None:
+            if task.cancelled():
+                callback(None)
+                return
+            callback(task.exception())
+
+        self.task.add_done_callback(completed)
+
     async def cancel(self) -> None:
         if self.task.done():
             with suppress(asyncio.CancelledError):
@@ -63,6 +79,7 @@ def make_launch_bot(
         require_real_voice_providers(settings)
         await ensure_preflight()
         parsed_overrides = AgentOverrides.model_validate(overrides) if overrides else None
+        ready = asyncio.Event()
         task = asyncio.create_task(
             run_call(
                 room,
@@ -71,9 +88,34 @@ def make_launch_bot(
                 g2p=g2p,
                 overrides=parsed_overrides,
                 sessions=sessions,
+                ready=ready,
             ),
             name=f"oron-agent:{context.session_id}",
         )
+        ready_wait = asyncio.create_task(
+            ready.wait(), name=f"oron-agent-ready:{context.session_id}"
+        )
+        try:
+            done, _ = await asyncio.wait(
+                {task, ready_wait},
+                timeout=15.0,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if task in done:
+                # Re-raise construction/connection failures before the paid SIP
+                # leg is created.  The dispatcher maps the detail to a safe
+                # public startup error and persists the failed session.
+                await task
+                raise RuntimeError("voice agent stopped before becoming ready")
+            if ready_wait not in done:
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+                raise TimeoutError("voice agent readiness timed out")
+        finally:
+            ready_wait.cancel()
+            with suppress(asyncio.CancelledError):
+                await ready_wait
         return AgentTaskHandle(task=task)
 
     return launch_bot

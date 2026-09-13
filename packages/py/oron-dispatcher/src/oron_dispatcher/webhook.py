@@ -40,6 +40,7 @@ class WebhookReceiver(Protocol):
 class OutboundCallRequest(BaseModel):
     phone_number: E164
     flow_id: UUID
+    contact_id: UUID | None = None
     flow_version: int | None = Field(default=None, ge=1, strict=True)
     agent_version_id: UUID | None = None
     caller_gender: Literal["male", "female"] | None = None
@@ -181,6 +182,7 @@ def create_app(
                 idempotency_key=request.idempotency_key,
                 explicit_approval=request.explicit_approval,
                 caller_gender=request.caller_gender,
+                contact_id=request.contact_id,
                 source_conversation_id=request.source_conversation_id,
                 conversation_context=request.conversation_context,
             )

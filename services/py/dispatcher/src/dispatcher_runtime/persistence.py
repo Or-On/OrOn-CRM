@@ -240,6 +240,7 @@ class PostgresVoiceRuntime:
                     if context.agent_version_id
                     else None,
                     "to": context.to_number,
+                    "contact": str(context.contact_id) if context.contact_id else None,
                     "address": context.caller_gender,
                     "source_conversation": str(context.source_conversation_id)
                     if context.source_conversation_id
@@ -261,6 +262,47 @@ class PostgresVoiceRuntime:
             )
         async with self._sessionmaker() as database, database.begin():
             await set_tenant(database, str(context.tenant_id))
+            resolved_contact_id = context.contact_id
+            if context.contact_id is not None:
+                contact_found = (
+                    await database.execute(
+                        text(
+                            """
+                            SELECT EXISTS (
+                              SELECT 1 FROM crm.contacts
+                              WHERE id=:contact AND tenant_id=:tenant
+                            )
+                            """
+                        ),
+                        {
+                            "contact": str(context.contact_id),
+                            "tenant": str(context.tenant_id),
+                        },
+                    )
+                ).scalar_one()
+                if not contact_found:
+                    raise ValueError("call contact is unavailable")
+            if context.source_conversation_id is not None:
+                conversation_contact = (
+                    await database.execute(
+                        text(
+                            """
+                            SELECT contact_id FROM messaging.conversations
+                            WHERE id=:conversation AND tenant_id=:tenant
+                            """
+                        ),
+                        {
+                            "conversation": str(context.source_conversation_id),
+                            "tenant": str(context.tenant_id),
+                        },
+                    )
+                ).scalar_one_or_none()
+                if conversation_contact is None or (
+                    context.contact_id is not None
+                    and str(conversation_contact) != str(context.contact_id)
+                ):
+                    raise ValueError("call conversation binding is unavailable")
+                resolved_contact_id = conversation_contact
             if idempotency_key is not None:
                 # Serialize same deterministic session admission across dispatcher
                 # processes. The lease lasts only for this DB transaction; no
@@ -306,6 +348,7 @@ class PostgresVoiceRuntime:
             )
             row.idempotency_key = idempotency_key
             row.initiated_by_service = "dispatcher"
+            row.contact_id = resolved_contact_id
             database.add(row)
             if configuration_event := _call_configuration_event(context):
                 database.add(configuration_event)
@@ -322,6 +365,10 @@ class PostgresVoiceRuntime:
                             if context.agent_version_id
                             else None,
                             "flow_version": context.flow_version,
+                            "contact_id": str(resolved_contact_id) if resolved_contact_id else None,
+                            "source_conversation_id": str(context.source_conversation_id)
+                            if context.source_conversation_id
+                            else None,
                         },
                     )
                 )

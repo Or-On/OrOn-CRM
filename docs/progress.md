@@ -1763,3 +1763,42 @@ uses the workspace.
   Alembic head, production builds, peer checks, and JavaScript/Python dependency
   audits. The NLTK advisory remains a time-bounded exception through 2026-10-13;
   NLTK and Torch are absent from the production dispatcher image.
+
+### History-grounded WhatsApp investigation and silent-call containment — 2026-09-13
+
+- Reproduced the latest silent-call evidence in canonical PostgreSQL: the newest
+  session remained `started`, had no answered signal, no STT audio, no TTS
+  characters, no recording/transcript, and only admission/configuration events.
+  The failure therefore occurred before an active conversational audio lifecycle,
+  not inside the Hebrew response text.
+- The dispatcher now waits for the retained voice pipeline to construct before
+  creating the SIP participant. Detached agent completion is observed, its room
+  is hung up, and the canonical session is finalized as ended or failed so a
+  pipeline startup/runtime fault cannot leave another paid silent leg or ghost
+  `started` session.
+- Automatic and operator-started calls now carry the canonical contact binding.
+  WhatsApp-triggered calls also carry the source conversation binding, and the
+  admission event records both identifiers for durable cross-channel evidence.
+- WhatsApp AI investigation now reads a bounded tenant-scoped contact record,
+  CRM notes, previous conversations, linked voice outcomes, and up to thirty
+  recent turns. Natural diagnostic questions are permitted behind deterministic
+  prompt-injection, false-action, and commercial-claim guards; approved business
+  facts still require the versioned knowledge path.
+- The voice call context now includes bounded CRM/history evidence in addition
+  to the recent WhatsApp transcript. A human handoff creates a high-priority CRM
+  task, linked contact note, durable handoff alert, and an evidence summary.
+  Exhausted automatic-call failures create the same operational recovery path.
+- The Finance workspace received the shared wide premium layout and larger KPI,
+  chart, payment-source, and ledger surfaces. Inbox layout was not changed.
+- Video/visual escalation remains deliberately unavailable until the deferred
+  OpenLive contact workflow is integrated. It is never faked and never blocks an
+  explicit human request, emergency, safety escalation, or unavailable-channel
+  fallback.
+- Verification passed: 170 messaging-worker unit tests with 30 environment-gated
+  skips, the isolated PostgreSQL signed-webhook/AI/callback integration test,
+  32 focused Python tests, Ruff, Pyrefly, repository ESLint, 492 web tests with
+  one environment-gated skip, web and worker strict TypeScript, Alembic graph
+  and offline-contract checks, current-database head validation, and the 65-page
+  Next.js production build. No real provider action occurred. The local Node
+  executable is 25.9.0 while the repository contract requires Node 24.20.x;
+  checks passed but the supported runtime remains Node 24.

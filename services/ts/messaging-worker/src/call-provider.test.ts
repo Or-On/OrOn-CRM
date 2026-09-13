@@ -10,6 +10,7 @@ afterEach(() => vi.unstubAllGlobals());
 const request = {
   actorRole: "agent" as const,
   actorUserId: "20000000-0000-4000-8000-000000000001",
+  contactId: "60000000-0000-4000-8000-000000000001",
   conversationContext: "Customer: Please call me.",
   conversationId: "30000000-0000-4000-8000-000000000001",
   destination: "+12025550198",

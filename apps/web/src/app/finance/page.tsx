@@ -79,7 +79,7 @@ export default async function FinancePage() {
       },
     );
     return (
-      <main className="page page--wide">
+      <main className="page page--wide page--workspace-premium page--finance">
         <FinanceWorkspace
           defaultCurrency={data.defaultCurrency}
           initialExpenses={data.expensePage.expenses}

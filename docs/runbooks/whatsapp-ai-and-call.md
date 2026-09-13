@@ -12,14 +12,16 @@ flowchart LR
   Meta[Meta signed webhook] --> Inbox[(PostgreSQL inbound event)]
   Inbox --> Worker[Messaging worker]
   Worker --> Canonical[Canonical conversation]
-  Canonical --> AI[Tenant default published agent]
+  Canonical --> CRM[Contact history notes and prior outcomes]
+  CRM --> AI[Tenant default published agent]
   AI --> Outbox[(Outbound response job)]
   Outbox --> MetaSend[Meta provider boundary]
   AI -->|explicit call requested| CallJob[(Durable call job)]
   CallJob --> Recheck[Recheck tenant actor contact consent and flow]
   Recheck --> Dispatcher[Signed dispatcher boundary]
   Dispatcher --> Voice[LiveKit SIP and retained voice agent]
-  Recheck -->|refused or terminal failure| Handoff[(Pending human handoff)]
+  Recheck -->|refused or terminal failure| Ticket[(Urgent CRM task and contact note)]
+  Ticket --> Handoff[(Pending human handoff and alert)]
 ```
 
 The webhook verifies the exact raw body before durably accepting a deduplicated
@@ -104,17 +106,35 @@ authorization, consent and the exact retained voice flow. It then releases the
 database transaction and sends an audience/capability-bound service assertion
 to the existing dispatcher.
 
-The voice agent receives at most twelve recent text messages, bounded to 3,500
-characters and ending at the requesting inbound message. The transcript is
-marked as untrusted customer data and provides continuity only. It cannot
-override the voice prompt, authorize tools or prove an action succeeded. It is
-not copied into the durable job payload or logs.
+The messaging model receives at most thirty recent text turns together with a
+bounded tenant-scoped projection of the contact, CRM notes, previous
+conversations and contact-linked voice outcomes. The voice agent receives at
+most twelve recent text messages plus a bounded CRM/history summary, ending at
+the requesting inbound message. All of this evidence is marked as untrusted
+customer/operator data and provides continuity only. It cannot override the
+agent prompt, authorize tools or prove an action succeeded. It is not copied
+into the durable call-job payload or logs.
 
 The job is idempotent per inbound AI job and each conversation has a ten-minute
 automatic-call admission cap. Transient dispatcher failures use bounded job
-retries. A refusal or exhausted job creates one pending human handoff and
-returns the conversation to human ownership. No retry can bypass a kill switch.
-Simulator messages cannot admit real calls.
+retries. A refusal or exhausted job creates one pending human handoff, an urgent
+CRM task, a contact note and an in-app alert, then returns the conversation to
+human ownership. No retry can bypass a kill switch. Simulator messages cannot
+admit real calls.
+
+Ordinary unresolved issues must be investigated through WhatsApp before the
+agent escalates. An explicit request for a human, an emergency, or a safety
+issue remains an immediate escape hatch; the platform never delays those behind
+a paid call or unavailable channel. Calls require the customer's explicit
+current request and non-revoked voice consent. A later visual/video diagnostic
+must likewise be available and consented before use. The production OpenLive
+video stage is not connected to contact workflows yet, so it is not represented
+as completed and never blocks a human handoff.
+
+When a handoff is created, the canonical CRM task and contact note contain the
+current issue, bounded WhatsApp evidence, relevant earlier conversation
+summaries, CRM notes, linked voice outcomes, and stable internal references.
+The notification contains no full phone number or message transcript.
 
 ## Provider-free end-to-end proof
 
@@ -145,7 +165,10 @@ Use one test tenant and a non-sensitive recipient:
 5. During a separately authorized smoke-test window, enable all three call
    switches, request a call explicitly and confirm one canonical session.
 6. Confirm the call uses relevant WhatsApp context without reading it aloud.
-7. Disable any one call switch and confirm the provider boundary refuses.
+7. End the call and confirm its session is linked to the same contact and appears
+   in the contact activity timeline.
+8. Disable any one call switch and confirm the provider boundary refuses and an
+   urgent human-attention task and alert are created after bounded retries.
 
 A live smoke test requires separate explicit user authorization. Automated
 tests and CI use fake model and provider responses only.

@@ -45,7 +45,8 @@ async def test_launcher_runs_one_cancellable_task_for_an_enabled_call() -> None:
     )
     started = asyncio.Event()
 
-    async def wait_forever(*_args, **_kwargs) -> None:
+    async def wait_forever(*_args, **kwargs) -> None:
+        kwargs["ready"].set()
         started.set()
         await asyncio.Event().wait()
 
@@ -88,7 +89,8 @@ async def test_successful_llm_preflight_is_cached_for_the_dispatcher_process() -
     preflight = AsyncMock()
     started = asyncio.Event()
 
-    async def wait_forever(*_args, **_kwargs) -> None:
+    async def wait_forever(*_args, **kwargs) -> None:
+        kwargs["ready"].set()
         started.set()
         await asyncio.Event().wait()
 
@@ -102,3 +104,24 @@ async def test_successful_llm_preflight_is_cached_for_the_dispatcher_process() -
         await first.cancel()
         await second.cancel()
     preflight.assert_awaited_once_with(settings)
+
+
+async def test_launcher_surfaces_pipeline_failure_before_returning_a_handle() -> None:
+    settings = Settings(
+        _env_file=None,
+        ENABLE_REAL_VOICE_PROVIDERS=True,
+        LIVEKIT_URL="ws://127.0.0.1:7880",
+        LIVEKIT_API_KEY="fixture",
+        LIVEKIT_API_SECRET="fixture-secret",
+        SONIOX_API_KEY="fixture-soniox",
+        GOOGLE_CLOUD_PROJECT="fixture-project",
+    )
+
+    with (
+        patch(
+            "oron_agent.launcher.run_call",
+            new=AsyncMock(side_effect=RuntimeError("pipeline construction failed")),
+        ),
+        pytest.raises(RuntimeError, match="pipeline construction failed"),
+    ):
+        await make_launch_bot(settings, preflight=AsyncMock())("fixture", _context(), None)

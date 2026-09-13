@@ -1,6 +1,7 @@
 """Fail sessions left `started` by an agent that died without finalizing.
 
-Intended to run periodically (a GKE CronJob calling `oron-sessions-sweeper`).
+Intended to run periodically through the deployment scheduler by calling
+`oron-sessions-sweeper`.
 
 Swept one tenant at a time, because `sessions` is under RLS. An unscoped UPDATE
 matches nothing once the app connects as a non-superuser: the policy compares

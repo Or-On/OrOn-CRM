@@ -84,6 +84,31 @@ export function safeKnowledgeStatement(value: string): boolean {
   );
 }
 
+/**
+ * Allow the model to ask natural investigative questions while retaining a
+ * deterministic boundary around consequential claims.  Business facts still
+ * have to travel through the approved-knowledge branch above.
+ */
+export function safeConversationalReply(value: string): boolean {
+  const text = value.trim();
+  return (
+    text.length > 0 &&
+    text.length <= 1000 &&
+    !/[\p{Cc}\p{Cf}<>`]/u.test(text) &&
+    !/(?:system|developer|assistant|tool)\s*:|ignore.{0,40}(?:instructions|rules)|override|prompt|json|queue|\bLLM\b|\bAI model\b/iu.test(
+      text,
+    ) &&
+    // Prices, discounts and other numeric commercial claims must come from an
+    // eligible knowledge fact rather than unconstrained model prose.
+    !/(?:[$€£₪]|\b(?:USD|EUR|GBP|NIS|ILS)\b)\s*\d|\d(?:[\d,. ]{0,16})\s*(?:%|[$€£₪]|\b(?:USD|EUR|GBP|NIS|ILS)\b)/iu.test(
+      text,
+    ) &&
+    !/\b(?:booked|refunded|delivered|connected|verified|scheduled|charged|paid|updated|sent|approved|fixed|resolved)\b|(?:קבעתי|תיאמתי|שלחתי|פתחתי|עדכנתי|זיכיתי|אימתתי|חיברתי|תוקן|נפתר|בוצע|נשלח|אישר(?:תי|ה|ו)?|אושר(?:ה)?|שולם|נקבע|נמסר)/iu.test(
+      text,
+    )
+  );
+}
+
 /** The model selects a key; the repository supplies every delivered business word. */
 export function groundAiReply(
   decision: WhatsAppAiDecision,
@@ -120,14 +145,13 @@ export function groundAiReply(
   if (decision.action === "reply") {
     if (decision.replyCode !== undefined)
       return conversationalReply(decision.replyCode, locale);
-    // Preserve harmless legacy adapter replies without admitting arbitrary prose.
-    const greeting = /^(?:hello|hi|hey|שלום|היי)[!.]?$/iu.test(
-      decision.text.trim(),
-    );
-    return conversationalReply(
-      greeting ? "greeting" : "knowledge_unavailable",
-      locale,
-    );
+    if (safeConversationalReply(decision.text)) {
+      return {
+        text: decision.text.trim(),
+        evidence: { kind: "conversation", code: "clarify" },
+      };
+    }
+    return conversationalReply("knowledge_unavailable", locale);
   }
   return conversationalReply("knowledge_unavailable", locale);
 }

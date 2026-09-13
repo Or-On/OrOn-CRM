@@ -279,10 +279,14 @@ interface AiWork {
   readonly knowledge: readonly EligibleKnowledgeFact[];
   readonly ownershipEpoch: string;
   readonly authorizedUserId: string;
+  readonly contactId: string;
   readonly conversationId: string;
   readonly locale: string;
   readonly provider: "simulator" | "meta";
   readonly systemPrompt: string;
+  readonly contactContext: NonNullable<
+    Parameters<WhatsAppAiProvider["decide"]>[0]["contactContext"]
+  >;
   readonly channelConfiguration:
     | {
         readonly graphApiVersion: string;
@@ -364,13 +368,21 @@ async function loadAiWork(
         configuration: unknown;
         ownership_epoch: string;
         agent_version_id: string;
+        contact_id: string;
+        contact_name: string;
+        contact_company: string | null;
+        lifecycle_status: string;
       }[]
     >`
       SELECT conversation.id AS conversation_id,
              conversation.ai_enabled_by_user_id,
              agent.system_prompt, agent.locale, agent.id AS agent_version_id, conversation.ownership_epoch,
-             channel.provider, channel.configuration
+             channel.provider, channel.configuration, contact.id AS contact_id,
+             contact.name AS contact_name, contact.company AS contact_company,
+             contact.lifecycle_status
       FROM messaging.conversations conversation
+      JOIN crm.contacts contact ON contact.id=conversation.contact_id
+        AND contact.tenant_id=conversation.tenant_id
       JOIN agents.agent_profile_versions agent
         ON agent.id = conversation.ai_agent_profile_version_id
        AND agent.tenant_id = conversation.tenant_id
@@ -412,7 +424,7 @@ async function loadAiWork(
       FROM messaging.messages
       WHERE conversation_id = ${row.conversation_id}::uuid
         AND content_type = 'text' AND content_text IS NOT NULL
-      ORDER BY created_at DESC, id DESC LIMIT 20
+      ORDER BY created_at DESC, id DESC LIMIT 50
     `;
     const config = row.configuration as Record<string, unknown> | null;
     const channelConfiguration =
@@ -428,13 +440,74 @@ async function loadAiWork(
         : undefined;
     if (!history.some((message) => message.id === triggerMessageId))
       throw new TypeError("AI conversation has no inbound trigger message");
+    const notes = await transaction<
+      { content_text: string; created_at: Date }[]
+    >`
+      SELECT left(note.body, 1200) AS content_text, note.created_at
+      FROM crm.notes note
+      WHERE note.contact_id=${row.contact_id}::uuid
+      ORDER BY note.created_at DESC, note.id DESC LIMIT 8
+    `;
+    const previousConversations = await transaction<
+      { summary: string; status: string; occurred_at: Date | null }[]
+    >`
+      SELECT left(coalesce(previous.last_message_preview, ''), 600) AS summary,
+             previous.status, previous.last_message_at AS occurred_at
+      FROM messaging.conversations previous
+      WHERE previous.contact_id=${row.contact_id}::uuid
+        AND previous.id<>${row.conversation_id}::uuid
+      ORDER BY previous.last_message_at DESC NULLS LAST, previous.id DESC LIMIT 8
+    `;
+    const voiceSessions = await transaction<
+      {
+        session_id: string;
+        status: string;
+        answered: boolean | null;
+        outcome: string | null;
+        recording_object_id: string | null;
+        transcript_object_id: string | null;
+        occurred_at: Date;
+      }[]
+    >`
+      SELECT session_id, status, answered, outcome, recording_object_id,
+             transcript_object_id, created_at AS occurred_at
+      FROM public.sessions
+      WHERE contact_id=${row.contact_id}::uuid
+      ORDER BY created_at DESC, session_id DESC LIMIT 8
+    `;
     return {
       agentVersionId: row.agent_version_id,
       knowledge,
       ownershipEpoch: row.ownership_epoch,
       conversationId: row.conversation_id,
       authorizedUserId: row.ai_enabled_by_user_id,
+      contactId: row.contact_id,
       systemPrompt: row.system_prompt,
+      contactContext: {
+        contact: {
+          name: row.contact_name,
+          company: row.contact_company,
+          lifecycleStatus: row.lifecycle_status,
+        },
+        notes: notes.reverse().map((note) => ({
+          text: note.content_text,
+          occurredAt: note.created_at.toISOString(),
+        })),
+        previousConversations: previousConversations.reverse().map((item) => ({
+          summary: item.summary,
+          status: item.status,
+          occurredAt: item.occurred_at?.toISOString() ?? null,
+        })),
+        voiceSessions: voiceSessions.reverse().map((session) => ({
+          sessionId: session.session_id,
+          status: session.status,
+          answered: session.answered,
+          outcome: session.outcome,
+          recordingObjectId: session.recording_object_id,
+          transcriptObjectId: session.transcript_object_id,
+          occurredAt: session.occurred_at.toISOString(),
+        })),
+      },
       locale: row.locale,
       provider: row.provider,
       channelConfiguration,
@@ -475,6 +548,107 @@ async function createAiHandoff(
   `;
   if (receipt[0] === undefined)
     throw new TypeError("AI handoff was not recorded");
+  const inbound = work.messages
+    .filter((message) => message.role === "user")
+    .map((message) => message.text.replace(/\s+/gu, " ").trim())
+    .filter(
+      (text) =>
+        text.length >= 5 &&
+        !explicitlyRequestsImmediateCall(text) &&
+        !/^(?:hi|hello|hey|thanks|thank you|שלום|היי|תודה)[!?. ]*$/iu.test(
+          text,
+        ) &&
+        !/(?:human|person|representative|agent|נציג|אדם|בן אדם)/iu.test(text),
+    );
+  // Prefer the most descriptive customer report over a final callback or
+  // handoff command. The complete ordered evidence remains below.
+  const issue =
+    inbound.toSorted((left, right) => right.length - left.length)[0] ??
+    safeReason;
+  const history = work.messages
+    .slice(-20)
+    .map(
+      (message) =>
+        `${message.role === "user" ? "Customer" : "AI Agent"}: ${message.text.replace(/\s+/gu, " ").trim()}`,
+    )
+    .join("\n");
+  const previous = work.contactContext.previousConversations
+    .slice(-5)
+    .map((item) => `- ${item.status}: ${item.summary}`)
+    .join("\n");
+  const voice = work.contactContext.voiceSessions
+    .slice(-5)
+    .map(
+      (session) =>
+        `- ${session.sessionId}: ${session.status}, answered=${String(session.answered)}${session.outcome ? `, outcome=${session.outcome}` : ""}, recording=${session.recordingObjectId ? "available" : "unavailable"}, transcript=${session.transcriptObjectId ? "available" : "unavailable"} at ${session.occurredAt}`,
+    )
+    .join("\n");
+  const description = [
+    `Customer: ${work.contactContext.contact.name}`,
+    work.contactContext.contact.company
+      ? `Company: ${work.contactContext.contact.company}`
+      : null,
+    `CRM status: ${work.contactContext.contact.lifecycleStatus}`,
+    `Escalation reason: ${safeReason}`,
+    `Current reported issue: ${issue}`,
+    "",
+    "WhatsApp evidence:",
+    history || "No retained text messages.",
+    "",
+    "Previous conversation evidence:",
+    previous || "No earlier conversation summary was found.",
+    "",
+    "CRM notes:",
+    work.contactContext.notes
+      .slice(-8)
+      .map((note) => `- ${note.occurredAt}: ${note.text}`)
+      .join("\n") || "No CRM note was found.",
+    "",
+    "Voice evidence:",
+    voice || "No contact-linked voice session was found.",
+    "",
+    `Conversation reference: ${work.conversationId}`,
+    `Handoff reference: ${receipt[0].id}`,
+  ]
+    .filter((line): line is string => line !== null)
+    .join("\n")
+    .slice(0, 20_000);
+  const ticket = await transaction<{ id: string }[]>`
+    INSERT INTO crm.tasks
+      (tenant_id, created_by_user_id, title, description, status, priority)
+    SELECT platform.current_tenant_id(), ${work.authorizedUserId}::uuid,
+           ${`AI handoff · ${issue.slice(0, 180)}`}, ${description}, 'todo',
+           ${reasonCode === "emergency" || reasonCode === "safety" ? "urgent" : "high"}
+    WHERE NOT EXISTS (
+      SELECT 1 FROM audit.records
+      WHERE action='conversation.ai_handoff_ticket'
+        AND target_type='handoff' AND target_id=${receipt[0].id}::uuid
+    )
+    RETURNING id
+  `;
+  if (ticket[0] !== undefined) {
+    await transaction`
+      INSERT INTO crm.notes (tenant_id, contact_id, author_user_id, body)
+      VALUES (platform.current_tenant_id(), ${work.contactId}::uuid,
+              ${work.authorizedUserId}::uuid, ${description})
+    `;
+    await transaction`
+      INSERT INTO messaging.notifications
+        (tenant_id, user_id, type, title, body, reference_type, reference_id)
+      SELECT platform.current_tenant_id(), recipient.user_id,
+             'handoff.requested', 'AI Agent needs a person',
+             ${`Investigation complete: ${issue.slice(0, 220)}`},
+             'handoff', ${receipt[0].id}::uuid
+      FROM platform.current_tenant_notification_recipients() recipient
+    `;
+    await transaction`
+      INSERT INTO audit.records
+        (tenant_id, actor_user_id, action, target_type, target_id, metadata)
+      VALUES (platform.current_tenant_id(), ${work.authorizedUserId}::uuid,
+              'conversation.ai_handoff_ticket', 'handoff', ${receipt[0].id}::uuid,
+              ${transaction.json({ taskId: ticket[0].id })})
+    `;
+  }
   await transaction`
     UPDATE messaging.conversations
     SET ownership_mode='human', ai_agent_profile_version_id=NULL,
@@ -743,7 +917,13 @@ function conversationContext(
     readonly content_text: string;
     readonly direction: "inbound" | "outbound";
   }[],
+  evidence: readonly string[] = [],
 ): string {
+  const evidenceBlock = evidence
+    .map((line) => line.replace(/\s+/gu, " ").trim())
+    .filter(Boolean)
+    .join("\n")
+    .slice(0, 1400);
   const lines = messages.map((message) => {
     const label =
       message.direction === "inbound"
@@ -753,7 +933,7 @@ function conversationContext(
     return `${label}: ${text}`;
   });
   const selected: string[] = [];
-  let length = 0;
+  let length = evidenceBlock.length;
   for (const line of lines.toReversed()) {
     if (length + line.length + 1 > 3500) break;
     selected.unshift(line);
@@ -761,7 +941,9 @@ function conversationContext(
   }
   if (selected.length === 0)
     throw new TypeError("automatic call conversation context is unavailable");
-  return selected.join("\n");
+  return [evidenceBlock, "Recent WhatsApp conversation:", ...selected]
+    .filter(Boolean)
+    .join("\n");
 }
 
 async function loadAutomaticCallWork(
@@ -791,9 +973,15 @@ async function loadAutomaticCallWork(
         normalized_value: string;
         trigger_text: string;
         agent_version_id: string;
+        contact_name: string;
+        contact_company: string | null;
+        lifecycle_status: string;
       }[]
     >`
-      SELECT identity.normalized_value, trigger.content_text AS trigger_text, agent.id AS agent_version_id
+      SELECT identity.normalized_value, trigger.content_text AS trigger_text,
+             agent.id AS agent_version_id, contact.name AS contact_name,
+             contact.company AS contact_company,
+             contact.lifecycle_status
       FROM messaging.conversations conversation
       JOIN agents.agent_profile_versions agent
         ON agent.id=conversation.ai_agent_profile_version_id AND agent.tenant_id=conversation.tenant_id
@@ -868,11 +1056,42 @@ async function loadAutomaticCallWork(
       ORDER BY message.created_at DESC, message.id DESC
       LIMIT 12
     `;
+    const notes = await transaction<{ body: string; created_at: Date }[]>`
+      SELECT left(note.body, 500) AS body, note.created_at
+      FROM crm.notes note
+      WHERE note.contact_id=${payload.contactId}::uuid
+      ORDER BY note.created_at DESC, note.id DESC LIMIT 3
+    `;
+    const prior = await transaction<{ summary: string; status: string }[]>`
+      SELECT left(coalesce(previous.last_message_preview, ''), 300) AS summary,
+             previous.status
+      FROM messaging.conversations previous
+      WHERE previous.contact_id=${payload.contactId}::uuid
+        AND previous.id<>${payload.conversationId}::uuid
+      ORDER BY previous.last_message_at DESC NULLS LAST, previous.id DESC LIMIT 3
+    `;
+    const evidence = [
+      `Tenant CRM contact: ${row.contact_name}.`,
+      row.contact_company ? `Company: ${row.contact_company}.` : "",
+      `CRM lifecycle status: ${row.lifecycle_status}.`,
+      ...notes
+        .toReversed()
+        .map(
+          (note) => `CRM note (${note.created_at.toISOString()}): ${note.body}`,
+        ),
+      ...prior
+        .toReversed()
+        .map(
+          (item) =>
+            `Earlier WhatsApp conversation (${item.status}): ${item.summary}`,
+        ),
+    ];
     return {
       actorRole: "agent",
       actorUserId: payload.actorUserId,
       agentVersionId: row.agent_version_id,
-      conversationContext: conversationContext(messages.reverse()),
+      contactId: payload.contactId,
+      conversationContext: conversationContext(messages.reverse(), evidence),
       conversationId: payload.conversationId,
       destination: row.normalized_value,
       flowId: payload.flowId,
@@ -955,7 +1174,7 @@ async function processAutomaticCall(
         // A failed old generation must not overwrite a later takeover/resume.
         if (stillOwned[0] === undefined) return;
         const fallbackReason = "Automatic telephone call could not be started";
-        await transaction`
+        const handoff = await transaction<{ id: string }[]>`
           INSERT INTO automation.handoffs
             (tenant_id, contact_id, conversation_id, requested_by_user_id,
              source_channel, reason_safe, status, idempotency_key)
@@ -963,8 +1182,88 @@ async function processAutomaticCall(
                   ${payload.conversationId}::uuid, ${payload.actorUserId}::uuid,
                   'whatsapp', ${fallbackReason}, 'pending',
                   ${`auto-call-failed:${job.id}`})
-          ON CONFLICT (tenant_id, idempotency_key) DO NOTHING
+          ON CONFLICT (tenant_id, idempotency_key) DO UPDATE
+            SET idempotency_key=EXCLUDED.idempotency_key
+          RETURNING id
         `;
+        const contact = await transaction<
+          { name: string; company: string | null; lifecycle_status: string }[]
+        >`
+          SELECT name, company, lifecycle_status FROM crm.contacts
+          WHERE id=${payload.contactId}::uuid
+        `;
+        const messages = await transaction<
+          { direction: "inbound" | "outbound"; content_text: string }[]
+        >`
+          SELECT direction, left(content_text, 1200) AS content_text
+          FROM messaging.messages
+          WHERE conversation_id=${payload.conversationId}::uuid
+            AND content_type='text' AND content_text IS NOT NULL
+          ORDER BY created_at DESC, id DESC LIMIT 20
+        `;
+        const callFailureDescription = [
+          `Customer: ${contact[0]?.name ?? "Unknown contact"}`,
+          contact[0]?.company ? `Company: ${contact[0].company}` : null,
+          contact[0]?.lifecycle_status
+            ? `CRM status: ${contact[0].lifecycle_status}`
+            : null,
+          `Escalation reason: ${fallbackReason}`,
+          `Safe error code: ${reason}`,
+          "",
+          "WhatsApp evidence:",
+          ...messages
+            .toReversed()
+            .map(
+              (message) =>
+                `${message.direction === "inbound" ? "Customer" : "AI Agent"}: ${message.content_text.replace(/\s+/gu, " ").trim()}`,
+            ),
+          "",
+          `Conversation reference: ${payload.conversationId}`,
+          `Call job reference: ${job.id}`,
+          `Handoff reference: ${handoff[0]?.id ?? "unavailable"}`,
+        ]
+          .filter((line): line is string => line !== null)
+          .join("\n")
+          .slice(0, 20_000);
+        if (handoff[0] !== undefined) {
+          const ticket = await transaction<{ id: string }[]>`
+            INSERT INTO crm.tasks
+              (tenant_id, created_by_user_id, title, description, status, priority)
+            SELECT platform.current_tenant_id(), ${payload.actorUserId}::uuid,
+                   'AI callback requires attention', ${callFailureDescription},
+                   'todo', 'urgent'
+            WHERE NOT EXISTS (
+              SELECT 1 FROM audit.records
+              WHERE action='conversation.ai_handoff_ticket'
+                AND target_type='handoff' AND target_id=${handoff[0].id}::uuid
+            )
+            RETURNING id
+          `;
+          if (ticket[0] !== undefined) {
+            await transaction`
+              INSERT INTO crm.notes (tenant_id, contact_id, author_user_id, body)
+              VALUES (platform.current_tenant_id(), ${payload.contactId}::uuid,
+                      ${payload.actorUserId}::uuid, ${callFailureDescription})
+            `;
+            await transaction`
+              INSERT INTO messaging.notifications
+                (tenant_id, user_id, type, title, body, reference_type, reference_id)
+              SELECT platform.current_tenant_id(), recipient.user_id,
+                     'handoff.requested', 'AI call needs human attention',
+                     'The requested AI call could not start. Review the ticket and contact history.',
+                     'handoff', ${handoff[0].id}::uuid
+              FROM platform.current_tenant_notification_recipients() recipient
+            `;
+            await transaction`
+              INSERT INTO audit.records
+                (tenant_id, actor_user_id, action, target_type, target_id, metadata)
+              VALUES (platform.current_tenant_id(), ${payload.actorUserId}::uuid,
+                      'conversation.ai_handoff_ticket', 'handoff',
+                      ${handoff[0].id}::uuid,
+                      ${transaction.json({ taskId: ticket[0].id, callJobId: job.id })})
+            `;
+          }
+        }
         await transaction`
           UPDATE messaging.conversations
           SET ownership_mode='human', ai_agent_profile_version_id=NULL,

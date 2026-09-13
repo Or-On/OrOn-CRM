@@ -6,6 +6,7 @@ export interface AutomaticCallRequest {
   readonly agentVersionId?: string;
   readonly conversationContext: string;
   readonly conversationId: string;
+  readonly contactId: string;
   readonly destination: string;
   readonly flowId: string;
   readonly flowVersion?: number;
@@ -88,6 +89,7 @@ export class DispatcherAutomaticCallProvider implements AutomaticCallProvider {
           },
           body: JSON.stringify({
             caller_gender: null,
+            contact_id: request.contactId,
             conversation_context: request.conversationContext,
             explicit_approval: true,
             flow_id: request.flowId,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 from uuid import NAMESPACE_URL, uuid4, uuid5
@@ -44,7 +45,12 @@ def _dispatcher(
         finalize=AsyncMock(return_value=True),
         ready=AsyncMock(return_value=True),
     )
-    launch = AsyncMock(return_value=AsyncMock())
+
+    class Handle:
+        async def cancel(self) -> None:
+            return None
+
+    launch = AsyncMock(return_value=Handle())
     hangup = AsyncMock()
     dispatcher = Dispatcher(
         settings=SimpleNamespace(room_prefix="call-", bot_identity="oron-agent"),
@@ -204,6 +210,37 @@ async def test_agent_startup_failure_is_safe_and_never_reaches_sip() -> None:
     dial.assert_not_awaited()
 
 
+async def test_runtime_agent_failure_hangs_up_and_marks_session_failed() -> None:
+    dial = AsyncMock()
+    dispatcher, sessions, launch, hangup = _dispatcher(sip=_sip(enabled=True, dial=dial))
+    observer = None
+
+    class Handle:
+        async def cancel(self) -> None:
+            return None
+
+        def observe_completion(self, callback) -> None:
+            nonlocal observer
+            observer = callback
+
+    launch.return_value = Handle()
+    result = await dispatcher.place_outbound_call(
+        "+14155550100",
+        TENANT_ID,
+        FLOW_ID,
+        idempotency_key="request-runtime-failure",
+        explicit_approval=True,
+    )
+    assert result.created
+    assert observer is not None
+    observer(RuntimeError("provider disconnected"))
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    hangup.assert_awaited_once()
+    sessions.finalize.assert_awaited_once()
+    assert sessions.finalize.await_args.kwargs["status"].value == "failed"
+
+
 async def test_outbound_replay_does_not_launch_or_dial() -> None:
     dial = AsyncMock()
     dispatcher, sessions, launch, _ = _dispatcher(
@@ -229,6 +266,7 @@ async def test_outbound_carries_cross_channel_context_into_the_agent() -> None:
     dial = AsyncMock()
     dispatcher, sessions, launch, _ = _dispatcher(sip=_sip(enabled=True, dial=dial))
     conversation_id = uuid4()
+    contact_id = uuid4()
 
     await dispatcher.place_outbound_call(
         "+14155550100",
@@ -237,12 +275,14 @@ async def test_outbound_carries_cross_channel_context_into_the_agent() -> None:
         idempotency_key="request-gender-context",
         explicit_approval=True,
         caller_gender="female",
+        contact_id=contact_id,
         source_conversation_id=conversation_id,
         conversation_context="Customer: Please call me now.",
     )
 
     context = sessions.begin.await_args.args[0]
     assert context.caller_gender == "female"
+    assert context.contact_id == contact_id
     assert context.source_conversation_id == conversation_id
     assert context.conversation_context == "Customer: Please call me now."
     assert launch.await_args.args[1].caller_gender == "female"

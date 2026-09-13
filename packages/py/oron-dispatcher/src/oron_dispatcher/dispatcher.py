@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Literal, Protocol
@@ -32,6 +33,8 @@ class IdempotencyConflict(RuntimeError):
 
 class BotHandle(Protocol):
     async def cancel(self) -> None: ...
+
+    def observe_completion(self, callback: Callable[[BaseException | None], None]) -> None: ...
 
 
 class SessionPersistence(Protocol):
@@ -169,6 +172,7 @@ class Dispatcher:
         flow_version: int | None = None,
         agent_version_id: UUID | None = None,
         caller_gender: Literal["male", "female"] | None = None,
+        contact_id: UUID | None = None,
         source_conversation_id: UUID | None = None,
         conversation_context: str | None = None,
         overrides: Mapping[str, object] | None = None,
@@ -190,6 +194,7 @@ class Dispatcher:
             tenant_id=tenant_id,
             session_id=session_id,
             caller_gender=caller_gender,
+            contact_id=contact_id,
             source_conversation_id=source_conversation_id,
             conversation_context=conversation_context,
         )
@@ -200,6 +205,7 @@ class Dispatcher:
                 "flow_version",
                 "agent_version_id",
                 "caller_gender",
+                "contact_id",
                 "source_conversation_id",
                 "conversation_context",
             )
@@ -302,7 +308,37 @@ class Dispatcher:
                 public_reason = "voice agent startup preflight failed"
             raise AgentStartupUnavailable(public_reason) from None
         self._active[room] = _Active(context=context, handle=handle)
+        observer = getattr(handle, "observe_completion", None)
+        if callable(observer):
+            observer(
+                lambda error: asyncio.create_task(
+                    self._handle_agent_completion(room, error),
+                    name=f"dispatcher-agent-completion:{context.session_id}",
+                )
+            )
         return True
+
+    async def _handle_agent_completion(self, room: str, error: BaseException | None) -> None:
+        """Close a provider leg when its detached conversational task exits."""
+
+        active = self._active.get(room)
+        if active is None:
+            return
+        if error is not None:
+            logger.error(
+                "Voice agent stopped unexpectedly (error_type=%s)",
+                type(error).__name__,
+            )
+        try:
+            await self._hangup_room(room)
+        finally:
+            # Do not call handle.cancel() from its own completion callback.
+            if not await self._sessions.finalize(
+                active.context,
+                status=SessionStatus.FAILED if error is not None else SessionStatus.ENDED,
+            ):
+                logger.error("Voice agent completion could not be persisted")
+            self._active.pop(room, None)
 
     async def _finalize(self, room: str, *, status: SessionStatus) -> None:
         active = self._active.get(room)

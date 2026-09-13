@@ -74,7 +74,7 @@ describe("OpenAiCompatibleChatProvider", () => {
       {
         role: "user",
         content: JSON.stringify({
-          kind: "untrusted_conversation_and_approved_fact_data",
+          kind: "untrusted_tenant_context_and_approved_fact_data",
           knowledge: [],
           messages: [
             {
@@ -86,6 +86,69 @@ describe("OpenAiCompatibleChatProvider", () => {
         }),
       },
     ]);
+  });
+
+  it("supplies tenant-scoped CRM and prior-channel evidence as labeled untrusted data", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      responseFor({
+        action: "reply",
+        text: "What changed today?",
+        reasonCode: null,
+        replyCode: null,
+        documentId: null,
+        factKey: null,
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await provider().decide({
+      ...request,
+      contactContext: {
+        contact: {
+          name: "Fictional Customer",
+          company: "Example Ltd",
+          lifecycleStatus: "active",
+        },
+        notes: [
+          {
+            text: "Previously reported router loss.",
+            occurredAt: "2026-09-01T09:00:00Z",
+          },
+        ],
+        previousConversations: [
+          {
+            summary: "Asked about connectivity.",
+            status: "closed",
+            occurredAt: "2026-09-02T09:00:00Z",
+          },
+        ],
+        voiceSessions: [
+          {
+            sessionId: "30000000-0000-4000-8000-000000000001",
+            status: "ended",
+            answered: true,
+            outcome: "diagnosed",
+            recordingObjectId: "40000000-0000-4000-8000-000000000001",
+            transcriptObjectId: "50000000-0000-4000-8000-000000000001",
+            occurredAt: "2026-09-03T09:00:00Z",
+          },
+        ],
+      },
+    });
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    if (typeof init.body !== "string")
+      throw new TypeError("expected JSON body");
+    const body = JSON.parse(init.body) as {
+      messages: { role: string; content: string }[];
+    };
+    const evidence = JSON.parse(body.messages[1]?.content ?? "null") as {
+      kind?: string;
+      contactContext?: { contact?: { name?: string }; notes?: unknown[] };
+    };
+    expect(evidence.kind).toBe(
+      "untrusted_tenant_context_and_approved_fact_data",
+    );
+    expect(evidence.contactContext?.contact?.name).toBe("Fictional Customer");
+    expect(evidence.contactContext?.notes).toHaveLength(1);
   });
 
   it("keeps injected caller claims and previous assistant statements in labeled data and selects only fact keys", async () => {

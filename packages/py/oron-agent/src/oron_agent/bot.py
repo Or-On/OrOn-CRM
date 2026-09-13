@@ -174,6 +174,7 @@ async def run_bot(
     g2p: G2P | None,
     overrides: AgentOverrides | None = None,
     sessions: RuntimeSessions | None = None,
+    ready: asyncio.Event | None = None,
 ):
     # `room`, never `st.livekit_room`: the dispatcher runs every call in-process
     # against one shared Settings, so that field holds a deployment-wide default
@@ -752,6 +753,11 @@ async def run_bot(
 
     runner = WorkerRunner(handle_sigint=False)
     await runner.add_workers(worker)
+    # Signal only after every tenant flow, model, STT, TTS, processor and
+    # persistence dependency has been constructed.  The dispatcher waits for
+    # this boundary before creating a paid SIP participant.
+    if ready is not None:
+        ready.set()
     try:
         await runner.run()
     except Exception:
@@ -774,6 +780,7 @@ async def run_call(
     g2p: G2P | None = None,
     overrides: AgentOverrides | None = None,
     sessions: RuntimeSessions | None = None,
+    ready: asyncio.Event | None = None,
 ) -> None:
     """Join `room_name` as the agent and run the pipeline for one call.
 
@@ -806,6 +813,7 @@ async def run_call(
         g2p=g2p,
         overrides=overrides,
         sessions=sessions,
+        ready=ready,
     )
 
 
