@@ -31,7 +31,7 @@ services:
     cpus: 2
     pids_limit: 256
     environment:
-      POSTGRES_DB: or_on_platform
+      POSTGRES_DB: ${DEPLOYMENT_DATABASE_NAME:?Set the deployment database name}
       POSTGRES_USER: platform_migrator
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
     secrets: [postgres_password]
@@ -50,7 +50,8 @@ services:
         "idle_in_transaction_session_timeout=60000",
       ]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U platform_migrator -d or_on_platform"]
+      test:
+        ["CMD-SHELL", 'pg_isready -U platform_migrator -d "$${POSTGRES_DB}"']
       interval: 5s
       timeout: 3s
       retries: 20
@@ -71,6 +72,33 @@ services:
     environment:
       PLATFORM_ENV: production
     depends_on: { postgres: { condition: service_healthy } }
+    networks: [database]
+    read_only: true
+    tmpfs: [/tmp]
+
+  bootstrap-owner:
+    <<: *service
+    image: ${MESSAGING_WORKER_IMAGE:?Set an immutable messaging-worker image digest}
+    # Compose bind-mounts file-backed secrets with their host ownership. This
+    # one-shot, read-only container needs root only to copy the 0600 secret into
+    # its private tmpfs; every long-running application service stays unprivileged.
+    user: "0:0"
+    command:
+      [
+        "sh",
+        "-c",
+        "umask 077; cp /run/secrets/owner_password /tmp/owner-password; exec node bootstrap-owner.mjs --confirm-empty-database",
+      ]
+    restart: "no"
+    profiles: [bootstrap]
+    env_file:
+      - path: ${DEPLOYMENT_CONFIG_DIR}/bootstrap-owner.env
+        format: raw
+    environment:
+      PLATFORM_ENV: production
+      BOOTSTRAP_OWNER_PASSWORD_FILE: /tmp/owner-password
+    depends_on: { postgres: { condition: service_healthy } }
+    secrets: [owner_password]
     networks: [database]
     read_only: true
     tmpfs: [/tmp]
@@ -213,3 +241,5 @@ networks:
 secrets:
   postgres_password:
     file: ${DEPLOYMENT_CONFIG_DIR}/postgres-password.txt
+  owner_password:
+    file: ${DEPLOYMENT_CONFIG_DIR}/owner-password.txt

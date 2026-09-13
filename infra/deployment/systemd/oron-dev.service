@@ -1,0 +1,17 @@
+[Unit]
+Description=Or-On Platform DEV container stack
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+ConditionPathIsSymbolicLink=/opt/oron-dev/current
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/docker compose --env-file /opt/oron-dev/shared/deployment.env --env-file /opt/oron-dev/current/images.env --file /opt/oron-dev/current/infra/compose/deployment.yaml --profile workers --profile voice up --detach --remove-orphans --wait --wait-timeout 240
+ExecStop=/usr/bin/docker compose --env-file /opt/oron-dev/shared/deployment.env --env-file /opt/oron-dev/current/images.env --file /opt/oron-dev/current/infra/compose/deployment.yaml --profile workers --profile voice stop
+TimeoutStartSec=300
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,12 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "declaration": false,
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
+    "noEmit": false,
+    "outDir": "../.artifacts/bootstrap-owner",
+    "rootDir": "."
+  },
+  "include": ["bootstrap_owner.ts"]
+}

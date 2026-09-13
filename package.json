@@ -23,6 +23,7 @@
     "typecheck": "pnpm -r --if-present run typecheck"
   },
   "devDependencies": {
+    "@or-on/auth": "workspace:*",
     "postgres": "catalog:",
     "@eslint/js": "catalog:",
     "@next/eslint-plugin-next": "16.3.3",

@@ -6,8 +6,11 @@ RUN corepack enable && corepack prepare pnpm@11.24.0 --activate
 COPY . .
 RUN pnpm install --frozen-lockfile \
     && pnpm --filter @or-on/messaging-worker... build \
+    && pnpm exec tsc --project scripts/tsconfig.bootstrap-owner.json \
+      --outDir /tmp/bootstrap-owner \
     && node infra/scripts/runtime-exports.mjs \
     && pnpm --filter @or-on/messaging-worker deploy --prod --legacy /runtime \
+    && cp /tmp/bootstrap-owner/bootstrap_owner.js /runtime/bootstrap-owner.mjs \
     && node infra/scripts/verify-runtime-lock.mjs
 
 FROM node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS runtime

@@ -92,6 +92,9 @@ importers:
       '@next/eslint-plugin-next':
         specifier: 16.3.3
         version: 16.3.3(eslint@10.9.1(jiti@2.7.0)(supports-color@10.2.2))
+      '@or-on/auth':
+        specifier: workspace:*
+        version: link:packages/ts/auth
       '@types/node':
         specifier: 'catalog:'
         version: 24.13.3

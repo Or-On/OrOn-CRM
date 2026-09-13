@@ -167,6 +167,9 @@ jobs:
   containers:
     name: Container builds
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
@@ -207,3 +210,105 @@ jobs:
       - run: docker build --file infra/images/messaging-worker.Dockerfile --tag or-on/messaging-worker:ci .
       - run: docker build --file infra/images/dispatcher.Dockerfile --tag or-on/dispatcher:ci .
       - run: docker build --file infra/images/migrator.Dockerfile --tag or-on/migrator:ci .
+      - name: Authenticate to Google Cloud for immutable DEV images
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: projects/157867817612/locations/global/workloadIdentityPools/github-oron-dev/providers/oron-crm-main
+          service_account: oron-github-dev@website-478708.iam.gserviceaccount.com
+      - name: Configure the regional Artifact Registry
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
+      - name: Publish immutable DEV images
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          REGISTRY: me-west1-docker.pkg.dev/website-478708/or-on-platform
+        run: |
+          set -Eeuo pipefail
+          gcloud auth configure-docker me-west1-docker.pkg.dev --quiet
+          for service in web control-api messaging-worker dispatcher migrator; do
+            docker tag "or-on/${service}:ci" "${REGISTRY}/${service}:${GITHUB_SHA}"
+            docker push "${REGISTRY}/${service}:${GITHUB_SHA}"
+          done
+
+  deploy-dev:
+    name: Deploy GCP DEV
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs:
+      [
+        typescript,
+        python,
+        database,
+        contracts,
+        architecture-security,
+        containers,
+      ]
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-gcp-dev
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    environment:
+      name: development
+      url: https://dev.or-on.io
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: projects/157867817612/locations/global/workloadIdentityPools/github-oron-dev/providers/oron-crm-main
+          service_account: oron-github-dev@website-478708.iam.gserviceaccount.com
+      - name: Install Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
+      - name: Assemble the release payload
+        id: release
+        shell: bash
+        env:
+          REGISTRY: me-west1-docker.pkg.dev/website-478708/or-on-platform
+        run: |
+          set -Eeuo pipefail
+          release_dir="${RUNNER_TEMP}/oron-dev-${GITHUB_SHA}"
+          mkdir -p "${release_dir}"
+          for service in web control-api messaging-worker dispatcher migrator; do
+            digest="$(gcloud artifacts docker images describe \
+              "${REGISTRY}/${service}:${GITHUB_SHA}" \
+              --project website-478708 --format='value(image_summary.digest)')"
+            [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]
+            variable="$(printf '%s' "${service}" | tr '[:lower:]-' '[:upper:]_')_IMAGE"
+            printf '%s=%s@%s\n' "${variable}" "${REGISTRY}/${service}" "${digest}" \
+              >>"${release_dir}/images.env"
+          done
+          cp --parents \
+            infra/compose/deployment.yaml \
+            infra/caddy/Caddyfile.deployment \
+            infra/deployment/systemd/oron-dev.service \
+            infra/deployment/systemd/oron-dev-backup.service \
+            infra/deployment/systemd/oron-dev-backup.timer \
+            scripts/deploy-dev.sh scripts/backup-dev.sh \
+            "${release_dir}"
+          archive="${RUNNER_TEMP}/oron-dev-release-${GITHUB_SHA}.tar.gz"
+          tar -czf "${archive}" -C "${release_dir}" .
+          echo "archive=${archive}" >>"${GITHUB_OUTPUT}"
+      - name: Transfer and deploy the release
+        shell: bash
+        env:
+          ARCHIVE: ${{ steps.release.outputs.archive }}
+        run: |
+          set -Eeuo pipefail
+          remote_archive="/tmp/oron-dev-release-${GITHUB_SHA}.tar.gz"
+          gcloud compute scp --quiet --tunnel-through-iap \
+            --project website-478708 --zone me-west1-b \
+            "${ARCHIVE}" "oron-dev:${remote_archive}"
+          gcloud compute ssh oron-dev --quiet --tunnel-through-iap \
+            --project website-478708 --zone me-west1-b \
+            --command="sudo /opt/oron-dev/scripts/deploy-dev.sh '${GITHUB_SHA}' '${remote_archive}'; rm -f '${remote_archive}'"
+      - name: Verify the public DEV endpoint
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            --max-time 15 http://dev.or-on.io/)" = "308"
+          curl --fail --silent --show-error --max-time 15 https://dev.or-on.io/login >/dev/null

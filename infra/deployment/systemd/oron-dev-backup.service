@@ -1,0 +1,12 @@
+[Unit]
+Description=Back up the Or-On Platform DEV PostgreSQL database
+Requires=docker.service
+After=docker.service oron-dev.service
+ConditionPathIsSymbolicLink=/opt/oron-dev/current
+
+[Service]
+Type=oneshot
+ExecStart=/opt/oron-dev/scripts/backup-dev.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

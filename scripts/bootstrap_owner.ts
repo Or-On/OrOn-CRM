@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 
 import postgres from "postgres";
 
-import { hashPassword } from "../packages/ts/auth/src/crypto.js";
+import { hashPassword } from "@or-on/auth";
 
 const MIGRATION_SEED_TENANT_ID = "00000000-0000-0000-0000-000000000001";
 
@@ -22,9 +22,13 @@ function deploymentInput(): {
   passwordFile: string;
 } {
   if (process.env.PLATFORM_ENV !== "production")
-    throw new Error("PLATFORM_ENV=production is required for first-owner bootstrap");
+    throw new Error(
+      "PLATFORM_ENV=production is required for first-owner bootstrap",
+    );
   if (!process.argv.includes("--confirm-empty-database"))
-    throw new Error("Explicit --confirm-empty-database acknowledgement is required");
+    throw new Error(
+      "Explicit --confirm-empty-database acknowledgement is required",
+    );
   const databaseUrl = required("MIGRATION_DATABASE_URL");
   if (!/^postgres(?:ql)?:\/\//u.test(databaseUrl))
     throw new Error("MIGRATION_DATABASE_URL must use PostgreSQL");
@@ -40,14 +44,23 @@ function deploymentInput(): {
   const passwordFile = required("BOOTSTRAP_OWNER_PASSWORD_FILE");
   if (!isAbsolute(passwordFile))
     throw new Error("BOOTSTRAP_OWNER_PASSWORD_FILE must be an absolute path");
-  return { databaseUrl, email, name, slug, passwordFile: resolve(passwordFile) };
+  return {
+    databaseUrl,
+    email,
+    name,
+    slug,
+    passwordFile: resolve(passwordFile),
+  };
 }
 
 async function privatePassword(path: string): Promise<string> {
   const metadata = await stat(path);
-  if (!metadata.isFile()) throw new Error("Owner password path must be a regular file");
+  if (!metadata.isFile())
+    throw new Error("Owner password path must be a regular file");
   if (process.platform !== "win32" && (metadata.mode & 0o077) !== 0)
-    throw new Error("Owner password file must not be accessible by group or others");
+    throw new Error(
+      "Owner password file must not be accessible by group or others",
+    );
   const source = await readFile(path, "utf8");
   const password = source.replace(/\r?\n$/u, "");
   if (password.includes("\n") || password.includes("\r"))
@@ -59,7 +72,9 @@ async function privatePassword(path: string): Promise<string> {
 
 async function main(): Promise<void> {
   const input = deploymentInput();
-  const passwordHash = await hashPassword(await privatePassword(input.passwordFile));
+  const passwordHash = await hashPassword(
+    await privatePassword(input.passwordFile),
+  );
   const bootstrapUserId = randomUUID();
   const sql = postgres(input.databaseUrl, {
     connect_timeout: 5,
@@ -86,13 +101,16 @@ async function main(): Promise<void> {
           AND slug = 'default'
           AND status = 'active'
       `;
+      const count = counts[0];
       if (
-        counts[0].tenants !== "1" ||
-        counts[0].users !== "0" ||
-        counts[0].memberships !== "0" ||
+        count?.tenants !== "1" ||
+        count.users !== "0" ||
+        count.memberships !== "0" ||
         seedTenants.length !== 1
       )
-        throw new Error("First-owner bootstrap refuses a non-empty identity database");
+        throw new Error(
+          "First-owner bootstrap refuses a non-empty identity database",
+        );
 
       const tenants = await transaction<{ id: string }[]>`
         UPDATE tenants
@@ -113,7 +131,8 @@ async function main(): Promise<void> {
       `;
       const tenantId = tenants[0]?.id;
       const userId = users[0]?.id;
-      if (!tenantId || !userId) throw new Error("Bootstrap identifiers were not returned");
+      if (!tenantId || !userId)
+        throw new Error("Bootstrap identifiers were not returned");
       await transaction`
         INSERT INTO memberships(user_id, tenant_id, role)
         VALUES(${userId}::uuid, ${tenantId}::uuid, 'owner')
