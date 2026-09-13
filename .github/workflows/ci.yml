@@ -106,7 +106,10 @@ jobs:
           node-version: 24.20.0
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @or-on/crm build
+      # Workspace packages publish compiled `dist` entry points. Build the
+      # worker's complete dependency closure so this diagnostic is valid from
+      # a clean checkout instead of relying on stale local build artifacts.
+      - run: pnpm --filter @or-on/messaging-worker... build
       - name: Isolated WhatsApp diagnostic persistence (mocked HTTP)
         env:
           MIGRATION_DATABASE_URL: ${{ env.DATABASE_URL }}

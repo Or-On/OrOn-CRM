@@ -8,7 +8,7 @@
     "clean": "node -e \"require('node:fs').rmSync('.next',{recursive:true,force:true})\"",
     "dev": "next dev --hostname 127.0.0.1",
     "start": "next start --hostname 0.0.0.0",
-    "test": "vitest run",
+    "test": "pnpm --filter \"@or-on/web^...\" build && vitest run",
     "typecheck": "next typegen && tsc --noEmit"
   },
   "dependencies": {
