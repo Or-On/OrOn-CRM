@@ -1,3 +1,6 @@
+from collections.abc import Awaitable, Callable
+from typing import Any
+
 from loguru import logger
 from oron_flows.compose import Composition, expand
 from oron_flows.graph import FlowSpec
@@ -11,12 +14,14 @@ from oron_agent.flows.runtime import HandlerRegistry
 __all__ = ["initial_node_from_composition", "initial_node_from_spec"]
 
 
-def initial_node_from_spec(spec: FlowSpec) -> NodeConfig:
+def initial_node_from_spec(
+    spec: FlowSpec, *, action_guard: Callable[..., Awaitable[Any]] | None = None
+) -> NodeConfig:
     """Entry NodeConfig for a stored spec, or the Hebrew greeting on any failure —
     a bad flow must never kill a call."""
     try:
         return bind_flow(
-            spec, handlers=HandlerRegistry(handlers=standard_handlers())
+            spec, handlers=HandlerRegistry(handlers=standard_handlers()), action_guard=action_guard
         ).initial_node()
     except Exception as e:  # noqa: BLE001
         logger.warning(f"flow load failed for '{spec.id}' ({e}); falling back to greeting")

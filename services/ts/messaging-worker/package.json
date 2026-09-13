@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@or-on/auth": "workspace:*",
     "@or-on/config": "workspace:*",
     "@or-on/crm": "workspace:*",
     "@or-on/observability": "workspace:*",

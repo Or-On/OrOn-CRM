@@ -18,7 +18,7 @@ def test_reports_broken_relative_link(tmp_path: Path) -> None:
         "docs/architecture/database-strategy.md",
         "docs/architecture/contracts.md",
         "docs/architecture/local-development.md",
-        "docs/architecture/gcp-dev-target.md",
+        "docs/architecture/deployment-target.md",
     ):
         document = tmp_path / relative
         document.parent.mkdir(parents=True, exist_ok=True)

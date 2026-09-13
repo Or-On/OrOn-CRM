@@ -1,5 +1,6 @@
 import { ControlApiClient } from "@or-on/api-client";
 import { loadConfig } from "@or-on/config";
+import { simulationRefusal } from "../../../../features/simulation-policy";
 
 import {
   assertAuthenticatedMutation,
@@ -13,9 +14,9 @@ export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   try {
+    const refusal = simulationRefusal();
+    if (refusal) return refusal;
     const config = loadConfig(process.env, { service: "web" });
-    if (config.environment !== "development")
-      return Response.json({ error: "Not found" }, { status: 404 });
     const session = await assertAuthenticatedMutation(request);
     const body = await jsonObject(request);
     if (

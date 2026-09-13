@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { simulationRefusal } from "../../../features/simulation-policy";
 
 import { createSimulatorBroadcast, listBroadcasts } from "@or-on/crm";
 
@@ -20,6 +21,8 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
+    const refusal = simulationRefusal();
+    if (refusal) return refusal;
     await assertCrmMutation(request);
     const body = await jsonObject(request);
     if (typeof body.name !== "string" || typeof body.body !== "string")

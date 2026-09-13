@@ -10,6 +10,7 @@
   },
   "scripts": {
     "auth:material": "tsx scripts/ensure_dev_auth.ts",
+    "bootstrap:owner": "tsx scripts/bootstrap_owner.ts --confirm-empty-database",
     "build": "pnpm -r --if-present run build",
     "clean": "pnpm -r --if-present run clean",
     "contracts:check": "pnpm contracts:generate && git diff --exit-code -- packages/ts/api-client/openapi.json packages/ts/api-client/src/generated packages/ts/contracts/src/generated",
@@ -22,6 +23,7 @@
     "typecheck": "pnpm -r --if-present run typecheck"
   },
   "devDependencies": {
+    "postgres": "catalog:",
     "@eslint/js": "catalog:",
     "@next/eslint-plugin-next": "16.3.3",
     "@types/node": "catalog:",

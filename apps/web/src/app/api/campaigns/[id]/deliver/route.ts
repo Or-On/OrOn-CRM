@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { simulationRefusal } from "../../../../../features/simulation-policy";
 
 import { enqueueSimulatorBroadcast } from "@or-on/crm";
 
@@ -13,6 +14,8 @@ export async function POST(
   context: RouteContext<"/api/campaigns/[id]/deliver">,
 ) {
   try {
+    const refusal = simulationRefusal();
+    if (refusal) return refusal;
     await assertCrmMutation(request);
     const { id } = await context.params;
     const queued = await withCurrentTenant("campaigns:manage", (sql) =>

@@ -1,11 +1,23 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import "./dialog-test-support";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ContactDetail } from "@or-on/crm";
 import { localized } from "./localized";
+import en from "../src/i18n/messages/en.json";
 
 const transport = vi.hoisted(() => ({ mutate: vi.fn() }));
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+const navigation = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/settings",
+  useRouter: () => navigation,
+}));
 vi.mock("../src/features/crm", () => ({ crmMutation: transport.mutate }));
 vi.mock("../src/features/voice", () => ({ voiceMutation: transport.mutate }));
 import { ContactDetailPanel, ContactManager } from "../src/features/contacts";
@@ -35,6 +47,93 @@ afterEach(() => {
 });
 
 describe("form recovery and permission presentation", () => {
+  it("keeps contact profile editing available when the optional voice service is down", () => {
+    render(
+      localized(
+        <ContactDetailPanel
+          contact={contact}
+          activity={[]}
+          voiceAvailable={false}
+        />,
+      ),
+    );
+    expect(
+      screen
+        .getByText(en.contacts.voiceServiceUnavailable)
+        .getAttribute("role"),
+    ).toBe("status");
+    expect(
+      screen.getByRole<HTMLButtonElement>("button", {
+        name: en.tenantPrimary.call,
+      }).disabled,
+    ).toBe(true);
+    fireEvent.click(
+      screen.getByRole("button", { name: en.premiumPrimary.profileEdit }),
+    );
+    expect(
+      screen.getByRole("dialog", { name: en.premiumPrimary.profileEdit }),
+    ).toBeTruthy();
+    expect(transport.mutate).not.toHaveBeenCalled();
+  });
+  it("keeps the relationship readable and opens focused profile and permission dialogs", () => {
+    const view = render(
+      localized(<ContactDetailPanel contact={contact} activity={[]} />),
+    );
+    const profile = screen.getByRole("complementary", {
+      name: en.contacts.profile,
+    });
+    expect(
+      within(profile).getByRole("heading", {
+        name: en.premiumPrimary.profileFacts,
+      }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("textbox", { name: "Name" })).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", { name: en.premiumPrimary.profileEdit }),
+    );
+    const profileDialog = screen.getByRole("dialog", {
+      name: en.premiumPrimary.profileEdit,
+    });
+    expect(
+      within(profileDialog).getByRole("textbox", { name: "Name" }),
+    ).toBeTruthy();
+    fireEvent.click(
+      within(profileDialog).getByRole("button", { name: en.common.close }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: en.tenantPrimary.call }),
+    );
+    const permissions = screen.getByRole("dialog", {
+      name: en.tenantPrimary.call,
+    });
+    expect(
+      within(permissions).queryByRole("combobox", { name: "Voice consent" }),
+    ).toBeNull();
+    expect(
+      within(permissions).queryByRole("combobox", { name: "WhatsApp consent" }),
+    ).toBeNull();
+    fireEvent.click(
+      within(permissions).getByRole("button", { name: en.common.close }),
+    );
+    const workRail = view.container.querySelector<HTMLElement>(
+      ".contact-record__main",
+    );
+    if (!workRail) throw new Error("Contact work rail missing");
+    expect(
+      within(workRail)
+        .getAllByRole("heading", { level: 2 })
+        .map((heading) => heading.textContent),
+    ).toEqual([en.contacts.activity]);
+    fireEvent.click(screen.getByRole("tab", { name: /^Notes/ }));
+    expect(
+      within(workRail).getByRole("textbox", { name: "Add an internal note" }),
+    ).toBeTruthy();
+    expect(view.container.querySelector(".detail-grid")?.children).toHaveLength(
+      2,
+    );
+    expect(transport.mutate).not.toHaveBeenCalled();
+  });
+
   it("sends custom numeric and boolean fields as typed values", async () => {
     transport.mutate.mockResolvedValue({});
     render(
@@ -63,6 +162,7 @@ describe("form recovery and permission presentation", () => {
         />,
       ),
     );
+    fireEvent.click(screen.getByRole("tab", { name: /^Custom fields/ }));
     const number = screen.getByRole<HTMLInputElement>("spinbutton", {
       name: "Capacity",
     });
@@ -140,6 +240,7 @@ describe("form recovery and permission presentation", () => {
       .mockRejectedValueOnce(new Error("temporary failure"))
       .mockResolvedValueOnce({});
     render(localized(<ContactDetailPanel contact={contact} activity={[]} />));
+    fireEvent.click(screen.getByRole("tab", { name: /^Notes/ }));
     const note = screen.getByRole<HTMLTextAreaElement>("textbox", {
       name: "Add an internal note",
     });
@@ -156,6 +257,9 @@ describe("form recovery and permission presentation", () => {
     render(
       localized(<OperationsPanel broadcasts={[]} automations={[]} runs={[]} />),
     );
+    fireEvent.click(
+      screen.getByRole("button", { name: en.premiumPrimary.newCampaign }),
+    );
     const name = screen.getByRole<HTMLInputElement>("textbox", {
       name: "Campaign name",
     });
@@ -168,37 +272,302 @@ describe("form recovery and permission presentation", () => {
     await screen.findByText("Operation failed");
     expect(name.value).toBe("Fictional draft");
   });
+  it("keeps an operations draft mounted while switching index tabs", () => {
+    render(
+      localized(<OperationsPanel broadcasts={[]} automations={[]} runs={[]} />),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: en.premiumPrimary.newCampaign }),
+    );
+    const name = screen.getByRole<HTMLInputElement>("textbox", {
+      name: "Campaign name",
+    });
+    fireEvent.change(name, { target: { value: "Fictional retained draft" } });
+    fireEvent.click(screen.getByRole("button", { name: en.common.close }));
+    fireEvent.click(screen.getByRole("tab", { name: /Automations/u }));
+    expect(
+      screen
+        .getByRole("tab", { name: /Automations/u })
+        .getAttribute("aria-selected"),
+    ).toBe("true");
+    fireEvent.click(screen.getByRole("tab", { name: /Campaigns/u }));
+    fireEvent.click(
+      screen.getByRole("button", { name: en.premiumPrimary.newCampaign }),
+    );
+    expect(name.value).toBe("Fictional retained draft");
+  });
+  it("honors a route-backed campaign creation intent after tab navigation", async () => {
+    const view = render(
+      localized(
+        <OperationsPanel
+          automations={[]}
+          broadcasts={[]}
+          initialTab="automations"
+          runs={[]}
+        />,
+      ),
+    );
+    expect(
+      screen
+        .getByRole("tab", { name: /Automations/u })
+        .getAttribute("aria-selected"),
+    ).toBe("true");
+
+    view.rerender(
+      localized(
+        <OperationsPanel
+          automations={[]}
+          broadcasts={[]}
+          initialCreate="campaigns"
+          runs={[]}
+        />,
+      ),
+    );
+    await vi.waitFor(() =>
+      expect(
+        screen
+          .getByRole("tab", { name: /Campaigns/u })
+          .getAttribute("aria-selected"),
+      ).toBe("true"),
+    );
+    expect(
+      view.container
+        .querySelector("#campaign-name")
+        ?.closest("dialog")
+        ?.hasAttribute("open"),
+    ).toBe(true);
+  });
+  it("separates campaign and flow management permissions", () => {
+    const view = render(
+      localized(
+        <OperationsPanel broadcasts={[]} automations={[]} runs={[]} />,
+        "en",
+        ["campaigns:manage"],
+      ),
+    );
+    expect(
+      view.container.querySelector("#campaign-name")?.matches(":disabled"),
+    ).toBe(false);
+    expect(
+      view.container.querySelector("#automation-name")?.matches(":disabled"),
+    ).toBe(true);
+
+    view.rerender(
+      localized(
+        <OperationsPanel broadcasts={[]} automations={[]} runs={[]} />,
+        "en",
+        ["flows:manage"],
+      ),
+    );
+    expect(
+      view.container.querySelector("#campaign-name")?.matches(":disabled"),
+    ).toBe(true);
+    expect(
+      view.container.querySelector("#automation-name")?.matches(":disabled"),
+    ).toBe(false);
+  });
   it("does not offer actionable write controls to a read-only role", () => {
     render(
       localized(<ContactDetailPanel contact={contact} activity={[]} />, "he", [
         "crm:read",
       ]),
     );
-    const form = screen.getByRole("button", { name: "שמירת פרופיל" });
+    const form = screen.getByRole("button", { name: "עריכת פרופיל" });
     expect((form as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      screen.queryByRole("button", { name: en.contacts.remove }),
+    ).toBeNull();
     expect(transport.mutate).not.toHaveBeenCalled();
   });
-  it("reports actual configured provider mode without exposing credentials", () => {
+  it("reviews and removes a contact from the active directory", async () => {
+    transport.mutate.mockResolvedValue({ ok: true });
+    render(localized(<ContactDetailPanel contact={contact} activity={[]} />));
+
+    fireEvent.click(screen.getByRole("button", { name: en.contacts.remove }));
+    const review = screen.getByRole("dialog", {
+      name: en.contacts.removeTitle,
+    });
+    expect(review.textContent).toContain(contact.name);
+    expect(transport.mutate).not.toHaveBeenCalled();
+
+    fireEvent.click(
+      within(review).getByRole("button", {
+        name: en.contacts.removeConfirm,
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(transport.mutate).toHaveBeenCalledWith(
+        `/api/crm/contacts/${contact.id}`,
+        {},
+        { method: "DELETE" },
+      ),
+    );
+    expect(navigation.push).toHaveBeenCalledWith("/contacts");
+    expect(navigation.refresh).toHaveBeenCalled();
+  });
+  it("requires caller identity and final review before admitting a real carrier call", async () => {
+    transport.mutate.mockResolvedValue({ created: true });
+    render(
+      localized(
+        <ContactDetailPanel
+          activity={[]}
+          contact={{
+            ...contact,
+            voiceConsent: "granted",
+            identities: [
+              {
+                id: "voice-identity",
+                channel: "phone",
+                normalizedValue: "+14155550123",
+                displayValue: "+1 415 555 0123",
+                validationStatus: "valid",
+                isPrimary: true,
+              },
+            ],
+          }}
+          realVoiceEnabled
+          voiceFlows={[
+            {
+              flow_id: "702a2dd8-24d9-4d54-a571-89c69978d48a",
+              language: "he",
+              latest_version: 1,
+              name: "Published conversation",
+              packaged: false,
+            },
+          ]}
+        />,
+        "en",
+        ["crm:read", "voice:operate"],
+      ),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: en.tenantPrimary.call }),
+    );
+    const call = within(
+      screen.getByRole("dialog", { name: en.tenantPrimary.call }),
+    ).getByRole<HTMLButtonElement>("button", {
+      name: en.tenantPrimary.call,
+    });
+    expect(call.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText(en.contacts.callerAddressForm), {
+      target: { value: "male" },
+    });
+    expect(call.disabled).toBe(false);
+    fireEvent.click(call);
+    const review = screen.getByRole("dialog", {
+      name: en.tenantPrimary.callReview,
+    });
+    expect(transport.mutate).not.toHaveBeenCalled();
+    expect(review.textContent).toContain(en.contacts.callerAddressMale);
+    const cancel = within(review).getByRole("button", {
+      name: en.common.cancel,
+    });
+    expect(document.activeElement).toBe(cancel);
+    fireEvent.click(cancel);
+    expect(review.hasAttribute("open")).toBe(false);
+    expect(transport.mutate).not.toHaveBeenCalled();
+    fireEvent.click(call);
+    fireEvent.click(
+      within(review).getByRole("button", { name: en.tenantPrimary.call }),
+    );
+    await vi.waitFor(() =>
+      expect(transport.mutate).toHaveBeenCalledWith(
+        "/api/voice/real-calls",
+        expect.objectContaining({
+          contactId: contact.id,
+          callerGender: "male",
+          explicitApproval: true,
+          flowId: "702a2dd8-24d9-4d54-a571-89c69978d48a",
+        }),
+      ),
+    );
+    expect(transport.mutate).toHaveBeenCalledOnce();
+  });
+  it("labels a carrier admission failure as a call failure", async () => {
+    transport.mutate.mockRejectedValue(new Error("Real call unavailable"));
+    render(
+      localized(
+        <ContactDetailPanel
+          activity={[]}
+          contact={{
+            ...contact,
+            voiceConsent: "granted",
+            identities: [
+              {
+                id: "voice-identity",
+                channel: "phone",
+                normalizedValue: "+14155550123",
+                displayValue: "+1 415 555 0123",
+                validationStatus: "valid",
+                isPrimary: true,
+              },
+            ],
+          }}
+          realVoiceEnabled
+          voiceFlows={[
+            {
+              flow_id: "702a2dd8-24d9-4d54-a571-89c69978d48a",
+              language: "he",
+              latest_version: 1,
+              name: "Published conversation",
+              packaged: false,
+            },
+          ]}
+        />,
+        "en",
+        ["crm:read", "voice:operate"],
+      ),
+    );
+    fireEvent.change(screen.getByLabelText(en.contacts.callerAddressForm), {
+      target: { value: "female" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: en.tenantPrimary.call }),
+    );
+    fireEvent.click(
+      within(
+        screen.getByRole("dialog", { name: en.tenantPrimary.call }),
+      ).getByRole("button", { name: en.tenantPrimary.call }),
+    );
+    const review = screen.getByRole("dialog", {
+      name: en.tenantPrimary.callReview,
+    });
+    fireEvent.click(
+      within(review).getByRole("button", { name: en.tenantPrimary.call }),
+    );
+    expect(await screen.findByText(en.tenantPrimary.callFailed)).toBeTruthy();
+    expect(screen.queryByText(en.contacts.updateFailed)).toBeNull();
+  });
+  it("keeps internal provider configuration out of tenant settings", () => {
     render(
       localized(
         <ManagementPanel
+          account={{
+            displayName: "Operator",
+            email: "operator@example.test",
+            isSuperuser: false,
+          }}
           members={[]}
           notifications={[]}
           apiKeys={[]}
+          currentUserId="00000000-0000-4000-8000-000000000002"
+          invitations={[]}
+          canManageTenant
           settings={{
             displayName: "Fictional workspace",
             defaultCurrency: "ILS",
             locale: "he",
             timezone: "Asia/Jerusalem",
           }}
-          realWhatsAppEnabled
+          tenantName="Fictional workspace"
         />,
       ),
     );
-    expect(screen.getByText("Real delivery enabled")).toBeTruthy();
+    expect(screen.queryByText("Real delivery enabled")).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: /API access/u }));
     expect(
       screen.getByRole<HTMLButtonElement>("button", { name: "Issue CRM key" })
         .disabled,
-    ).toBe(true);
+    ).toBe(false);
   });
 });

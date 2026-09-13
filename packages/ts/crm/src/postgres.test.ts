@@ -175,6 +175,12 @@ describe.skipIf(databaseUrl === undefined)(
               queued: true,
             });
             expect(
+              await transaction<{ unread_count: number }[]>`
+                SELECT unread_count FROM messaging.conversations
+                WHERE id = ${inserted.conversationId}::uuid
+              `,
+            ).toEqual([{ unread_count: 0 }]);
+            expect(
               await queueWhatsAppOutbound(transaction, {
                 conversationId: inserted.conversationId,
                 senderUserId: userId,

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
   enabled: false,
@@ -57,6 +57,7 @@ const context = {
 
 describe("WhatsApp outbound API", () => {
   beforeEach(() => {
+    vi.stubEnv("PLATFORM_ENV", "development");
     state.enabled = false;
     state.page.mockReset();
     state.permission.mockClear();
@@ -68,6 +69,7 @@ describe("WhatsApp outbound API", () => {
       requestId: "request",
     });
   });
+  afterEach(() => vi.unstubAllEnvs());
 
   it("returns projected diagnostics through the existing authenticated tenant read", async () => {
     const page = {

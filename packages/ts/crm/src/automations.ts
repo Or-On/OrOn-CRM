@@ -1,8 +1,13 @@
 import type postgres from "postgres";
 
-import type { AutomationRunSummary, AutomationSummary } from "./types.js";
+import type {
+  AutomationRunSummary,
+  AutomationSummary,
+  JsonValue,
+} from "./types.js";
 
 interface AutomationRow {
+  definition: JsonValue;
   execution_kind: NonNullable<AutomationSummary["executionKind"]>;
   id: string;
   name: string;
@@ -19,10 +24,10 @@ export async function listAutomations(
   const rows = await sql<AutomationRow[]>`
     SELECT definition.id, definition.name, definition.description,
            version.version, version.published_at, version.validation_status,
-           definition.created_at, version.execution_kind
+           definition.created_at, version.definition, version.execution_kind
     FROM automation.flow_definitions definition
     JOIN LATERAL (
-      SELECT flow.version, flow.published_at, flow.validation_status,
+      SELECT flow.version, flow.published_at, flow.validation_status, flow.definition,
              CASE WHEN flow.definition->'nodes' = '[]'::jsonb THEN 'empty'
                   WHEN flow.definition->>'schemaVersion' = '1.0' THEN 'canonical'
                   ELSE 'unsupported' END AS execution_kind
@@ -30,9 +35,11 @@ export async function listAutomations(
       WHERE flow.flow_definition_id = definition.id
       ORDER BY flow.version DESC LIMIT 1
     ) version ON true
+    WHERE definition.archived_at IS NULL
     ORDER BY definition.updated_at DESC, definition.id DESC
   `;
   return rows.map((row) => ({
+    definition: row.definition,
     executionKind: row.execution_kind,
     id: row.id,
     name: row.name,
@@ -42,6 +49,56 @@ export async function listAutomations(
     validationStatus: row.validation_status,
     createdAt: row.created_at.toISOString(),
   }));
+}
+
+export async function renameAutomation(
+  sql: postgres.TransactionSql,
+  actorUserId: string,
+  definitionId: string,
+  name: string,
+): Promise<boolean> {
+  const normalized = name.trim();
+  if (!normalized || normalized.length > 120)
+    throw new TypeError("flow name must contain 1–120 characters");
+  const rows = await sql<{ id: string }[]>`
+    UPDATE automation.flow_definitions
+    SET name=${normalized}, updated_at=CURRENT_TIMESTAMP
+    WHERE id=${definitionId}::uuid AND archived_at IS NULL
+    RETURNING id
+  `;
+  if (rows.length === 1)
+    await sql`
+      INSERT INTO audit.records
+        (tenant_id, actor_user_id, action, target_type, target_id, metadata)
+      VALUES (platform.current_tenant_id(), ${actorUserId}::uuid,
+              'flow.renamed', 'flow_definition', ${definitionId}::uuid,
+              ${sql.json({ name: normalized })})
+    `;
+  return rows.length === 1;
+}
+
+export async function archiveAutomation(
+  sql: postgres.TransactionSql,
+  actorUserId: string,
+  definitionId: string,
+): Promise<boolean> {
+  const rows = await sql<{ id: string }[]>`
+    UPDATE automation.flow_definitions
+    SET archived_at=CURRENT_TIMESTAMP,
+        name=name || ' · archived ' || left(id::text, 8),
+        updated_at=CURRENT_TIMESTAMP
+    WHERE id=${definitionId}::uuid AND archived_at IS NULL
+    RETURNING id
+  `;
+  if (rows.length === 1)
+    await sql`
+      INSERT INTO audit.records
+        (tenant_id, actor_user_id, action, target_type, target_id, metadata)
+      VALUES (platform.current_tenant_id(), ${actorUserId}::uuid,
+              'flow.archived', 'flow_definition', ${definitionId}::uuid,
+              '{}'::jsonb)
+    `;
+  return rows.length === 1;
 }
 
 export async function createAutomationDraft(
@@ -100,6 +157,10 @@ export async function runManualAutomation(
            '{"adapter":"phase4-empty-graph"}'::jsonb, 'succeeded',
            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
     FROM automation.flow_versions version
+    JOIN automation.flow_definitions definition
+      ON definition.id=version.flow_definition_id
+     AND definition.tenant_id=version.tenant_id
+     AND definition.archived_at IS NULL
     WHERE version.flow_definition_id = ${definitionId}::uuid
       AND version.published_at IS NOT NULL
       AND version.definition->'nodes' = '[]'::jsonb

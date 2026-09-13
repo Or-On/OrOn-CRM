@@ -4,7 +4,7 @@ import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useState, type SyntheticEvent } from "react";
 
-import { Button, Input } from "@or-on/ui";
+import { Button, InlineFeedback, Input } from "@or-on/ui";
 
 export function LoginForm() {
   const t = useTranslations();
@@ -65,11 +65,9 @@ export function LoginForm() {
         type="password"
       />
       {error === undefined ? null : (
-        <p aria-live="polite" className="form-error">
-          {error}
-        </p>
+        <InlineFeedback description={error} tone="critical" />
       )}
-      <Button disabled={pending} type="submit">
+      <Button busy={pending} type="submit">
         {pending ? t("auth.pending") : t("auth.submit")}
       </Button>
     </form>

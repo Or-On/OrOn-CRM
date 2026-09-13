@@ -1,0 +1,23 @@
+.controls {
+  display: grid;
+  gap: 0.875rem;
+  min-inline-size: 0;
+  text-align: start;
+}
+
+.controls p {
+  margin: 0;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.625rem;
+}
+
+.actions button {
+  white-space: normal;
+  max-inline-size: 100%;
+}

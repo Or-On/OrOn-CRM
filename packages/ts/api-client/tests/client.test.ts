@@ -78,4 +78,33 @@ describe("ControlApiClient", () => {
     );
     expect(result.data.created).toBe(true);
   });
+
+  it("encodes a session path as one segment without leaking it into the command", async () => {
+    const fetcher = vi.fn(() =>
+      Promise.resolve(Response.json({ status: "pending" })),
+    );
+    const client = new ControlApiClient("http://control-api:8000", fetcher);
+    // A normal session is a UUID. The generator must still safely encode input;
+    // UUID validation remains the API's responsibility, not URL interpolation.
+    const sessionId = "fixture/session?tenant=other#fragment";
+    await client.getVoiceSessionControl({ session_id: sessionId });
+    const url = new URL(
+      "http://control-api:8000/api/v1/voice/sessions/" +
+        encodeURIComponent(sessionId) +
+        "/control",
+    );
+    expect(fetcher).toHaveBeenLastCalledWith(url);
+    const command = {
+      mode: "paused" as const,
+      expected_epoch: 0,
+      idempotency_key: "fixture-pause-001",
+    };
+    await client.setVoiceSessionControl({ session_id: sessionId }, command);
+    expect(fetcher).toHaveBeenLastCalledWith(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(command),
+    });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
 });

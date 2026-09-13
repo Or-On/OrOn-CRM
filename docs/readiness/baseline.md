@@ -1,0 +1,475 @@
+# Readiness baseline — 2026-09-12
+
+Status: in progress; neither staging nor production approved.
+
+- Target: `C:/Users/almo9/Or-On-Integration/OrOn-Platform`.
+- Branch: `codex/phase-7-ui-polish`; HEAD: `7afa8534fc89259cd679da7ff58ec7546bd01b14`.
+- Existing changed paths: 442. Tracked + nonignored untracked files: 958.
+- Discovered pages: 25; API route files: 69. Significant actions need individual review, not a sidebar count.
+- No automatic commit, stash, reset, push, data deletion, cloud deployment, provider action or real-worker startup is authorized by this readiness task.
+- All three upstream worktrees verified clean at locked SHAs: Or-on cece174f4d590a1b8a283d539dd66e08cc689aa9; WACRM 98b5bd26e8feacacfd4b74ff58411acb8154d212; OpenLive 849173cd1c8c17a95d600b17b428c301722bf5df.
+- Full readiness prompt (184 lines), root/scoped AGENTS, complete MASTER_PROMPT (1794 lines), current progress and relevant architecture/runbooks read. Referenced BOOST.md not found in workspace/target/user-home locations; no substitute instructions invented.
+- Host: Windows, Node 25.9.0 (outside declared support), pnpm 11.24.0, uv 0.12.7, Docker Engine 29.7.2. Pinned Node 24.20.0 is available under ignored .artifacts/toolchains for subsequent checks. Terraform/gcloud not on PATH.
+- User development runner, Next dev and hot-reload workers were active at baseline. Stop requested before application edits. Do not restart/stop those processes or consume their queues. New test stack must use separate project, containers, ports, database, volumes and no inherited secrets.
+
+## Initial checks
+
+| Check | Observed result | Limitation |
+| --- | --- | --- |
+| pnpm test | exit 0: 510 passed, 33 skipped across workspace | Database-gated skips are NOT persistence evidence; Node unsupported warning. Messaging test script automatically rebuilds CRM dist; no further shared builds while live workers active. |
+| pnpm lint | passed | Source-only |
+| uv run --no-sync ruff check . | failed: 3 E501 at c92f8341a7de lines 105,107,180 | Baseline pre-existing SQL string formatting |
+| check_repository.py | passed | Static policy, not runtime proof |
+| check_secrets.py | passed | Pattern-based worktree scan, not full Git history/image scan |
+| security exception inspection | PYSEC-2026-3740 expired 2026-09-09 | Must investigate remediation; do not extend merely to pass |
+| Compose/CI/Terraform inspection | development-only Compose; only web/control Dockerfiles; Terraform resource placeholders | Required staging artifacts missing |
+| Docker web baseline build | running | Production runtime/startup not yet verified |
+
+## Preservation manifest
+
+This is the pre-edit porcelain manifest (new readiness inventory documents, if concurrently created, are this task's output). Deleted entries were already deleted by the user/prior work. No existing changes may be discarded.
+
+```text
+ M .env.example
+ M README.md
+ M THIRD_PARTY_NOTICES.md
+ M apps/web/package.json
+ M apps/web/src/app/[locale]/page.tsx
+ M apps/web/src/app/api/messaging/conversations/[id]/route.ts
+ M apps/web/src/app/api/settings/route.ts
+ M apps/web/src/app/api/system/health/route.ts
+ M apps/web/src/app/contacts/[id]/page.tsx
+ M apps/web/src/app/contacts/page.tsx
+ M apps/web/src/app/error.tsx
+ M apps/web/src/app/flows/page.tsx
+ M apps/web/src/app/global-error.tsx
+ M apps/web/src/app/globals.css
+ M apps/web/src/app/inbox/page.tsx
+ M apps/web/src/app/layout.tsx
+ M apps/web/src/app/loading.tsx
+ M apps/web/src/app/login/login-form.tsx
+ M apps/web/src/app/login/page.tsx
+ M apps/web/src/app/not-found.tsx
+ M apps/web/src/app/operations/page.tsx
+ M apps/web/src/app/orchestration/page.tsx
+ M apps/web/src/app/page.tsx
+ M apps/web/src/app/pipelines/page.tsx
+ M apps/web/src/app/providers.tsx
+ M apps/web/src/app/settings/page.tsx
+ M apps/web/src/app/start/page.tsx
+ M apps/web/src/app/system/health/page.tsx
+ M apps/web/src/app/voice/calls/[id]/page.tsx
+ M apps/web/src/app/voice/campaigns/page.tsx
+ M apps/web/src/app/voice/page.tsx
+ M apps/web/src/branding.ts
+ M apps/web/src/features/auth/server.ts
+ M apps/web/src/features/brand/index.tsx
+ M apps/web/src/features/contacts/contact-detail-panel.tsx
+ M apps/web/src/features/contacts/contact-manager.tsx
+ M apps/web/src/features/crm-route/index.ts
+ M apps/web/src/features/crm/client.ts
+ M apps/web/src/features/inbox/conversation-thread.tsx
+ M apps/web/src/features/inbox/delivery-failure.tsx
+ M apps/web/src/features/inbox/inbox-workspace.tsx
+ M apps/web/src/features/inbox/reply-intent.ts
+ M apps/web/src/features/management/management-panel.tsx
+ D apps/web/src/features/marketing/index.tsx
+ D apps/web/src/features/marketing/mobile-menu.tsx
+ D apps/web/src/features/marketing/workflow-preview.tsx
+ M apps/web/src/features/operations/index.ts
+ M apps/web/src/features/operations/operations-panel.tsx
+ M apps/web/src/features/orchestration/index.ts
+ M apps/web/src/features/orchestration/orchestration-panel.tsx
+ M apps/web/src/features/overview/index.tsx
+ M apps/web/src/features/pipelines/pipeline-board.tsx
+ M apps/web/src/features/shell/index.tsx
+ M apps/web/src/features/shell/navigation.test.ts
+ M apps/web/src/features/shell/navigation.ts
+ M apps/web/src/features/system-health/index.tsx
+ M apps/web/src/features/voice-server/index.ts
+ M apps/web/src/features/voice/index.ts
+ M apps/web/src/features/voice/voice-campaign-panel.tsx
+ M apps/web/src/features/voice/voice-flow-panel.tsx
+ M apps/web/src/features/voice/voice-overview.tsx
+ M apps/web/src/i18n/access-denied.tsx
+ M apps/web/src/i18n/error-message.ts
+ M apps/web/src/i18n/language-control.tsx
+ M apps/web/src/i18n/messages/en.json
+ M apps/web/src/i18n/messages/he.json
+ M apps/web/src/i18n/product-heading.tsx
+ M apps/web/src/i18n/theme-control.tsx
+ M apps/web/src/proxy.ts
+ M apps/web/tests/bilingual.test.tsx
+ M apps/web/tests/delivery-failure.test.tsx
+ M apps/web/tests/form-recovery.test.tsx
+ M apps/web/tests/inbox-interaction.test.tsx
+ M apps/web/tests/locale-proxy.test.ts
+ D apps/web/tests/marketing-brand.test.tsx
+ M apps/web/tests/orchestration.test.tsx
+ D apps/web/tests/public-layout.test.ts
+ M apps/web/tests/shell-drawer.test.tsx
+ M apps/web/tests/shell.test.tsx
+ M apps/web/tests/voice.test.tsx
+ M apps/web/tests/whatsapp.test.tsx
+ M apps/web/tsconfig.json
+ M db/contracts/schema-manifest.json
+ M db/seeds/seed_development.py
+ M db/tests/postgres/test_catalog.py
+ M docs/adr/0015-ui-design-system.md
+ M docs/architecture/authorization.md
+ M docs/architecture/cross-channel-orchestration.md
+ M docs/architecture/telephony.md
+ M docs/audit/source-map.md
+ M docs/progress.md
+ M docs/runbooks/cross-channel-simulator.md
+ M docs/runbooks/voice-control-plane.md
+ M docs/security/threat-model.md
+ M packages/py/oron-agent/src/oron_agent/audio.py
+ M packages/py/oron-agent/src/oron_agent/bot.py
+ M packages/py/oron-agent/src/oron_agent/config.py
+ M packages/py/oron-agent/src/oron_agent/flows/resolve.py
+ M packages/py/oron-agent/src/oron_agent/idle.py
+ M packages/py/oron-agent/src/oron_agent/launcher.py
+ M packages/py/oron-agent/src/oron_agent/llm.py
+ M packages/py/oron-agent/src/oron_agent/pipeline.py
+ M packages/py/oron-agent/src/oron_agent/session_recorder.py
+ M packages/py/oron-agent/src/oron_agent/transcript.py
+ M packages/py/oron-agent/src/oron_agent/tts.py
+ M packages/py/oron-agent/tests/test_config.py
+ M packages/py/oron-agent/tests/test_flow_resolve.py
+ M packages/py/oron-agent/tests/test_idle.py
+ M packages/py/oron-agent/tests/test_launcher.py
+ M packages/py/oron-agent/tests/test_llm_provider.py
+ M packages/py/oron-agent/tests/test_overrides.py
+ M packages/py/oron-agent/tests/test_pipeline.py
+ M packages/py/oron-agent/tests/test_run_call.py
+ M packages/py/oron-agent/tests/test_session_lifecycle.py
+ M packages/py/oron-agent/tests/test_transcript.py
+ M packages/py/oron-agent/tests/test_tts_provider.py
+ M packages/py/oron-agent/tests/test_turn_end.py
+ M packages/py/oron-common/src/oron_common/context.py
+ M packages/py/oron-common/src/oron_common/usage.py
+ M packages/py/oron-common/tests/test_context.py
+ M packages/py/oron-dispatcher/src/oron_dispatcher/dispatcher.py
+ M packages/py/oron-dispatcher/src/oron_dispatcher/webhook.py
+ M packages/py/oron-dispatcher/tests/test_config.py
+ M packages/py/oron-dispatcher/tests/test_dispatcher.py
+ M packages/py/oron-dispatcher/tests/test_webhook.py
+ M packages/py/oron-flows/src/oron_flows/compose.py
+ M packages/py/oron-flows/src/oron_flows/graph.py
+ M packages/py/oron-flows/src/oron_flows/packs.py
+ M packages/py/oron-flows/src/oron_flows/seeds.py
+ M packages/py/oron-flows/tests/test_compose.py
+ M packages/py/oron-flows/tests/test_packs.py
+ M packages/py/oron-flows/tests/test_seeds.py
+ M packages/py/oron-hebrew/src/oron_hebrew/filters.py
+ M packages/py/oron-hebrew/src/oron_hebrew/gender_audio_ecapa.py
+ M packages/py/oron-hebrew/src/oron_hebrew/niqqud.py
+ M packages/py/oron-hebrew/src/oron_hebrew/normalizers.py
+ M packages/py/oron-hebrew/tests/test_filters.py
+ M packages/py/oron-hebrew/tests/test_gender_audio_ecapa.py
+ M packages/py/oron-hebrew/tests/test_niqqud.py
+ M packages/py/oron-hebrew/tests/test_normalizers.py
+ M packages/py/oron-sessions/src/oron_sessions/api.py
+ M packages/py/oron-sessions/src/oron_sessions/app.py
+ M packages/py/oron-sessions/src/oron_sessions/artifacts.py
+ M packages/py/oron-sessions/src/oron_sessions/client.py
+ M packages/py/oron-sessions/tests/test_client.py
+ M packages/py/oron-tenancy/src/oron_tenancy/flow_store.py
+ M packages/py/oron-tenancy/src/oron_tenancy/models.py
+ M packages/py/oron-tenancy/src/oron_tenancy/router.py
+ M packages/py/oron-tenancy/tests/test_users_models.py
+ M packages/py/platform-integration/src/or_on_platform/config.py
+ M packages/py/platform-integration/tests/test_config.py
+ M packages/ts/api-client/openapi.json
+ M packages/ts/api-client/src/generated/schema.ts
+ M packages/ts/auth/src/auth.test.ts
+ M packages/ts/auth/src/authorization.ts
+ M packages/ts/auth/src/repository.ts
+ M packages/ts/auth/src/service.test.ts
+ M packages/ts/auth/src/service.ts
+ M packages/ts/auth/src/types.ts
+ M packages/ts/config/src/index.ts
+ M packages/ts/config/tests/config.test.ts
+ M packages/ts/crm/src/analytics.ts
+ M packages/ts/crm/src/automations.ts
+ M packages/ts/crm/src/contacts.ts
+ M packages/ts/crm/src/cross-channel.ts
+ M packages/ts/crm/src/index.ts
+ M packages/ts/crm/src/management.ts
+ M packages/ts/crm/src/messaging.ts
+ M packages/ts/crm/src/postgres.test.ts
+ M packages/ts/crm/src/types.ts
+ M packages/ts/crm/src/whatsapp-outbound.ts
+ M packages/ts/ui/package.json
+ M packages/ts/ui/src/index.ts
+ M packages/ts/ui/src/primitives/button.tsx
+ M packages/ts/ui/src/primitives/dialog.tsx
+ M packages/ts/ui/src/primitives/feedback.tsx
+ M packages/ts/ui/src/primitives/surface.tsx
+ M packages/ts/ui/src/styles.css
+ M packages/ts/ui/tests/primitives.test.tsx
+ M packages/ts/ui/tsconfig.build.json
+ M packages/ts/ui/tsconfig.json
+ M pnpm-lock.yaml
+ M pnpm-workspace.yaml
+ M scripts/check_secrets.py
+ M scripts/dev.py
+ M scripts/ensure_dev_auth.ts
+ M scripts/preview_ui.py
+ M scripts/tests/test_db_verify.py
+ M scripts/tests/test_dev.py
+ M scripts/tests/test_secret_scan.py
+ M services/py/control-api/src/control_api/voice.py
+ M services/py/control-api/tests/test_voice.py
+ M services/py/dispatcher/pyproject.toml
+ M services/py/dispatcher/src/dispatcher_runtime/app.py
+ M services/py/dispatcher/src/dispatcher_runtime/main.py
+ M services/py/dispatcher/tests/test_app.py
+ M services/ts/messaging-worker/package.json
+ M services/ts/messaging-worker/src/database.ts
+ M services/ts/messaging-worker/src/main.ts
+ M services/ts/messaging-worker/tests/call-followup.live.test.ts
+ M uv.lock
+?? UI_UX_REDESIGN_MASTER_PROMPT.md
+?? apps/web/public/brand/logo.webp
+?? apps/web/src/app/api/account/avatar/route.ts
+?? apps/web/src/app/api/account/password/route.ts
+?? apps/web/src/app/api/account/profile/route.ts
+?? apps/web/src/app/api/auth/invitations/accept/route.ts
+?? apps/web/src/app/api/billing/payment-source/route.ts
+?? apps/web/src/app/api/billing/topups/route.ts
+?? apps/web/src/app/api/calendar/events/[id]/route.ts
+?? apps/web/src/app/api/calendar/events/route.ts
+?? apps/web/src/app/api/email/oauth/[provider]/callback/route.ts
+?? apps/web/src/app/api/email/oauth/[provider]/start/route.ts
+?? apps/web/src/app/api/email/oauth/configuration/route.ts
+?? apps/web/src/app/api/finance/expenses/[id]/route.ts
+?? apps/web/src/app/api/finance/expenses/route.ts
+?? apps/web/src/app/api/settings/invitations/[id]/route.ts
+?? apps/web/src/app/api/settings/invitations/route.ts
+?? apps/web/src/app/api/settings/logo/route.ts
+?? apps/web/src/app/api/settings/members/[id]/route.ts
+?? apps/web/src/app/api/tasks/[id]/route.ts
+?? apps/web/src/app/api/tasks/route.ts
+?? apps/web/src/app/api/tenants/[id]/route.ts
+?? apps/web/src/app/api/tenants/route.ts
+?? apps/web/src/app/api/voice/real-calls/route.ts
+?? apps/web/src/app/api/voice/sessions/[id]/recording/route.ts
+?? apps/web/src/app/api/webhooks/stripe/route.ts
+?? apps/web/src/app/auth.css
+?? apps/web/src/app/calendar/error.tsx
+?? apps/web/src/app/calendar/loading.tsx
+?? apps/web/src/app/calendar/page.tsx
+?? apps/web/src/app/email/page.tsx
+?? apps/web/src/app/finance/page.tsx
+?? apps/web/src/app/inbox-workspace.css
+?? apps/web/src/app/invite/accept-form.tsx
+?? apps/web/src/app/invite/page.tsx
+?? apps/web/src/app/profile/page.tsx
+?? apps/web/src/app/roles/page.tsx
+?? apps/web/src/app/studio-replica.css
+?? apps/web/src/app/tasks/error.tsx
+?? apps/web/src/app/tasks/loading.tsx
+?? apps/web/src/app/tasks/page.tsx
+?? apps/web/src/app/tenants/page.tsx
+?? apps/web/src/app/users/page.tsx
+?? apps/web/src/app/voice-details.css
+?? apps/web/src/app/workspace-details.css
+?? apps/web/src/app/workspace-features.css
+?? apps/web/src/app/workspace-premium.css
+?? apps/web/src/app/workspace.css
+?? apps/web/src/features/brand/entry-story.tsx
+?? apps/web/src/features/brand/mark.tsx
+?? apps/web/src/features/calendar/calendar-time.ts
+?? apps/web/src/features/calendar/calendar-workspace.module.css
+?? apps/web/src/features/calendar/calendar-workspace.tsx
+?? apps/web/src/features/calendar/index.ts
+?? apps/web/src/features/contacts/contact-call-dialog.tsx
+?? apps/web/src/features/contacts/contact-results.tsx
+?? apps/web/src/features/email/email-workspace.module.css
+?? apps/web/src/features/email/email-workspace.tsx
+?? apps/web/src/features/email/index.ts
+?? apps/web/src/features/email/oauth-server.ts
+?? apps/web/src/features/finance/finance-workspace.module.css
+?? apps/web/src/features/finance/finance-workspace.tsx
+?? apps/web/src/features/finance/index.ts
+?? apps/web/src/features/finance/stripe-server.test.ts
+?? apps/web/src/features/finance/stripe-server.ts
+?? apps/web/src/features/identity/identity-image-editor.tsx
+?? apps/web/src/features/identity/identity-image.tsx
+?? apps/web/src/features/identity/image-upload.ts
+?? apps/web/src/features/identity/index.ts
+?? apps/web/src/features/inbox/conversation-presentation.test.ts
+?? apps/web/src/features/inbox/conversation-presentation.ts
+?? apps/web/src/features/inbox/inbox-notifications.test.ts
+?? apps/web/src/features/inbox/inbox-notifications.ts
+?? apps/web/src/features/inbox/use-inbox-panel-focus.ts
+?? apps/web/src/features/operations/automations-view.tsx
+?? apps/web/src/features/operations/campaigns-view.tsx
+?? apps/web/src/features/operations/run-history.tsx
+?? apps/web/src/features/orchestration/agent-register.tsx
+?? apps/web/src/features/orchestration/flow-canvas.tsx
+?? apps/web/src/features/orchestration/location.ts
+?? apps/web/src/features/overview/activity-chart.tsx
+?? apps/web/src/features/profile/index.ts
+?? apps/web/src/features/profile/profile-workspace.module.css
+?? apps/web/src/features/profile/profile-workspace.tsx
+?? apps/web/src/features/roles/index.ts
+?? apps/web/src/features/roles/roles-workspace.module.css
+?? apps/web/src/features/roles/roles-workspace.tsx
+?? apps/web/src/features/tasks/index.ts
+?? apps/web/src/features/tasks/tasks-workspace.module.css
+?? apps/web/src/features/tasks/tasks-workspace.tsx
+?? apps/web/src/features/tenants/index.ts
+?? apps/web/src/features/tenants/tenant-workspace.tsx
+?? apps/web/src/features/users/index.ts
+?? apps/web/src/features/users/users-workspace.module.css
+?? apps/web/src/features/users/users-workspace.tsx
+?? apps/web/src/features/voice/call-recording-player.tsx
+?? apps/web/src/features/voice/live-call-summary.tsx
+?? apps/web/src/features/voice/voice-presentation.ts
+?? apps/web/src/i18n/global-error-messages.ts
+?? apps/web/src/i18n/theme-transition.ts
+?? apps/web/tests/authorization-contract.test.ts
+?? apps/web/tests/brand.test.tsx
+?? apps/web/tests/calendar-time.test.ts
+?? apps/web/tests/conversation-delete-api.test.ts
+?? apps/web/tests/crm-route.test.ts
+?? apps/web/tests/crm-workspaces.test.tsx
+?? apps/web/tests/dialog-test-support.ts
+?? apps/web/tests/flow-canvas.test.ts
+?? apps/web/tests/global-error-messages.test.ts
+?? apps/web/tests/health-route.test.ts
+?? apps/web/tests/identity-image-upload.test.ts
+?? apps/web/tests/identity-image.test.tsx
+?? apps/web/tests/invitation-accept-form.test.tsx
+?? apps/web/tests/invitation-accept-route.test.ts
+?? apps/web/tests/invitation-page.test.tsx
+?? apps/web/tests/layout-session.test.ts
+?? apps/web/tests/localized-entry.test.tsx
+?? apps/web/tests/login-page.test.tsx
+?? apps/web/tests/messaging-experience.test.tsx
+?? apps/web/tests/operational-empty-states.test.tsx
+?? apps/web/tests/operational-layout.test.tsx
+?? apps/web/tests/orchestration-location.test.ts
+?? apps/web/tests/orchestration-redesign.test.tsx
+?? apps/web/tests/overview-experience.test.tsx
+?? apps/web/tests/product-heading.test.tsx
+?? apps/web/tests/real-call-route.test.ts
+?? apps/web/tests/route-fallbacks.test.tsx
+?? apps/web/tests/settings-access.test.tsx
+?? apps/web/tests/settings-layout-contract.test.ts
+?? apps/web/tests/shell-commands.test.tsx
+?? apps/web/tests/studio-replica-contract.test.ts
+?? apps/web/tests/system-health.test.tsx
+?? apps/web/tests/tenant-delete-route.test.ts
+?? apps/web/tests/tenant-deletion.test.tsx
+?? apps/web/tests/tenant-operations.test.tsx
+?? apps/web/tests/tenant-product-workspaces.test.tsx
+?? apps/web/tests/tenant-settings.test.tsx
+?? apps/web/tests/theme-transition.test.ts
+?? apps/web/tests/voice-layout-contract.test.ts
+?? apps/web/tests/voice-live-pricing.test.tsx
+?? apps/web/tests/voice-presentation.test.ts
+?? apps/web/tests/voice-recording-route.test.ts
+?? db/alembic/versions/39862f055865_fix_tenant_creation_identifier.py
+?? db/alembic/versions/5725968b8ae1_qualify_session_membership_role.py
+?? db/alembic/versions/ac18e9d47b20_backfill_existing_tenant_defaults.py
+?? db/alembic/versions/b74f6e2a9c31_revoke_tenant_invitations.py
+?? db/alembic/versions/c567208f57bc_add_platform_administration_and_account_.py
+?? db/alembic/versions/c718f92a2b71_grant_voice_runtime_canonical_flow_.py
+?? db/alembic/versions/c92f8341a7de_add_user_and_tenant_identity_images.py
+?? db/alembic/versions/ce2dff05c838_authorize_tenant_messaging_ai_workers.py
+?? db/alembic/versions/d41b2038c77a_require_stripe_payment_sources.py
+?? db/alembic/versions/e139bf3fde7e_harden_tenant_administration_access.py
+?? db/alembic/versions/ea600fafe463_allow_web_voice_flow_dispatch_lookup.py
+?? db/alembic/versions/eb2660eb37ec_add_guarded_tenant_deletion.py
+?? db/alembic/versions/f8be561f06de_add_ai_oauth_tenant_and_campaign_.py
+?? db/alembic/versions/fad9392c9fb4_add_tenant_finance_tasks_and_calendar.py
+?? db/tests/postgres/test_platform_administration.py
+?? docs/audit/production-staging-master-prompt.md
+?? docs/plans/application-ui-rebuild-2026-09-08.md
+?? docs/plans/brand-rebuild-bundle-review.md
+?? docs/plans/frontend-excellence-2026-09.md
+?? docs/plans/or-on-product-experience-2026-09-10.md
+?? docs/plans/phase-7-customer-operations-redesign.md
+?? docs/plans/studio-admin-product-replica-2026-09-11.md
+?? docs/plans/tenant-saas-redesign-2026-09-10.md
+?? docs/runbooks/whatsapp-ai-and-call.md
+?? packages/py/oron-agent/src/oron_agent/caller_gender.py
+?? packages/py/oron-agent/src/oron_agent/runtime_sessions.py
+?? packages/py/oron-agent/src/oron_agent/spoken_safety.py
+?? packages/py/oron-agent/src/oron_agent/turn_planner.py
+?? packages/py/oron-agent/src/oron_agent/whatsapp_context.py
+?? packages/py/oron-agent/tests/test_caller_gender.py
+?? packages/py/oron-agent/tests/test_llm_preflight.py
+?? packages/py/oron-agent/tests/test_responsive_turn_start.py
+?? packages/py/oron-agent/tests/test_spoken_safety.py
+?? packages/py/oron-agent/tests/test_turn_planner.py
+?? packages/py/oron-agent/tests/test_whatsapp_context.py
+?? packages/py/oron-sessions/tests/test_artifact_readback.py
+?? packages/py/oron-sessions/tests/test_runtime_flow_source.py
+?? packages/py/oron-tenancy/tests/test_flow_visibility.py
+?? packages/ts/crm/src/agent-profile-projection.test.ts
+?? packages/ts/crm/src/billing.ts
+?? packages/ts/crm/src/calendar.ts
+?? packages/ts/crm/src/contact-creation-policy.postgres.test.ts
+?? packages/ts/crm/src/contact-creation-policy.test.ts
+?? packages/ts/crm/src/conversation-deletion.postgres.test.ts
+?? packages/ts/crm/src/expenses.ts
+?? packages/ts/crm/src/overview-insights.postgres.test.ts
+?? packages/ts/crm/src/tasks.ts
+?? packages/ts/crm/src/tenant-deletion.postgres.test.ts
+?? packages/ts/crm/src/tenant-operations.test.ts
+?? packages/ts/crm/src/tenants.ts
+?? packages/ts/ui/src/motion.tsx
+?? packages/ts/ui/src/page-transition.tsx
+?? packages/ts/ui/src/patterns/data-table.tsx
+?? packages/ts/ui/src/patterns/metric.tsx
+?? packages/ts/ui/src/patterns/page-header.tsx
+?? packages/ts/ui/src/patterns/progress.tsx
+?? packages/ts/ui/src/patterns/section-header.tsx
+?? packages/ts/ui/src/patterns/status-indicator.tsx
+?? packages/ts/ui/src/patterns/tabs.tsx
+?? packages/ts/ui/src/primitives/animated-number.tsx
+?? packages/ts/ui/src/primitives/checkbox.tsx
+?? packages/ts/ui/src/primitives/combobox.tsx
+?? packages/ts/ui/src/primitives/confirm-dialog.tsx
+?? packages/ts/ui/src/primitives/icon-button.tsx
+?? packages/ts/ui/src/primitives/popover.tsx
+?? packages/ts/ui/src/primitives/select.tsx
+?? packages/ts/ui/src/primitives/textarea.tsx
+?? packages/ts/ui/tests/animated-number.test.tsx
+?? packages/ts/ui/tests/color-contrast.test.ts
+?? packages/ts/ui/tests/controls.test.tsx
+?? packages/ts/ui/tests/styles-contract.test.ts
+?? packages/ts/ui/vitest.config.ts
+?? scripts/capture_ui_preview.mjs
+?? scripts/clean_development_demo_data.py
+?? scripts/preview_composed_controls.mjs
+?? scripts/preview_controls_browser.mjs
+?? scripts/preview_ui_browser.py
+?? scripts/preview_ui_fixtures.py
+?? scripts/preview_voice_api.py
+?? scripts/preview_voice_fixtures.py
+?? scripts/tests/test_clean_development_demo_data.py
+?? scripts/tests/test_preview_ui_fixtures.py
+?? scripts/tests/test_preview_voice_api.py
+?? scripts/verify_primary_ui_preview.mjs
+?? scripts/verify_tenant_overview_health.mjs
+?? scripts/verify_tenant_primary_ui_preview.mjs
+?? scripts/verify_tenant_settings_preview.mjs
+?? scripts/verify_voice_ui_preview.mjs
+?? scripts/verify_workspace_ui_preview.mjs
+?? scripts/write_tenant_ui_review_index.mjs
+?? scripts/write_ui_review_index.mjs
+?? services/py/control-api/tests/test_voice_flow_visibility.py
+?? services/py/dispatcher/src/dispatcher_runtime/persistence.py
+?? services/py/dispatcher/tests/test_persistence.py
+?? services/ts/messaging-worker/src/ai-provider.test.ts
+?? services/ts/messaging-worker/src/ai-provider.ts
+?? services/ts/messaging-worker/src/call-provider.test.ts
+?? services/ts/messaging-worker/src/call-provider.ts
+?? services/ts/messaging-worker/tests/ai-reply.live.test.ts
+```

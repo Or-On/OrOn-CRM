@@ -1,14 +1,8 @@
-"""Publish the packaged flow catalog into the `flows` table at boot.
+"""Publish an explicitly selected development-fixture catalog.
 
-The catalog is code — it ships with the build — but a call now reads its flow
-from the database, so the two have to be brought into line somewhere. Doing it on
-startup means a fresh database (or a new packaged flow) needs no manual step, and
-the DIDs already bound to a packaged flow_id keep answering.
-
-Republishing unconditionally is deliberate. It preserves exactly the semantics
-the agent had when it expanded the composition in-process on every call: a
-packaged flow always matches the build that is running. Tenant-authored flows are
-untouched by this — they are only ever republished by their author.
+Runtime startup does not call this utility. Frozen publications remain immutable:
+an identical replay is harmless, but a changed fixture or expansion requires a
+new composition version. Tenant-authored flows are never touched by this utility.
 """
 
 import uuid

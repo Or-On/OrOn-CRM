@@ -12,6 +12,7 @@ fetched value is spoken on this very entry.
 Nothing here knows about components, appointments or Hebrew.
 """
 
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from oron_flows.graph import FlowSpec
@@ -50,6 +51,7 @@ def _bind_function(
     handlers: HandlerRegistry,
     configs: dict[str, NodeConfig],
     enters: dict[str, EnterHandler],
+    action_guard: Callable[..., Awaitable[Any]] | None = None,
 ) -> FlowsFunctionSchema:
     properties: dict[str, dict] = {}
     required: list[str] = []
@@ -67,7 +69,7 @@ def _bind_function(
     name, handler_key, routes, config = fn.name, fn.handler, fn.routes, fn.config
     say_while = fn.say_while
 
-    async def wrapper(args: dict, flow_manager) -> tuple[Any, NodeConfig]:
+    async def execute(args: dict, flow_manager) -> tuple[Any, NodeConfig]:
         if say_while:
             # Counter in per-call state, not the closure: a bound flow is shared
             # by every caller in flight, so a closure would rotate across calls
@@ -97,12 +99,18 @@ def _bind_function(
         # interpolating in place would mutate shared config.
         return result.public, render_node(configs[target_name], session)
 
+    async def wrapper(args: dict, flow_manager) -> tuple[Any, NodeConfig]:
+        if action_guard is not None:
+            return await action_guard(execute, args, flow_manager)
+        return await execute(args, flow_manager)
+
     return FlowsFunctionSchema(
         name=fn.name,
         description=fn.description,
         properties=properties,
         required=required,
         handler=wrapper,
+        cancel_on_interruption=action_guard is not None,
     )
 
 
@@ -112,6 +120,7 @@ def _build(
     configs: dict[str, NodeConfig],
     handlers: HandlerRegistry,
     enters: dict[str, EnterHandler],
+    action_guard: Callable[..., Awaitable[Any]] | None = None,
 ) -> NodeConfig:
     config: NodeConfig = {
         "name": node.name,
@@ -133,7 +142,7 @@ def _build(
         ]
     if node.functions:
         config["functions"] = [
-            _bind_function(fn, handlers, configs, enters) for fn in node.functions
+            _bind_function(fn, handlers, configs, enters, action_guard) for fn in node.functions
         ]
 
     if node.respond_immediately is not None:
@@ -145,7 +154,12 @@ def _build(
     return config
 
 
-def bind_flow(spec: FlowSpec, *, handlers: HandlerRegistry) -> BoundFlow:
+def bind_flow(
+    spec: FlowSpec,
+    *,
+    handlers: HandlerRegistry,
+    action_guard: Callable[..., Awaitable[Any]] | None = None,
+) -> BoundFlow:
     # Resolved here so an unknown on_enter handler is a bind-time KeyError, the
     # same as an unknown function handler.
     enters = {
@@ -157,5 +171,5 @@ def bind_flow(spec: FlowSpec, *, handlers: HandlerRegistry) -> BoundFlow:
     # Handlers close over `configs`, fully populated before any handler runs, so
     # forward references resolve.
     for node in spec.nodes:
-        configs[node.name] = _build(spec, node, configs, handlers, enters)
+        configs[node.name] = _build(spec, node, configs, handlers, enters, action_guard)
     return BoundFlow(spec=spec, configs=configs)

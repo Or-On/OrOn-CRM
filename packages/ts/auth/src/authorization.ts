@@ -54,8 +54,22 @@ export function hasPermission(role: Role, permission: Permission): boolean {
   return rolePermissions[role].has(permission);
 }
 
+/**
+ * Canonical authorization decision for an authenticated platform session.
+ *
+ * Platform super-administrators are deliberately modeled separately from
+ * tenant roles. Keeping the bypass here prevents API handlers, service grants,
+ * and the public session projection from drifting into different policies.
+ */
+export function isAuthorized(
+  principal: { readonly role: Role; readonly isSuperuser: boolean },
+  permission: Permission,
+): boolean {
+  return principal.isSuperuser || hasPermission(principal.role, permission);
+}
+
 export function canAssignRole(actor: Role, target: Role): boolean {
   if (actor === "owner") return true;
-  if (actor === "admin") return target === "agent" || target === "viewer";
+  if (actor === "admin") return target !== "owner";
   return false;
 }

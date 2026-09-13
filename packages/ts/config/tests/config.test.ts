@@ -27,7 +27,10 @@ describe("loadConfig", () => {
     const config = loadConfig({});
 
     expect(config.enableRealTelephony).toBe(false);
+    expect(config.enableRealVoiceProviders).toBe(false);
     expect(config.enableRealWhatsApp).toBe(false);
+    expect(config.enableWhatsAppAutoCalls).toBe(false);
+    expect(config.dispatcherUrl).toBe("http://127.0.0.1:8082");
   });
 
   it("requires PostgreSQL when requested", () => {
@@ -64,7 +67,7 @@ describe("loadConfig", () => {
         "postgresql://platform_messaging:also-do-not-print@localhost/platform",
       LIVEKIT_API_SECRET: "livekit-secret",
       WHATSAPP_ACCESS_TOKEN: "whatsapp-secret",
-      AI_API_KEY: "ai-secret",
+      LLM_API_KEY: "llm-secret",
       AUTH_TOKEN_PEPPER: "auth-token-pepper-with-thirty-two-characters",
       AUTH_SERVICE_SECRET: "auth-service-secret-with-thirty-two-characters",
       AUTH_DUMMY_PASSWORD_HASH: "$argon2id$v=19$m=65536,t=3,p=1$dummy$dummy",
@@ -75,7 +78,7 @@ describe("loadConfig", () => {
     expect(rendered).not.toContain("also-do-not-print");
     expect(rendered).not.toContain("livekit-secret");
     expect(rendered).not.toContain("whatsapp-secret");
-    expect(rendered).not.toContain("ai-secret");
+    expect(rendered).not.toContain("llm-secret");
     expect(rendered).not.toContain("auth-token-pepper");
     expect(rendered).not.toContain("auth-service-secret");
     expect(rendered).toContain("[REDACTED]");
@@ -117,14 +120,60 @@ describe("loadConfig", () => {
     expect(loadConfig({ LOG_LEVEL: "INFO" }).logLevel).toBe("info");
   });
 
+  it("requires the shared OpenAI-compatible LLM configuration when WhatsApp AI is enabled", () => {
+    expect(() => loadConfig({ ENABLE_WHATSAPP_AI: "true" })).toThrow(
+      "WhatsApp AI requires LLM_PROVIDER=openai-compat",
+    );
+    expect(
+      loadConfig({
+        ENABLE_WHATSAPP_AI: "true",
+        LLM_PROVIDER: "openai-compat",
+        LLM_API_KEY: "test-key",
+        LLM_BASE_URL:
+          "https://generativelanguage.googleapis.com/v1beta/openai/",
+        LLM_MODEL: "gemini-2.5-flash",
+      }).enableWhatsAppAi,
+    ).toBe(true);
+  });
+
+  it("requires both Stripe secrets before real billing starts", () => {
+    expect(() =>
+      loadConfig({ ENABLE_REAL_BILLING: "true", STRIPE_SECRET_KEY: "sk_test" }),
+    ).toThrow("real billing requires");
+  });
+
+  it("requires every safety gate before WhatsApp can start calls", () => {
+    expect(() => loadConfig({ ENABLE_WHATSAPP_AUTO_CALLS: "true" })).toThrow(
+      "WhatsApp automatic calls require",
+    );
+
+    const config = loadConfig({
+      ENABLE_WHATSAPP_AUTO_CALLS: "true",
+      ENABLE_WHATSAPP_AI: "true",
+      ENABLE_REAL_WHATSAPP: "true",
+      ENABLE_REAL_TELEPHONY: "true",
+      ENABLE_REAL_VOICE_PROVIDERS: "true",
+      AUTH_SERVICE_SECRET: "fictional-service-secret-at-least-32-bytes",
+      LLM_PROVIDER: "openai-compat",
+      LLM_API_KEY: "fictional-key",
+      LLM_BASE_URL: "https://llm.invalid/v1/",
+      LLM_MODEL: "fictional-model",
+    });
+    expect(config.enableWhatsAppAutoCalls).toBe(true);
+  });
+
   it("treats blank optional integration secrets as unset", () => {
     const config = loadConfig({
-      AI_API_KEY: "",
+      LLM_API_KEY: "",
       LIVEKIT_API_SECRET: "",
       WHATSAPP_ACCESS_TOKEN: "",
+      WHATSAPP_PHONE_NUMBER_ID: "",
+      WHATSAPP_WABA_ID: "",
     });
-    expect(config.secrets.aiApiKey).toBeUndefined();
+    expect(config.secrets.llmApiKey).toBeUndefined();
     expect(config.secrets.livekitApiSecret).toBeUndefined();
     expect(config.secrets.whatsappAccessToken).toBeUndefined();
+    expect(config.whatsApp.phoneNumberId).toBeUndefined();
+    expect(config.whatsApp.wabaId).toBeUndefined();
   });
 });

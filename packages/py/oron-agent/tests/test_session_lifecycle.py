@@ -1,5 +1,7 @@
 """The agent's session lifecycle: which status gets written, and when."""
 
+import asyncio
+import time
 import uuid
 
 import pytest
@@ -17,6 +19,7 @@ class FakeSessionsClient:
         self._create_succeeds = create_succeeds
         self.finalized: list[SessionStatus] = []
         self.calls: list[dict] = []
+        self.checkpoints: list[CallUsage] = []
         self.closed = False
 
     async def create(self, ctx, *, room):
@@ -25,6 +28,10 @@ class FakeSessionsClient:
     async def finalize(self, session_id, *, status=SessionStatus.ENDED, **kw):
         self.finalized.append(status)
         self.calls.append({"status": status, **kw})
+        return True
+
+    async def checkpoint_usage(self, session_id, *, tenant_id, usage):
+        self.checkpoints.append(usage)
         return True
 
     async def aclose(self):
@@ -93,6 +100,40 @@ async def test_finalize_carries_the_tenant():
     await recorder.start(room="r1")
     await recorder.finish(SessionStatus.ENDED, CallUsage())
     assert client.calls[0]["tenant_id"] == ctx.tenant_id
+
+
+async def test_live_usage_is_checkpointed_and_stops_at_finalize():
+    client, _ctx, recorder = make_recorder()
+    usage = CallUsage(llm_prompt_tokens=12, llm_model="gemini-2.5-flash")
+    await recorder.start(room="r1")
+    recorder.start_usage_reporting(
+        usage,
+        started_at=time.monotonic() - 2,
+        interval_seconds=0.01,
+    )
+
+    await asyncio.sleep(0.025)
+    assert client.checkpoints
+    assert client.checkpoints[-1].call_seconds >= 2
+    assert client.checkpoints[-1].llm_prompt_tokens == 12
+
+    await recorder.finish(SessionStatus.ENDED, usage)
+    count_after_finish = len(client.checkpoints)
+    await asyncio.sleep(0.02)
+    assert len(client.checkpoints) == count_after_finish
+
+
+async def test_live_usage_reporting_requires_a_durable_session_row():
+    client, _ctx, recorder = make_recorder(create_succeeds=False)
+    await recorder.start(room="r1")
+    recorder.start_usage_reporting(
+        CallUsage(),
+        started_at=time.monotonic(),
+        interval_seconds=0.01,
+    )
+    await asyncio.sleep(0.02)
+    assert client.checkpoints == []
+    await recorder.aclose()
 
 
 async def test_artifact_uris_are_derived_from_the_session_id():

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import os
 import re
 import secrets
@@ -100,6 +101,7 @@ def _require_provider_safety(environment: dict[str, str]) -> None:
             "ENABLE_REAL_TELEPHONY",
             "ENABLE_REAL_WHATSAPP",
             "ENABLE_REAL_VOICE_PROVIDERS",
+            "ENABLE_WHATSAPP_AUTO_CALLS",
         )
         if environment.get(key, "false").strip().lower() != "false"
     }
@@ -117,6 +119,57 @@ def _require_non_whatsapp_provider_safety(environment: dict[str, str]) -> None:
     if enabled:
         names = ", ".join(sorted(enabled))
         raise RuntimeError(f"development refuses unsafe provider flags: {names} must be false")
+
+
+def _enabled(environment: dict[str, str], key: str) -> bool:
+    return environment.get(key, "false").strip().lower() == "true"
+
+
+def _ensure_real_voice_material(environment: dict[str, str]) -> dict[str, str]:
+    """Prepare ignored localhost encryption material without enabling a provider."""
+
+    telephony = _enabled(environment, "ENABLE_REAL_TELEPHONY")
+    providers = _enabled(environment, "ENABLE_REAL_VOICE_PROVIDERS")
+    if telephony != providers:
+        raise RuntimeError(
+            "ENABLE_REAL_TELEPHONY and ENABLE_REAL_VOICE_PROVIDERS must be enabled together"
+        )
+    if not telephony:
+        return environment
+
+    generated = {
+        "FIELD_CIPHER_LOCAL_KEY": base64.b64encode(secrets.token_bytes(32)).decode("ascii"),
+        "BLIND_INDEX_KEY": base64.b64encode(secrets.token_bytes(32)).decode("ascii"),
+    }
+    lines = ENV_FILE.read_text(encoding="utf-8").splitlines()
+    found: set[str] = set()
+    updated: list[str] = []
+    changed = False
+    for line in lines:
+        if "=" not in line or line.lstrip().startswith("#"):
+            updated.append(line)
+            continue
+        key, value = line.split("=", maxsplit=1)
+        normalized = key.strip()
+        if normalized not in generated:
+            updated.append(line)
+            continue
+        found.add(normalized)
+        if value.strip().strip('"').strip("'"):
+            updated.append(line)
+            continue
+        updated.append(f"{normalized}={generated[normalized]}")
+        changed = True
+    for key, value in generated.items():
+        if key not in found:
+            updated.append(f"{key}={value}")
+            changed = True
+    if changed:
+        ENV_FILE.write_text("\n".join(updated) + "\n", encoding="utf-8")
+        with suppress(OSError):
+            ENV_FILE.chmod(0o600)
+        print("Generated ignored local voice data-encryption material.")
+    return _load_environment()
 
 
 def _compose(*arguments: str, profile: str = "core") -> list[str]:
@@ -231,7 +284,7 @@ def doctor() -> None:
             in_use = probe.connect_ex(("127.0.0.1", port)) == 0
         state = "in use" if in_use else "available"
         print(f"port {port:<11} {'WARN' if in_use else 'PASS':4} {state}")
-    print("GCP, gcloud, Terraform, and provider credentials are not localhost prerequisites.")
+    print("Hosting and provider credentials are not localhost prerequisites.")
     if not all(passed for _, passed in checks):
         raise RuntimeError("doctor found missing or incompatible required tools")
 
@@ -499,14 +552,20 @@ def voice_down() -> None:
 
 def dev() -> None:
     environment = _load_environment()
-    # Real WhatsApp may be explicitly enabled for the guarded Phase 6 queue/UI.
-    # Telephony and AI providers remain prohibited on this command surface.
-    _require_non_whatsapp_provider_safety(environment)
+    # Explicit flags may start the provider-capable dispatcher, but startup never
+    # dials. A user-confirmed UI command or an explicit customer callback request
+    # still passes through the independent dispatcher and SIP safety boundaries.
+    environment = _ensure_real_voice_material(environment)
     if not ENV_FILE.exists():
         raise RuntimeError(".env is missing; run `make bootstrap` first")
     _run(_compose("up", "-d", "--wait", "postgres"), environment=environment)
     migration_check(environment)
-    commands = (["uv", "run", "or-on-control-api"], ["pnpm", "dev"])
+    commands: tuple[list[str], ...] = (
+        ["uv", "run", "or-on-control-api"],
+        ["pnpm", "dev"],
+    )
+    if _enabled(environment, "ENABLE_REAL_TELEPHONY"):
+        commands += (["uv", "run", "--group", "voice", "or-on-dispatcher-runtime"],)
     # Both commands are fixed platform entrypoints and are never shell-expanded.
     processes = [
         subprocess.Popen(_resolve_command(command), cwd=ROOT, env=environment)  # noqa: S603
@@ -588,10 +647,11 @@ def help_text() -> None:
   voice-up         start and read-only verify local Redis/LiveKit/SIP control plane
   voice-check      list SIP control-plane resources without mutating them
   voice-down       stop only the optional local voice infrastructure
-  dev              run web, control API, live-agent, and messaging-worker on the host
+  dev              run the web/control plane; starts the guarded voice dispatcher only
+                   when both real voice flags are explicitly true
   stop / ps / logs manage the local Compose stack without deleting its volume
   migrate / migration-check / seed
-                   operate the sole Alembic lineage and fictional seed
+                   operate the sole Alembic lineage and development identity seed
   migration-graph / migration-sql / db-contract-check
                    inspect the canonical graph and deterministic PostgreSQL SQL offline
   db-verify-offline verify repository-controlled database artifacts without a server
@@ -599,9 +659,9 @@ def help_text() -> None:
   lint / format / typecheck / test / verify
                    run target-repository quality gates
 
-No command enables providers automatically. Real WhatsApp is accepted by `dev`
-only when the ignored environment explicitly opts in; every send still requires
-RBAC, consent, confirmation, durable admission, and the worker boundary switch.
+No command enables providers automatically. Explicit provider flags only make a
+provider adapter available; RBAC, consent, idempotency and per-action confirmation
+still gate every real message or call at the UI and lowest provider boundary.
 """
     )
 

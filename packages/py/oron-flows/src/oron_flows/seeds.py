@@ -1,8 +1,8 @@
-"""The packaged flow catalog: the flows this build ships, by id.
+"""Deterministic development/test flow fixtures, keyed by id.
 
-Lives here rather than in the agent so anything that *binds* a flow — the
-tenancy control plane registering a DID — can check the id exists before storing
-it, without depending on the agent.
+Runtime services do not import, auto-publish, or fall back to this catalog.
+Tests and explicit development setup may publish a selected fixture through the
+normal tenant-owned flow API.
 
 They are the first thing a reader meets, so they use only registered components —
 never the raw `nodes:` escape hatch.
@@ -289,7 +289,6 @@ SEED_COMPOSITIONS = {
 
 
 def composition_for(flow_id: uuid.UUID) -> Composition:
-    """The composition for `flow_id`, or the Hebrew example if this build does
-    not ship it — a binding can outlive a deploy, and the caller is already
-    connected by the time we look."""
-    return SEED_COMPOSITIONS.get(flow_id, EXAMPLE_HE)
+    """Return one explicitly selected fixture; unknown IDs fail closed."""
+
+    return SEED_COMPOSITIONS[flow_id]

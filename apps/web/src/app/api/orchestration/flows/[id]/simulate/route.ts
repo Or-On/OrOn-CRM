@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { simulationRefusal } from "../../../../../../features/simulation-policy";
 import { queueCanonicalSimulation } from "@or-on/crm";
 import { jsonObject, withCurrentTenant } from "../../../../../../features/auth";
 import {
@@ -11,6 +12,8 @@ export async function POST(
   context: { params: Promise<{ id: string }> },
 ) {
   try {
+    const refusal = simulationRefusal();
+    if (refusal) return refusal;
     await assertCrmMutation(request);
     const { id } = await context.params;
     const body = await jsonObject(request);

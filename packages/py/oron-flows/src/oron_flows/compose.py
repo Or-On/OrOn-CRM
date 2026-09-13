@@ -10,7 +10,7 @@ join point, not the next line in the file, so inheriting it would be a trap.
 """
 
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, SerializeAsAny, field_validator
 
@@ -35,7 +35,7 @@ class FlowMeta(BaseModel):
 class Persona(BaseModel):
     agent_name: str
     org: str
-    gender: str = "female"
+    gender: Literal["female", "male", "neutral"] = "female"
     pronunciations: dict[str, str] = Field(default_factory=dict)
     """Written form -> spoken form, for brand and foreign names TTS would mangle.
     A tenant's vocabulary, so it is authored per flow — never in a language pack."""
@@ -196,6 +196,7 @@ def expand(composition: Composition) -> FlowSpec:
         version=composition.flow.version,
         entry=composition.steps[0].id if composition.steps else composition.nodes[0].name,
         language=composition.flow.language,
+        persona_gender=composition.persona.gender if composition.persona else "neutral",
         role_message=persona_text,
         # Also on the spec, not only rendered into the persona prompt: the
         # scripted `say` lines never reach the model, so the TTS path needs the

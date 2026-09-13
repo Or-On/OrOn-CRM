@@ -77,6 +77,14 @@ const localErrorCodes = new Set([
   "network_error",
   "retry_exhausted",
   "outbound_processing_failed",
+  "delivery_outcome_unknown",
+  "sender_configuration_changed",
+  "outbound_eligibility_changed",
+  "ai_evidence_changed",
+  "ai_evidence_invalid",
+  "ai_trigger_superseded",
+  "stale_worker_claim",
+  "simulation_disabled",
 ]);
 
 export function messageDeliveryFailure(

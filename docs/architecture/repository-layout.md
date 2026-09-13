@@ -39,12 +39,11 @@ db/
   seeds/                       deterministic PII-free development seeds
   tests/                       PostgreSQL migration/RLS integration tests
 infra/
-  compose/                     localhost core and future optional profiles
-  caddy/                       one-origin proxy foundation
-  terraform/
-    modules/                   only reusable resource groups that earn a module
-    environments/dev/          one-VM GCP development environment
-  scripts/                     infrastructure-specific operations
+  compose/                     localhost and portable deployment topologies
+  caddy/                       one-origin TLS proxy configuration
+  deployment/                  deployment private-config templates
+  images/                      deployable service image definitions
+  scripts/                     provider-neutral release operations
 docs/
   audit/                       immutable source facts and provenance plan
   adr/                         architecture decision records

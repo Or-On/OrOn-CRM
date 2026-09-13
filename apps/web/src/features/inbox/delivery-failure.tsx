@@ -9,6 +9,7 @@ export function DeliveryFailure({
   readonly failure: MessageDeliveryFailure | null | undefined;
 }) {
   const t = useTranslations("deliveryFailure");
+  const tenant = useTranslations("tenantPrimary");
   const diagnostic = failure?.diagnostic;
   return (
     <div className="message-failure">
@@ -16,9 +17,11 @@ export function DeliveryFailure({
       <p>
         {diagnostic
           ? t(diagnostic.reason)
-          : failure && t.has(failure.code)
-            ? t(failure.code)
-            : t("legacy")}
+          : failure?.code === "provider_disabled"
+            ? tenant("sendingUnavailable")
+            : failure && t.has(failure.code)
+              ? t(failure.code)
+              : t("legacy")}
       </p>
       {failure ? (
         <details>

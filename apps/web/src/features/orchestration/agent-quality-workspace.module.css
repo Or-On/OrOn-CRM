@@ -1,0 +1,51 @@
+.workspace {
+  display: grid;
+  gap: 1.25rem;
+  min-inline-size: 0;
+  padding-block-start: 1.5rem;
+  text-align: start;
+}
+
+.workspace :global(.feature-form) {
+  display: grid;
+  gap: 1rem;
+  padding: 0;
+  min-inline-size: 0;
+}
+
+.workspace :is(h4, h5, p, dl) {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.workspace p {
+  line-height: 1.65;
+  font-size: var(--or-text-compact);
+}
+
+.workspace :is(section, details, fieldset fieldset) {
+  border-block-start: 1px solid var(--or-border);
+  padding-block-start: 1rem;
+}
+
+.workspace legend {
+  padding-block: 0.5rem;
+  font-weight: 600;
+}
+
+.workspace dd {
+  margin-inline-start: 0;
+  margin-block: 0.5rem 1rem;
+  overflow-wrap: anywhere;
+}
+
+.workspace summary {
+  cursor: pointer;
+  padding-block-end: 0.75rem;
+}
+
+.workspace :global(.or-button) {
+  justify-self: start;
+  max-inline-size: 100%;
+  white-space: normal;
+}

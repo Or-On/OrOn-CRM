@@ -7,10 +7,11 @@ import sys
 from datetime import date
 
 EXCEPTIONS = {
-    # NLTK model-artifact file APIs are not called and the platform accepts no
-    # caller-controlled NLTK model paths. No patched release exists as of
-    # 2026-09-02. See docs/security/threat-model.md.
-    "PYSEC-2026-3740": date(2026, 9, 9),
+    # Pipecat declares NLTK but the platform and Pipecat runtime do not import it.
+    # The deployable voice image removes NLTK after dependency installation, and
+    # no caller-controlled model path reaches the affected APIs. Upstream still
+    # has no patched release as of 2026-09-13. Review within 30 days.
+    "PYSEC-2026-3740": date(2026, 10, 13),
 }
 
 

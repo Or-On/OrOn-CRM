@@ -19,6 +19,7 @@ from pydantic import ValidationError
 
 def _settings(**extra) -> Settings:
     return Settings(
+        _env_file=None,
         ENABLE_REAL_VOICE_PROVIDERS=True,
         LIVEKIT_URL="ws://localhost:7880",
         LIVEKIT_API_KEY="APIoron",
@@ -43,7 +44,7 @@ def test_unset_knobs_leave_the_deployed_defaults_alone():
 def test_overrides_do_not_mutate_the_shared_settings():
     base = _settings()
     settings_with(base, AgentOverrides(user_idle_secs=99.0))
-    assert base.user_idle_secs == 7.0
+    assert base.user_idle_secs == 10.0
 
 
 def test_a_knob_outside_the_tunable_set_is_rejected():

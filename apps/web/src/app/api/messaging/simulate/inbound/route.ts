@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 
 import { ingestSimulatedInbound } from "@or-on/crm";
-import { loadConfig } from "@or-on/config";
+import { simulationRefusal } from "../../../../../features/simulation-policy";
 
 import { jsonObject, withCurrentTenant } from "../../../../../features/auth";
 import {
@@ -13,9 +13,8 @@ import {
 
 export async function POST(request: Request) {
   try {
-    const config = loadConfig(process.env, { service: "web" });
-    if (config.environment !== "development")
-      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    const refusal = simulationRefusal();
+    if (refusal) return refusal;
     await assertCrmMutation(request);
     const body = await jsonObject(request);
     if (

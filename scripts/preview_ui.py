@@ -11,6 +11,7 @@ import socket
 import subprocess
 import sys
 from pathlib import Path
+from threading import Thread
 from urllib.parse import quote, urlsplit, urlunsplit
 from uuid import uuid4
 
@@ -19,6 +20,9 @@ import asyncpg
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from scripts.dev import _load_environment, _resolve_command  # noqa: E402
+from scripts.preview_ui_browser import PreviewBrowserLogin  # noqa: E402
+from scripts.preview_ui_fixtures import seed_preview_fixtures  # noqa: E402
+from scripts.preview_voice_fixtures import seed_preview_voice  # noqa: E402
 
 
 def isolated_url(source: str, database: str) -> str:
@@ -59,7 +63,11 @@ def run(command: list[str], environment: dict[str, str], *, cwd: Path = ROOT) ->
 
 
 async def main(
-    *, check_db: bool = False, check_messaging: bool = False, production: bool = False
+    *,
+    check_db: bool = False,
+    check_messaging: bool = False,
+    production: bool = False,
+    browser_login: bool = False,
 ) -> None:
     if production and not (ROOT / "apps/web/.next/BUILD_ID").is_file():
         raise ValueError("Production preview requires pnpm build first")
@@ -76,8 +84,14 @@ async def main(
     password = secrets.token_urlsafe(24)
     artifact = ROOT / ".artifacts" / "phase7-preview-login.json"
     child: subprocess.Popen[str] | None = None
+    voice_child: subprocess.Popen[str] | None = None
+    voice_role = f"oron_ui_voice_{uuid4().hex}"
+    voice_role_created = False
+    browser: PreviewBrowserLogin | None = None
     created = False
     role_created = False
+    stop_requested = asyncio.Event()
+    loop = asyncio.get_running_loop()
     try:
         await admin.execute(f'CREATE DATABASE "{database}"')
         created = True
@@ -149,6 +163,13 @@ async def main(
             environment,
         )
         run(["uv", "run", "--no-sync", "python", "db/seeds/seed_development.py"], environment)
+        # These fixtures never enter the developer seed or application runtime.
+        # Verification-only databases keep their existing test-owned fixtures.
+        fixture_routes = (
+            {} if check_db or check_messaging else await seed_preview_fixtures(target, database)
+        )
+        if not check_db and not check_messaging:
+            fixture_routes.update(await seed_preview_voice(target, database))
         await admin.execute(
             f"CREATE ROLE \"{login_role}\" LOGIN PASSWORD '{role_password}' "
             "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS"
@@ -162,6 +183,46 @@ async def main(
             f"postgresql://{login_role}:{quote(role_password)}@{host}:"
             f"{parsed.port or 5432}/{database}"
         )
+        if not check_db and not check_messaging:
+            with socket.socket() as probe:
+                probe.bind(("127.0.0.1", 3102))
+            voice_password = secrets.token_hex(24)
+            await admin.execute(
+                f"CREATE ROLE \"{voice_role}\" LOGIN PASSWORD '{voice_password}' "
+                "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS"
+            )
+            voice_role_created = True
+            await admin.execute(f'GRANT platform_voice TO "{voice_role}"')
+            voice_environment = {
+                **environment,
+                "VOICE_DATABASE_URL": (
+                    f"postgresql://{voice_role}:{quote(voice_password)}@{host}:"
+                    f"{parsed.port or 5432}/{database}"
+                ),
+                "PREVIEW_DATABASE_NAME": database,
+            }
+            voice_child = subprocess.Popen(  # noqa: S603, ASYNC220
+                _resolve_command(
+                    [
+                        "uv",
+                        "run",
+                        "--no-sync",
+                        "uvicorn",
+                        "scripts.preview_voice_api:create_app",
+                        "--factory",
+                        "--host",
+                        "127.0.0.1",
+                        "--port",
+                        "3102",
+                        "--no-access-log",
+                    ]
+                ),
+                cwd=ROOT,
+                env=voice_environment,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            )
+            environment["CONTROL_API_URL"] = "http://127.0.0.1:3102"
         if check_messaging:
             environment["MESSAGING_DIAGNOSTICS_TEST_DATABASE_URL"] = target
             environment["MESSAGING_DIAGNOSTICS_RUNTIME_DATABASE_URL"] = environment["DATABASE_URL"]
@@ -201,26 +262,39 @@ async def main(
                     "password": password,
                     "database": database,
                     "login_role": login_role,
+                    "fixture_routes": fixture_routes,
                 }
             ),
             encoding="utf-8",
         )
         artifact.chmod(0o600)
+        if browser_login:
+
+            def request_browser_stop() -> None:
+                loop.call_soon_threadsafe(stop_requested.set)
+
+            browser = PreviewBrowserLogin(
+                database_url=target,
+                database=database,
+                email=environment["DEV_AUTH_EMAIL"],
+                password=password,
+                on_stop=request_browser_stop,
+            )
+            browser.start()
         print("Isolated PostgreSQL preview ready. No messaging/voice worker started.", flush=True)
         print(
             "Preview: http://127.0.0.1:3100 — "
             "temporary login in .artifacts/phase7-preview-login.json",
             flush=True,
         )
+        if browser_login:
+            print("Fictional browser session: http://127.0.0.1:3101/fictional-preview", flush=True)
         # This CLI owns one child process; shutdown always reaps its process tree.
         child = subprocess.Popen(  # noqa: S603, ASYNC220
             _resolve_command(
                 [
-                    "pnpm",
-                    "--filter",
-                    "@or-on/web",
-                    "exec",
-                    "next",
+                    "node",
+                    str(ROOT / "apps/web/node_modules/next/dist/bin/next"),
                     "start" if production else "dev",
                     "--hostname",
                     "127.0.0.1",
@@ -228,15 +302,37 @@ async def main(
                     "3100",
                 ]
             ),
-            cwd=ROOT,
+            cwd=ROOT / "apps/web",
             env=environment,
             text=True,
+            encoding="utf-8",
+            errors="replace",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
-        await asyncio.to_thread(child.wait)
-        if child.returncode:
+
+        def relay_web_output() -> None:
+            assert child is not None and child.stdout is not None
+            for line in child.stdout:
+                for key, value in environment.items():
+                    if (
+                        any(word in key for word in ("URL", "PASSWORD", "SECRET", "PEPPER", "HASH"))
+                        and value
+                    ):
+                        line = line.replace(value, "[REDACTED]")
+                print(line.rstrip().encode("ascii", "backslashreplace").decode("ascii"), flush=True)
+
+        Thread(target=relay_web_output, daemon=True, name="fictional-preview-web-output").start()
+        web_finished = asyncio.create_task(asyncio.to_thread(child.wait))
+        stop_signal = asyncio.create_task(stop_requested.wait())
+        await asyncio.wait((web_finished, stop_signal), return_when=asyncio.FIRST_COMPLETED)
+        stop_signal.cancel()
+        if web_finished.done() and child.returncode:
             raise RuntimeError("Preview web process exited unsuccessfully")
     finally:
+        if browser is not None:
+            browser.close()
         if child is not None and child.poll() is None:
             if os.name == "nt":
                 subprocess.run(  # noqa: S603, ASYNC221 — reap only our owned child tree
@@ -248,7 +344,19 @@ async def main(
                 child.terminate()
             child.wait(timeout=15)
         if created:
+            if voice_child is not None and voice_child.poll() is None:
+                if os.name == "nt":
+                    subprocess.run(  # noqa: S603, ASYNC221
+                        ["taskkill", "/PID", str(voice_child.pid), "/T", "/F"],  # noqa: S607
+                        capture_output=True,
+                        check=False,
+                    )
+                else:
+                    voice_child.terminate()
+                voice_child.wait(timeout=15)
             await admin.execute(f'DROP DATABASE "{database}" WITH (FORCE)')
+        if voice_role_created:
+            await admin.execute(f'DROP ROLE "{voice_role}"')
         if role_created:
             await admin.execute(f'DROP ROLE "{login_role}"')
         await admin.close()
@@ -269,6 +377,11 @@ if __name__ == "__main__":
         "--production", action="store_true", help="Preview existing Next production output"
     )
     parser.add_argument(
+        "--browser-login",
+        action="store_true",
+        help="Enable temporary loopback browser login for the generated fictional account",
+    )
+    parser.add_argument(
         "--check-messaging",
         action="store_true",
         help="Run mocked-provider diagnostics on an owned database as platform_messaging",
@@ -277,11 +390,14 @@ if __name__ == "__main__":
     try:
         if sum((arguments.check_db, arguments.check_messaging, arguments.production)) > 1:
             parser.error("Choose only one of --check-db, --check-messaging, or --production")
+        if arguments.browser_login and (arguments.check_db or arguments.check_messaging):
+            parser.error("--browser-login is available only for an interactive isolated preview")
         asyncio.run(
             main(
                 check_db=arguments.check_db,
                 check_messaging=arguments.check_messaging,
                 production=arguments.production,
+                browser_login=arguments.browser_login,
             )
         )
     except KeyboardInterrupt:

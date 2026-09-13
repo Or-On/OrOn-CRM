@@ -1,0 +1,514 @@
+.mailFrame {
+  display: grid;
+  grid-template-columns: 14.5rem minmax(0, 1fr);
+  min-block-size: min(44rem, calc(100dvh - 7.5rem));
+  overflow: hidden;
+  border: 1px solid var(--or-border);
+  border-radius: 0.65rem;
+  background: var(--or-surface);
+  box-shadow: var(--or-shadow-1);
+}
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  min-inline-size: 0;
+  border-inline-end: 1px solid var(--or-border);
+  background: var(--or-surface);
+}
+.accountIdentity {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.9rem 0.8rem;
+  border-block-end: 1px solid var(--or-border);
+}
+.accountIdentity > span {
+  display: grid;
+  place-items: center;
+  inline-size: 2rem;
+  block-size: 2rem;
+  flex: 0 0 auto;
+  border-radius: 0.4rem;
+  color: var(--or-text-inverse);
+  background: var(--or-text);
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+.accountIdentity > div {
+  min-inline-size: 0;
+}
+.accountIdentity strong,
+.accountIdentity small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.accountIdentity strong {
+  font-size: 0.78rem;
+}
+.accountIdentity small {
+  color: var(--or-text-muted);
+  font-size: 0.75rem;
+}
+.sidebar nav {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.7rem 0.55rem;
+}
+.sidebar nav button,
+.sidebar nav a {
+  display: grid;
+  grid-template-columns: 1rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.55rem;
+  min-block-size: 2rem;
+  padding: 0.35rem 0.5rem;
+  border: 0;
+  border-radius: 0.35rem;
+  color: var(--or-text-secondary);
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.75rem;
+  text-align: start;
+}
+.sidebar nav button:hover,
+.sidebar nav a:hover,
+.sidebar nav button[aria-pressed="true"] {
+  color: var(--or-text);
+  background: var(--or-surface-hover);
+}
+.sidebar nav button[aria-pressed="true"] {
+  font-weight: 600;
+}
+.sidebar nav small {
+  color: var(--or-text-muted);
+  font-size: 0.75rem;
+}
+.sidebar nav p {
+  margin: 0.8rem 0.5rem 0.25rem;
+  color: var(--or-text-muted);
+  font-size: 0.75rem;
+}
+.sidebarStatus {
+  display: grid;
+  gap: 0.1rem;
+  margin-block-start: auto;
+  padding: 0.8rem;
+  border-block-start: 1px solid var(--or-border);
+}
+.sidebarStatus span {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.sidebarStatus i {
+  inline-size: 0.42rem;
+  block-size: 0.42rem;
+  border-radius: 50%;
+  background: var(--or-text-muted);
+}
+.sidebarStatus i[data-connected="true"] {
+  background: var(--or-positive);
+}
+.sidebarStatus small {
+  color: var(--or-text-muted);
+  font-size: 0.75rem;
+}
+.content {
+  min-inline-size: 0;
+}
+.contentHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-block-size: 4.2rem;
+  padding: 0.8rem 1rem;
+  border-block-end: 1px solid var(--or-border);
+}
+.contentHeader h1 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+.contentHeader p {
+  margin: 0.15rem 0 0;
+  color: var(--or-text-muted);
+  font-size: 0.75rem;
+}
+.contentBody {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+}
+.connectedBadge,
+.blockedBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-block-size: 1.45rem;
+  inline-size: fit-content;
+  padding: 0.15rem 0.45rem;
+  border: 1px solid var(--or-border);
+  border-radius: 0.3rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.connectedBadge {
+  color: var(--or-positive);
+  border-color: color-mix(in srgb, var(--or-positive) 30%, var(--or-border));
+  background: color-mix(in srgb, var(--or-positive) 7%, transparent);
+}
+.blockedBadge {
+  color: var(--or-warning);
+  border-color: color-mix(in srgb, var(--or-warning) 30%, var(--or-border));
+  background: color-mix(in srgb, var(--or-warning) 7%, transparent);
+}
+.oauthNotice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid color-mix(in srgb, var(--or-warning) 30%, var(--or-border));
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--or-warning) 6%, var(--or-surface));
+}
+.oauthNotice strong {
+  display: block;
+  font-size: 0.76rem;
+}
+.oauthNotice p {
+  margin: 0.15rem 0 0;
+  color: var(--or-text-muted);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+.providerGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+.providerCard {
+  display: grid;
+  grid-template-columns: 2.2rem minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 0.7rem;
+  padding: 1rem;
+  border: 1px solid var(--or-border);
+  border-radius: 0.6rem;
+  background: var(--or-surface);
+}
+.googleMark,
+.microsoftMark {
+  display: grid;
+  place-items: center;
+  inline-size: 2.2rem;
+  block-size: 2.2rem;
+  border: 1px solid var(--or-border);
+  border-radius: 0.45rem;
+  background: var(--or-surface-subtle);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.googleMark {
+  color: #4285f4;
+}
+.microsoftMark {
+  color: #0078d4;
+}
+.providerCopy h2 {
+  margin: 0;
+  font-size: 0.82rem;
+}
+.providerCopy p {
+  margin: 0.2rem 0 0;
+  color: var(--or-text-muted);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+.providerCard > :last-child {
+  grid-column: 1 / -1;
+}
+.setupButton {
+  inline-size: 100%;
+  min-block-size: 2rem;
+  border: 1px solid var(--or-border);
+  border-radius: 0.4rem;
+  color: var(--or-text);
+  background: var(--or-surface);
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.setupButton:hover {
+  border-color: var(--or-border-strong);
+  background: var(--or-surface-hover);
+}
+.setupButton:focus-visible,
+.guide:focus-visible {
+  outline: 2px solid var(--or-focus);
+  outline-offset: 2px;
+}
+.connectedAccount {
+  display: grid;
+  gap: 0.1rem;
+  padding: 0.6rem 0.7rem;
+  border-radius: 0.4rem;
+  background: var(--or-surface-subtle);
+}
+.connectedAccount strong {
+  font-size: 0.75rem;
+}
+.connectedAccount small {
+  color: var(--or-text-muted);
+  font-size: 0.75rem;
+}
+.channelsCard,
+.guide {
+  overflow: hidden;
+  border: 1px solid var(--or-border);
+  border-radius: 0.6rem;
+  background: var(--or-surface);
+}
+.channelsCard > header,
+.guide > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.8rem 1rem;
+  border-block-end: 1px solid var(--or-border);
+}
+.channelsCard h2,
+.guide h2 {
+  margin: 0;
+  font-size: 0.8rem;
+}
+.channelsCard header p,
+.guide header p {
+  margin: 0.15rem 0 0;
+  color: var(--or-text-muted);
+  font-size: 0.75rem;
+}
+.empty {
+  display: grid;
+  place-items: center;
+  gap: 0.45rem;
+  min-block-size: 9rem;
+  color: var(--or-text-muted);
+  font-size: 0.75rem;
+}
+.empty p {
+  margin: 0;
+}
+.channelList article {
+  display: grid;
+  grid-template-columns: 2rem minmax(10rem, 1fr) auto minmax(12rem, auto);
+  align-items: center;
+  gap: 0.7rem;
+  min-block-size: 4rem;
+  padding: 0.65rem 1rem;
+  border-block-start: 1px solid var(--or-border);
+}
+.channelList article:first-child {
+  border-block-start: 0;
+}
+.mailIcon {
+  display: grid;
+  place-items: center;
+  inline-size: 2rem;
+  block-size: 2rem;
+  border: 1px solid var(--or-border);
+  border-radius: 0.4rem;
+  background: var(--or-surface-subtle);
+}
+.channelList strong,
+.channelList small {
+  display: block;
+}
+.channelList strong {
+  font-size: 0.75rem;
+}
+.channelList small,
+.channelList time {
+  color: var(--or-text-muted);
+  font-size: 0.75rem;
+}
+.otherNote {
+  margin: 0;
+  padding: 0.55rem 1rem;
+  border-block-start: 1px solid var(--or-border);
+  color: var(--or-text-muted);
+  font-size: 0.75rem;
+}
+.guide > header {
+  justify-content: flex-start;
+}
+.guide > header > span {
+  display: grid;
+  place-items: center;
+  inline-size: 2.1rem;
+  block-size: 2.1rem;
+  flex: 0 0 auto;
+  border-radius: 0.4rem;
+  background: var(--or-surface-subtle);
+}
+.guide ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.guide li {
+  display: grid;
+  grid-template-columns: 1.75rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.9rem 1rem;
+  border-block-start: 1px solid var(--or-border);
+}
+.guide li:first-child {
+  border-block-start: 0;
+}
+.guide li > span {
+  display: grid;
+  place-items: center;
+  inline-size: 1.75rem;
+  block-size: 1.75rem;
+  border: 1px solid var(--or-border);
+  border-radius: 50%;
+  font-size: 0.75rem;
+}
+.guide li strong {
+  display: block;
+  font-size: 0.75rem;
+}
+.guide li p {
+  margin: 0.15rem 0 0;
+  color: var(--or-text-muted);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+.guide li b {
+  padding: 0.15rem 0.4rem;
+  border-radius: 0.25rem;
+  color: var(--or-warning);
+  background: color-mix(in srgb, var(--or-warning) 8%, transparent);
+  font-size: 0.75rem;
+}
+.oauthForm {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+  padding: 1rem;
+  border-block-start: 1px solid var(--or-border);
+}
+.oauthForm > p,
+.oauthForm > button {
+  grid-column: 1 / -1;
+}
+.oauthForm > p {
+  margin: 0;
+  color: var(--or-text-muted);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+.oauthForm > p[role="alert"] {
+  color: var(--or-danger);
+}
+.settingsLink {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.8rem 1rem;
+  border: 1px solid var(--or-border);
+  border-radius: 0.5rem;
+  background: var(--or-surface);
+}
+.settingsLink > div {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+.settingsLink strong,
+.settingsLink small {
+  display: block;
+}
+.settingsLink strong {
+  font-size: 0.75rem;
+}
+.settingsLink small {
+  color: var(--or-text-muted);
+  font-size: 0.75rem;
+}
+@media (max-width: 58rem) {
+  .mailFrame {
+    grid-template-columns: 11rem minmax(0, 1fr);
+  }
+  .providerGrid {
+    grid-template-columns: 1fr;
+  }
+  .channelList article {
+    grid-template-columns: 2rem minmax(0, 1fr) auto;
+  }
+  .channelList article time {
+    grid-column: 2 / -1;
+  }
+}
+@media (max-width: 40rem) {
+  .oauthForm {
+    grid-template-columns: 1fr;
+  }
+  .mailFrame {
+    display: block;
+    min-block-size: 0;
+    overflow: visible;
+  }
+  .sidebar {
+    border-inline-end: 0;
+    border-block-end: 1px solid var(--or-border);
+  }
+  .sidebar nav {
+    display: flex;
+    gap: 0.35rem;
+    overflow-x: auto;
+  }
+  .sidebar nav p,
+  .sidebar nav a,
+  .sidebarStatus {
+    display: none;
+  }
+  .sidebar nav button {
+    grid-template-columns: 1rem auto auto;
+    flex: 0 0 auto;
+  }
+  .contentHeader {
+    align-items: flex-start;
+  }
+  .providerCard {
+    grid-template-columns: 2.2rem minmax(0, 1fr);
+  }
+  .providerCard > .connectedBadge,
+  .providerCard > .blockedBadge {
+    grid-column: 1 / -1;
+  }
+  .channelList article {
+    align-items: start;
+  }
+  .channelList article > .connectedBadge,
+  .channelList article > .blockedBadge {
+    grid-column: 2;
+  }
+  .channelList article time {
+    grid-column: 2;
+  }
+  .guide li {
+    grid-template-columns: 1.75rem minmax(0, 1fr);
+  }
+  .guide li b {
+    grid-column: 2;
+  }
+}

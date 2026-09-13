@@ -56,6 +56,7 @@ def test_entry_is_the_first_step():
 def test_persona_becomes_the_flow_role_message():
     spec = expand(_composition([Announce(id="a", then="bye")]))
     assert "נועה" in spec.role_message and "המוקד" in spec.role_message
+    assert spec.persona_gender == "female"
 
 
 def test_steps_hydrate_from_json_into_their_concrete_models():

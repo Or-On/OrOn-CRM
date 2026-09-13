@@ -10,6 +10,7 @@ from pipecat.frames.frames import (
     EndWorkerFrame,
     TTSSpeakFrame,
     UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
 )
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
@@ -149,6 +150,46 @@ async def test_the_agent_never_nudges_the_caller_mid_sentence(monkeypatch):
     assert poker.policy.pokes == 0, "spent one of the caller's chances on our own speech"
 
 
+async def test_the_agent_never_nudges_while_the_caller_is_still_speaking(monkeypatch):
+    """A long caller utterance may exceed the idle interval; it is not silence."""
+
+    async def noop(self, frame, direction):
+        return None
+
+    monkeypatch.setattr(IdleFrameProcessor, "process_frame", noop, raising=True)
+    poker = UserIdlePoker(prompts=["still there?"], timeout_secs=0.01)
+    poker.arm()
+    spoken = await _push_into(poker)
+
+    await poker.process_frame(UserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+    await poker._on_idle(poker)
+
+    assert spoken == []
+    assert poker.policy.pokes == 0
+
+    await poker.process_frame(UserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+    await poker._on_idle(poker)
+    assert [frame.text for frame in spoken] == ["still there?"]
+
+
+async def test_dropped_turn_clears_active_user_state_without_refilling_allowance(monkeypatch):
+    async def noop(self, frame, direction):
+        return None
+
+    monkeypatch.setattr(IdleFrameProcessor, "process_frame", noop, raising=True)
+    poker = UserIdlePoker(prompts=PROMPTS, timeout_secs=0.01)
+    poker.arm()
+    await poker.process_frame(UserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+    poker.policy.next_action()
+    poker._idle_event = asyncio.Event()
+
+    poker.abandon_user_turn()
+
+    assert poker._user_speaking is False
+    assert poker.policy.pokes == 1
+    assert poker._idle_event.is_set()
+
+
 async def test_a_genuinely_silent_caller_is_still_nudged():
     """The guard must not disable the feature it protects."""
     poker = UserIdlePoker(prompts=["still there?"], timeout_secs=0.01)
@@ -273,7 +314,7 @@ async def test_the_aggregator_still_announces_a_dropped_turn():
 
     @aggregator.event_handler("on_user_turn_stop_timeout")
     async def _(_aggregator):
-        poker.rearm()
+        poker.abandon_user_turn()
 
     await aggregator._on_user_turn_stop_timeout(None)
     # The handler is dispatched as its own task, so asserting straight after the

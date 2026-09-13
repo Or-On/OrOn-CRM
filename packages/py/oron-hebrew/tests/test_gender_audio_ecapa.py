@@ -105,6 +105,53 @@ async def test_defaults_leave_a_retry_window(low_confidence_processor):
     assert proc._required_seconds < proc._max_seconds, "retry path must be reachable"
 
 
+async def test_configured_confirmation_requires_two_matching_readings(monkeypatch):
+    results = iter([("female", 0.96), ("female", 0.95)])
+    observed: list[tuple[str, float]] = []
+    proc = GenderClassifierProcessor(
+        required_seconds=0.1,
+        retry_interval_seconds=0.1,
+        max_seconds=0.5,
+        confidence_threshold=0.9,
+        confirmation_attempts=2,
+        on_gender_classified=lambda gender, confidence: _record(observed, gender, confidence),
+        vad_analyzer=_StubVAD(VADState.SPEAKING),
+    )
+    monkeypatch.setattr(proc, "_classify", lambda: next(results), raising=True)
+
+    await _feed(proc, 0.35)
+
+    assert observed == [("female", 0.95)]
+
+
+async def _record(target: list[tuple[str, float]], gender: str, confidence: float) -> None:
+    target.append((gender, confidence))
+
+
+async def test_conflicting_high_confidence_readings_do_not_latch(monkeypatch):
+    results = iter([("male", 0.96), ("female", 0.97), ("female", 0.96)])
+    observed: list[tuple[str, float]] = []
+    proc = GenderClassifierProcessor(
+        required_seconds=0.1,
+        retry_interval_seconds=0.1,
+        max_seconds=0.6,
+        confidence_threshold=0.9,
+        confirmation_attempts=2,
+        on_gender_classified=lambda gender, confidence: _record(observed, gender, confidence),
+        vad_analyzer=_StubVAD(VADState.SPEAKING),
+    )
+    monkeypatch.setattr(proc, "_classify", lambda: next(results), raising=True)
+
+    await _feed(proc, 0.45)
+
+    assert observed == [("female", 0.96)]
+
+
+def test_confirmation_attempts_must_be_positive():
+    with pytest.raises(ValueError, match="confirmation_attempts"):
+        GenderClassifierProcessor(confirmation_attempts=0, vad_analyzer=_StubVAD(VADState.SPEAKING))
+
+
 async def test_non_speech_never_reaches_the_classifier():
     """The regression that matters: ECAPA scores silence as male at 0.81-0.99
     confidence — above threshold, so it would be ACCEPTED and latched. The bot

@@ -19,36 +19,26 @@ export async function runWorker(
       );
     }
     dependencies.logger.info({ messagesSent: 0 }, "worker_ready");
-    let signal: string;
-    for (;;) {
-      const outcome = await Promise.race([
-        stop.then((value) => ({ kind: "stop" as const, value })),
-        (dependencies.processAvailable?.() ?? Promise.resolve(0)).then(
-          (processed) => ({ kind: "processed" as const, processed }),
-        ),
-      ]);
-      if (outcome.kind === "stop") {
-        signal = outcome.value;
-        break;
-      }
-      if (outcome.processed > 0) {
-        dependencies.logger.info(
-          { processed: outcome.processed },
-          "worker_batch_processed",
-        );
+    let signal: string | undefined;
+    const stopped = stop.then((value) => {
+      signal = value;
+    });
+    const stopping = () => signal !== undefined;
+    // Drain the bounded current action before closing its persistence pool.
+    // Promise.race never cancelled provider traffic and used to lose receipts.
+    await Promise.resolve();
+    while (!stopping()) {
+      const processed = await (dependencies.processAvailable?.() ??
+        Promise.resolve(0));
+      if (stopping()) break;
+      if (processed > 0) {
+        dependencies.logger.info({ processed }, "worker_batch_processed");
         continue;
       }
       const idle =
         dependencies.wait?.(1000) ??
         new Promise<void>((resolve) => setTimeout(resolve, 1000));
-      const idleOutcome = await Promise.race([
-        stop.then((value) => ({ kind: "stop" as const, value })),
-        idle.then(() => ({ kind: "idle" as const })),
-      ]);
-      if (idleOutcome.kind === "stop") {
-        signal = idleOutcome.value;
-        break;
-      }
+      await Promise.race([stopped, idle]);
     }
     dependencies.logger.info({ signal }, "worker_stopping");
   } finally {

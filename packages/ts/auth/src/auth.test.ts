@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  canonicalRoles,
   canAssignRole,
   hashOpaqueToken,
   hashPassword,
   hasPermission,
+  isAuthorized,
   issueServiceAssertion,
+  permissions,
   tokenDigestMatches,
   verifyPassword,
   verifyServiceAssertion,
@@ -38,14 +41,50 @@ describe("authentication cryptography", () => {
 });
 
 describe("authorization", () => {
-  it("denies privileged actions to non-privileged roles", () => {
-    expect(hasPermission("viewer", "members:manage")).toBe(false);
-    expect(hasPermission("agent", "tenant:manage")).toBe(false);
-    expect(canAssignRole("admin", "owner")).toBe(false);
-    expect(canAssignRole("owner", "owner")).toBe(true);
-    expect(hasPermission("viewer", "voice:read")).toBe(true);
-    expect(hasPermission("viewer", "voice:operate")).toBe(false);
-    expect(hasPermission("agent", "voice:operate")).toBe(true);
+  const expected = {
+    owner: [...permissions],
+    admin: [...permissions],
+    agent: [
+      "platform:read",
+      "voice:read",
+      "voice:operate",
+      "crm:read",
+      "crm:write",
+      "pipelines:manage",
+      "messaging:operate",
+    ],
+    viewer: ["platform:read", "voice:read", "crm:read"],
+  } as const;
+
+  it.each(canonicalRoles)("enforces the exact %s permission set", (role) => {
+    for (const permission of permissions) {
+      expect(hasPermission(role, permission), `${role} -> ${permission}`).toBe(
+        expected[role].includes(permission as never),
+      );
+    }
+  });
+
+  it("keeps tenant role assignment within the owner/admin boundary", () => {
+    for (const actor of canonicalRoles) {
+      for (const target of canonicalRoles) {
+        const allowed =
+          actor === "owner" || (actor === "admin" && target !== "owner");
+        expect(canAssignRole(actor, target), `${actor} -> ${target}`).toBe(
+          allowed,
+        );
+      }
+    }
+  });
+
+  it("grants platform super-administrators every capability without widening tenant roles", () => {
+    for (const permission of permissions) {
+      expect(
+        isAuthorized({ role: "viewer", isSuperuser: true }, permission),
+      ).toBe(true);
+    }
+    expect(
+      isAuthorized({ role: "viewer", isSuperuser: false }, "members:manage"),
+    ).toBe(false);
   });
 });
 

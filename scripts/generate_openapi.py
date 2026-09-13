@@ -86,7 +86,7 @@ def _method_name(operation_id: str) -> str:
 
 
 def generate_client(document: dict[str, Any]) -> str:
-    operations: list[tuple[str, str, str, str, str | None]] = []
+    operations: list[tuple[str, str, str, str, str | None, list[tuple[str, str]]]] = []
     for path, path_item in sorted(document.get("paths", {}).items()):
         for http_method in ("get", "post"):
             operation = path_item.get(http_method)
@@ -99,6 +99,19 @@ def generate_client(document: dict[str, Any]) -> str:
             if isinstance(request_body, dict):
                 request_schema = request_body["content"]["application/json"]["schema"]
                 request_type = _typescript_type(request_schema)
+            declared = {
+                parameter["name"]: _typescript_type(parameter.get("schema", {}))
+                for parameter in [
+                    *path_item.get("parameters", []),
+                    *operation.get("parameters", []),
+                ]
+                if parameter.get("in") == "path"
+            }
+            path_parameters = []
+            for name in re.findall(r"\{([^}]+)\}", path):
+                if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) or name not in declared:
+                    raise ValueError("every path placeholder must have a declared parameter")
+                path_parameters.append((name, declared[name]))
             operations.append(
                 (
                     _method_name(operation["operationId"]),
@@ -106,6 +119,7 @@ def generate_client(document: dict[str, Any]) -> str:
                     response_type,
                     http_method.upper(),
                     request_type,
+                    path_parameters,
                 )
             )
 
@@ -113,7 +127,7 @@ def generate_client(document: dict[str, Any]) -> str:
         sorted(
             {
                 schema_type
-                for _, _, response_type, _, request_type in operations
+                for _, _, response_type, _, request_type, _ in operations
                 for schema_type in (response_type, request_type)
                 if schema_type is not None
             }
@@ -142,12 +156,27 @@ def generate_client(document: dict[str, Any]) -> str:
         "  ) {}",
         "",
     ]
-    for method_name, path, response_type, http_method, request_type in operations:
+    for method_name, path, response_type, http_method, request_type, path_parameters in operations:
+        arguments = []
+        target = json.dumps(path)
+        if path_parameters:
+            fields = "; ".join(f"readonly {name}: {kind}" for name, kind in path_parameters)
+            arguments.append(f"parameters: {{ {fields} }}")
+            escaped = path.replace("`", "\\`").replace("${", "\\${")
+            for name, _ in path_parameters:
+                escaped = escaped.replace(
+                    "{" + name + "}", "${encodeURIComponent(String(parameters." + name + "))}"
+                )
+            target = "`" + escaped + "`"
+        if request_type is not None:
+            arguments.append(f"body: {request_type}")
+        signature = ", ".join(arguments)
         if request_type is None:
             lines.extend(
                 [
-                    f"  public async {method_name}(): Promise<ApiResponse<{response_type}>> {{",
-                    f'    return this.request<{response_type}>("{path}");',
+                    f"  public async {method_name}({signature}): "
+                    f"Promise<ApiResponse<{response_type}>> {{",
+                    f"    return this.request<{response_type}>({target});",
                     "  }",
                     "",
                 ]
@@ -156,10 +185,10 @@ def generate_client(document: dict[str, Any]) -> str:
             lines.extend(
                 [
                     (
-                        f"  public async {method_name}(body: {request_type}): "
+                        f"  public async {method_name}({signature}): "
                         f"Promise<ApiResponse<{response_type}>> {{"
                     ),
-                    f'    return this.request<{response_type}>("{path}", {{',
+                    f"    return this.request<{response_type}>({target}, {{",
                     f'      method: "{http_method}",',
                     '      headers: { "content-type": "application/json" },',
                     "      body: JSON.stringify(body),",

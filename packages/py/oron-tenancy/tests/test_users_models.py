@@ -21,9 +21,15 @@ def test_viewer_does_not_pass_an_admin_gate():
 
 
 def test_tables_have_expected_columns():
-    assert {"id", "email", "is_superuser", "status", "created_at", "updated_at"} <= set(
-        User.__table__.columns.keys()
-    )
+    assert {
+        "id",
+        "email",
+        "display_name",
+        "is_superuser",
+        "status",
+        "created_at",
+        "updated_at",
+    } <= set(User.__table__.columns.keys())
     assert {"user_id", "tenant_id", "role"} <= set(Membership.__table__.columns.keys())
     assert {
         "id",
@@ -65,13 +71,29 @@ def test_users_are_not_tenant_scoped():
     assert "tenant_id" not in User.__table__.columns
 
 
-def test_no_column_is_nullable():
-    """Nullable only when absent is a real, handled domain state. Nothing here
-    qualifies."""
+def test_only_optional_profile_fields_are_nullable():
+    """Profile images may be absent; identity and membership keys may not."""
     nullable = [
         f"{t.__tablename__}.{c.name}" for t in TABLES for c in t.__table__.columns if c.nullable
     ]
-    assert nullable == []
+    assert nullable == [
+        "users.display_name",
+        "users.avatar_data",
+        "users.avatar_content_type",
+        "users.avatar_updated_at",
+    ]
+
+
+def test_profile_image_columns_match_the_existing_migration():
+    columns = User.__table__.columns
+    assert isinstance(columns["avatar_data"].type, sa.LargeBinary)
+    assert isinstance(columns["avatar_content_type"].type, sa.Text)
+    assert isinstance(columns["avatar_updated_at"].type, sa.DateTime)
+    assert columns["avatar_updated_at"].type.timezone is True
+    user = User(email="fictional@example.invalid")
+    assert user.avatar_data is None
+    assert user.avatar_content_type is None
+    assert user.avatar_updated_at is None
 
 
 def test_enums_are_stored_as_text():

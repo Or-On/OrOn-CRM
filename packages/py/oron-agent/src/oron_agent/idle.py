@@ -19,6 +19,7 @@ from pipecat.frames.frames import (
     Frame,
     TTSSpeakFrame,
     UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.processors.idle_frame_processor import IdleFrameProcessor
@@ -74,6 +75,7 @@ class UserIdlePoker(IdleFrameProcessor):
             # turn keeps running through this one.
             types=[
                 UserStartedSpeakingFrame,
+                UserStoppedSpeakingFrame,
                 BotStartedSpeakingFrame,
                 BotStoppedSpeakingFrame,
             ],
@@ -87,6 +89,11 @@ class UserIdlePoker(IdleFrameProcessor):
         # already listed above: base_output pushes them upstream as well as
         # downstream, which is the only reason those resets reach us here.
         self._bot_speaking = False
+        # A user turn can legitimately exceed the idle interval (slow speech,
+        # an address or a name). A start frame resets the base timer but does
+        # not suspend it, so without this guard the timer can ask "still there?"
+        # while the caller is audibly talking.
+        self._user_speaking = False
         # Nothing to be idle about until somebody is on the call. The pipeline
         # starts when the bot joins the room, which on an OUTBOUND call is before
         # the phone has even rung: unarmed, the agent prompts an empty room and
@@ -98,6 +105,12 @@ class UserIdlePoker(IdleFrameProcessor):
         self._armed = True
         self.policy.caller_spoke()
         self.rearm()
+
+    def set_ai_paused(self, paused: bool) -> None:
+        """An operator-held call must not receive nudges or an idle hangup."""
+        self._armed = not paused
+        if not paused:
+            self.rearm()
 
     def rearm(self) -> None:
         """Restart the countdown, leaving the caller's allowance alone.
@@ -113,9 +126,24 @@ class UserIdlePoker(IdleFrameProcessor):
         if (idle_event := getattr(self, "_idle_event", None)) is not None:
             idle_event.set()
 
+    def abandon_user_turn(self) -> None:
+        """Recover after Pipecat force-closes a turn with no transcript.
+
+        That timeout has no ``UserStoppedSpeakingFrame`` to clear our local
+        state. Keeping the flag set would disable idle handling for the rest of
+        the call; clearing it here restores the timer without pretending the
+        caller supplied a valid answer.
+        """
+
+        self._user_speaking = False
+        self.rearm()
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, UserStartedSpeakingFrame):
+            self._user_speaking = True
             self.policy.caller_spoke()
+        elif isinstance(frame, UserStoppedSpeakingFrame):
+            self._user_speaking = False
         elif isinstance(frame, BotStartedSpeakingFrame):
             self._bot_speaking = True
         elif isinstance(frame, BotStoppedSpeakingFrame):
@@ -125,11 +153,11 @@ class UserIdlePoker(IdleFrameProcessor):
     async def _on_idle(self, _processor: IdleFrameProcessor) -> None:
         if not self._armed:
             return
-        if self._bot_speaking:
-            # Not idle — WE are talking. Consuming a prompt here would both
-            # interrupt the agent and spend one of the caller's chances on
-            # silence they were never given a turn to fill. The idle loop
-            # re-arms on its own, so returning simply checks again later.
+        if self._bot_speaking or self._user_speaking:
+            # Not idle — somebody is talking. Consuming a prompt here would
+            # interrupt them and spend one of the caller's chances on silence
+            # they were never given a turn to fill. The idle loop re-arms on its
+            # own, so returning simply checks again later.
             return
         prompt = self.policy.next_action()
         if prompt is None:

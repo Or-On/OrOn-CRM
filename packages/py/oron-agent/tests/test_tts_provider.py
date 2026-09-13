@@ -79,11 +79,14 @@ def test_the_niqqud_transformer_registers_on_the_soniox_service():
     assert len(tts._text_transforms) == 1
 
 
-def test_soniox_keeps_niqqud_out_of_the_assistant_context():
-    """Soniox's character timestamps echo the POINTED text it was sent, and
-    pipecat builds the assistant message — the saved transcript and the LLM's
-    memory of its own line — out of them. Confirmed live: unpatched, the context
-    came back as 'שַׁלוֹם, מַה שׁלוֹמֶך' instead of 'שלום, מה שלומך'."""
+def test_soniox_uses_the_proven_original_text_audio_path():
+    """Use the path proven audible on real LiveKit/SIP calls.
+
+    Character timestamps can make interrupted context more precise, but with
+    the current Pipecat/Soniox combination they produced timestamp text while
+    the entire outbound recording channel remained silent. Original text frames
+    also keep any optional niqqud out of the assistant's conversation memory.
+    """
     tts = _build(TtsProvider.SONIOX, "Maya")
 
     assert tts._push_text_frames is True

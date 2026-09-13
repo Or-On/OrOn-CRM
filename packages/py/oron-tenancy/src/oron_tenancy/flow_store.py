@@ -5,10 +5,10 @@ Lives here rather than in oron-flows because it needs oron-db: oron-flows is a
 leaf package so the authoring tools (and the future builder UI) can import the
 component library without dragging in a database driver.
 
-Tenancy: the packaged catalog is stored with `tenant_id IS NULL` and is readable
-by every tenant; a tenant's own flows carry their id and are visible only to
-them. RLS (migration 0007) enforces that split at the database; the predicate
-here states the same rule so the queries are honest on their own.
+Tenancy: runtime tenant lookups see only rows carrying that tenant's id. Legacy
+or explicit development fixtures may still be stored with ``tenant_id IS NULL``
+through ``GLOBAL_TENANT``, but they are visible only to that explicit store key,
+never as a fallback for an ordinary tenant.
 
 Every method opens its own transaction and sets the `app.current_tenant` GUC
 from the tenant_id it was handed. It has to: the policy is FORCE, so a session
@@ -39,17 +39,40 @@ class FlowNotFound(LookupError):
     a caller ends up hearing the wrong script."""
 
 
+class FlowVersionConflict(RuntimeError):
+    """A published key cannot be reused for different frozen content."""
+
+
 def _owner(tenant_id: str) -> uuid.UUID | None:
-    """The `tenant_id` column value for a store-level tenant key. GLOBAL_TENANT
-    maps to NULL — the packaged catalog belongs to nobody."""
+    """Map the explicit development-fixture key to an unowned database row."""
+
     return None if tenant_id == GLOBAL_TENANT else uuid.UUID(tenant_id)
 
 
 def _visible_to(tenant_id: str) -> ColumnElement[bool]:
-    """Rows this tenant may run: the packaged catalog, plus its own if it has one."""
+    """Rows owned by this tenant, or unowned rows for the explicit global key."""
+
     owner = _owner(tenant_id)
-    packaged = col(Flow.tenant_id).is_(None)
-    return packaged if owner is None else (col(Flow.tenant_id) == owner) | packaged
+    return col(Flow.tenant_id).is_(None) if owner is None else col(Flow.tenant_id) == owner
+
+
+def _flow_spec_from_row(row: Flow) -> FlowSpec:
+    """Load a frozen spec while preserving pre-field persona metadata.
+
+    Published flows created before ``persona_gender`` was added still carry the
+    authoritative value in their immutable source composition. Hydrating that
+    value here fixes existing calls without rewriting published JSON or losing
+    version provenance.
+    """
+
+    payload = dict(row.spec)
+    if "persona_gender" not in payload:
+        source = row.source if isinstance(row.source, dict) else {}
+        persona = source.get("persona") if isinstance(source, dict) else None
+        gender = persona.get("gender") if isinstance(persona, dict) else None
+        if gender in {"female", "male", "neutral"}:
+            payload["persona_gender"] = gender
+    return FlowSpec.model_validate(payload)
 
 
 class PostgresFlowStore:
@@ -63,8 +86,8 @@ class PostgresFlowStore:
     async def _scoped(self, tenant_id: str) -> AsyncIterator[AsyncSession]:
         """A transaction with the tenant GUC set, so RLS scopes the statement.
 
-        GLOBAL_TENANT deliberately leaves the GUC unset: that is the state in
-        which the policy admits reading and writing the packaged catalog.
+        GLOBAL_TENANT deliberately leaves the GUC unset for explicit fixture
+        tooling. Runtime callers always provide a tenant UUID.
         """
         async with self._sessionmaker() as session, session.begin():
             if tenant_id != GLOBAL_TENANT:
@@ -81,54 +104,71 @@ class PostgresFlowStore:
             row = (await session.execute(stmt)).scalars().first()
         if row is None:
             raise FlowNotFound(f"flow {flow_id} v{version} not found for tenant {tenant_id}")
-        return FlowSpec.model_validate(row.spec)
+        return _flow_spec_from_row(row)
 
     async def load_latest(self, tenant_id: str, flow_id: uuid.UUID) -> FlowSpec:
         stmt = (
             select(Flow)
             .where(col(Flow.flow_id) == flow_id)
             .where(_visible_to(tenant_id))
-            # A tenant's own flow outranks a packaged one sharing its id, whatever
-            # the versions are: `is_(None)` sorts false-before-true, so owned rows
-            # come first. Publishing cannot create that collision, but nothing
-            # stops a hand-written row from doing so, and the winner must not
-            # depend on which the planner happened to reach first.
-            .order_by(col(Flow.tenant_id).is_(None), col(Flow.version).desc())
+            .order_by(col(Flow.version).desc())
             .limit(1)
         )
         async with self._scoped(tenant_id) as session:
             row = (await session.execute(stmt)).scalars().first()
         if row is None:
             raise FlowNotFound(f"flow {flow_id} not found for tenant {tenant_id}")
-        return FlowSpec.model_validate(row.spec)
+        return _flow_spec_from_row(row)
 
     async def publish(self, tenant_id: str, composition: Composition) -> int:
         """Expand, freeze and store under the composition's own version.
 
-        Idempotent on (flow_id, version): republishing the same version
-        overwrites it. That is what makes packaged-catalog convergence safe to
-        run on every boot, and it is why authoring a *change* means bumping the
-        version rather than editing in place.
+        Exact replays leave the original row untouched. A source, expanded spec,
+        or component-library change requires a new version, including fixture
+        publications. The insert arbitrates concurrent writers before comparing
+        the winner in a fresh statement under PostgreSQL READ COMMITTED.
         """
+        source = composition.model_dump(mode="json")
+        spec = expand(composition).model_dump(mode="json")
         stmt = insert(Flow).values(
             flow_id=composition.flow.id,
             version=composition.flow.version,
             tenant_id=_owner(tenant_id),
-            source=composition.model_dump(mode="json"),
-            spec=expand(composition).model_dump(mode="json"),
+            source=source,
+            spec=spec,
             components_version=SPEC_VERSION,
         )
         async with self._scoped(tenant_id) as session:
-            await session.execute(
-                stmt.on_conflict_do_update(
-                    index_elements=["flow_id", "version"],
-                    set_={
-                        "source": stmt.excluded.source,
-                        "spec": stmt.excluded.spec,
-                        "components_version": stmt.excluded.components_version,
-                    },
+            inserted = await session.execute(
+                stmt.on_conflict_do_nothing(index_elements=["flow_id", "version"]).returning(
+                    col(Flow.flow_id)
                 )
             )
+            if inserted.first() is None:
+                existing = (
+                    (
+                        await session.execute(
+                            select(Flow)
+                            .where(
+                                col(Flow.flow_id) == composition.flow.id,
+                                col(Flow.version) == composition.flow.version,
+                            )
+                            .where(_visible_to(tenant_id))
+                        )
+                    )
+                    .scalars()
+                    .first()
+                )
+                if (
+                    existing is None
+                    or existing.source != source
+                    or existing.spec != spec
+                    or existing.components_version != SPEC_VERSION
+                ):
+                    # Do not disclose another tenant's colliding flow content.
+                    raise FlowVersionConflict(
+                        f"version {composition.flow.version} is already published; bump the version"
+                    )
         return composition.flow.version
 
     async def list_versions(self, tenant_id: str, flow_id: uuid.UUID) -> list[int]:
@@ -145,11 +185,9 @@ class PostgresFlowStore:
         stmt = (
             select(Flow)
             .where(_visible_to(tenant_id))
-            # DISTINCT ON keeps one row per flow, and the ORDER BY decides which:
-            # the same precedence load_latest uses, so a listing never advertises
-            # a version the answer path would not run.
+            # DISTINCT ON keeps the latest owned version for each flow.
             .distinct(col(Flow.flow_id))
-            .order_by(col(Flow.flow_id), col(Flow.tenant_id).is_(None), col(Flow.version).desc())
+            .order_by(col(Flow.flow_id), col(Flow.version).desc())
         )
         async with self._scoped(tenant_id) as session:
             rows = list((await session.execute(stmt)).scalars())
@@ -169,7 +207,7 @@ class PostgresFlowStore:
     ) -> Composition:
         stmt = select(Flow).where(col(Flow.flow_id) == flow_id).where(_visible_to(tenant_id))
         if version is None:
-            stmt = stmt.order_by(col(Flow.tenant_id).is_(None), col(Flow.version).desc()).limit(1)
+            stmt = stmt.order_by(col(Flow.version).desc()).limit(1)
         else:
             stmt = stmt.where(col(Flow.version) == version)
         async with self._scoped(tenant_id) as session:

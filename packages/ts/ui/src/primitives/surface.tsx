@@ -14,6 +14,7 @@ export interface SurfaceProps extends HTMLAttributes<HTMLElement> {
   readonly as?: SurfaceElement;
   readonly children: ReactNode;
   readonly level?: "base" | "raised" | "floating";
+  readonly variant?: "outlined" | "plain" | "inset";
 }
 
 export function Surface({
@@ -21,11 +22,12 @@ export function Surface({
   children,
   className = "",
   level = "base",
+  variant = "outlined",
   ...props
 }: SurfaceProps) {
   return (
     <Element
-      className={`or-surface or-surface--${level} ${className}`.trim()}
+      className={`or-surface or-surface--${level} or-surface--${variant} ${className}`.trim()}
       {...props}
     >
       {children}

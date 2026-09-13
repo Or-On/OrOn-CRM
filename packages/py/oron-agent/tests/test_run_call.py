@@ -2,7 +2,7 @@ import uuid
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from oron_agent.bot import RealVoiceProvidersDenied, run_call
+from oron_agent.bot import RealVoiceProvidersDenied, bot, run_call
 from oron_agent.config import Settings
 from oron_common import CallContext
 
@@ -68,3 +68,14 @@ async def test_run_call_denies_before_livekit_construction_by_default():
     ):
         await run_call("call-denied", ctx, Settings(_env_file=None))
     mint_token.assert_not_called()
+
+
+async def test_dispatcherless_entrypoint_requires_an_explicit_stored_flow() -> None:
+    settings = Settings(_env_file=None)
+    with (
+        patch("oron_agent.bot.load_settings", return_value=settings),
+        patch("oron_agent.bot.run_call", new=AsyncMock()) as mock_run_bot,
+        pytest.raises(RuntimeError, match="FLOW_ID and TENANT_ID are required"),
+    ):
+        await bot()
+    mock_run_bot.assert_not_awaited()

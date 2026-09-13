@@ -19,7 +19,7 @@ state that implementation is deferred; that is not evidence the control exists.
 | [0007](0007-canonical-flow-graph.md) | Canonical flow graph | Accepted, implementation deferred |
 | [0008](0008-unified-agent-profile.md) | Unified agent profile | Accepted, implementation deferred |
 | [0009](0009-object-media-storage.md) | Object and media storage | Accepted, implementation deferred |
-| [0010](0010-single-gcp-vm-development-target.md) | Single GCP VM development target | Accepted, implementation deferred |
+| [0010](0010-portable-single-host-development-target.md) | Portable single-host development target | Accepted |
 | [0011](0011-authentication-selection-process.md) | Authentication selection process | Accepted, selection deferred |
 | [0012](0012-secrets-management.md) | Secrets management | Accepted |
 | [0013](0013-technology-preservation-modernization.md) | Technology preservation and modernization | Accepted |

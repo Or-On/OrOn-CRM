@@ -7,6 +7,7 @@ import {
   listAutomationRuns,
   listAutomations,
   listBroadcasts,
+  tenantOperationalInsights,
 } from "@or-on/crm";
 
 import {
@@ -16,20 +17,36 @@ import {
 } from "../../features/auth";
 import { OperationsPanel } from "../../features/operations";
 
-export default async function OperationsPage() {
+export default async function OperationsPage({
+  searchParams,
+}: {
+  readonly searchParams: Promise<{
+    readonly create?: string;
+    readonly tab?: string;
+  }>;
+}) {
   try {
+    const { create, tab } = await searchParams;
     const data = await withCurrentTenant("crm:read", async (sql) => ({
       broadcasts: await listBroadcasts(sql),
       automations: await listAutomations(sql),
       runs: await listAutomationRuns(sql),
+      insights: await tenantOperationalInsights(sql),
     }));
     return (
-      <main className="page page--wide">
-        <ProductHeading page="operations" />
+      <main className="page page--wide page--operations page--workspace-premium">
+        <ProductHeading page="operations" premium />
         <OperationsPanel
           automations={data.automations}
           broadcasts={data.broadcasts}
           runs={data.runs}
+          insights={data.insights}
+          initialTab={
+            tab === "automations" || tab === "history" ? tab : "campaigns"
+          }
+          {...(create === "campaign"
+            ? { initialCreate: "campaigns" as const }
+            : {})}
         />
       </main>
     );

@@ -1,5 +1,6 @@
 import { renderMarkup as renderToStaticMarkup } from "./localized";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import en from "../src/i18n/messages/en.json";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const state = vi.hoisted(() => ({
   queue: vi.fn(),
   guard: vi.fn(),
@@ -26,10 +27,12 @@ import { OrchestrationPanel } from "../src/features/orchestration";
 
 describe("canonical simulator API and UI", () => {
   beforeEach(() => {
+    vi.stubEnv("PLATFORM_ENV", "development");
     state.queue.mockReset().mockResolvedValue("run-id");
     state.guard.mockReset().mockResolvedValue(undefined);
     state.permission.mockClear();
   });
+  afterEach(() => vi.unstubAllEnvs());
   it("requires CSRF/auth guard, flow RBAC, explicit conversation and idempotency", async () => {
     const request = () =>
       new Request("http://localhost/api/test", {
@@ -104,6 +107,11 @@ describe("canonical simulator API and UI", () => {
     );
     expect(markup).toContain("Queue flow simulation");
     expect(markup).toContain("Published voice flow version");
-    expect(markup).toContain("Local simulation only");
+    expect(markup).toContain("Simulation only");
+    expect(markup.match(/role="tab"/gu)).toHaveLength(4);
+    expect(markup.match(/role="tabpanel"/gu)).toHaveLength(4);
+    expect(markup).toContain(en.orchestration.agents);
+    expect(markup).toContain(en.orchestration.flows);
+    expect(markup).toContain(en.orchestration.handoffs);
   });
 });

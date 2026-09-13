@@ -20,13 +20,13 @@ flowchart LR
 
 ## Source parity and preservation
 
-| Concern | Preserved source behavior | Phase 6 adaptation |
-| --- | --- | --- |
-| Voice flow | Or-on typed component graph, published flow versions, Pipecat execution | Canonical nodes compile to `oron-flow.v1`; actual execution remains in retained `oron-flows`/`oron-agent`. |
-| Messaging automation | WACRM draft/publish, CRM actions, WhatsApp message steps | Canonical nodes compile to `wacrm-automation.v1`; delivery remains worker-owned, simulator-default, and optionally Meta-gated. |
-| Agents | Or-on voice configuration plus WACRM AI/tool/knowledge intent | Tenant profile with immutable versions and explicit `voice`/`whatsapp` capabilities. Secrets remain references. |
-| State changes | Source-specific automation/call/message records | Domain records stay authoritative; `platform.contact_activity` is a read-only union. |
-| Retry/replay | Source idempotency and resumable delivery | Canonical `ops.jobs` keys and conditional handoff transitions. |
+| Concern              | Preserved source behavior                                               | Phase 6 adaptation                                                                                                             |
+| -------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Voice flow           | Or-on typed component graph, published flow versions, Pipecat execution | Canonical nodes compile to `oron-flow.v1`; actual execution remains in retained `oron-flows`/`oron-agent`.                     |
+| Messaging automation | WACRM draft/publish, CRM actions, WhatsApp message steps                | Canonical nodes compile to `wacrm-automation.v1`; delivery remains worker-owned, simulator-default, and optionally Meta-gated. |
+| Agents               | Or-on voice configuration plus WACRM AI/tool/knowledge intent           | Tenant profile with immutable versions and explicit `voice`/`whatsapp` capabilities. Secrets remain references.                |
+| State changes        | Source-specific automation/call/message records                         | Domain records stay authoritative; `platform.contact_activity` is a read-only union.                                           |
+| Retry/replay         | Source idempotency and resumable delivery                               | Canonical `ops.jobs` keys and conditional handoff transitions.                                                                 |
 
 ## Canonical contract
 
@@ -79,6 +79,30 @@ tenant-local PostgreSQL transaction.
 
 ## Safe workflows
 
+- Inbound WhatsApp → AI reply: exact-body signature verification precedes a
+  durable, provider-event-idempotent inbox record and one generic notification
+  per active tenant operator. A never-handed-off, unassigned conversation is
+  atomically assigned to the tenant's configured default, valid, published
+  WhatsApp agent. Human ownership is sticky: accepting/taking over a conversation
+  advances its ownership fence and prevents a later inbound retry from silently
+  returning control to AI. The worker
+  rechecks that the enabling operator is active and authorized, calls the model
+  outside the database transaction, and queues the generated text through the
+  existing canonical outbound boundary. Tenant RLS, consent, opt-out, E.164, the
+  24-hour service window, idempotency, audit, and both Meta kill-switch checks
+  remain authoritative. Structured model output is limited to reply, handoff, or
+  call-request decisions; arbitrary model text never becomes an audit reason.
+- WhatsApp call request → automatic callback: when the independent default-off
+  callback gate is enabled, a model-classified explicit request from a real Meta
+  conversation to be called now creates one tenant-idempotent `whatsapp.ai.call`
+  job. Simulator input cannot admit a real call. The worker revalidates the
+  active contact, non-revoked voice consent, E.164 identity, enabling actor and
+  exact retained flow before leaving its transaction and invoking the signed
+  dispatcher boundary. The dispatcher and SIP adapters retain their own real
+  telephony kill switches. Up to twelve bounded prior text turns are attached as
+  untrusted continuity context, not durable job payload or executable policy.
+  Disabled admission, invalid configuration, permanent refusal, or exhausted
+  retry becomes one safe pending human handoff.
 - Call outcome → WhatsApp: only a terminal, contact-linked retained session can
   enqueue `cross_channel.whatsapp_followup.simulated`, with granted WhatsApp
   consent and no opt-out. The messaging worker rechecks consent under a row lock,
@@ -98,6 +122,13 @@ tenant-local PostgreSQL transaction.
 - Handoff: request keys are tenant-idempotent and accept/resolve/cancel updates
   use compare-and-set status predicates. Concurrent accepts yield one winner.
 
+Agent profiles and canonical flow definitions use archival deletion. Archived
+parents disappear from active lists and cannot be published, simulated, selected
+for automatic calls, edited through quality tooling, or used for audio previews;
+their immutable published versions, historical runs, and audit evidence remain.
+Renaming changes only the mutable parent label. An agent that still owns an active
+AI conversation cannot be archived until a human takes over.
+
 Cross-channel demonstrations continue to enqueue literal simulator jobs. Direct
 Inbox delivery may separately enqueue `whatsapp.outbound.send`; Meta is never a
 fallback and requires explicit provider selection, consent, confirmation, and
@@ -111,6 +142,7 @@ migration connection with permission to create disposable databases, then run:
 
 ```sh
 pnpm --filter @or-on/crm build
+pnpm --filter @or-on/messaging-worker exec vitest run tests/ai-reply.live.test.ts
 pnpm --filter @or-on/messaging-worker exec vitest run tests/call-followup.live.test.ts
 ```
 

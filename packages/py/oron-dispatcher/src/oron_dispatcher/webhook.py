@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Any, Literal, Protocol
 from uuid import UUID
@@ -20,9 +20,11 @@ from oron_common import E164
 from pydantic import BaseModel, Field
 
 from oron_dispatcher.dispatcher import (
+    AgentStartupUnavailable,
     Dispatcher,
     DispatchResult,
     HealthReport,
+    IdempotencyConflict,
     PersistenceUnavailable,
 )
 from oron_dispatcher.sip_client import RealTelephonyDenied
@@ -38,6 +40,11 @@ class WebhookReceiver(Protocol):
 class OutboundCallRequest(BaseModel):
     phone_number: E164
     flow_id: UUID
+    flow_version: int | None = Field(default=None, ge=1, strict=True)
+    agent_version_id: UUID | None = None
+    caller_gender: Literal["male", "female"] | None = None
+    source_conversation_id: UUID | None = None
+    conversation_context: str | None = Field(default=None, max_length=4000)
     idempotency_key: str = Field(min_length=8, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$")
     explicit_approval: bool = False
 
@@ -64,6 +71,7 @@ def create_app(
     receiver: WebhookReceiver | None,
     ledger: WebhookLedger | None,
     assertion_verifier: ServiceAssertionVerifier | None,
+    shutdown: Callable[[], Awaitable[None]] | None = None,
 ) -> FastAPI:
     """Build the dispatcher HTTP boundary with injected process-owned state."""
 
@@ -74,6 +82,8 @@ def create_app(
         finally:
             if ledger is not None:
                 await ledger.close()
+            if shutdown is not None:
+                await shutdown()
 
     app = FastAPI(title="Or-On Platform Dispatcher", version="0.1.0", lifespan=lifespan)
     bearer = HTTPBearer(auto_error=False)
@@ -166,10 +176,21 @@ def create_app(
                 request.phone_number,
                 principal.tenant_id,
                 request.flow_id,
+                flow_version=request.flow_version,
+                agent_version_id=request.agent_version_id,
                 idempotency_key=request.idempotency_key,
                 explicit_approval=request.explicit_approval,
+                caller_gender=request.caller_gender,
+                source_conversation_id=request.source_conversation_id,
+                conversation_context=request.conversation_context,
             )
+        except IdempotencyConflict:
+            raise HTTPException(
+                status_code=409, detail="idempotency key is bound to different call parameters"
+            ) from None
         except RealTelephonyDenied as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from None
+        except AgentStartupUnavailable as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from None
         except PersistenceUnavailable:
             raise HTTPException(status_code=503, detail="call persistence is unavailable") from None

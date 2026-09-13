@@ -24,6 +24,9 @@ dependencies = [
   "python-dotenv==1.2.2",
 ]
 
+[project.optional-dependencies]
+gender = ["oron-hebrew[gender]==0.1.0"]
+
 [project.scripts]
 oron-agent = "oron_agent.bot:main"
 

@@ -19,7 +19,7 @@ REQUIRED = (
     "docs/architecture/database-strategy.md",
     "docs/architecture/contracts.md",
     "docs/architecture/local-development.md",
-    "docs/architecture/gcp-dev-target.md",
+    "docs/architecture/deployment-target.md",
 )
 LINK = re.compile(r"(?<!!)\[[^\]]+\]\((?P<target>[^)]+)\)")
 

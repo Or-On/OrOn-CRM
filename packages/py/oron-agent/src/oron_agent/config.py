@@ -3,14 +3,13 @@ import tempfile
 import uuid
 from pathlib import Path
 
-from oron_flows import SPEED_MAX, SPEED_MIN, FlowStoreBackend, FlowVoice
-from oron_flows.seeds import EXAMPLE_HE_ID
+from oron_flows import SPEED_MAX, SPEED_MIN, FlowVoice
 from pipecat.services.tts_service import TextAggregationMode
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from oron_agent.audio import AudioInFilter, TurnEnd, TurnStart
-from oron_agent.llm import LlmProvider
+from oron_agent.llm import LlmProvider, LlmReasoningEffort
 from oron_agent.storage import ArtifactsBackend
 from oron_agent.tts import TtsProvider
 
@@ -29,16 +28,15 @@ class Settings(BaseSettings):
         default=SecretStr(""), validation_alias="LIVEKIT_API_SECRET"
     )
     livekit_room: str = Field(default="oron-dev", validation_alias="LIVEKIT_ROOM")
-    # Only the dispatcher-less dev path reads this: with no DID there is no
-    # binding to resolve a flow from, and pinning one packaged flow in code made
-    # every other packaged flow unreachable by ear.
-    dev_flow_id: uuid.UUID = Field(default=EXAMPLE_HE_ID, validation_alias="FLOW_ID")
-    # Same dispatcher-less path: with no DID there is no tenant to resolve either.
-    # Defaults to the tenant migration 0002 seeds, so it exists in every database.
-    dev_tenant_id: uuid.UUID = Field(
-        default=uuid.UUID("00000000-0000-0000-0000-000000000001"),
-        validation_alias="TENANT_ID",
-    )
+    # Only the dispatcher-less development entrypoint reads this. It has no DID
+    # from which to resolve a binding, so the operator must name an existing,
+    # tenant-owned published flow explicitly. There is deliberately no example
+    # flow default: a missing database configuration must fail before a call.
+    dev_flow_id: uuid.UUID | None = Field(default=None, validation_alias="FLOW_ID")
+    # The same dispatcher-less path also has no tenant binding. Requiring both
+    # values prevents an explicit flow ID from being looked up under a silent
+    # fixture/default tenant.
+    dev_tenant_id: uuid.UUID | None = Field(default=None, validation_alias="TENANT_ID")
 
     # The oron-sessions API. Always configured — persistence is not optional, and
     # the client fails soft on its own, so there is no "unconfigured" code path.
@@ -50,10 +48,10 @@ class Settings(BaseSettings):
     sessions_api_key: SecretStr | None = Field(default=None, validation_alias="SESSIONS_API_KEY")
 
     # Where per-session recordings and transcripts go. The backend owns both the
-    # URI scheme and the upload, so these cannot disagree. `local` is for dev —
-    # on GKE it loses artifacts with the pod.
+    # URI scheme and the upload, so these cannot disagree. Portable deployments
+    # mount the local root on persistent storage; remote object storage is opt-in.
     artifacts_backend: ArtifactsBackend = Field(
-        default=ArtifactsBackend.GCS, validation_alias="ARTIFACTS_BACKEND"
+        default=ArtifactsBackend.LOCAL, validation_alias="ARTIFACTS_BACKEND"
     )
     # Used by the gcs backend. Set per deployment — artifact URIs are derived
     # from it, so a wrong value produces rows naming a bucket nobody writes to.
@@ -64,7 +62,7 @@ class Settings(BaseSettings):
         validation_alias="ARTIFACTS_LOCAL_ROOT",
     )
 
-    # A Google Cloud project is REQUIRED — the LLM (Vertex Gemini) and TTS run on it.
+    # Required only when the optional Vertex provider is selected.
     google_cloud_project: str = Field(default="", validation_alias="GOOGLE_CLOUD_PROJECT")
 
     vertex_location: str = Field(default="global", validation_alias="VERTEX_LOCATION")
@@ -80,11 +78,28 @@ class Settings(BaseSettings):
     llm_api_key: SecretStr = Field(default=SecretStr(""), validation_alias="LLM_API_KEY")
     llm_base_url: str = Field(default="", validation_alias="LLM_BASE_URL")
     llm_model: str = Field(default="", validation_alias="LLM_MODEL")
-    # One throwaway inference at call setup so the caller's first turn hits a warm
-    # prompt cache instead of paying ~4s. Read ONLY under `openai-compat`: Vertex
-    # cached 0 tokens across 39 sessions, so warming it would buy an extra
-    # inference and nothing else. True here means "warm where warming works".
-    llm_warmup: bool = Field(default=True, validation_alias="LLM_WARMUP")
+    # Voice turns need a fast reaction, not a hidden reasoning pass. This stays
+    # unset for generic compatible providers; deployments opt in only when the
+    # selected endpoint supports the OpenAI `reasoning_effort` parameter.
+    llm_reasoning_effort: LlmReasoningEffort | None = Field(
+        default=None, validation_alias="LLM_REASONING_EFFORT"
+    )
+
+    @field_validator("llm_reasoning_effort", mode="before")
+    @classmethod
+    def empty_reasoning_effort_is_unset(cls, value: object) -> object:
+        return None if value == "" else value
+
+    # A little variation sounds conversational without making tool selection or
+    # collected details erratic. These settings apply only to openai-compat.
+    llm_temperature: float = Field(default=0.4, ge=0.0, le=2.0, validation_alias="LLM_TEMPERATURE")
+    # A hard ceiling prevents a voice turn becoming a monologue. The persona
+    # remains the primary 1-2 sentence control; this is the last safety net.
+    llm_max_tokens: int = Field(default=256, ge=32, le=2048, validation_alias="LLM_MAX_TOKENS")
+    # Optional throwaway inference at call setup. Off by default: the current
+    # Google compatibility endpoint showed no useful prompt-cache benefit, so a
+    # warm-up added cost without making the first customer turn faster.
+    llm_warmup: bool = Field(default=False, validation_alias="LLM_WARMUP")
     # How long a completion may produce nothing before the turn is abandoned.
     # Unbounded until now: the OpenAI SDK defaults to 600s, and on 2026-08-05 a
     # request that never sent a token held the pipeline for 21.8s until teardown.
@@ -95,18 +110,19 @@ class Settings(BaseSettings):
         default=5.0, gt=0.0, validation_alias="LLM_REQUEST_TIMEOUT_SECS"
     )
     # Silence before the caller is prompted; each `idle_prompts` entry fires one
-    # interval apart, then the call ends. 7s trades a thinking caller's pause for
-    # the dead air a missed turn leaves — a caller who was not heard should not
-    # wait 15s to find out.
-    user_idle_secs: float = Field(default=7.0, validation_alias="USER_IDLE_SECS")
+    # interval apart, then the call ends. Ten seconds leaves a natural thinking
+    # pause without returning to the old 15-second dead-air failure. Active user
+    # and bot speech suspend the policy independently in UserIdlePoker.
+    user_idle_secs: float = Field(default=10.0, validation_alias="USER_IDLE_SECS")
     # Silence that ends a caller's turn. 0.2 is what pipecat's built-in STT p99
     # values assume; above it every turn pays the difference and pipecat warns.
     vad_stop_secs: float = Field(default=0.2, validation_alias="VAD_STOP_SECS")
     # Stacks on TOP of vad_stop_secs, and ALWAYS runs to completion — the turn
     # cannot end sooner however fast STT is. Soniox finalizes 200-244ms after VAD
-    # stop, so below ~0.25 there is nothing left to win. Not yet swept against
-    # Hebrew callers, who pause on fillers: override per call to compare.
-    user_speech_timeout: float = Field(default=0.3, validation_alias="USER_SPEECH_TIMEOUT")
+    # stop, so below ~0.25 there is little left to win. The previous 0.3s floor
+    # cut off ordinary Hebrew pauses while 0.7s felt sluggish; 0.5s is the
+    # bounded latency-only compromise, for roughly 0.7s total silence.
+    user_speech_timeout: float = Field(default=0.5, validation_alias="USER_SPEECH_TIMEOUT")
 
     # How many transcribed words start a turn. Read only when turn_start is
     # `min_words`, where 0 would silently mean "no gate at all" — see the
@@ -141,16 +157,42 @@ class Settings(BaseSettings):
     # caller cannot take a turn at all. No fallback is possible — the turn
     # controller takes the first strategy to fire, so any VAD strategy added to
     # cover it wins and defeats the gate. Rollback is this variable, not code.
-    turn_start: TurnStart = Field(default=TurnStart.MIN_WORDS, validation_alias="TURN_START")
-    # Who decides the caller finished. `vad` keeps our ~602ms floor; `soniox`
-    # gives the decision to the STT model. Ships `vad` — this replaces the stage
-    # every latency number is measured against, so it wants one call each way,
-    # not a default.
-    turn_end: TurnEnd = Field(default=TurnEnd.VAD, validation_alias="TURN_END")
+    turn_start: TurnStart = Field(default=TurnStart.RESPONSIVE, validation_alias="TURN_START")
+    # Who decides the caller finished. Soniox v5 uses semantic context rather
+    # than a fixed silence floor, so it can wait through a dictated number while
+    # ending a complete short answer promptly. The local transcript-based start
+    # gate remains independent and still protects bot speech from wordless VAD.
+    turn_end: TurnEnd = Field(default=TurnEnd.SONIOX, validation_alias="TURN_END")
 
     # Required: STT is Soniox, so a bot cannot run without it. Better to fail at
     # settings load than midway through pipeline construction on a live call.
     soniox_api_key: SecretStr = Field(default=SecretStr(""), validation_alias="SONIOX_API_KEY")
+    # Pin the active real-time model explicitly rather than relying on the
+    # Pipecat adapter's changing default. V5 improves telephony robustness and
+    # semantic endpointing while remaining API-compatible with v4.
+    soniox_stt_model: str = Field(default="stt-rt-v5", validation_alias="SONIOX_STT_MODEL")
+    # Responsive semantic endpointing: level two and slight positive sensitivity
+    # reduce the latest measured 1.6-2.0 second handoff while the semantic model
+    # still sees context. The one-second cap bounds long end-of-turn waits.
+    # These settings are used only when TURN_END=soniox.
+    soniox_endpoint_latency_adjustment_level: int = Field(
+        default=2,
+        ge=0,
+        le=3,
+        validation_alias="SONIOX_ENDPOINT_LATENCY_ADJUSTMENT_LEVEL",
+    )
+    soniox_endpoint_sensitivity: float = Field(
+        default=0.15,
+        ge=-1.0,
+        le=1.0,
+        validation_alias="SONIOX_ENDPOINT_SENSITIVITY",
+    )
+    soniox_max_endpoint_delay_ms: int = Field(
+        default=1000,
+        ge=500,
+        le=3000,
+        validation_alias="SONIOX_MAX_ENDPOINT_DELAY_MS",
+    )
     google_application_credentials: str | None = Field(
         default=None, validation_alias="GOOGLE_APPLICATION_CREDENTIALS"
     )
@@ -167,17 +209,16 @@ class Settings(BaseSettings):
     tts_first_clause: bool = Field(default=True, validation_alias="TTS_FIRST_CLAUSE")
     # Soniox: ~310ms to first audio vs Gemini's ~830ms on Hebrew, warm.
     tts_provider: TtsProvider = Field(default=TtsProvider.SONIOX, validation_alias="TTS_PROVIDER")
-    # Whether to point Hebrew before sending it to the vendor. On by default,
-    # which is what shipped — but it has never been measured against either
-    # vendor, and a voice trained on unpointed text may read the diacritics as
-    # material rather than as vowels.
-    tts_niqqud: bool = Field(default=True, validation_alias="TTS_NIQQUD")
+    # Whether to point Hebrew before sending it to the vendor. Off until a
+    # verified, checksum-pinned Renikud model is explicitly configured; the
+    # setting alone cannot create niqqud and must not imply that it does.
+    tts_niqqud: bool = Field(default=False, validation_alias="TTS_NIQQUD")
     # 1.0 is the vendor's own pace. Hebrew read at an English cadence sounds
     # slow; bounded by the narrower of the two vendors' ranges (Soniox 0.7-1.3).
     tts_speed: float = Field(default=1.0, ge=SPEED_MIN, le=SPEED_MAX, validation_alias="TTS_SPEED")
-    soniox_tts_model: str = Field(default="tts-rt-v1", validation_alias="SONIOX_TTS_MODEL")
+    soniox_tts_model: str = Field(default="tts-rt-v2", validation_alias="SONIOX_TTS_MODEL")
     soniox_tts_voice_default: str = Field(
-        default="Maya", validation_alias="SONIOX_TTS_VOICE_DEFAULT"
+        default="Harper", validation_alias="SONIOX_TTS_VOICE_DEFAULT"
     )
     # Not 2.5-flash-tts: ~250ms faster to first audio, clearly worse Hebrew.
     gemini_tts_model: str = Field(
@@ -207,34 +248,39 @@ class Settings(BaseSettings):
     renikud_model_sha256: str | None = Field(default=None, validation_alias="RENUKID_MODEL_SHA256")
     ecapa_model_path: str | None = Field(default=None, validation_alias="ECAPA_MODEL_PATH")
     ecapa_model_sha256: str | None = Field(default=None, validation_alias="ECAPA_MODEL_SHA256")
-
-    # FlowStore backend selection. `file` (one JSON document) is the only backend
-    # until MongoFlowStore ships (F2.2). Not read yet: the agent resolves the
-    # packaged catalog in process and never calls store.load().
-    flow_store_backend: FlowStoreBackend = Field(
-        default=FlowStoreBackend.FILE, validation_alias="FLOW_STORE_BACKEND"
+    # Telephone-band acoustic gender classification is not reliable enough to
+    # change how a customer is addressed by default. Deployments may opt into
+    # the retained classifier for controlled evaluation; the safe path stays
+    # neutral and avoids loading the model entirely.
+    gender_detection_enabled: bool = Field(
+        default=False, validation_alias="GENDER_DETECTION_ENABLED"
+    )
+    # Gender changes Hebrew morphology, so a wrong confident guess is worse
+    # than remaining neutral. Require two matching readings over more caller
+    # speech before the result is allowed into the prompt and niqqud pipeline.
+    gender_required_seconds: float = Field(
+        default=1.5, gt=0.0, validation_alias="GENDER_REQUIRED_SECONDS"
+    )
+    gender_confidence_threshold: float = Field(
+        default=0.9, ge=0.5, le=1.0, validation_alias="GENDER_CONFIDENCE_THRESHOLD"
+    )
+    gender_max_seconds: float = Field(default=4.0, gt=0.0, validation_alias="GENDER_MAX_SECONDS")
+    gender_retry_interval_seconds: float = Field(
+        default=0.75, gt=0.0, validation_alias="GENDER_RETRY_INTERVAL_SECONDS"
+    )
+    gender_confirmation_attempts: int = Field(
+        default=2, ge=1, le=5, validation_alias="GENDER_CONFIRMATION_ATTEMPTS"
     )
 
     @model_validator(mode="after")
-    def _soniox_turn_end_does_not_silently_drop_the_start_gate(self) -> Settings:
-        """Soniox turn detection replaces BOTH ends, not just the stop.
-
-        A service may recommend turn strategies only when the caller passed none,
-        so `TURN_END=soniox` means passing none at all — and `TURN_START` goes
-        with them. Soniox then opens a turn on the local VAD signal, which is
-        exactly the trigger the word gate exists to suppress. Refused rather than
-        honoured-then-discarded, which is how the gate sat dead for three deploys.
-
-        Since the gate is now the default, `TURN_END=soniox` requires setting
-        `TURN_START=vad` explicitly. That is the point: giving it up is a
-        decision, not a side effect.
-        """
-        if self.turn_end is TurnEnd.SONIOX and self.turn_start is not TurnStart.VAD:
+    def _gender_window_allows_confirmation(self) -> Settings:
+        minimum_window = self.gender_required_seconds + (
+            (self.gender_confirmation_attempts - 1) * self.gender_retry_interval_seconds
+        )
+        if self.gender_max_seconds < minimum_window:
             raise ValueError(
-                f"TURN_END=soniox cannot be combined with TURN_START={self.turn_start}: "
-                "Soniox turn detection supplies both strategies, so the start gate "
-                "would be dropped. Set TURN_START=vad to accept that, or keep "
-                "TURN_END=vad."
+                "GENDER_MAX_SECONDS must allow the configured number of "
+                "GENDER_CONFIRMATION_ATTEMPTS"
             )
         return self
 
@@ -263,6 +309,20 @@ class Settings(BaseSettings):
             ]
             if missing:
                 raise ValueError(f"LLM_PROVIDER={self.llm_provider} needs {', '.join(missing)}")
+        return self
+
+    @model_validator(mode="after")
+    def _google_reasoning_setting_matches_the_model(self) -> Settings:
+        """Gemini 3 cannot disable thinking through the compatibility API."""
+        if (
+            "generativelanguage.googleapis.com" in self.llm_base_url
+            and self.llm_model.startswith("gemini-3")
+            and self.llm_reasoning_effort is LlmReasoningEffort.NONE
+        ):
+            raise ValueError(
+                "LLM_REASONING_EFFORT=none is supported by Gemini 2.5 models, not Gemini 3; "
+                "use gemini-2.5-flash for the lowest-latency voice path or set the effort to low"
+            )
         return self
 
     @model_validator(mode="after")
@@ -312,6 +372,7 @@ class Settings(BaseSettings):
     def diagnostics(self) -> dict[str, object]:
         return {
             "enable_real_voice_providers": self.enable_real_voice_providers,
+            "soniox_stt_model": self.soniox_stt_model,
             "livekit_url_configured": bool(self.livekit_url),
             "livekit_api_key": "[REDACTED]" if self.livekit_api_key.get_secret_value() else "unset",
             "livekit_api_secret": (
@@ -319,6 +380,8 @@ class Settings(BaseSettings):
             ),
             "soniox_api_key": "[REDACTED]" if self.soniox_api_key.get_secret_value() else "unset",
             "llm_api_key": "[REDACTED]" if self.llm_api_key.get_secret_value() else "unset",
+            "tts_niqqud_requested": self.tts_niqqud,
+            "tts_niqqud_model_configured": bool(self.renikud_model_path),
             "renikud_model_configured": bool(self.renikud_model_path),
             "ecapa_model_configured": bool(self.ecapa_model_path),
         }

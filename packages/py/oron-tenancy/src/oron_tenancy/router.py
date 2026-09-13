@@ -274,13 +274,7 @@ CONFLICT = "phone number already registered"
 
 
 async def _require_known_flow(store: FlowStore, tenant_id: uuid.UUID, flow_id: uuid.UUID) -> None:
-    """A DID bound to a flow nobody has published answers with a substitute, and
-    the operator who typo'd it finds out from a customer. Refuse at the bind.
-
-    Asked of the store rather than the packaged catalog, so a tenant can bind a
-    flow it published itself — and so a packaged flow that never converged is
-    caught here rather than on someone's answer path.
-    """
+    """Refuse a DID binding unless this tenant published the selected flow."""
     try:
         await store.load_latest(str(tenant_id), flow_id)
     except FlowNotFound:

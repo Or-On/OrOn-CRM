@@ -4,6 +4,11 @@ export {
   type FetchLike,
 } from "./generated/client";
 export type {
+  AgentEvaluationSource,
+  AgentProviderEvaluationRequest,
+  AgentProviderEvaluationResult,
+  AudioPreviewRequest,
+  AudioPreviewResult,
   CallUsage,
   CanonicalFlowContract,
   CanonicalFlowEdge,
@@ -32,6 +37,8 @@ export type {
   VoiceCampaignRun,
   VoiceCampaignRunResult,
   VoiceCampaignSummary,
+  VoiceControlCommand,
+  VoiceControlStatus,
   VoiceSessionDetail,
   VoiceSessionEvent,
   VoiceSessionList,

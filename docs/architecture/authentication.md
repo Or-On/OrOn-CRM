@@ -70,7 +70,7 @@ its voice boundary. Browser access remains same-origin through the BFF, and the
 database query still relies on PostgreSQL RLS after the application-level RBAC
 decision. The shared local signing secret is injected from ignored environment
 configuration; future deployed service identity is still governed by the
-secrets and GCP identity ADRs.
+secrets and deployment identity ADRs.
 
 ## Deferred capabilities
 

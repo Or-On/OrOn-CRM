@@ -2,8 +2,6 @@ import { NextResponse, type NextRequest } from "next/server";
 import { resolveLocale } from "./i18n/direction";
 
 export function proxy(request: NextRequest) {
-  const localizedPublicRoute =
-    request.nextUrl.pathname === "/en" || request.nextUrl.pathname === "/he";
   const pathLocale = request.nextUrl.pathname.split("/")[1];
   const locale = resolveLocale(
     pathLocale === "en" || pathLocale === "he"
@@ -11,12 +9,9 @@ export function proxy(request: NextRequest) {
       : request.cookies.get("or_on_locale")?.value,
   );
   const requestHeaders = new Headers(request.headers);
-  // Overwrite untrusted incoming metadata; this is never an auth/tenant boundary.
+  // Locale metadata is not an authentication boundary. Never trust caller headers.
   requestHeaders.set("x-or-on-locale", locale);
-  requestHeaders.set(
-    "x-or-on-public-route",
-    localizedPublicRoute ? "localized-root" : "application",
-  );
+  requestHeaders.delete("x-or-on-public-route");
   const response = NextResponse.next({ request: { headers: requestHeaders } });
   if (
     (pathLocale === "en" || pathLocale === "he") &&

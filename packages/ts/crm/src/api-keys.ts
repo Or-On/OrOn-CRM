@@ -123,16 +123,16 @@ export async function withApiKeyTenant<T>(
     throw new TypeError("invalid API key");
   const sql = postgres(databaseUrl, { max: 1, prepare: false });
   try {
-    const resolved = await sql<
-      { resolved_tenant_id: string; resolved_scopes: string[] }[]
-    >`
+    return (await sql.begin(async (transaction) => {
+      const resolved = await transaction<
+        { resolved_tenant_id: string; resolved_scopes: string[] }[]
+      >`
       SELECT * FROM platform.resolve_api_key(${digestApiKey(token, pepper)})
     `;
-    const identity = resolved[0];
-    if (!identity?.resolved_scopes.includes(requiredScope)) {
-      throw new TypeError("invalid API key");
-    }
-    return (await sql.begin(async (transaction) => {
+      const identity = resolved[0];
+      if (!identity?.resolved_scopes.includes(requiredScope)) {
+        throw new TypeError("invalid API key");
+      }
       await transaction`
         SELECT set_config('app.current_tenant', ${identity.resolved_tenant_id}, true),
                set_config('app.current_role', 'api_key', true)

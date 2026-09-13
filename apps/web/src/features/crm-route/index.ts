@@ -26,6 +26,26 @@ export function crmErrorResponse(error: unknown): NextResponse {
       { error: "A matching record already exists" },
       { status: 409 },
     );
+  if (code === "42501")
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (code === "55006")
+    return NextResponse.json(
+      {
+        error:
+          "The tenant has active calls or provider work. Try again after it finishes.",
+      },
+      { status: 409 },
+    );
+  if (code === "P0002")
+    return NextResponse.json(
+      { error: "The requested record was not found" },
+      { status: 404 },
+    );
+  if (code === "22023" || code === "23514")
+    return NextResponse.json(
+      { error: "The request violates a platform constraint" },
+      { status: 400 },
+    );
   console.error("CRM request failed", {
     errorType: error instanceof Error ? error.name : "UnknownError",
   });

@@ -177,5 +177,30 @@ jobs:
         run: |
           docker compose --env-file .env.example -f infra/compose/compose.yaml --profile core config
           docker compose --env-file .env.example -f infra/compose/compose.yaml --profile voice config
+      - name: Validate portable deployment topology
+        shell: bash
+        run: |
+          set -euo pipefail
+          config="$RUNNER_TEMP/oron-config"
+          data="$RUNNER_TEMP/oron-data"
+          mkdir -p "$config" "$data/postgres" "$data/caddy" "$data/objects"
+          for template in infra/deployment/config/*.env.template; do
+            cp "$template" "$config/$(basename "${template%.template}")"
+          done
+          printf '%s' 'ci-only-postgres-password' > "$config/postgres-password.txt"
+          digest="sha256:$(printf 'a%.0s' {1..64})"
+          DEPLOYMENT_CONFIG_DIR="$config" DEPLOYMENT_DATA_DIR="$data" \
+          PLATFORM_ORIGIN="https://deployment.example.invalid" \
+          TLS_CONTACT_EMAIL="operator@example.invalid" \
+          WEB_IMAGE="example.invalid/oron/web@$digest" \
+          CONTROL_API_IMAGE="example.invalid/oron/control-api@$digest" \
+          MESSAGING_WORKER_IMAGE="example.invalid/oron/messaging-worker@$digest" \
+          DISPATCHER_IMAGE="example.invalid/oron/dispatcher@$digest" \
+          MIGRATOR_IMAGE="example.invalid/oron/migrator@$digest" \
+          docker compose -f infra/compose/deployment.yaml \
+            --profile release --profile workers --profile voice config --quiet
       - run: docker build --file services/py/control-api/Dockerfile --tag or-on/control-api:ci .
       - run: docker build --file apps/web/Dockerfile --tag or-on/web:ci .
+      - run: docker build --file infra/images/messaging-worker.Dockerfile --tag or-on/messaging-worker:ci .
+      - run: docker build --file infra/images/dispatcher.Dockerfile --tag or-on/dispatcher:ci .
+      - run: docker build --file infra/images/migrator.Dockerfile --tag or-on/migrator:ci .

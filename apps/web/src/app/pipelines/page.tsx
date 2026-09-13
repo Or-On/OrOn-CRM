@@ -18,8 +18,8 @@ export default async function PipelinesPage() {
       listPipelineBoards(sql),
     );
     return (
-      <main className="page page--wide">
-        <ProductHeading page="pipelines" />
+      <main className="page page--wide page--workspace-premium">
+        <ProductHeading page="pipelines" premium />
         <PipelineBoard boards={boards} />
       </main>
     );

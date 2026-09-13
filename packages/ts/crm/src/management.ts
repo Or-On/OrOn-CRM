@@ -3,16 +3,205 @@ import type postgres from "postgres";
 import type {
   NotificationSummary,
   TeamMember,
+  TenantInvitationSummary,
   TenantSettings,
+  StoredIdentityImage,
 } from "./types.js";
+
+interface StoredIdentityImageRow {
+  readonly data: Uint8Array;
+  readonly content_type: StoredIdentityImage["contentType"];
+  readonly updated_at: Date;
+}
+
+function storedImage(
+  row: StoredIdentityImageRow | undefined,
+): StoredIdentityImage | undefined {
+  return row === undefined
+    ? undefined
+    : {
+        data: row.data,
+        contentType: row.content_type,
+        updatedAt: row.updated_at.toISOString(),
+      };
+}
+
+export async function getCurrentUserAvatar(
+  sql: postgres.TransactionSql,
+): Promise<StoredIdentityImage | undefined> {
+  const rows = await sql<StoredIdentityImageRow[]>`
+    SELECT data, content_type, updated_at FROM platform.current_user_avatar()
+  `;
+  return storedImage(rows[0]);
+}
+
+export async function setCurrentUserAvatar(
+  sql: postgres.TransactionSql,
+  image:
+    { readonly data: Uint8Array; readonly contentType: string } | undefined,
+  requestId: string,
+): Promise<void> {
+  await sql`
+    SELECT platform.set_current_user_avatar(
+      ${image?.data ?? null}::bytea, ${image?.contentType ?? null}::text,
+      ${requestId}::text
+    )
+  `;
+}
+
+export async function getCurrentTenantLogo(
+  sql: postgres.TransactionSql,
+): Promise<StoredIdentityImage | undefined> {
+  const rows = await sql<StoredIdentityImageRow[]>`
+    SELECT data, content_type, updated_at FROM platform.current_tenant_logo()
+  `;
+  return storedImage(rows[0]);
+}
+
+export async function setCurrentTenantLogo(
+  sql: postgres.TransactionSql,
+  image:
+    { readonly data: Uint8Array; readonly contentType: string } | undefined,
+  requestId: string,
+): Promise<void> {
+  await sql`
+    SELECT platform.set_current_tenant_logo(
+      ${image?.data ?? null}::bytea, ${image?.contentType ?? null}::text,
+      ${requestId}::text
+    )
+  `;
+}
 
 export async function listTeamMembers(
   sql: postgres.TransactionSql,
 ): Promise<readonly TeamMember[]> {
   return sql<TeamMember[]>`
-    SELECT user_id AS "userId", email, role
+    SELECT user_id AS "userId", email, display_name AS "displayName", role
     FROM platform.current_tenant_team()
     ORDER BY lower(email), user_id
+  `;
+}
+
+export async function listTenantInvitations(
+  sql: postgres.TransactionSql,
+): Promise<readonly TenantInvitationSummary[]> {
+  const rows = await sql<
+    {
+      id: string;
+      email: string;
+      role: TenantInvitationSummary["role"];
+      expires_at: Date;
+      created_at: Date;
+    }[]
+  >`
+    SELECT id, email, role, expires_at, created_at
+    FROM platform.current_tenant_invitations()
+  `;
+  return rows.map((row) => ({
+    id: row.id,
+    email: row.email,
+    role: row.role,
+    expiresAt: row.expires_at.toISOString(),
+    createdAt: row.created_at.toISOString(),
+  }));
+}
+
+export async function createTenantInvitation(
+  sql: postgres.TransactionSql,
+  input: {
+    readonly email: string;
+    readonly role: TenantInvitationSummary["role"];
+    readonly tokenHash: string;
+    readonly requestId: string;
+  },
+): Promise<string> {
+  const email = input.email.trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email) || email.length > 320)
+    throw new TypeError("a valid invitation email is required");
+  const rows = await sql<{ id: string }[]>`
+    SELECT platform.create_current_tenant_invitation(
+      ${email}::citext, ${input.role}::text, ${input.tokenHash}::text,
+      ${new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)}::timestamptz,
+      ${input.requestId}::text
+    ) AS id
+  `;
+  const id = rows[0]?.id;
+  if (id === undefined)
+    throw new Error("invitation creation returned no identifier");
+  return id;
+}
+
+export async function revokeTenantInvitation(
+  sql: postgres.TransactionSql,
+  invitationId: string,
+  requestId: string,
+): Promise<boolean> {
+  const rows = await sql<{ revoked: boolean }[]>`
+    SELECT platform.revoke_current_tenant_invitation(
+      ${invitationId}::uuid, ${requestId}::text
+    ) AS revoked
+  `;
+  return rows[0]?.revoked === true;
+}
+
+export async function updateCurrentTenantName(
+  sql: postgres.TransactionSql,
+  name: string,
+  requestId: string,
+): Promise<string> {
+  const rows = await sql<{ name: string }[]>`
+    SELECT platform.update_current_tenant_name(${name}::text, ${requestId}::text) AS name
+  `;
+  const updated = rows[0]?.name;
+  if (updated === undefined) throw new Error("tenant name update failed");
+  return updated;
+}
+
+export async function updateCurrentUserProfile(
+  sql: postgres.TransactionSql,
+  displayName: string,
+  email: string,
+  requestId: string,
+): Promise<void> {
+  const normalizedEmail = email.trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(normalizedEmail))
+    throw new TypeError("a valid email is required");
+  if (displayName.trim().length > 120)
+    throw new TypeError("display name is too long");
+  await sql`
+    SELECT platform.update_current_user_profile(
+      ${displayName}::text, ${normalizedEmail}::citext, ${requestId}::text
+    )
+  `;
+}
+
+export async function changeCurrentUserPassword(
+  sql: postgres.TransactionSql,
+  passwordHash: string,
+  sessionId: string,
+  requestId: string,
+): Promise<void> {
+  await sql`
+    SELECT platform.change_current_user_password(
+      ${passwordHash}::text, ${sessionId}::uuid, ${requestId}::text
+    )
+  `;
+}
+
+export async function updateTenantMember(
+  sql: postgres.TransactionSql,
+  input: {
+    readonly userId: string;
+    readonly role: TeamMember["role"];
+    readonly remove?: boolean;
+    readonly requestId: string;
+  },
+): Promise<void> {
+  await sql`
+    SELECT platform.manage_current_tenant_member(
+      ${input.userId}::uuid, ${input.role}::text,
+      ${input.remove === true}::boolean, ${input.requestId}::text
+    )
   `;
 }
 
@@ -59,6 +248,13 @@ export async function updateTenantSettings(
   const displayName = input.displayName?.trim();
   if (!locale || !timezone)
     throw new TypeError("locale and timezone are required");
+  if (timezone.length > 100)
+    throw new TypeError("timezone must be a valid IANA time-zone name");
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: timezone }).format(0);
+  } catch {
+    throw new TypeError("timezone must be a valid IANA time-zone name");
+  }
   const rows = await sql<
     {
       display_name: string | null;
@@ -99,9 +295,12 @@ export async function listNotifications(
       body: string | null;
       read_at: Date | null;
       created_at: Date;
+      reference_type: string | null;
+      reference_id: string | null;
+      type: string;
     }[]
   >`
-    SELECT id, title, body, read_at, created_at
+    SELECT id, title, body, read_at, created_at, reference_type, reference_id, type
     FROM messaging.notifications WHERE user_id = ${userId}::uuid
     ORDER BY created_at DESC, id DESC LIMIT 50
   `;
@@ -111,7 +310,23 @@ export async function listNotifications(
     body: row.body,
     read: row.read_at !== null,
     createdAt: row.created_at.toISOString(),
+    referenceType: row.reference_type,
+    referenceId: row.reference_id,
+    type: row.type,
   }));
+}
+
+export async function markAllNotificationsRead(
+  sql: postgres.TransactionSql,
+  userId: string,
+): Promise<number> {
+  const rows = await sql<{ id: string }[]>`
+    UPDATE messaging.notifications
+    SET read_at=CURRENT_TIMESTAMP
+    WHERE user_id=${userId}::uuid AND read_at IS NULL
+    RETURNING id
+  `;
+  return rows.length;
 }
 
 export async function markNotificationRead(

@@ -5,6 +5,7 @@ import type {
   AuthRepository,
   AuthSession,
   CreateSessionInput,
+  InvitationRecord,
   LoginRecord,
   Membership,
 } from "./types.js";
@@ -12,6 +13,7 @@ import type {
 interface LoginRow {
   user_id: string;
   email: string;
+  display_name: string | null;
   status: string;
   is_superuser: boolean;
   password_hash: string | null;
@@ -30,9 +32,20 @@ interface SessionRow extends MembershipRow {
   session_id: string;
   user_id: string;
   email: string;
+  display_name: string | null;
+  is_superuser: boolean;
   csrf_token_hash: Uint8Array;
   absolute_expires_at: Date;
   rotation_count: number;
+}
+
+interface InvitationRow {
+  invitation_id: string;
+  email: string;
+  tenant_name: string;
+  role: string;
+  expires_at: Date;
+  existing_account: boolean;
 }
 
 export function createAuthRepository(databaseUrl: string): AuthRepository {
@@ -78,6 +91,7 @@ export function createAuthRepository(databaseUrl: string): AuthRepository {
         : {
             userId: row.user_id,
             email: row.email,
+            displayName: row.display_name ?? undefined,
             status: row.status,
             isSuperuser: row.is_superuser,
             passwordHash: row.password_hash ?? undefined,
@@ -122,6 +136,8 @@ export function createAuthRepository(databaseUrl: string): AuthRepository {
         sessionId: row.session_id,
         userId: row.user_id,
         email: row.email,
+        displayName: row.display_name ?? undefined,
+        isSuperuser: row.is_superuser,
         tenant: {
           tenantId: row.tenant_id,
           tenantName: row.tenant_name,
@@ -133,6 +149,32 @@ export function createAuthRepository(databaseUrl: string): AuthRepository {
         absoluteExpiresAt: row.absolute_expires_at,
         rotationCount: row.rotation_count,
       };
+    },
+    async invitationRecord(tokenHash): Promise<InvitationRecord | undefined> {
+      const rows = await sql<InvitationRow[]>`
+        SELECT * FROM platform.auth_invitation_record(${tokenHash}::text)
+      `;
+      const row = rows[0];
+      if (row === undefined) return undefined;
+      const role = normalizeRole(row.role);
+      if (role === undefined) return undefined;
+      return {
+        invitationId: row.invitation_id,
+        email: row.email,
+        tenantName: row.tenant_name,
+        role,
+        expiresAt: row.expires_at,
+        existingAccount: row.existing_account,
+      };
+    },
+    async acceptInvitation(input): Promise<boolean> {
+      const rows = await sql<{ created: boolean }[]>`
+        SELECT platform.auth_accept_invitation(
+          ${input.tokenHash}::text, ${input.passwordHash}::text,
+          ${input.displayName}::text, ${input.requestId}::text
+        ) AS created
+      `;
+      return rows[0]?.created === true;
     },
     async switchTenant(input): Promise<boolean> {
       const rows = await sql<{ switched: boolean }[]>`

@@ -1,17 +1,26 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
-from scripts.db_verify import VerificationError, graph_report, render_offline_sql, validate_contract
+from scripts.db_verify import (
+    MANIFEST_PATH,
+    VerificationError,
+    graph_report,
+    render_offline_sql,
+    validate_contract,
+)
 
 
 def test_graph_has_preserved_oron_root_and_one_target_head() -> None:
     report = graph_report()
+    manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
 
     assert report.bases == ("0001",)
-    assert report.heads == ("50a6befe7903",)
+    assert report.heads == (manifest["alembic_head"],)
     assert report.branch_points == ("8eda5976c920",)
-    assert report.revision_count == 39
+    assert report.revision_count == 62
 
 
 def test_rendered_postgresql_contract_passes_static_security_checks() -> None:

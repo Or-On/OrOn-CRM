@@ -11,6 +11,8 @@ export interface AuthSession {
   readonly sessionId: string;
   readonly userId: string;
   readonly email: string;
+  readonly displayName: string | undefined;
+  readonly isSuperuser: boolean;
   readonly tenant: Membership;
   readonly memberships: readonly Membership[];
   readonly csrfTokenHash: Uint8Array;
@@ -19,7 +21,12 @@ export interface AuthSession {
 }
 
 export interface PublicSession {
-  readonly user: { readonly id: string; readonly email: string };
+  readonly user: {
+    readonly id: string;
+    readonly email: string;
+    readonly displayName?: string;
+    readonly isSuperuser: boolean;
+  };
   readonly tenant: Membership;
   readonly memberships: readonly Membership[];
   readonly expiresAt: string;
@@ -35,11 +42,21 @@ export interface IssuedSession {
 export interface LoginRecord {
   readonly userId: string;
   readonly email: string;
+  readonly displayName: string | undefined;
   readonly status: string;
   readonly isSuperuser: boolean;
   readonly passwordHash: string | undefined;
   readonly failedAttempts: number;
   readonly lockedUntil: Date | undefined;
+}
+
+export interface InvitationRecord {
+  readonly invitationId: string;
+  readonly email: string;
+  readonly tenantName: string;
+  readonly role: Role;
+  readonly expiresAt: Date;
+  readonly existingAccount: boolean;
 }
 
 export interface CreateSessionInput {
@@ -62,6 +79,13 @@ export interface AuthRepository {
   recordLoginSuccess(userId: string): Promise<void>;
   createSession(input: CreateSessionInput): Promise<string>;
   resolveSession(tokenHash: Uint8Array): Promise<AuthSession | undefined>;
+  invitationRecord(tokenHash: string): Promise<InvitationRecord | undefined>;
+  acceptInvitation(input: {
+    readonly tokenHash: string;
+    readonly passwordHash: string;
+    readonly displayName: string;
+    readonly requestId: string;
+  }): Promise<boolean>;
   switchTenant(input: {
     currentHash: Uint8Array;
     tenantId: string;

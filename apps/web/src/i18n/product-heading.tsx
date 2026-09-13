@@ -1,12 +1,20 @@
+import { PageHeader } from "@or-on/ui";
 import { useTranslations } from "next-intl";
 
-export function ProductHeading({ page }: { readonly page: string }) {
+export function ProductHeading({
+  page,
+  premium = false,
+}: {
+  readonly page: string;
+  readonly premium?: boolean;
+}) {
   const t = useTranslations("pages");
   return (
-    <header className="page-heading">
-      <p className="eyebrow">{t(`${page}Eyebrow`)}</p>
-      <h1>{t(`${page}Title`)}</h1>
-      <p>{t(`${page}Description`)}</p>
-    </header>
+    <PageHeader
+      className={`page-heading${premium ? " page-heading--premium" : ""}`}
+      description={t(`${page}Description`)}
+      eyebrow={t(`${page}Eyebrow`)}
+      title={t(`${page}Title`)}
+    />
   );
 }

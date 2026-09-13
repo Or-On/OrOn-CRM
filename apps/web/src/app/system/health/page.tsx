@@ -16,8 +16,8 @@ export async function generateMetadata(): Promise<Metadata> {
 export default async function SystemHealthPage() {
   if ((await currentPublicSession()) === undefined) redirect("/login");
   return (
-    <main className="page">
-      <ProductHeading page="health" />
+    <main className="page page--health page--workspace-premium">
+      <ProductHeading page="health" premium />
       <HealthPanel />
     </main>
   );

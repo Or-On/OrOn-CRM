@@ -18,17 +18,17 @@ permissions where practical. Source, images, fixtures, and logs contain no secre
 values. Typed configuration redacts sensitive fields and real-provider flags
 default to false.
 
-The future GCP environment uses Secret Manager, VM service identity, and Workload
-Identity Federation for CI; service-account JSON is never committed. Terraform
-references secret resources without placing secret values in configuration or
-state. Provider credentials that must be persisted in PostgreSQL use
+Deployed environments use an operator-selected external secret store or private
+host-mounted files and a least-privilege runtime identity. CI must use short-lived
+credentials when publication is separately enabled; static hosting keys are
+never committed. Provider credentials that must be persisted in PostgreSQL use
 application-level authenticated encryption with a master key outside PostgreSQL.
 Evaluate Or-on's existing secret code before introducing new cryptography.
 
 ## Consequences
 
 Secret references, access policy, rotation, and audit ownership become explicit.
-Local environment files remain operator-managed. Phase 1 implements redaction and
+Local and deployment secret delivery remains operator-managed. The repository implements redaction and
 scanning foundations but not final credential persistence.
 
 ## Verification

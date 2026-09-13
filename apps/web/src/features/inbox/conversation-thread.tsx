@@ -3,20 +3,24 @@
 import { DeliveryFailure } from "./delivery-failure";
 
 import { errorMessage } from "../../i18n/error-message";
-import { useTranslations, useLocale } from "next-intl";
+import { useTranslations, useLocale, useTimeZone } from "next-intl";
 
 import {
-  ThumbsUp,
-  MessageCircle,
   ArrowLeft,
   ArrowUp,
-  ChevronDown,
+  CircleAlert,
+  MessageCircle,
+  MessageSquareText,
+  MoreHorizontal,
   Send,
-  ShieldCheck,
+  ThumbsUp,
+  Trash2,
+  UserRound,
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState, type SyntheticEvent } from "react";
 import type {
+  AgentProfileSummary,
   ConversationSummary,
   Message,
   MessageCursor,
@@ -25,8 +29,23 @@ import type {
   QuickReply,
   TeamMember,
 } from "@or-on/crm";
-import { Badge, Button, Dialog, Input } from "@or-on/ui";
+import {
+  Badge,
+  Button,
+  ConfirmDialog,
+  Dialog,
+  IconButton,
+  Input,
+  LoadingSkeleton,
+  Popover,
+  Select,
+  Textarea,
+} from "@or-on/ui";
 import { crmMutation, crmRead } from "../crm";
+import {
+  conversationChannelKey,
+  conversationDayKey,
+} from "./conversation-presentation";
 import {
   templateParameters,
   type ReplyDraft,
@@ -40,6 +59,24 @@ function historyUrl(id: string, before?: MessageCursor | null): string {
     : base;
 }
 
+function messageDay(value: string, locale: string, timeZone: string): string {
+  return new Intl.DateTimeFormat(locale, {
+    day: "numeric",
+    month: "long",
+    timeZone,
+    weekday: "short",
+    year: "numeric",
+  }).format(new Date(value));
+}
+
+function messageTime(value: string, locale: string, timeZone: string): string {
+  return new Intl.DateTimeFormat(locale, {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone,
+  }).format(new Date(value));
+}
+
 export function ConversationThread({
   conversation,
   initialPage,
@@ -51,9 +88,14 @@ export function ConversationThread({
   metaSenderId,
   quickReplies,
   teamMembers,
+  agentProfiles = [],
+  aiRepliesEnabled = false,
+  mobileThreadOpen,
   onBack,
+  onShowContact,
   onQueued,
   onChanged,
+  onDeleted,
 }: {
   readonly conversation: ConversationSummary;
   readonly initialPage: MessagePage | undefined;
@@ -65,12 +107,21 @@ export function ConversationThread({
   readonly metaSenderId: string | undefined;
   readonly quickReplies: readonly QuickReply[];
   readonly teamMembers: readonly TeamMember[];
+  readonly agentProfiles?: readonly AgentProfileSummary[];
+  readonly aiRepliesEnabled?: boolean;
+  readonly mobileThreadOpen: boolean;
   readonly onBack: () => void;
+  readonly onShowContact: (trigger: HTMLButtonElement) => void;
   readonly onQueued: (result: QueuedWhatsAppOutbound) => Promise<void>;
   readonly onChanged: () => Promise<void>;
+  readonly onDeleted: (conversationId: string) => Promise<void>;
 }) {
   const t = useTranslations();
   const locale = useLocale();
+  const timeZone = useTimeZone() ?? "UTC";
+  const channelLabel = t(conversationChannelKey(conversation.channelKind));
+  const canSendWhatsApp =
+    realWhatsAppEnabled && conversation.channelKind === "whatsapp";
   const [page, setPage] = useState<MessagePage>(
     initialPage ?? { messages: [], nextCursor: null },
   );
@@ -82,10 +133,10 @@ export function ConversationThread({
   const historyRef = useRef(false);
   const historyRequest = useRef<AbortController | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [confirmed, setConfirmed] = useState(false);
-  const [review, setReview] = useState<ReplyDraft>();
   const scrollArea = useRef<HTMLDivElement>(null);
   const [receipt, setReceipt] = useState<string>();
+  const [controlsOpen, setControlsOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -133,10 +184,15 @@ export function ConversationThread({
     if (!history && !loading)
       scrollArea.current?.scrollTo({ top: scrollArea.current.scrollHeight });
   }, [page.messages.length, history, loading]);
+  // The selected thread stays mounted while the mobile navigator is visible.
+  // Its first hidden render cannot scroll; opening it must reveal the latest
+  // messages, without moving an operator who explicitly loaded earlier history.
+  useEffect(() => {
+    if (mobileThreadOpen && !history && !loading)
+      scrollArea.current?.scrollTo({ top: scrollArea.current.scrollHeight });
+  }, [mobileThreadOpen, history, loading]);
 
   function updateDraft(change: Partial<ReplyDraft>) {
-    setConfirmed(false);
-    setReview(undefined);
     setDraft({ ...draft, ...change });
   }
 
@@ -190,11 +246,7 @@ export function ConversationThread({
 
   async function send(snapshot: ReplyDraft) {
     if (!canOperate || pending || loading || loadError !== undefined) return;
-    if (
-      snapshot.provider === "meta" &&
-      (!realWhatsAppEnabled || !confirmed || review === undefined)
-    )
-      return;
+    if (snapshot.provider !== "meta" || !canSendWhatsApp) return;
     setPending(true);
     setActionError(undefined);
     try {
@@ -203,7 +255,7 @@ export function ConversationThread({
         {
           ...snapshot,
           parameters: templateParameters(snapshot.parameters),
-          confirmReal: snapshot.provider === "meta",
+          confirmReal: true,
         },
         { idempotencyKey: keys.get(conversation.id, metaSenderId, snapshot) },
       );
@@ -215,8 +267,6 @@ export function ConversationThread({
         language: "",
         parameters: "",
       });
-      setConfirmed(false);
-      setReview(undefined);
       setReceipt(
         result.queued ? t("inbox.queueSuccess") : t("inbox.queueDuplicate"),
       );
@@ -231,10 +281,9 @@ export function ConversationThread({
 
   function submit(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (draft.provider === "meta") {
-      if (!realWhatsAppEnabled || !confirmed) return;
-      setReview({ ...draft });
-    } else void send({ ...draft });
+    if (!canOperate || pending || !canSendWhatsApp || draft.provider !== "meta")
+      return;
+    void send({ ...draft });
   }
 
   async function change(body: Record<string, unknown>, messageId?: string) {
@@ -258,65 +307,150 @@ export function ConversationThread({
     }
   }
 
+  async function removeConversation() {
+    if (!canOperate || pending) return;
+    setPending(true);
+    setActionError(undefined);
+    try {
+      await crmMutation(
+        `/api/messaging/conversations/${conversation.id}`,
+        {},
+        { method: "DELETE" },
+      );
+      setDeleteOpen(false);
+      setControlsOpen(false);
+      await onDeleted(conversation.id);
+    } catch (error) {
+      setActionError(errorMessage(error, t, "inbox.deleteFailed"));
+    } finally {
+      setPending(false);
+    }
+  }
+
   return (
     <>
-      <header className="message-panel__heading">
-        <Button
+      <header className="message-panel__heading conversation-header">
+        <IconButton
           className="inbox-back"
-          aria-label={t("inbox.back")}
+          label={t("inbox.back")}
           onClick={onBack}
-          variant="quiet"
         >
           <ArrowLeft aria-hidden="true" size={18} />
-        </Button>
+        </IconButton>
         <span className="contact-avatar" aria-hidden="true">
           {conversation.contactName.slice(0, 1)}
         </span>
         <div className="message-contact">
           <Link href={`/contacts/${conversation.contactId}`}>
-            <h2>{conversation.contactName}</h2>
+            <h2>
+              <bdi>{conversation.contactName}</bdi>
+            </h2>
           </Link>
-          <small>
-            <bdi>{conversation.recipientAddress ?? t("inbox.noRecipient")}</bdi>{" "}
-            ·{" "}
-            {conversation.provider === "meta"
-              ? "Meta WhatsApp"
-              : t("common.simulator")}
-          </small>
+          <span className="message-contact__metadata">
+            <small>
+              <bdi>
+                {conversation.recipientAddress ?? t("inbox.noRecipient")}
+              </bdi>
+            </small>
+            <span aria-hidden="true">·</span>
+            <small>{channelLabel}</small>
+          </span>
         </div>
-        <Badge
-          label={
-            t.has(`status.${conversation.status}`)
-              ? t(`status.${conversation.status}`)
-              : t("common.unknown")
-          }
-          tone={conversation.status === "open" ? "info" : "neutral"}
-        />
-        <details className="conversation-details">
-          <summary>
-            {t("common.details")}
-            <ChevronDown aria-hidden="true" size={13} />
-          </summary>
-          <div>
-            <p>
-              {t("inbox.currentChannel")}
-              {conversation.senderAddress ?? t("inbox.unknownSender")}
-            </p>
-            {conversation.providerAccountId ? (
+        <div className="conversation-header__state">
+          <Badge
+            label={
+              t.has(`status.${conversation.status}`)
+                ? t(`status.${conversation.status}`)
+                : t("common.unknown")
+            }
+            tone={conversation.status === "open" ? "positive" : "neutral"}
+          />
+          {conversation.unreadCount > 0 ? (
+            <Badge
+              label={t("inbox.unread", { count: conversation.unreadCount })}
+              tone="info"
+            />
+          ) : null}
+        </div>
+        <IconButton
+          label={t("inbox.contactDetails")}
+          onClick={(event) => onShowContact(event.currentTarget)}
+          className="conversation-header__contact-action"
+        >
+          <UserRound aria-hidden="true" size={18} />
+        </IconButton>
+        <IconButton
+          className="conversation-actions"
+          label={t("premiumPrimary.messageSettings")}
+          onClick={() => setControlsOpen(true)}
+        >
+          <MoreHorizontal aria-hidden="true" size={18} />
+        </IconButton>
+        <Dialog
+          className="conversation-controls-dialog"
+          closeLabel={t("common.close")}
+          title={t("premiumPrimary.messageSettings")}
+          open={controlsOpen}
+          onClose={() => setControlsOpen(false)}
+        >
+          <div className="conversation-actions__menu">
+            <div className="conversation-actions__context">
               <p>
-                {t("inbox.senderId")}
-                <bdi>{conversation.providerAccountId}</bdi>
+                {conversation.contactName} ·{" "}
+                <bdi>{conversation.recipientAddress}</bdi>
               </p>
-            ) : null}
-            <p>
-              {t("inbox.consent")} {t(`status.${conversation.whatsAppConsent}`)}
-              {conversation.whatsAppOptedOutAt ? t("inbox.optedOut") : ""}
-            </p>
-            <p>{t("inbox.eligibility")}</p>
-            <label>
-              {t("inbox.status")}
-              <select
+            </div>
+            <div className="conversation-actions__fields">
+              <Select
                 disabled={!canOperate || pending}
+                id={`conversation-owner-${conversation.id}`}
+                label={t("inbox.responder")}
+                onChange={(event) => {
+                  const versionId = event.target.value;
+                  void change(
+                    versionId === "human"
+                      ? {
+                          ownershipMode: "human",
+                          reason: "Human takeover requested from Inbox",
+                        }
+                      : {
+                          ownershipMode: "ai",
+                          agentProfileVersionId: versionId,
+                        },
+                  );
+                }}
+                value={
+                  conversation.ownershipMode === "ai"
+                    ? (conversation.aiAgentProfileVersionId ?? "human")
+                    : "human"
+                }
+              >
+                <option value="human">{t("inbox.humanResponder")}</option>
+                {agentProfiles.flatMap((profile) =>
+                  profile.versionId === null
+                    ? []
+                    : [
+                        <option
+                          disabled={!aiRepliesEnabled}
+                          key={profile.versionId}
+                          value={profile.versionId}
+                        >
+                          {t("inbox.aiResponder", { name: profile.name })}
+                        </option>,
+                      ],
+                )}
+              </Select>
+              <small>
+                {!aiRepliesEnabled
+                  ? t("inbox.aiDisabled")
+                  : agentProfiles.length === 0
+                    ? t("inbox.noAiAgent")
+                    : t("inbox.responderHint")}
+              </small>
+              <Select
+                disabled={!canOperate || pending}
+                id={`conversation-status-${conversation.id}`}
+                label={t("inbox.status")}
                 onChange={(event) =>
                   void change({ status: event.target.value })
                 }
@@ -326,12 +460,11 @@ export function ConversationThread({
                 <option value="pending">{t("status.pending")}</option>
                 <option value="resolved">{t("status.resolved")}</option>
                 <option value="closed">{t("status.closed")}</option>
-              </select>
-            </label>
-            <label>
-              {t("inbox.assigned")}
-              <select
+              </Select>
+              <Select
                 disabled={!canOperate || pending}
+                id={`conversation-assignee-${conversation.id}`}
+                label={t("inbox.assigned")}
                 onChange={(event) =>
                   void change({ assignedUserId: event.target.value || null })
                 }
@@ -343,10 +476,59 @@ export function ConversationThread({
                     {member.email} · {t(`status.${member.role}`)}
                   </option>
                 ))}
-              </select>
-            </label>
+              </Select>
+            </div>
+            {canOperate ? (
+              <div className="conversation-actions__danger-zone">
+                <div>
+                  <strong>{t("inbox.deleteConversation")}</strong>
+                  <p>{t("inbox.deleteConversationHint")}</p>
+                </div>
+                <Button
+                  disabled={pending}
+                  onClick={() => {
+                    setActionError(undefined);
+                    setDeleteOpen(true);
+                  }}
+                  size="small"
+                  variant="danger"
+                >
+                  <Trash2 aria-hidden="true" size={15} />
+                  {t("inbox.deleteConversation")}
+                </Button>
+              </div>
+            ) : null}
           </div>
-        </details>
+          {actionError && controlsOpen && !deleteOpen ? (
+            <p className="form-error" role="alert">
+              {actionError}
+            </p>
+          ) : null}
+        </Dialog>
+        <ConfirmDialog
+          busy={pending}
+          cancelLabel={t("common.cancel")}
+          confirmLabel={t("inbox.deleteConversationConfirm")}
+          destructive
+          description={t("inbox.deleteConversationDescription", {
+            contact: conversation.contactName,
+          })}
+          onCancel={() => {
+            if (!pending) {
+              setDeleteOpen(false);
+              setActionError(undefined);
+            }
+          }}
+          onConfirm={() => void removeConversation()}
+          open={deleteOpen}
+          title={t("inbox.deleteConversationTitle")}
+        >
+          {actionError && deleteOpen ? (
+            <p className="form-error" role="alert">
+              {actionError}
+            </p>
+          ) : null}
+        </ConfirmDialog>
       </header>
       <div
         className="message-thread"
@@ -376,9 +558,21 @@ export function ConversationThread({
           </Button>
         ) : null}
         {loading ? (
-          <p role="status" className="thread-notice">
-            {t("inbox.loading")}
-          </p>
+          <div
+            className="thread-loading"
+            role="status"
+            aria-label={t("inbox.loading")}
+          >
+            {page.messages.length ? (
+              <p>{t("inbox.loading")}</p>
+            ) : (
+              <div aria-hidden="true">
+                <LoadingSkeleton />
+                <LoadingSkeleton />
+                <LoadingSkeleton />
+              </div>
+            )}
+          </div>
         ) : null}
         {loadError ? (
           <div className="thread-notice" role="alert">
@@ -392,102 +586,168 @@ export function ConversationThread({
           <div className="thread-empty">
             <MessagesPlaceholder />
             <h3>{t("inbox.starts")}</h3>
-            <p>{t("inbox.startsHint")}</p>
+            <p>{t("tenantPrimary.startsHint")}</p>
           </div>
         ) : null}
-        {page.messages.map((message) => (
-          <article
-            className={`message-bubble message-bubble--${message.direction}`}
-            key={message.id}
-            aria-label={`${t(`status.${message.direction}`)} ${t(`status.${message.status}`)}`}
+        {page.messages.length ? (
+          <ol
+            aria-live={history ? "off" : "polite"}
+            aria-relevant="additions"
+            className="message-timeline"
+            role="log"
           >
-            {message.template ? (
-              <div className="template-message">
-                <strong>
-                  {t("inbox.templatePrefix")}
-                  {message.template.name}
-                </strong>
-                <small>
-                  {t("inbox.language")}
-                  {message.template.language}
-                </small>
-                {message.template.parameters.length ? (
-                  <ol>
-                    {message.template.parameters.map((parameter, index) => (
-                      <li key={index}>{parameter}</li>
-                    ))}
-                  </ol>
-                ) : (
-                  <p>{t("inbox.noParams")}</p>
-                )}
-                <small>{t("inbox.templateHint")}</small>
-              </div>
-            ) : (
-              <p dir="auto">
-                {message.contentText ?? `[${message.contentType}]`}
-              </p>
-            )}
-            <footer>
-              <time dateTime={message.createdAt}>
-                {new Intl.DateTimeFormat(locale, {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                  timeZone: "Asia/Jerusalem",
-                }).format(new Date(message.createdAt))}
-              </time>
-              <span>
-                {message.direction === "outbound"
-                  ? t(`status.${message.status}`)
-                  : t("inbox.received")}
-              </span>
-            </footer>
-            {message.status === "failed" || message.deliveryFailure ? (
-              <DeliveryFailure failure={message.deliveryFailure} />
-            ) : null}
-            {message.deliveryEvents.length ? (
-              <details className="delivery-history">
-                <summary>{t("inbox.deliveryHistory")}</summary>
-                <ul>
-                  {message.deliveryEvents.map((event, index) => (
-                    <li key={index}>
-                      {t(`status.${event.status}`)} ·{" "}
-                      <time dateTime={event.occurredAt}>
-                        {new Date(event.occurredAt).toLocaleString(locale, {
-                          timeZone: "Asia/Jerusalem",
-                        })}
+            {page.messages.map((message, index) => {
+              const previous = page.messages[index - 1];
+              const startsDay =
+                previous === undefined ||
+                conversationDayKey(new Date(previous.createdAt), timeZone) !==
+                  conversationDayKey(new Date(message.createdAt), timeZone);
+              const grouped =
+                !startsDay &&
+                previous.direction === message.direction &&
+                previous.senderType === message.senderType &&
+                new Date(message.createdAt).getTime() -
+                  new Date(previous.createdAt).getTime() <
+                  300_000;
+              return (
+                <li className="message-timeline__item" key={message.id}>
+                  {startsDay ? (
+                    <div className="message-day-separator" role="separator">
+                      <time dateTime={message.createdAt}>
+                        {messageDay(message.createdAt, locale, timeZone)}
                       </time>
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            ) : null}
-            {message.reactions.length || canOperate ? (
-              <div className="reaction-row">
-                {message.reactions.map((reaction) => (
-                  <span key={reaction}>{reaction}</span>
-                ))}
-                {canOperate ? (
-                  <button
-                    aria-label={t("inbox.react")}
-                    disabled={pending}
-                    onClick={() => void change({ emoji: "👍" }, message.id)}
-                    type="button"
+                    </div>
+                  ) : null}
+                  <div
+                    className={`message-cluster message-cluster--${message.direction} ${grouped ? "message-cluster--grouped" : ""}`}
                   >
-                    <ThumbsUp aria-hidden="true" size={14} />
-                  </button>
-                ) : null}
-              </div>
-            ) : null}
-          </article>
-        ))}
+                    <span className="message-author-avatar" aria-hidden="true">
+                      {grouped
+                        ? ""
+                        : message.senderType === "contact"
+                          ? conversation.contactName.slice(0, 1)
+                          : "O"}
+                    </span>
+                    <div className="message-content-stack">
+                      <article
+                        aria-label={`${t(`status.${message.direction}`)} ${t(`status.${message.status}`)}`}
+                        className={`message-bubble message-bubble--${message.direction} ${grouped ? "message-bubble--grouped" : ""}`}
+                      >
+                        {!grouped ? (
+                          <small className="message-sender">
+                            <bdi>
+                              {message.senderType === "contact"
+                                ? conversation.contactName
+                                : t(
+                                    message.senderType === "agent"
+                                      ? "tenantPrimary.senderAgent"
+                                      : message.senderType === "system"
+                                        ? "tenantPrimary.senderSystem"
+                                        : "tenantPrimary.senderTeam",
+                                  )}
+                            </bdi>
+                          </small>
+                        ) : null}
+                        {message.template ? (
+                          <div className="template-message">
+                            <strong>
+                              {t("inbox.templatePrefix")}
+                              {message.template.name}
+                            </strong>
+                            <small>
+                              {t("inbox.language")}
+                              {message.template.language}
+                            </small>
+                            {message.template.parameters.length ? (
+                              <ol>
+                                {message.template.parameters.map(
+                                  (parameter, parameterIndex) => (
+                                    <li key={parameterIndex}>{parameter}</li>
+                                  ),
+                                )}
+                              </ol>
+                            ) : (
+                              <p>{t("inbox.noParams")}</p>
+                            )}
+                            <small>{t("inbox.templateHint")}</small>
+                          </div>
+                        ) : (
+                          <p dir="auto">
+                            {message.contentText ??
+                              t("tenantPrimary.unsupportedContent", {
+                                type: message.contentType,
+                              })}
+                          </p>
+                        )}
+                        {message.status === "failed" ||
+                        message.deliveryFailure ? (
+                          <DeliveryFailure failure={message.deliveryFailure} />
+                        ) : null}
+                        {message.deliveryEvents.length ? (
+                          <details className="delivery-history">
+                            <summary>{t("inbox.deliveryHistory")}</summary>
+                            <ul>
+                              {message.deliveryEvents.map(
+                                (event, eventIndex) => (
+                                  <li key={eventIndex}>
+                                    {t(`status.${event.status}`)} ·{" "}
+                                    <time dateTime={event.occurredAt}>
+                                      {new Date(
+                                        event.occurredAt,
+                                      ).toLocaleString(locale, {
+                                        timeZone,
+                                      })}
+                                    </time>
+                                  </li>
+                                ),
+                              )}
+                            </ul>
+                          </details>
+                        ) : null}
+                        {message.reactions.length || canOperate ? (
+                          <div className="reaction-row">
+                            {message.reactions.map((reaction) => (
+                              <span key={reaction}>{reaction}</span>
+                            ))}
+                            {canOperate ? (
+                              <IconButton
+                                disabled={pending}
+                                label={t("inbox.react")}
+                                onClick={() =>
+                                  void change({ emoji: "👍" }, message.id)
+                                }
+                              >
+                                <ThumbsUp aria-hidden="true" size={14} />
+                              </IconButton>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </article>
+                      <footer className="message-footer">
+                        <time dateTime={message.createdAt}>
+                          {messageTime(message.createdAt, locale, timeZone)}
+                        </time>
+                        <span>
+                          {message.direction === "outbound"
+                            ? t(`status.${message.status}`)
+                            : t("inbox.received")}
+                        </span>
+                      </footer>
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+        ) : null}
       </div>
-      <form className="composer" onSubmit={submit}>
+      <form className="composer conversation-composer" onSubmit={submit}>
         {receipt ? (
           <p role="status" className="queue-receipt">
             {receipt}
           </p>
         ) : null}
-        {actionError && review === undefined ? (
+        {actionError && !controlsOpen && !deleteOpen ? (
           <p className="form-error" role="alert">
             {actionError}
           </p>
@@ -495,58 +755,25 @@ export function ConversationThread({
         {!canOperate ? (
           <p className="thread-notice">{t("inbox.readOnly")}</p>
         ) : (
-          <>
-            <div className="composer-controls">
-              <label htmlFor="delivery-provider">
-                {t("inbox.mode")}
-                <select
-                  id="delivery-provider"
+          <div className="composer-shell">
+            <div
+              className="composer-kind"
+              role="group"
+              aria-label={t("tenantPrimary.kind")}
+            >
+              {(["text", "template"] as const).map((kind) => (
+                <button
+                  key={kind}
+                  type="button"
                   disabled={pending}
-                  value={draft.provider}
-                  onChange={(event) =>
-                    updateDraft({
-                      provider:
-                        event.target.value === "meta" ? "meta" : "simulator",
-                    })
-                  }
+                  aria-pressed={draft.kind === kind}
+                  onClick={() => updateDraft({ kind })}
                 >
-                  <option value="simulator">{t("inbox.simulator")}</option>
-                  <option disabled={!realWhatsAppEnabled} value="meta">
-                    {t("inbox.real")}
-                    {realWhatsAppEnabled ? "" : " " + t("inbox.disabled")}
-                  </option>
-                </select>
-              </label>
-              <label htmlFor="message-kind">
-                {t("inbox.type")}
-                <select
-                  id="message-kind"
-                  disabled={pending}
-                  value={draft.kind}
-                  onChange={(event) =>
-                    updateDraft({
-                      kind:
-                        event.target.value === "template" ? "template" : "text",
-                    })
-                  }
-                >
-                  <option value="text">{t("inbox.text")}</option>
-                  <option value="template">{t("inbox.template")}</option>
-                </select>
-              </label>
+                  {t(`tenantPrimary.${kind}`)}
+                </button>
+              ))}
+              <span>{channelLabel}</span>
             </div>
-            {draft.provider === "meta" ? (
-              <p className="sender-notice">
-                {t("inbox.realSender")}{" "}
-                <bdi>{metaSenderId ?? t("inbox.notConfigured")}</bdi>
-                {t("inbox.senderHint")}
-              </p>
-            ) : (
-              <p className="sender-notice">
-                <ShieldCheck aria-hidden="true" size={13} />
-                {t("inbox.simulatorHint")}
-              </p>
-            )}
             {draft.kind === "template" ? (
               <div className="template-fields">
                 <Input
@@ -584,28 +811,13 @@ export function ConversationThread({
               </div>
             ) : (
               <>
-                {quickReplies.length ? (
-                  <div className="quick-reply-row">
-                    {quickReplies.map((reply) => (
-                      <button
-                        disabled={pending}
-                        key={reply.id}
-                        onClick={() => updateDraft({ text: reply.body })}
-                        type="button"
-                      >
-                        {reply.title}
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-                <label className="or-visually-hidden" htmlFor="reply-text">
-                  {t("inbox.reply")}
-                </label>
-                <textarea
-                  id="reply-text"
+                <Textarea
+                  className="composer__textarea"
                   dir="auto"
                   maxLength={4096}
                   disabled={pending}
+                  id={`reply-text-${conversation.id}`}
+                  label={t("inbox.reply")}
                   onChange={(event) =>
                     updateDraft({ text: event.target.value })
                   }
@@ -616,99 +828,82 @@ export function ConversationThread({
                 />
               </>
             )}
-            {draft.provider === "meta" ? (
-              <label className="real-provider-confirmation">
-                <input
-                  required
-                  type="checkbox"
-                  checked={confirmed}
-                  disabled={pending}
-                  onChange={(event) => setConfirmed(event.target.checked)}
-                />
-                {t("inbox.confirm", {
-                  contact: conversation.contactName,
-                  recipient:
-                    "\u2068" +
-                    (conversation.recipientAddress ?? t("inbox.noRecipient")) +
-                    "\u2069",
-                })}
-              </label>
-            ) : null}
             <div className="composer-footer">
-              <small>
-                {draft.kind === "text" ? (
-                  <bdi dir="ltr">{draft.text.length} / 4096</bdi>
-                ) : (
-                  t("inbox.exactValues")
-                )}
-              </small>
-              <Button
-                disabled={
-                  pending ||
-                  loading ||
-                  loadError !== undefined ||
-                  (draft.provider === "meta" &&
-                    (!confirmed || !realWhatsAppEnabled))
-                }
-                type="submit"
-              >
-                <Send aria-hidden="true" size={15} />{" "}
-                {pending
-                  ? t("inbox.queuing")
-                  : draft.provider === "meta"
-                    ? t("inbox.review")
-                    : t("inbox.queueSimulator")}
-              </Button>
+              <div className="composer-footer__tools">
+                {draft.kind === "text" && quickReplies.length ? (
+                  <Popover
+                    align="start"
+                    contentClassName="composer-quick-replies"
+                    disabled={pending}
+                    label={t("inbox.quickReplies")}
+                    role="menu"
+                    trigger={<MessageSquareText aria-hidden="true" size={17} />}
+                    triggerClassName="composer-tool"
+                  >
+                    {({ close }) =>
+                      quickReplies.map((reply) => (
+                        <button
+                          disabled={pending}
+                          key={reply.id}
+                          onClick={() => {
+                            updateDraft({ text: reply.body });
+                            close();
+                          }}
+                          role="menuitem"
+                          type="button"
+                        >
+                          {reply.title}
+                        </button>
+                      ))
+                    }
+                  </Popover>
+                ) : null}
+                {!canSendWhatsApp ? (
+                  <span
+                    className="sender-notice"
+                    role="status"
+                    title={t("tenantPrimary.sendingUnavailable")}
+                  >
+                    <CircleAlert aria-hidden="true" size={17} />
+                    <span className="or-visually-hidden">
+                      {t("tenantPrimary.sendingUnavailable")}
+                    </span>
+                  </span>
+                ) : null}
+              </div>
+              <div className="composer-footer__meta">
+                <small>
+                  {draft.kind === "text" ? (
+                    <bdi dir="ltr">{draft.text.length} / 4096</bdi>
+                  ) : (
+                    t("inbox.exactValues")
+                  )}
+                </small>
+                <Button
+                  aria-label={
+                    pending ? t("inbox.queuing") : t("tenantPrimary.send")
+                  }
+                  busy={pending}
+                  className="composer-send"
+                  disabled={
+                    pending ||
+                    loading ||
+                    loadError !== undefined ||
+                    !canSendWhatsApp
+                  }
+                  title={pending ? t("inbox.queuing") : t("tenantPrimary.send")}
+                  type="submit"
+                >
+                  <Send aria-hidden="true" size={16} />
+                  <span className="or-visually-hidden">
+                    {pending ? t("inbox.queuing") : t("tenantPrimary.send")}
+                  </span>
+                </Button>
+              </div>
             </div>
-          </>
+          </div>
         )}
       </form>
-      <Dialog
-        closeLabel={t("common.close")}
-        open={review !== undefined}
-        onClose={() => {
-          if (!pending) setReview(undefined);
-        }}
-        title={t("inbox.confirmTitle")}
-        description={t("inbox.confirmHint")}
-      >
-        <dl className="send-review">
-          <dt>{t("inbox.recipient")}</dt>
-          <dd>
-            {conversation.contactName} ·{" "}
-            <bdi>{conversation.recipientAddress}</bdi>
-          </dd>
-          <dt>{t("inbox.configuredSender")}</dt>
-          <dd>
-            <bdi>{metaSenderId ?? t("inbox.notConfigured")}</bdi>
-          </dd>
-          <dt>{t("inbox.message")}</dt>
-          <dd dir="auto">
-            {review?.kind === "text"
-              ? review.text
-              : `${review?.templateName ?? ""} · ${review?.language ?? ""}\n${review?.parameters ?? ""}`}
-          </dd>
-        </dl>
-        <p>{t("inbox.guardHint")}</p>
-        {actionError && review !== undefined ? (
-          <p role="alert" className="form-error">
-            {actionError}
-          </p>
-        ) : null}
-        <Button
-          disabled={
-            pending ||
-            !realWhatsAppEnabled ||
-            !confirmed ||
-            review === undefined
-          }
-          onClick={() => {
-            if (review) void send(review);
-          }}
-        >
-          {pending ? t("inbox.queuing") : t("inbox.sendReal")}
-        </Button>
-      </Dialog>
     </>
   );
 }

@@ -1,8 +1,9 @@
 import os
 
 import pytest
-from oron_agent.audio import AudioInFilter, TurnStart
+from oron_agent.audio import AudioInFilter, TurnEnd, TurnStart
 from oron_agent.config import AgentOverrides, Settings, load_settings, settings_with
+from oron_agent.storage import ArtifactsBackend
 from pydantic import ValidationError
 
 
@@ -20,7 +21,7 @@ def test_loads_required_from_env(monkeypatch):
     assert st.vertex_location == "global"  # overridable per deployment region
     assert st.vertex_llm_model == "gemini-2.5-flash"
     assert st.vertex_thinking_budget == 0
-    assert st.user_idle_secs == 7.0
+    assert st.user_idle_secs == 10.0
 
 
 def test_the_shipped_endpointing_defaults_are_the_evaluated_ones():
@@ -28,8 +29,35 @@ def test_the_shipped_endpointing_defaults_are_the_evaluated_ones():
     turn-latency knobs a developer tunes in their own .env, and asserting the
     instance makes the suite fail on their machine instead of on a real change."""
     defaults = Settings.model_fields
+    assert defaults["turn_end"].default is TurnEnd.SONIOX
     assert defaults["vad_stop_secs"].default == 0.2  # what pipecat's STT p99s assume
-    assert defaults["user_speech_timeout"].default == 0.3  # was pipecat's 0.6
+    assert defaults["user_speech_timeout"].default == 0.5
+    assert defaults["turn_start"].default is TurnStart.RESPONSIVE
+    assert defaults["soniox_endpoint_latency_adjustment_level"].default == 2
+    assert defaults["soniox_endpoint_sensitivity"].default == 0.15
+    assert defaults["soniox_max_endpoint_delay_ms"].default == 1000
+
+
+def test_voice_defaults_prefer_natural_tts_and_conservative_gendering():
+    defaults = Settings.model_fields
+    assert defaults["soniox_stt_model"].default == "stt-rt-v5"
+    assert defaults["soniox_tts_model"].default == "tts-rt-v2"
+    assert defaults["soniox_tts_voice_default"].default == "Harper"
+    assert defaults["gender_required_seconds"].default == 1.5
+    assert defaults["gender_confidence_threshold"].default == 0.9
+    assert defaults["gender_confirmation_attempts"].default == 2
+    assert defaults["gender_detection_enabled"].default is False
+
+
+def test_gender_window_must_allow_every_confirmation_attempt():
+    with pytest.raises(ValidationError, match="GENDER_MAX_SECONDS"):
+        Settings(
+            _env_file=None,
+            gender_required_seconds=1.5,
+            gender_retry_interval_seconds=1.0,
+            gender_confirmation_attempts=3,
+            gender_max_seconds=3.0,
+        )
 
 
 def test_vertex_location_and_model_are_overridable(monkeypatch):
@@ -76,18 +104,9 @@ def test_sessions_api_url_is_built_from_host_and_port(monkeypatch):
     assert st.sessions_api_url == "http://oron-sessions:9000"
 
 
-def test_flow_store_backend_defaults_to_file(monkeypatch):
-    for k, v in (
-        ("LIVEKIT_URL", "ws://x"),
-        ("LIVEKIT_API_KEY", "k"),
-        ("LIVEKIT_API_SECRET", "s"),
-        ("GOOGLE_CLOUD_PROJECT", "p"),
-        ("SONIOX_API_KEY", "sx"),
-    ):
-        monkeypatch.setenv(k, v)
-    from oron_flows import FlowStoreBackend
-
-    assert load_settings().flow_store_backend == FlowStoreBackend.FILE
+def test_dispatcherless_flow_has_no_fictional_default() -> None:
+    assert Settings(_env_file=None).dev_flow_id is None
+    assert Settings(_env_file=None).dev_tenant_id is None
 
 
 def test_sessions_api_key_is_configurable(monkeypatch):
@@ -140,10 +159,9 @@ def test_an_explicit_quota_project_is_left_alone(monkeypatch):
     assert os.environ["GOOGLE_CLOUD_QUOTA_PROJECT"] == "billing-project"
 
 
-def test_the_word_gate_ships_live_not_dormant(monkeypatch):
-    """It shipped dormant for three deploys — TURN_START was plumbed nowhere and
-    INTERRUPT_MIN_WORDS was documented as the switch, so the value was read and
-    discarded while re-triggered VAD killed generations mid-stream."""
+def test_responsive_barge_in_ships_live_not_dormant(monkeypatch):
+    """The shipped hybrid cuts bot audio on VAD while ordinary listening still
+    waits for transcript evidence, rather than treating every noise as a turn."""
     for k, v in [
         ("LIVEKIT_URL", "ws://x"),
         ("LIVEKIT_API_KEY", "k"),
@@ -152,10 +170,9 @@ def test_the_word_gate_ships_live_not_dormant(monkeypatch):
         ("SONIOX_API_KEY", "sx"),
     ]:
         monkeypatch.setenv(k, v)
-    from oron_agent.config import Settings
 
     st = Settings()
-    assert st.turn_start is TurnStart.MIN_WORDS
+    assert st.turn_start is TurnStart.RESPONSIVE
     assert st.interrupt_min_words == 1
     assert st.vad_confidence == 0.35
     assert st.vad_min_volume == 0.35
@@ -244,3 +261,7 @@ def test_settings_rejects_negative_interrupt_min_words(monkeypatch):
 def test_agent_overrides_rejects_out_of_range_values(kwargs):
     with pytest.raises(ValidationError):
         AgentOverrides(**kwargs)
+
+
+def test_artifacts_default_to_portable_local_storage() -> None:
+    assert Settings(_env_file=None).artifacts_backend is ArtifactsBackend.LOCAL

@@ -1,5 +1,69 @@
 // Generated from control-api OpenAPI. Do not edit by hand.
 
+export interface AgentEvaluationSource {
+  readonly document_id: string;
+  readonly fact_key: string;
+  readonly source_id: string;
+  readonly version: number;
+}
+
+export interface AgentProviderEvaluationRequest {
+  readonly agent_id: string;
+  readonly confirmed: true;
+  readonly text: string;
+  readonly version_id: string;
+}
+
+export interface AgentProviderEvaluationResult {
+  readonly accepted_text: string;
+  readonly actions_executed?: false;
+  readonly agent_id: string;
+  readonly cost_usd?: null;
+  readonly decision: string;
+  readonly evaluation_kind?: "paid_typed_llm";
+  readonly model: string;
+  readonly model_ms: number;
+  readonly provider: string;
+  readonly recognized_text?: null;
+  readonly request_id: string;
+  readonly response: string;
+  readonly sources: Array<AgentEvaluationSource>;
+  readonly validation_ms: number;
+  readonly version_id: string;
+}
+
+export interface AudioPreviewRequest {
+  readonly agent_id: string;
+  readonly confirmed: true;
+  readonly text: string;
+  readonly version_id: string;
+}
+
+export interface AudioPreviewResult {
+  readonly agent_id: string;
+  readonly audio_base64: string;
+  readonly canonical_text: string;
+  readonly duration_seconds: number;
+  readonly evaluation_kind?: "paid_tts_preview";
+  readonly expires_in_seconds?: 60;
+  readonly media_type?: "audio/wav";
+  readonly model: string;
+  readonly provider: string;
+  readonly request_id: string;
+  readonly speech_normalized_text: string;
+  readonly version_id: string;
+  readonly voice: string;
+}
+
+export interface CallCost {
+  readonly llm?: number;
+  readonly stt?: number;
+  readonly telephony?: number;
+  readonly total: number;
+  readonly tts?: number;
+  readonly unpriced?: Array<string>;
+}
+
 export interface CallUsage {
   readonly call_seconds?: number;
   readonly carrier?: string;
@@ -182,9 +246,31 @@ export interface VoiceCampaignSummary {
   readonly status: string;
 }
 
+export interface VoiceControlCommand {
+  readonly expected_epoch: number;
+  readonly idempotency_key: string;
+  readonly mode: "paused" | "ai";
+}
+
+export interface VoiceControlStatus {
+  readonly acknowledged_at?: string | null;
+  readonly acknowledged_epoch?: number | null;
+  readonly active: boolean;
+  readonly can_operate: boolean;
+  readonly command_id?: string | null;
+  readonly desired_mode: "ai" | "paused";
+  readonly epoch: number;
+  readonly human_connection?: "not_managed";
+  readonly resume_required?: boolean;
+  readonly session_id: string;
+  readonly status: "pending" | "applied" | "worker_unavailable";
+  readonly worker_mode?: "ai" | "paused" | null;
+}
+
 export interface VoiceSessionDetail {
   readonly answered: boolean | null;
   readonly contact_id: string | null;
+  readonly cost: CallCost;
   readonly created_at: string;
   readonly direction: Direction;
   readonly ended_at: string | null;
@@ -192,9 +278,11 @@ export interface VoiceSessionDetail {
   readonly outcome: string | null;
   readonly platform_campaign_id: string | null;
   readonly provider: string;
+  readonly recording_available: boolean;
   readonly recording_object_id: string | null;
   readonly session_id: string;
   readonly status: SessionStatus;
+  readonly transcript_available: boolean;
   readonly transcript_object_id: string | null;
   readonly usage: CallUsage;
 }
@@ -217,6 +305,7 @@ export interface VoiceSessionLookup {
 export interface VoiceSessionSummary {
   readonly answered: boolean | null;
   readonly contact_id: string | null;
+  readonly cost: CallCost;
   readonly created_at: string;
   readonly direction: Direction;
   readonly ended_at: string | null;
@@ -225,4 +314,5 @@ export interface VoiceSessionSummary {
   readonly provider: string;
   readonly session_id: string;
   readonly status: SessionStatus;
+  readonly usage: CallUsage;
 }

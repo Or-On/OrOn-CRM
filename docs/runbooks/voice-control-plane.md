@@ -1,8 +1,8 @@
 # Local voice control-plane runbook
 
-This runbook starts only the opt-in Redis-backed LiveKit and LiveKit SIP control
-plane. It does not start the provider-enabled voice agent, publish SIP/RTP ports,
-create trunks or dispatch rules, provision a DID, or place a telephone call.
+This runbook covers the local control plane and the guarded cloud LiveKit/SIP
+dispatcher. It never creates trunks or dispatch rules, provisions a DID, or
+places a call without an authenticated single-recipient action.
 
 ## One-time local configuration
 
@@ -19,7 +19,8 @@ LIVEKIT_API_SECRET=<random local secret of at least 32 characters>
 ```
 
 Do not reuse these values outside localhost and do not use the upstream
-`devkey`/`secret` placeholder pair. All real-action flags must remain false.
+`devkey`/`secret` placeholder pair. Keep all real-action flags false for the
+local Compose voice profile.
 
 ## Start and verify
 
@@ -86,7 +87,7 @@ and open `/flows`, `/voice`, and `/voice/campaigns`.
 3. Open a fictional contact, set voice consent to `granted`, and start a
    simulator call; replay uses the submitted idempotency key.
 4. Inspect the call lifecycle, transcript event, outcome, artifact metadata,
-   usage, and latency on `/voice/calls/[id]`.
+   usage, estimated cost, and latency on `/voice/calls/[id]`.
 5. Create and run a voice campaign. Only explicitly opted-in active contacts
    with usable E.164 identities are selected.
 
@@ -94,5 +95,184 @@ Use `make voice-check` (or `uv run python scripts/dev.py voice-check`) for the
 optional local SIP control plane. It lists resources only. Do not treat an empty
 provider inventory as drift repair authorization.
 
-Real calls remain out of scope. Never set `ENABLE_REAL_TELEPHONY=true` without a
-separate approved action and real-provider runbook.
+## Guarded real outbound call
+
+Use this only after LiveKit Cloud, its outbound SIP trunk, Twilio termination,
+Soniox, and the configured LLM have already been verified. The repository does
+not create or modify those provider resources.
+
+1. Publish the agent profile, retained voice flow, and canonical connected flow.
+2. Apply current migrations with `uv run python scripts/dev.py migrate`.
+3. Set both `ENABLE_REAL_TELEPHONY=true` and
+   `ENABLE_REAL_VOICE_PROVIDERS=true` in the ignored `.env`. They must match.
+4. Restart with `uv run python scripts/dev.py dev`. The dispatcher starts on
+   loopback and reports readiness only when PostgreSQL and its durable webhook
+   ledger are available.
+5. Open the intended contact, verify its E.164 phone identity, set voice consent
+   to `granted`, choose the published voice flow and the caller's requested
+   Hebrew address form, tick the real-call checkbox, press the clearly labelled
+   real-call button, and accept the final browser confirmation. The address form
+   is call-local and may be corrected by the caller during the conversation.
+6. Follow the created session under `/voice`. Reusing an idempotency key cannot
+   create a second call.
+
+Before the first call in each dispatcher process, the retained agent sends a
+one-token, customer-data-free inference probe to the configured LLM. The SIP
+leg is not dialled unless that probe succeeds. This catches valid keys that do
+not have access to `LLM_MODEL`, disabled provider billing/quota, invalid
+credentials, and provider outages before a telephone call starts. A successful
+probe is cached for the dispatcher process; restart the process after changing
+LLM credentials or model access.
+
+For the Google AI Studio compatibility endpoint, the low-latency conversational
+profile is:
+
+```dotenv
+LLM_PROVIDER=openai-compat
+LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+LLM_MODEL=gemini-2.5-flash
+LLM_REASONING_EFFORT=none
+LLM_TEMPERATURE=0.4
+LLM_MAX_TOKENS=256
+LLM_WARMUP=false
+VAD_STOP_SECS=0.2
+USER_SPEECH_TIMEOUT=0.5
+TURN_START=responsive
+TURN_END=soniox
+SONIOX_ENDPOINT_LATENCY_ADJUSTMENT_LEVEL=2
+SONIOX_ENDPOINT_SENSITIVITY=0.15
+SONIOX_MAX_ENDPOINT_DELAY_MS=1000
+USER_IDLE_SECS=10
+TTS_PROVIDER=soniox
+SONIOX_STT_MODEL=stt-rt-v5
+SONIOX_TTS_MODEL=tts-rt-v2
+SONIOX_TTS_VOICE_DEFAULT=Harper
+TTS_TEXT_AGGREGATION=sentence
+TTS_FIRST_CLAUSE=true
+TTS_NIQQUD=false
+TTS_SPEED=1.0
+GENDER_DETECTION_ENABLED=false
+GENDER_REQUIRED_SECONDS=1.5
+GENDER_CONFIDENCE_THRESHOLD=0.9
+GENDER_MAX_SECONDS=4.0
+GENDER_RETRY_INTERVAL_SECONDS=0.75
+GENDER_CONFIRMATION_ATTEMPTS=2
+```
+
+Keep `LLM_API_KEY` only in the ignored `.env`. Gemini 2.5 Flash is intentional
+for telephone turns: disabling thinking reduced the measured model response
+from roughly 2.3 seconds on Gemini 3.8 Flash at low reasoning to roughly one
+second, while preserving streaming and function calls. The 256-token ceiling
+is a safety net against spoken monologues; the flow persona still requires one
+or two sentences and one question at a time. `LLM_REASONING_EFFORT=none` must
+not be paired with Gemini 3, which does not support disabling thinking through
+this endpoint.
+
+`tts-rt-v2` is the supported Soniox real-time model. `Harper` is the current
+fallback chosen for relaxed, conversational delivery; a compatible voice set on
+the call or published flow still wins. Restart the development runner after a
+model, voice, or turn-threshold change. Acoustic gender detection is disabled by
+default because telephone confidence is not a safe identity signal. If enabled
+for controlled evaluation, gender must be confirmed twice above the configured
+threshold; otherwise the agent deliberately keeps neutral Hebrew.
+The caller can set the form deterministically during a call by saying, for
+example, `אני גבר`, `אני אישה`, `דבר אליי בלשון נקבה`, or
+`דברי אליי בלשון זכר`. Explicit self-identification takes effect on that reply,
+persists for the call, and overrides every acoustic guess. Do not enable
+acoustic detection merely to test this behavior. The selected form is applied
+to Pipecat's primary flow/node system instruction, not only to conversation
+history. A final narrow TTS safeguard corrects common unambiguous direct-address
+forms while preserving the female agent's own first-person grammar. For new
+outbound sessions, the operator-selected form is also stored as the safe
+`voice.call.configuration.v1` event; no phone number, prompt, or audio is
+copied into that diagnostic payload.
+
+`TURN_END=soniox` uses the v5 model's Hebrew-aware semantic endpoint for the
+stop decision. `TURN_START=responsive` is deliberately asymmetric: while the
+agent is speaking, VAD starts an interruption immediately; while the agent is
+quiet, at least one transcribed word is still required. This gives barge-in the
+roughly 200 ms VAD response path without allowing wordless line noise to create
+ordinary turns. Endpoint level `2`, sensitivity `0.15`, and the 1000 ms ceiling
+target the repeated 1.6-2.0 second response gaps measured in the latest call.
+`TURN_END=vad` remains the fixed-time rollback; only then do `VAD_STOP_SECS` and
+`USER_SPEECH_TIMEOUT` determine the stop delay.
+
+Terminal dots are removed from synthesized text so they cannot be spoken as
+"period", while question marks and commas remain for prosody. Clock values such
+as `בשעה 10:00` are normalized to natural spoken Hebrew before TTS, and written
+date prefixes such as `ה-17` are joined after number expansion so punctuation is
+not voiced mechanically. Generated LLM text passes through a bounded full-turn
+planner before TTS. If the model joins an answer and a final direct question,
+the planner inserts an internal full stop and restores a missing question mark.
+Keeping the full stop inside one Soniox request avoids both the old comma-chain
+delivery and the terminal "period" regression.
+
+Only clock expressions containing minutes, or bare ranges explicitly labelled
+as hours, are normalized to `עד`. Long telephone and identity-number shapes are
+read digit by digit; a hyphen inside such an identifier is never treated as a
+time range. Generated `HDMI` and `WhatsApp` tokens receive reviewed Hebrew
+spoken forms before synthesis.
+
+Every runtime flow receives a final grounding rule after its published agent
+prompt: a lookup, eligibility result, appointment slot, booking, or confirmation
+may be claimed only after an exposed tool returns that result. A tool-less
+conversation can collect context and offer human follow-up, but cannot simulate
+an unavailable company system. Unsafe requests receive one brief refusal and a
+safe alternative rather than a policy lecture.
+
+The current handler registry contains conversation-routing functions, not
+subscriber lookup, identity verification, ticketing, technician scheduling, or
+message-delivery tools. A final TTS-boundary guard suppresses generated claims
+that one of those operations succeeded and replaces them with an honest human
+follow-up. It also suppresses requests for a full identity number. When real
+business tools are added, their verified result must be carried to an explicit
+claim-authorization state before relaxing this guard; prompt compliance alone
+is not evidence that an operation occurred.
+
+`USER_IDLE_SECS=10` is the first genuine-silence prompt. The idle processor
+suspends this policy while either participant is speaking, so a long caller
+utterance is not misclassified as silence.
+
+`TTS_NIQQUD=false` keeps the experimental model-backed pronunciation transform
+out of the live path. Soniox's native Hebrew and a narrow, reviewed flow
+pronunciation lexicon remain active. The spoken boundary still adds targeted
+niqqud to caller-address homographs whose written form cannot distinguish male
+from female, for example `לְךָ`/`לָךְ` and `נִסִּיתָ`/`נִסִּיתְ`. This is driven
+only by the explicit call-local address form and does not point the rest of the
+sentence. Add other pronunciations only for words demonstrated to be wrong in
+a recording; do not apply automatic niqqud to every generated sentence.
+
+After a completed call, open its row under `/voice`. The details page streams the
+complete stereo recording through the authenticated application. A missing
+player means no recording object was committed; a visible player that returns
+"not found" means the database metadata exists but the configured local/GCS
+artifact is unavailable to the control API. Do not replace this with a public
+storage URL.
+
+## Live cost estimates
+
+The `/voice` call list shows an estimated USD cost for every conversation. While
+a call is active, the agent checkpoints metered usage about once per second and
+the authenticated web surface refreshes the estimate every two seconds. The call
+detail page shows the same live total plus telephony, speech-recognition,
+language-model, and voice-synthesis components. A refresh failure retains the
+last valid tenant-scoped snapshot and does not interfere with the call.
+
+These values are operational estimates, not provider invoices. A **partial
+estimate** means at least one consumed component has no matching rate in the
+current price book. In particular, outbound carrier pricing remains partial
+until the destination/carrier rate can be attributed reliably; the platform
+does not substitute an unrelated inbound or local rate. Provider invoice
+reconciliation remains the source for settled spend.
+
+If the call UI reports that the model is unavailable or not authorized, select
+a model the account can actually infer with. A provider model catalog is not
+sufficient evidence because it may list dedicated or gated models. If it
+reports unavailable billing/quota, enable billing or use another supported LLM
+account before retrying. Never work around either failure by disabling the
+preflight.
+
+Turning on flags does not itself dial. The web admission boundary checks auth,
+CSRF, RBAC, tenant ownership, contact state, consent, identity, and flow; the
+dispatcher independently checks its feature flag and approval again. Real
+voice campaigns remain outside this single-contact workflow.

@@ -2197,14 +2197,21 @@ dependencies = [
     { name = "uvicorn", extra = ["standard"] },
 ]
 
+[package.optional-dependencies]
+voice = [
+    { name = "oron-agent" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = "==0.141.1" },
     { name = "or-on-platform-integration", editable = "packages/py/platform-integration" },
+    { name = "oron-agent", marker = "extra == 'voice'", editable = "packages/py/oron-agent" },
     { name = "oron-db", editable = "packages/py/oron-db" },
     { name = "oron-sessions", editable = "packages/py/oron-sessions" },
     { name = "uvicorn", extras = ["standard"], specifier = "==0.52.4" },
 ]
+provides-extras = ["voice"]
 
 [[package]]
 name = "or-on-dispatcher-runtime"
@@ -2212,7 +2219,10 @@ version = "0.1.0"
 source = { editable = "services/py/dispatcher" }
 dependencies = [
     { name = "or-on-platform-integration" },
+    { name = "oron-db" },
     { name = "oron-dispatcher" },
+    { name = "oron-sessions" },
+    { name = "oron-tenancy" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -2225,7 +2235,10 @@ voice = [
 requires-dist = [
     { name = "or-on-platform-integration", editable = "packages/py/platform-integration" },
     { name = "oron-agent", marker = "extra == 'voice'", editable = "packages/py/oron-agent" },
+    { name = "oron-db", editable = "packages/py/oron-db" },
     { name = "oron-dispatcher", editable = "packages/py/oron-dispatcher" },
+    { name = "oron-sessions", editable = "packages/py/oron-sessions" },
+    { name = "oron-tenancy", editable = "packages/py/oron-tenancy" },
     { name = "uvicorn", extras = ["standard"], specifier = "==0.52.4" },
 ]
 provides-extras = ["voice"]
@@ -2247,7 +2260,7 @@ dev = [
     { name = "ruff" },
 ]
 voice = [
-    { name = "oron-agent" },
+    { name = "oron-agent", extra = ["gender"] },
 ]
 
 [package.metadata]
@@ -2263,7 +2276,7 @@ dev = [
     { name = "pytest-asyncio", specifier = "==1.4.0" },
     { name = "ruff", specifier = "==0.16.5" },
 ]
-voice = [{ name = "oron-agent", editable = "packages/py/oron-agent" }]
+voice = [{ name = "oron-agent", extras = ["gender"], editable = "packages/py/oron-agent" }]
 
 [[package]]
 name = "or-on-platform-integration"
@@ -2329,6 +2342,11 @@ dependencies = [
     { name = "python-dotenv" },
 ]
 
+[package.optional-dependencies]
+gender = [
+    { name = "oron-hebrew", extra = ["gender"] },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "arize-phoenix-otel", specifier = "==0.17.1" },
@@ -2342,12 +2360,14 @@ requires-dist = [
     { name = "oron-common", editable = "packages/py/oron-common" },
     { name = "oron-flows", editable = "packages/py/oron-flows" },
     { name = "oron-hebrew", editable = "packages/py/oron-hebrew" },
+    { name = "oron-hebrew", extras = ["gender"], marker = "extra == 'gender'", editable = "packages/py/oron-hebrew" },
     { name = "oron-secrets", editable = "packages/py/oron-secrets" },
     { name = "oron-sessions", editable = "packages/py/oron-sessions" },
     { name = "pipecat-ai", extras = ["google", "livekit", "rnnoise", "runner", "silero", "soniox", "tracing"], specifier = "==1.8.1" },
     { name = "pydantic-settings", specifier = "==2.15.0" },
     { name = "python-dotenv", specifier = "==1.2.2" },
 ]
+provides-extras = ["gender"]
 
 [[package]]
 name = "oron-common"
@@ -2432,6 +2452,10 @@ dependencies = [
     { name = "oron-common" },
     { name = "pipecat-ai" },
     { name = "renikud-plus", extra = ["cpu"] },
+]
+
+[package.optional-dependencies]
+gender = [
     { name = "safetensors" },
     { name = "torch" },
     { name = "torchaudio" },
@@ -2443,10 +2467,11 @@ requires-dist = [
     { name = "oron-common", editable = "packages/py/oron-common" },
     { name = "pipecat-ai", specifier = "==1.8.1" },
     { name = "renikud-plus", extras = ["cpu"], specifier = "==0.5.0" },
-    { name = "safetensors", specifier = "==0.8.0" },
-    { name = "torch", specifier = "==2.13.0" },
-    { name = "torchaudio", specifier = "==2.11.0" },
+    { name = "safetensors", marker = "extra == 'gender'", specifier = "==0.8.0" },
+    { name = "torch", marker = "extra == 'gender'", specifier = "==2.13.0" },
+    { name = "torchaudio", marker = "extra == 'gender'", specifier = "==2.11.0" },
 ]
+provides-extras = ["gender"]
 
 [[package]]
 name = "oron-secrets"

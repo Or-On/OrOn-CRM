@@ -109,6 +109,63 @@ async def test_runtime_roles_are_unprivileged_and_rls_catalog_is_forced(
         assert rls[table]["relforcerowsecurity"]
 
 
+async def test_web_can_validate_retained_voice_flows_without_mutating_them(
+    pg: asyncpg.Connection,
+) -> None:
+    privileges = await pg.fetchrow(
+        """
+        SELECT has_table_privilege('platform_web', 'public.flows', 'SELECT') AS can_read,
+               has_table_privilege('platform_web', 'public.flows', 'INSERT') AS can_insert,
+               has_table_privilege('platform_web', 'public.flows', 'UPDATE') AS can_update,
+               has_table_privilege('platform_web', 'public.flows', 'DELETE') AS can_delete
+        """
+    )
+    assert privileges is not None
+    assert privileges["can_read"]
+    assert not privileges["can_insert"]
+    assert not privileges["can_update"]
+    assert not privileges["can_delete"]
+
+
+async def test_tenant_work_tables_have_least_privilege_runtime_grants(
+    pg: asyncpg.Connection,
+) -> None:
+    rows = await pg.fetch(
+        """
+        SELECT role_name, table_name,
+               has_table_privilege(role_name, table_name, 'SELECT') AS can_read,
+               has_table_privilege(role_name, table_name, 'INSERT') AS can_insert,
+               has_table_privilege(role_name, table_name, 'UPDATE') AS can_update,
+               has_table_privilege(role_name, table_name, 'DELETE') AS can_delete
+        FROM unnest(ARRAY[
+          'platform_web', 'platform_readonly', 'platform_voice', 'platform_messaging'
+        ]) AS roles(role_name)
+        CROSS JOIN unnest(ARRAY[
+          'finance.expenses', 'crm.tasks', 'crm.calendar_events'
+        ]) AS tables(table_name)
+        ORDER BY role_name, table_name
+        """
+    )
+
+    assert len(rows) == 12
+    for row in rows:
+        if row["role_name"] == "platform_web":
+            assert row["can_read"]
+            assert row["can_insert"]
+            assert row["can_update"]
+            assert row["can_delete"]
+        elif row["role_name"] == "platform_readonly":
+            assert row["can_read"]
+            assert not row["can_insert"]
+            assert not row["can_update"]
+            assert not row["can_delete"]
+        else:
+            assert not row["can_read"]
+            assert not row["can_insert"]
+            assert not row["can_update"]
+            assert not row["can_delete"]
+
+
 async def test_target_policies_have_no_supabase_auth_dependency(pg: asyncpg.Connection) -> None:
     policy_sql = "\n".join(
         str(row["definition"])
@@ -153,6 +210,69 @@ async def test_security_definer_functions_pin_search_path_and_public_has_no_exec
         assert not row["public_execute"]
 
 
+async def test_whatsapp_ai_defaults_archival_and_notification_grants(
+    pg: asyncpg.Connection,
+) -> None:
+    columns = {
+        (row["table_schema"], row["table_name"], row["column_name"])
+        for row in await pg.fetch(
+            """
+            SELECT table_schema, table_name, column_name
+            FROM information_schema.columns
+            WHERE (table_schema, table_name) IN (
+              ('agents', 'agent_profiles'),
+              ('automation', 'flow_definitions'),
+              ('crm', 'tenant_settings')
+            )
+            """
+        )
+    }
+    assert ("agents", "agent_profiles", "archived_at") in columns
+    assert ("automation", "flow_definitions", "archived_at") in columns
+    assert (
+        "crm",
+        "tenant_settings",
+        "whatsapp_ai_agent_profile_id",
+    ) in columns
+    assert (
+        "crm",
+        "tenant_settings",
+        "whatsapp_ai_enabled_by_user_id",
+    ) in columns
+    assert ("crm", "tenant_settings", "whatsapp_ai_enabled_at") in columns
+
+    privileges = await pg.fetchrow(
+        """
+        SELECT
+          has_function_privilege(
+            'platform_messaging',
+            'platform.current_tenant_notification_recipients()',
+            'EXECUTE'
+          ) AS can_resolve_recipients,
+          has_column_privilege(
+            'platform_messaging', 'crm.tenant_settings', 'tenant_id', 'SELECT'
+          ) AS can_read_tenant,
+          has_column_privilege(
+            'platform_messaging', 'crm.tenant_settings',
+            'whatsapp_ai_agent_profile_id', 'SELECT'
+          ) AS can_read_agent,
+          has_column_privilege(
+            'platform_messaging', 'crm.tenant_settings',
+            'whatsapp_ai_enabled_by_user_id', 'SELECT'
+          ) AS can_read_actor,
+          has_column_privilege(
+            'platform_messaging', 'crm.tenant_settings', 'display_name', 'SELECT'
+          ) AS can_read_display_name
+        """
+    )
+    assert privileges is not None
+    assert privileges["can_resolve_recipients"]
+    assert privileges["can_read_tenant"]
+    assert privileges["can_read_agent"]
+    assert privileges["can_read_actor"]
+    assert not privileges["can_read_display_name"]
+
+
 async def test_all_unified_foreign_keys_declare_delete_semantics(pg: asyncpg.Connection) -> None:
     rows = await pg.fetch(
         """
@@ -164,7 +284,18 @@ async def test_all_unified_foreign_keys_declare_delete_semantics(pg: asyncpg.Con
         WHERE con.contype = 'f'
           AND n.nspname = ANY($1::text[])
         """,
-        ["platform", "crm", "messaging", "automation", "agents", "objects", "ops", "audit", "live"],
+        [
+            "platform",
+            "crm",
+            "messaging",
+            "automation",
+            "agents",
+            "objects",
+            "ops",
+            "audit",
+            "live",
+            "finance",
+        ],
     )
 
     assert rows
@@ -199,7 +330,7 @@ async def test_development_seed_is_idempotent(isolated_postgres_url: str) -> Non
             "SELECT value FROM platform.system_metadata WHERE key = 'foundation_version'"
         )
         assert row is not None
-        assert json.loads(row["value"]) == "phase-4"
+        assert json.loads(row["value"]) == "phase-7"
         assert (
             await connection.fetchval(
                 "SELECT count(*) FROM users WHERE email = 'operator@or-on.local'"

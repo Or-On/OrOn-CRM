@@ -17,8 +17,8 @@ export default async function VoicePage() {
       client.reconcileVoicePhoneNumbers(),
     ]);
     return (
-      <main className="page page--wide">
-        <ProductHeading page="voice" />
+      <main className="page page--wide page--workspace-premium">
+        <ProductHeading page="voice" premium />
         <VoiceOverview
           flows={flows.data.items}
           numbers={numbers.data.items}

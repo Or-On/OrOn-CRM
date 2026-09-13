@@ -6,8 +6,9 @@ architecture it loads lives flat in `ecapa_model.py`, mirroring Jpost's
 target instead requires a verified local model path and exact SHA-256 and uses
 `local_files_only=True`; no runtime download fallback exists.
 
-torch/torchaudio remain package dependencies, but the classifier is unavailable
-until an operator deliberately supplies a licensed, checksum-pinned asset.
+torch/torchaudio are installed only through the optional ``gender`` dependency;
+the classifier is unavailable until an operator deliberately selects that
+runtime and supplies a licensed, checksum-pinned asset.
 """
 
 from __future__ import annotations
@@ -92,6 +93,7 @@ class GenderClassifierProcessor(FrameProcessor):
         confidence_threshold: float = 0.7,
         max_seconds: float = 3.0,
         retry_interval_seconds: float = 0.5,
+        confirmation_attempts: int = 1,
         on_gender_classified: Callable[[str, float], Awaitable[None]] | None = None,
         vad_analyzer: VADAnalyzer | None = None,
         is_bot_speaking: Callable[[], bool] | None = None,
@@ -107,6 +109,9 @@ class GenderClassifierProcessor(FrameProcessor):
         retry_interval_seconds: extra speech required between low-confidence
             retries. Without it a retry fires on every ~20ms audio frame,
             i.e. ~100 inferences across a 1s->3s window.
+        confirmation_attempts: matching high-confidence readings required before
+            gender is accepted. A value above one trades a slightly later
+            decision for fewer customer-facing misclassifications.
         vad_analyzer: speech gate. Injected so tests can drive it; defaults to
             its OWN Silero instance rather than sharing the turn-taking one,
             which is stateful and driven from another point in the pipeline.
@@ -116,6 +121,9 @@ class GenderClassifierProcessor(FrameProcessor):
         self._confidence_threshold = confidence_threshold
         self._max_seconds = max_seconds
         self._retry_interval_seconds = retry_interval_seconds
+        if confirmation_attempts < 1:
+            raise ValueError("confirmation_attempts must be at least 1")
+        self._confirmation_attempts = confirmation_attempts
         self._on_gender_classified = on_gender_classified
         self._vad = (
             vad_analyzer
@@ -133,6 +141,8 @@ class GenderClassifierProcessor(FrameProcessor):
         self._classified = False
         self._classifying = False
         self._next_attempt_seconds = required_seconds
+        self._candidate_gender: str | None = None
+        self._candidate_confirmations = 0
         # Only audio inside the caller's OWN turn is buffered. The echo guard
         # below is a timing guess; this is not. Echo arrives when the caller is
         # not speaking, so the turn boundary excludes it by construction — which
@@ -195,15 +205,28 @@ class GenderClassifierProcessor(FrameProcessor):
             return
 
         seconds = self._buffered_seconds()
-        if confidence < self._confidence_threshold and seconds < self._max_seconds:
+        if confidence >= self._confidence_threshold:
+            if gender == self._candidate_gender:
+                self._candidate_confirmations += 1
+            else:
+                self._candidate_gender = gender
+                self._candidate_confirmations = 1
+        else:
+            self._candidate_gender = None
+            self._candidate_confirmations = 0
+
+        confirmed = self._candidate_confirmations >= self._confirmation_attempts
+        if not confirmed and seconds < self._max_seconds:
             logger.warning(
-                f"[GenderClassifierProcessor] low confidence ({confidence:.2f}), "
+                "[GenderClassifierProcessor] verdict not yet stable "
+                f"({gender}, confidence={confidence:.2f}, "
+                f"confirmations={self._candidate_confirmations}/{self._confirmation_attempts}); "
                 f"continuing to buffer ({seconds:.1f}s / {self._max_seconds}s max)"
             )
             self._classifying = False
             return
 
-        if confidence < self._confidence_threshold:
+        if not confirmed:
             gender = "unknown"
 
         self._classified = True

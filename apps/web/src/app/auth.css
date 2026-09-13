@@ -1,0 +1,387 @@
+/* Focused entry surfaces share the product's actual Or-On brand and controls. */
+.login-page,
+.invite-page {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-block-size: 100dvh;
+  padding-inline: clamp(1rem, 4vw, 4rem);
+  color: var(--or-text);
+  background: var(--or-bg);
+  font-family: var(--or-font-sans);
+}
+.login-header,
+.invite-header,
+.login-footer {
+  inline-size: min(100%, 80rem);
+  margin-inline: auto;
+}
+.login-header,
+.invite-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-block-size: 5rem;
+}
+.login-header .brand__name,
+.invite-header .brand__name {
+  color: var(--or-text);
+  font-size: 1rem;
+  letter-spacing: -0.03em;
+}
+.login-preferences {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.login-preferences .or-select {
+  max-inline-size: 9rem;
+  font-size: 0.8125rem;
+}
+.login-body,
+.invite-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  align-items: center;
+  gap: clamp(2rem, 6vw, 6rem);
+  inline-size: min(100%, 74rem);
+  margin-inline: auto;
+  padding-block: 2rem 3rem;
+}
+.entry-story {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-block-size: 34rem;
+  padding: clamp(2rem, 4vw, 4rem);
+  overflow: hidden;
+  border: 1px solid var(--or-brand-deep);
+  border-radius: var(--or-radius-lg);
+  color: #eaf4ff;
+  background:
+    radial-gradient(ellipse at 90% 90%, #0a2348, transparent 75%),
+    var(--or-brand-dark);
+}
+.entry-story::before {
+  position: absolute;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+  background:
+    linear-gradient(rgb(127 198 255 / 4%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(127 198 255 / 4%) 1px, transparent 1px);
+  background-size: 3rem 3rem;
+  mask-image: linear-gradient(transparent, black);
+}
+.entry-story > * {
+  position: relative;
+}
+.entry-story__eyebrow {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: #7fc6ff;
+}
+.entry-story__statement {
+  margin: 2.5rem 0 1rem;
+  max-inline-size: 13ch;
+  font: 600 clamp(2rem, 3.4vw, 3.25rem)/1.2 var(--or-font-heading);
+  letter-spacing: -0.045em;
+  text-wrap: balance;
+}
+.entry-story__description {
+  margin: 0;
+  max-inline-size: 40ch;
+  color: #8fb0d8;
+  font-size: 0.9375rem;
+  line-height: 1.8;
+}
+.entry-architecture {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-block-size: 12rem;
+  gap: 0;
+}
+.entry-architecture > span {
+  display: grid;
+  flex-shrink: 0;
+  inline-size: 3.5rem;
+  block-size: 3.5rem;
+  border: 1px solid rgb(127 198 255 / 25%);
+  color: #7fc6ff;
+  background: rgb(10 35 72 / 80%);
+  border-radius: 1rem;
+  place-items: center;
+}
+.entry-architecture > i {
+  block-size: 1px;
+  flex: 1;
+  background: linear-gradient(90deg, transparent, #2d8cff, transparent);
+}
+.entry-architecture .entry-architecture__core {
+  inline-size: 5rem;
+  block-size: 5rem;
+  border-color: #2d8cff;
+  color: #eaf4ff;
+  background: #155cff;
+  box-shadow: 0 0 40px rgb(45 140 255 / 18%);
+}
+.entry-architecture .entry-architecture__context {
+  position: absolute;
+  inset-inline-start: calc(50% - 1.25rem);
+  inset-block-end: 0;
+  inline-size: 2.5rem;
+  block-size: 2.5rem;
+  border-radius: 0.75rem;
+}
+.entry-architecture__context::before {
+  position: absolute;
+  inset-block-end: 100%;
+  inset-inline-start: 50%;
+  block-size: 1.5rem;
+  inline-size: 1px;
+  content: "";
+  background: rgb(127 198 255 / 30%);
+}
+.entry-story__principles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem 1rem;
+  padding-block-start: 2.5rem;
+  color: #8fb0d8;
+  font-size: 0.6875rem;
+}
+.entry-story__principles span + span::before {
+  content: "·";
+  margin-inline-end: 1rem;
+  color: #7fc6ff;
+}
+.login-access,
+.invite-card {
+  display: grid;
+  gap: 1.5rem;
+  inline-size: 100%;
+  padding: clamp(1.25rem, 3vw, 2.25rem);
+  background: var(--or-surface);
+  border: 1px solid var(--or-border);
+  border-radius: var(--or-radius-lg);
+  box-shadow: var(--or-shadow-1);
+}
+.login-access__heading {
+  display: grid;
+  gap: 0.75rem;
+}
+.login-eyebrow,
+.invite-card__eyebrow {
+  color: var(--or-accent);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+.login-access__heading h1,
+.invite-card h1 {
+  margin: 0;
+  font-size: clamp(1.75rem, 2.5vw, 2.25rem);
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.04em;
+  text-wrap: balance;
+}
+.login-access__heading > p,
+.invite-card > p,
+.invite-form > p {
+  margin: 0;
+  color: var(--or-text-muted);
+  font-size: 0.875rem;
+  line-height: 1.7;
+}
+.login-form,
+.invite-form {
+  display: grid;
+  gap: 1.25rem;
+  margin-block-start: 0.25rem;
+}
+.login-access .or-field,
+.invite-card .or-field {
+  gap: 0.5rem;
+}
+.login-access .or-field__label,
+.invite-card .or-field__label {
+  color: var(--or-text-secondary);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+.login-access .or-input,
+.invite-card .or-input {
+  min-block-size: 3rem;
+  background: var(--or-input-background);
+}
+.login-form > .or-button,
+.invite-form > .or-button {
+  inline-size: 100%;
+  min-block-size: 3rem;
+  margin-block-start: 0.5rem;
+}
+.login-access .access-help {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font-size: 0.75rem;
+  color: var(--or-text-muted);
+}
+.access-help summary {
+  inline-size: fit-content;
+  min-block-size: 2rem;
+  cursor: pointer;
+}
+.access-help p {
+  margin: 0.5rem 0 0;
+  color: var(--or-text-muted);
+  line-height: 1.7;
+}
+.login-trust {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  margin: 0;
+  padding-block-start: 1.25rem;
+  color: var(--or-text-muted);
+  border-block-start: 1px solid var(--or-divider);
+  font-size: 0.75rem;
+  line-height: 1.6;
+}
+.login-trust svg {
+  flex-shrink: 0;
+  margin-block-start: 0.2rem;
+}
+.login-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-block-size: 4rem;
+  color: var(--or-text-muted);
+  border-block-start: 1px solid var(--or-divider);
+  font-size: 0.75rem;
+}
+.invite-card > .text-link {
+  min-block-size: 2.75rem;
+  display: inline-flex;
+  align-items: center;
+  color: var(--or-accent);
+  font-size: 0.875rem;
+}
+[dir="rtl"] .login-eyebrow,
+[dir="rtl"] .invite-card__eyebrow {
+  letter-spacing: 0;
+}
+@media (max-width: 62rem) {
+  .login-body,
+  .invite-body {
+    gap: 2rem;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .entry-story {
+    padding: 2rem;
+    min-block-size: 30rem;
+  }
+  .entry-story__statement {
+    font-size: 2.1rem;
+  }
+  .entry-story__description {
+    font-size: 0.8125rem;
+  }
+  .entry-story__principles {
+    gap: 0.5rem;
+  }
+  .entry-story__principles span + span::before {
+    margin-inline-end: 0.5rem;
+  }
+}
+@media (max-width: 48rem) {
+  .login-page,
+  .invite-page {
+    padding-inline: 1rem;
+  }
+  .login-header,
+  .invite-header {
+    min-block-size: 4.5rem;
+  }
+  .login-header .brand-lockup__copy,
+  .invite-header .brand-lockup__copy {
+    display: none;
+  }
+  .login-body,
+  .invite-body {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.25rem;
+    inline-size: min(100%, 32rem);
+    padding-block: 1rem 2rem;
+  }
+  .entry-story {
+    min-block-size: auto;
+    padding: 1.5rem;
+    border-radius: var(--or-radius-md);
+  }
+  .entry-story__eyebrow {
+    font-size: 0.6875rem;
+  }
+  .entry-story__statement {
+    max-inline-size: none;
+    margin: 0.65rem 0 0;
+    font-size: 1.45rem;
+  }
+  .entry-story__description,
+  .entry-architecture,
+  .entry-story__principles {
+    display: none;
+  }
+  .login-access,
+  .invite-card {
+    padding: 1.5rem;
+  }
+  .login-preferences .or-select {
+    max-inline-size: 7.5rem;
+    font-size: 0.75rem;
+    min-block-size: 2.75rem;
+  }
+  .login-footer {
+    padding-block: 1rem;
+    align-items: flex-start;
+  }
+  .login-footer span:last-child {
+    max-inline-size: 13rem;
+    text-align: end;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .login-access,
+  .invite-card {
+    animation: entry-form-in 220ms ease-out;
+  }
+  @keyframes entry-form-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}
+@media (forced-colors: active) {
+  .entry-story,
+  .login-access,
+  .invite-card {
+    border: 1px solid CanvasText;
+    background: Canvas;
+    color: CanvasText;
+  }
+  .entry-architecture {
+    display: none;
+  }
+}

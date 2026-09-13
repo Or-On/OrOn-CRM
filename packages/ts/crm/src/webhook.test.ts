@@ -9,6 +9,39 @@ import {
 } from "./webhook.js";
 
 describe("WhatsApp webhook boundary", () => {
+  it("preserves provider time and does not invent one for legacy or invalid envelopes", () => {
+    const payload = (timestamp: string | undefined) => ({
+      entry: [
+        {
+          id: "fixture",
+          changes: [
+            {
+              value: {
+                metadata: { phone_number_id: "fixture-phone" },
+                messages: [
+                  {
+                    id: "fixture-message",
+                    from: "12025550199",
+                    text: { body: "Fictional text" },
+                    timestamp,
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(
+      parseWhatsAppTextEnvelopes(payload("1788364800"))[0]?.occurredAt,
+    ).toBe("2026-09-02T16:00:00.000Z");
+    expect(
+      parseWhatsAppTextEnvelopes(payload(undefined))[0]?.occurredAt,
+    ).toBeUndefined();
+    expect(
+      parseWhatsAppTextEnvelopes(payload("999999999999999"))[0]?.occurredAt,
+    ).toBeUndefined();
+  });
   it("verifies the exact raw request bytes", () => {
     const body = Buffer.from('{"entry":[]}');
     const secret = "fictional-app-secret-for-tests";

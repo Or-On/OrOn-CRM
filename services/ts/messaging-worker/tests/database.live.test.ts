@@ -44,18 +44,28 @@ describe.skipIf(databaseUrl === undefined)("durable messaging worker", () => {
         return id;
       });
 
-      const store = createMessagingStore(databaseUrl, "phase4-live-worker", {
-        simulator: new SimulatorWhatsAppProvider(),
-        meta: new MetaWhatsAppProvider({
-          enabled: false,
-          accessToken: undefined,
-          graphApiVersion: undefined,
-          phoneNumberId: undefined,
-        }),
-      });
+      const store = createMessagingStore(
+        databaseUrl,
+        "phase4-live-worker",
+        {
+          simulator: new SimulatorWhatsAppProvider(),
+          meta: new MetaWhatsAppProvider({
+            enabled: false,
+            accessToken: undefined,
+            graphApiVersion: undefined,
+            phoneNumberId: undefined,
+          }),
+        },
+        undefined,
+        { simulatorEnabled: true },
+      );
       try {
         expect(await store.processAvailable()).toBeGreaterThan(0);
-        expect(await store.processAvailable()).toBe(0);
+        // The worker holds one lease at a time, so each recipient is a turn.
+        let remaining = 1;
+        for (let turn = 0; turn < 200 && remaining > 0; turn += 1)
+          remaining = await store.processAvailable();
+        expect(remaining).toBe(0);
       } finally {
         await store.close();
       }
@@ -122,9 +132,10 @@ describe.skipIf(databaseUrl === undefined)("durable messaging worker", () => {
         if (channelId === undefined)
           throw new Error("Meta channel fixture failed");
         const conversations = await transaction<{ id: string }[]>`
-          INSERT INTO messaging.conversations (tenant_id, channel_id, contact_id, status)
-          VALUES (platform.current_tenant_id(), ${channelId}::uuid, ${contact.id}::uuid, 'open')
-          ON CONFLICT (tenant_id, channel_id, contact_id) DO UPDATE SET status = 'open'
+          INSERT INTO messaging.conversations (tenant_id, channel_id, contact_id, status, customer_service_window_expires_at)
+          VALUES (platform.current_tenant_id(), ${channelId}::uuid, ${contact.id}::uuid, 'open',CURRENT_TIMESTAMP+INTERVAL '1 hour')
+          ON CONFLICT (tenant_id, channel_id, contact_id) DO UPDATE SET status = 'open',
+            customer_service_window_expires_at=EXCLUDED.customer_service_window_expires_at
           RETURNING id
         `;
         const conversation = conversations[0]?.id;

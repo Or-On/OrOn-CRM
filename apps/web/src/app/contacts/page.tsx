@@ -15,17 +15,24 @@ import { ContactManager } from "../../features/contacts";
 export default async function ContactsPage({
   searchParams,
 }: {
-  readonly searchParams: Promise<{ readonly q?: string }>;
+  readonly searchParams: Promise<{
+    readonly create?: string;
+    readonly q?: string;
+  }>;
 }) {
   try {
-    const { q } = await searchParams;
+    const { create, q } = await searchParams;
     const contacts = await withCurrentTenant("crm:read", (sql) =>
       listContacts(sql, q === undefined ? {} : { query: q }),
     );
     return (
-      <main className="page page--wide">
-        <ProductHeading page="contacts" />
-        <ContactManager contacts={contacts} query={q ?? ""} />
+      <main className="page page--wide page--workspace-premium">
+        <ProductHeading page="contacts" premium />
+        <ContactManager
+          contacts={contacts}
+          query={q ?? ""}
+          {...(create === "1" ? { initialPanel: "create" as const } : {})}
+        />
       </main>
     );
   } catch (error) {

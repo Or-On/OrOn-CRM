@@ -3,7 +3,7 @@ import { NextRequest } from "next/server";
 import { proxy } from "../src/proxy";
 
 describe("server-rendered locale selection", () => {
-  it("overwrites untrusted locale metadata and persists a direct Hebrew public visit", () => {
+  it("overwrites untrusted locale metadata and persists the Hebrew application entry language", () => {
     const response = proxy(
       new NextRequest("https://preview.example.invalid/he", {
         headers: { "x-or-on-locale": "unsupported" },
@@ -14,7 +14,7 @@ describe("server-rendered locale selection", () => {
     );
     expect(
       response.headers.get("x-middleware-request-x-or-on-public-route"),
-    ).toBe("localized-root");
+    ).toBeNull();
     expect(response.cookies.get("or_on_locale")).toMatchObject({
       value: "he",
       httpOnly: true,
@@ -34,10 +34,10 @@ describe("server-rendered locale selection", () => {
     );
     expect(
       response.headers.get("x-middleware-request-x-or-on-public-route"),
-    ).toBe("application");
+    ).toBeNull();
     expect(response.headers.get("location")).toBeNull();
   });
-  it("overwrites a spoofed public marker on application and nested locale paths", () => {
+  it("removes the obsolete public marker from every application request", () => {
     for (const path of ["/inbox", "/login", "/en/product", "/he/"]) {
       const response = proxy(
         new NextRequest(`http://localhost${path}`, {
@@ -46,7 +46,7 @@ describe("server-rendered locale selection", () => {
       );
       expect(
         response.headers.get("x-middleware-request-x-or-on-public-route"),
-      ).toBe("application");
+      ).toBeNull();
     }
   });
   it("falls back to English for unsupported cookie values", () => {

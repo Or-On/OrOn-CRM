@@ -80,3 +80,73 @@ def test_tts_voice_defaults_to_none_and_is_settable():
         ).tts_voice
         == "Kore"
     )
+
+
+def test_caller_address_gender_is_typed_and_optional():
+    assert (
+        CallContext(
+            call_id="c7", direction="outbound", flow_id=FLOW_ID, tenant_id=TENANT_ID
+        ).caller_gender
+        is None
+    )
+    assert (
+        CallContext(
+            call_id="c8",
+            direction="outbound",
+            flow_id=FLOW_ID,
+            tenant_id=TENANT_ID,
+            caller_gender="male",
+        ).caller_gender
+        == "male"
+    )
+    with pytest.raises(ValidationError):
+        CallContext(
+            call_id="c9",
+            direction="outbound",
+            flow_id=FLOW_ID,
+            tenant_id=TENANT_ID,
+            caller_gender="unknown",
+        )
+
+
+def test_cross_channel_context_is_typed_and_bounded():
+    conversation_id = uuid.uuid4()
+    ctx = CallContext(
+        call_id="c10",
+        direction="outbound",
+        flow_id=FLOW_ID,
+        tenant_id=TENANT_ID,
+        source_conversation_id=conversation_id,
+        conversation_context="Customer: Please call me now.",
+    )
+    assert ctx.source_conversation_id == conversation_id
+    assert ctx.conversation_context == "Customer: Please call me now."
+    with pytest.raises(ValidationError):
+        CallContext(
+            call_id="c11",
+            direction="outbound",
+            flow_id=FLOW_ID,
+            tenant_id=TENANT_ID,
+            conversation_context="x" * 4001,
+        )
+
+
+def test_optional_published_bindings_round_trip_in_call_context():
+    old = CallContext(call_id="legacy", direction="outbound", flow_id=FLOW_ID, tenant_id=TENANT_ID)
+    assert old.flow_version is None and old.agent_version_id is None
+    agent_version_id = uuid.uuid4()
+    pinned = old.model_copy(update={"flow_version": 3, "agent_version_id": agent_version_id})
+    parsed = CallContext.model_validate_json(pinned.model_dump_json())
+    assert parsed.flow_version == 3 and parsed.agent_version_id == agent_version_id
+
+
+@pytest.mark.parametrize("version", [0, -1, 1.5, True, "1"])
+def test_flow_version_requires_positive_integer(version):
+    with pytest.raises(ValidationError):
+        CallContext(
+            call_id="invalid",
+            direction="outbound",
+            flow_id=FLOW_ID,
+            tenant_id=TENANT_ID,
+            flow_version=version,
+        )

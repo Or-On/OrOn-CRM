@@ -51,7 +51,10 @@ def test_the_warmup_is_skipped_on_a_provider_that_does_not_cache():
     alone also matches the unrelated `running_llm` line above, which made an
     earlier version of this test pass with the gate deleted."""
     src = inspect.getsource(bot.run_bot)
-    assert "if st.llm_warmup and st.llm_provider is LlmProvider.OPENAI_COMPAT:" in src
+    assert (
+        "if st.llm_warmup and st.llm_provider is LlmProvider.OPENAI_COMPAT "
+        "and voice_control is None:" in src
+    )
 
 
 def test_the_standalone_entrypoint_installs_the_exporter():

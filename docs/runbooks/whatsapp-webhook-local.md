@@ -41,7 +41,7 @@ docker compose -f infra/compose/webhook-tunnel.yaml down
 This removes only the two stateless tunnel containers and their dedicated
 network; no application volumes are attached. Containers intentionally do not
 auto-start after Docker/host restart. Restart the tunnel explicitly and re-read
-its URL; update Meta if it changed. A later stable domain/named tunnel or GCP
+its URL; update Meta if it changed. A later stable domain or named tunnel
 deployment requires its own explicit setup; do not rely on this URL permanently.
 
 ## Configure Meta manually

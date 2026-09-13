@@ -11,6 +11,7 @@ top-to-bottom like the call does.
 """
 
 import uuid
+from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -23,6 +24,13 @@ class FlowSpec(BaseModel):
     version: int
     entry: str
     language: str = "he"
+    persona_gender: Literal["female", "male", "neutral"] = "neutral"
+    """Structured speaking gender for Hebrew morphology and G2P.
+
+    It is intentionally separate from ``role_message``: a TTS processor cannot
+    reliably recover grammar from prose, and guessing female was wrong for
+    existing male-authored flows.
+    """
     role_message: str | None = None
     """Flow-wide persona; a node's own ``role_message`` overrides it."""
     pronunciations: dict[str, str] = Field(default_factory=dict)

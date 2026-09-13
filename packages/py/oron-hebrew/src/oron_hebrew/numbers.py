@@ -139,6 +139,8 @@ def number_to_hebrew(n: int) -> str:
             parts.append(_THOUSANDS[thousands])
         elif thousands <= 19:
             parts.append(_TEENS[thousands - 10] + " אלף")
+        elif thousands >= 100:
+            parts.append(number_to_hebrew(thousands) + " אלף")
         else:
             t_tens = thousands // 10
             t_units = thousands % 10
@@ -193,18 +195,18 @@ _FEM_TEENS = [
     "שמונה עשרה",
     "תשע עשרה",
 ]
-_FEM_TENS = ["", "עשר", "עשרים", "שלושים", "ארבעים", "חמישים"]
+_FEM_TENS = ["", "עשר", "עשרים", "שלושים", "ארבעים", "חמישים", "שישים", "שבעים", "שמונים", "תשעים"]
 
 
 def feminine_hour_minute(n: int) -> str:
-    """Convert 0-59 to feminine Hebrew words (for hours/minutes)."""
+    """Convert 0-99 to feminine Hebrew words (hours/minutes and agorot)."""
     if n == 0:
         return "אפס"
     if 1 <= n <= 9:
         return _FEM_UNITS[n]
     if 10 <= n <= 19:
         return _FEM_TEENS[n - 10]
-    if 20 <= n <= 59:
+    if 20 <= n <= 99:
         tens = n // 10
         units = n % 10
         if units == 0:

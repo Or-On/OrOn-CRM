@@ -1,6 +1,9 @@
-import { hasPermission, permissions } from "./authorization.js";
+import { Buffer } from "node:buffer";
+
+import { isAuthorized, permissions } from "./authorization.js";
 import {
   generateOpaqueToken,
+  hashPassword,
   hashOpaqueToken,
   tokenDigestMatches,
   verifyPassword,
@@ -8,6 +11,7 @@ import {
 import type {
   AuthRepository,
   AuthSession,
+  InvitationRecord,
   IssuedSession,
   PublicSession,
 } from "./types.js";
@@ -115,6 +119,8 @@ export class AuthService {
         sessionId,
         userId: record.userId,
         email: record.email,
+        displayName: record.displayName,
+        isSuperuser: record.isSuperuser,
         tenant,
         memberships,
         csrfTokenHash: hashOpaqueToken(csrfToken, this.#tokenPepper),
@@ -174,14 +180,66 @@ export class AuthService {
     );
   }
 
+  public async verifyCurrentPassword(
+    session: AuthSession,
+    password: string,
+  ): Promise<boolean> {
+    const record = await this.#repository.lookupLogin(session.email);
+    return record?.userId === session.userId &&
+      record.passwordHash !== undefined
+      ? verifyPassword(record.passwordHash, password)
+      : false;
+  }
+
+  public async inspectInvitation(
+    token: string,
+  ): Promise<InvitationRecord | undefined> {
+    if (token.length < 32 || token.length > 128) return undefined;
+    return this.#repository.invitationRecord(
+      Buffer.from(hashOpaqueToken(token, this.#tokenPepper)).toString("hex"),
+    );
+  }
+
+  public async acceptInvitation(input: {
+    readonly token: string;
+    readonly password?: string;
+    readonly displayName?: string;
+    readonly requestId: string;
+  }): Promise<{ readonly accountCreated: boolean }> {
+    const invitation = await this.inspectInvitation(input.token);
+    if (invitation === undefined) throw new InvalidCredentialsError();
+    const passwordHash = invitation.existingAccount
+      ? "existing-account"
+      : await hashPassword(input.password ?? "");
+    const accountCreated = await this.#repository.acceptInvitation({
+      tokenHash: Buffer.from(
+        hashOpaqueToken(input.token, this.#tokenPepper),
+      ).toString("hex"),
+      passwordHash,
+      displayName: input.displayName?.trim() ?? "",
+      requestId: input.requestId,
+    });
+    return { accountCreated };
+  }
+
   public toPublicSession(session: AuthSession): PublicSession {
     return {
-      user: { id: session.userId, email: session.email },
+      user: {
+        id: session.userId,
+        email: session.email,
+        ...(session.displayName === undefined
+          ? {}
+          : { displayName: session.displayName }),
+        isSuperuser: session.isSuperuser,
+      },
       tenant: session.tenant,
       memberships: session.memberships,
       expiresAt: session.absoluteExpiresAt.toISOString(),
       permissions: permissions.filter((permission) =>
-        hasPermission(session.tenant.role, permission),
+        isAuthorized(
+          { role: session.tenant.role, isSuperuser: session.isSuperuser },
+          permission,
+        ),
       ),
     };
   }

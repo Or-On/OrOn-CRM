@@ -32,6 +32,8 @@ function repository(login?: LoginRecord) {
     absoluteExpiresAt: new Date("2030-01-02T00:00:00Z"),
     csrfTokenHash: new Uint8Array(32),
     email: "operator@example.test",
+    displayName: "Fixture Operator",
+    isSuperuser: false,
     memberships: [membership],
     rotationCount: 0,
     sessionId: "30000000-0000-4000-8000-000000000001",
@@ -39,12 +41,14 @@ function repository(login?: LoginRecord) {
     userId: "20000000-0000-4000-8000-000000000001",
   };
   const value: AuthRepository = {
+    acceptInvitation: () => Promise.resolve(true),
     close: () => Promise.resolve(),
     createSession: (input) => {
       created = input;
       return Promise.resolve(session.sessionId);
     },
     lookupLogin: () => Promise.resolve(login),
+    invitationRecord: () => Promise.resolve(undefined),
     membershipsForUser: () => Promise.resolve([membership]),
     recordLoginFailure: () => Promise.resolve(),
     recordLoginSuccess: () => Promise.resolve(),
@@ -65,6 +69,7 @@ describe("AuthService", () => {
   it("issues opaque session material while persisting only digests", async () => {
     const repo = repository({
       email: "operator@example.test",
+      displayName: "Fixture Operator",
       failedAttempts: 0,
       isSuperuser: false,
       lockedUntil: undefined,
@@ -90,6 +95,9 @@ describe("AuthService", () => {
     expect(service.toPublicSession(issued.session).permissions).toContain(
       "tenant:manage",
     );
+    expect(service.toPublicSession(issued.session).user.displayName).toBe(
+      "Fixture Operator",
+    );
   });
 
   it("uses one generic failure for unknown users and wrong passwords", async () => {
@@ -104,6 +112,26 @@ describe("AuthService", () => {
         requestId: "one",
       }),
     ).rejects.toBeInstanceOf(InvalidCredentialsError);
+  });
+
+  it("exposes every permission to a platform superuser regardless of tenant role", () => {
+    const repo = repository();
+    const service = new AuthService(repo.value, {
+      dummyPasswordHash: encodedPassword,
+      tokenPepper: pepper,
+    });
+    const session: AuthSession = {
+      ...repo.session,
+      isSuperuser: true,
+      tenant: { ...repo.session.tenant, role: "viewer" },
+    };
+
+    expect(service.toPublicSession(session).permissions).toContain(
+      "members:change-role",
+    );
+    expect(service.toPublicSession(session).permissions).toContain(
+      "tenant:manage",
+    );
   });
 
   it("requires the CSRF cookie, header, and session digest to agree", () => {

@@ -6,6 +6,8 @@ aggregated an utterance by then, so there is no fragment reassembly to get wrong
 """
 
 import asyncio
+import os
+from pathlib import Path
 
 from loguru import logger
 from pydantic import BaseModel
@@ -34,19 +36,51 @@ class TranscriptHandler:
     def __init__(self, output_file: str):
         self.messages: list[TranscriptMessage] = []
         self.output_file = output_file
+        self._lock = asyncio.Lock()
 
     async def save_message(self, message: TranscriptMessage) -> None:
-        self.messages.append(message)
+        async with self._lock:
+            self.messages.append(message)
+            line = self._line(message)
+            logger.info("Transcript turn persisted locally")
+            try:
+                await asyncio.to_thread(self._append_line, line)
+            except OSError:
+                # A transcript write must never take the call down with it.
+                logger.error("Transcript turn could not be persisted locally")
+
+    async def finalize(self) -> None:
+        """Write the completed transcript in event-time order.
+
+        Pipecat can deliver a user turn event after an idle/assistant event even
+        when its embedded timestamp is earlier. Append-as-you-go remains the
+        crash-safe journal; this atomic final pass makes completed playback and
+        diagnostics chronological.
+        """
+
+        async with self._lock:
+            ordered = sorted(
+                enumerate(self.messages),
+                key=lambda item: (item[1].timestamp is None, item[1].timestamp or "", item[0]),
+            )
+            lines = [self._line(message) for _, message in ordered]
+            try:
+                await asyncio.to_thread(self._replace_lines, lines)
+            except OSError:
+                logger.error("Transcript could not be finalized chronologically")
+
+    @staticmethod
+    def _line(message: TranscriptMessage) -> str:
         stamp = f"[{message.timestamp}] " if message.timestamp else ""
         cut = " [interrupted]" if message.interrupted else ""
-        line = f"{stamp}{message.role}{cut}: {message.content}"
-        logger.info("Transcript turn persisted locally")
-        try:
-            await asyncio.to_thread(self._append_line, line)
-        except OSError:
-            # A transcript write must never take the call down with it.
-            logger.error("Transcript turn could not be persisted locally")
+        return f"{stamp}{message.role}{cut}: {message.content}"
 
     def _append_line(self, line: str) -> None:
         with open(self.output_file, "a", encoding="utf-8") as output:
             output.write(line + "\n")
+
+    def _replace_lines(self, lines: list[str]) -> None:
+        target = Path(self.output_file)
+        temporary = target.with_suffix(f"{target.suffix}.tmp")
+        temporary.write_text("".join(f"{line}\n" for line in lines), encoding="utf-8")
+        os.replace(temporary, target)

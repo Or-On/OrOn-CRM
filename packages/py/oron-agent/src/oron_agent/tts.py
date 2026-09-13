@@ -37,9 +37,12 @@ class SonioxUnpointedContextTTSService(SonioxTTSService):
     text. Verified live 2026-07-30; Gemini has neither problem because it pushes
     the original, pre-transform text instead.
 
-    So do what Gemini does: push the original text and stop asking for the
-    timestamps. The cost is word-level interruption timing, which was never
-    usable here — the words it times are the pointed ones.
+    Pipecat's timestamp-driven Soniox path produced timestamp text but no audio
+    on a real call (the agent channel was sample-for-sample silent). Keep the
+    proven path used by earlier audible calls: publish the original text frame
+    and do not ask Soniox for character timestamps. This gives up word-level
+    interruption progress, but it never feeds pointed text back into the LLM
+    and, most importantly, keeps synthesized audio on the transport path.
     """
 
     def __init__(self, **kwargs):

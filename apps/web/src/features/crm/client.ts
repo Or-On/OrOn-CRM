@@ -16,6 +16,7 @@ export async function crmMutation<T>(
   options: {
     readonly method?: "POST" | "PATCH" | "DELETE";
     readonly idempotencyKey?: string;
+    readonly signal?: AbortSignal;
   } = {},
 ): Promise<T> {
   const headers: Record<string, string> = {
@@ -28,6 +29,7 @@ export async function crmMutation<T>(
     method: options.method ?? "POST",
     headers,
     body: JSON.stringify(body),
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
   });
   const payload = await responsePayload(response);
   if (!response.ok) {
@@ -38,6 +40,34 @@ export async function crmMutation<T>(
       typeof payload.error === "string"
         ? payload.error
         : "Operation failed";
+    throw new Error(message);
+  }
+  return payload as T;
+}
+
+export async function imageMutation<T>(
+  url: string,
+  options: {
+    readonly file?: File;
+    readonly method: "DELETE" | "PATCH";
+  },
+): Promise<T> {
+  const body = new FormData();
+  if (options.file !== undefined) body.set("image", options.file);
+  const response = await fetch(url, {
+    method: options.method,
+    headers: { "x-csrf-token": csrfToken() },
+    ...(options.method === "PATCH" ? { body } : {}),
+  });
+  const payload = await responsePayload(response);
+  if (!response.ok) {
+    const message =
+      payload !== null &&
+      typeof payload === "object" &&
+      "error" in payload &&
+      typeof payload.error === "string"
+        ? payload.error
+        : "Image update failed";
     throw new Error(message);
   }
   return payload as T;

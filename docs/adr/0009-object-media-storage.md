@@ -15,8 +15,8 @@ authoritative ownership and retention metadata.
 
 PostgreSQL is authoritative for object metadata: object ID, tenant, owner or
 reference, MIME type, byte size, checksum, storage key, retention state, and
-timestamps. Bytes use a mounted local object directory in local development and a
-private Google Cloud Storage bucket in the future GCP development environment.
+timestamps. Bytes use a mounted local object directory by default and may use a
+configured remote object-store adapter when deployment requirements justify it.
 
 Access goes through a storage port with tenant authorization. Storage keys are
 opaque and non-authoritative; database records govern lifecycle. Supabase Storage

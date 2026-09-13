@@ -27,6 +27,10 @@ def scan_paths(root: Path, paths: Iterable[Path]) -> list[str]:
             continue
         try:
             content = path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            # ls-files --cached also returns tracked files deleted in the worktree.
+            # They have no current content to scan; other read failures still fail.
+            continue
         except UnicodeDecodeError:
             continue
         for name, pattern in PATTERNS.items():

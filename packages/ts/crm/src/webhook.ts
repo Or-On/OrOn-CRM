@@ -28,6 +28,7 @@ export function verifyWhatsAppSignature(
 }
 
 export interface WhatsAppInboundEnvelope {
+  readonly occurredAt?: string;
   readonly providerAccountId: string;
   readonly providerEventId: string;
   readonly providerMessageId: string;
@@ -88,6 +89,10 @@ export function parseStoredWhatsAppEnvelope(
     return undefined;
   }
   return {
+    ...(typeof envelope.occurredAt === "string" &&
+    Number.isFinite(Date.parse(envelope.occurredAt))
+      ? { occurredAt: envelope.occurredAt }
+      : {}),
     providerAccountId: envelope.providerAccountId,
     providerEventId: envelope.providerEventId,
     providerMessageId: envelope.providerMessageId,
@@ -139,7 +144,18 @@ export function parseWhatsAppTextEnvelopes(
         const profile = record(contact?.profile);
         const profileName =
           typeof profile?.name === "string" ? profile.name : from;
+        const timestamp =
+          typeof message?.timestamp === "string"
+            ? Number(message.timestamp)
+            : NaN;
+        const occurredAt =
+          Number.isSafeInteger(timestamp) &&
+          timestamp > 0 &&
+          timestamp < 8_640_000_000_000
+            ? new Date(timestamp * 1000).toISOString()
+            : undefined;
         results.push({
+          ...(occurredAt === undefined ? {} : { occurredAt }),
           providerAccountId: accountId,
           providerEventId: `${entryId}:${id}`,
           providerMessageId: id,

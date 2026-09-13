@@ -16,7 +16,7 @@ dev = [
   "pytest-asyncio==1.4.0",
   "ruff==0.16.5",
 ]
-voice = ["oron-agent==0.1.0"]
+voice = ["oron-agent[gender]==0.1.0"]
 
 [tool.uv]
 package = false
@@ -43,6 +43,10 @@ oron-agent = { path = "packages/py/oron-agent", editable = true }
 target-version = "py314"
 line-length = 100
 extend-exclude = ["packages/ts", "services/ts", "apps"]
+
+[tool.ruff.per-file-target-version]
+# Host deployment helpers run on the selected Ubuntu/Debian distribution Python.
+"infra/**/*.py" = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "ASYNC", "S"]

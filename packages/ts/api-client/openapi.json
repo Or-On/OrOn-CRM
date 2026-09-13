@@ -1,6 +1,296 @@
 {
   "components": {
     "schemas": {
+      "AgentEvaluationSource": {
+        "properties": {
+          "document_id": {
+            "format": "uuid",
+            "title": "Document Id",
+            "type": "string"
+          },
+          "fact_key": {
+            "title": "Fact Key",
+            "type": "string"
+          },
+          "source_id": {
+            "format": "uuid",
+            "title": "Source Id",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": ["source_id", "document_id", "version", "fact_key"],
+        "title": "AgentEvaluationSource",
+        "type": "object"
+      },
+      "AgentProviderEvaluationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "format": "uuid",
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "confirmed": {
+            "const": true,
+            "title": "Confirmed",
+            "type": "boolean"
+          },
+          "text": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          },
+          "version_id": {
+            "format": "uuid",
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": ["agent_id", "version_id", "text", "confirmed"],
+        "title": "AgentProviderEvaluationRequest",
+        "type": "object"
+      },
+      "AgentProviderEvaluationResult": {
+        "properties": {
+          "accepted_text": {
+            "title": "Accepted Text",
+            "type": "string"
+          },
+          "actions_executed": {
+            "const": false,
+            "default": false,
+            "title": "Actions Executed",
+            "type": "boolean"
+          },
+          "agent_id": {
+            "format": "uuid",
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "cost_usd": {
+            "title": "Cost Usd",
+            "type": "null"
+          },
+          "decision": {
+            "title": "Decision",
+            "type": "string"
+          },
+          "evaluation_kind": {
+            "const": "paid_typed_llm",
+            "default": "paid_typed_llm",
+            "title": "Evaluation Kind",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "model_ms": {
+            "title": "Model Ms",
+            "type": "number"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "recognized_text": {
+            "title": "Recognized Text",
+            "type": "null"
+          },
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "response": {
+            "title": "Response",
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/AgentEvaluationSource"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "validation_ms": {
+            "title": "Validation Ms",
+            "type": "number"
+          },
+          "version_id": {
+            "format": "uuid",
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "agent_id",
+          "version_id",
+          "accepted_text",
+          "response",
+          "decision",
+          "sources",
+          "model_ms",
+          "validation_ms",
+          "provider",
+          "model"
+        ],
+        "title": "AgentProviderEvaluationResult",
+        "type": "object"
+      },
+      "AudioPreviewRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "format": "uuid",
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "confirmed": {
+            "const": true,
+            "title": "Confirmed",
+            "type": "boolean"
+          },
+          "text": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          },
+          "version_id": {
+            "format": "uuid",
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": ["agent_id", "version_id", "text", "confirmed"],
+        "title": "AudioPreviewRequest",
+        "type": "object"
+      },
+      "AudioPreviewResult": {
+        "properties": {
+          "agent_id": {
+            "format": "uuid",
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "audio_base64": {
+            "title": "Audio Base64",
+            "type": "string"
+          },
+          "canonical_text": {
+            "title": "Canonical Text",
+            "type": "string"
+          },
+          "duration_seconds": {
+            "title": "Duration Seconds",
+            "type": "number"
+          },
+          "evaluation_kind": {
+            "const": "paid_tts_preview",
+            "default": "paid_tts_preview",
+            "title": "Evaluation Kind",
+            "type": "string"
+          },
+          "expires_in_seconds": {
+            "const": 60,
+            "default": 60,
+            "title": "Expires In Seconds",
+            "type": "integer"
+          },
+          "media_type": {
+            "const": "audio/wav",
+            "default": "audio/wav",
+            "title": "Media Type",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "speech_normalized_text": {
+            "title": "Speech Normalized Text",
+            "type": "string"
+          },
+          "version_id": {
+            "format": "uuid",
+            "title": "Version Id",
+            "type": "string"
+          },
+          "voice": {
+            "title": "Voice",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "agent_id",
+          "version_id",
+          "audio_base64",
+          "provider",
+          "model",
+          "voice",
+          "duration_seconds",
+          "canonical_text",
+          "speech_normalized_text"
+        ],
+        "title": "AudioPreviewResult",
+        "type": "object"
+      },
+      "CallCost": {
+        "properties": {
+          "llm": {
+            "default": 0.0,
+            "title": "Llm",
+            "type": "number"
+          },
+          "stt": {
+            "default": 0.0,
+            "title": "Stt",
+            "type": "number"
+          },
+          "telephony": {
+            "default": 0.0,
+            "title": "Telephony",
+            "type": "number"
+          },
+          "total": {
+            "readOnly": true,
+            "title": "Total",
+            "type": "number"
+          },
+          "tts": {
+            "default": 0.0,
+            "title": "Tts",
+            "type": "number"
+          },
+          "unpriced": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Unpriced",
+            "type": "array"
+          }
+        },
+        "required": ["total"],
+        "title": "CallCost",
+        "type": "object"
+      },
       "CallUsage": {
         "description": "Per-call consumption.\n\n`call_seconds` is measured caller-join → caller-leave, not from the session\nrow's lifetime: `ended_at` is stamped after recording stops, a settle delay\nand an artifact upload, all of which would otherwise bill as talk time.\n\nThe model names are recorded because they are configurable at runtime, so\nthe rate that applies is a property of the call, not of today's config.",
         "properties": {
@@ -739,6 +1029,131 @@
         "title": "VoiceCampaignSummary",
         "type": "object"
       },
+      "VoiceControlCommand": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_epoch": {
+            "maximum": 9007199254740990.0,
+            "minimum": 0.0,
+            "title": "Expected Epoch",
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "maxLength": 128,
+            "minLength": 8,
+            "pattern": "^[A-Za-z0-9._:-]+$",
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "mode": {
+            "enum": ["paused", "ai"],
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "required": ["mode", "expected_epoch", "idempotency_key"],
+        "title": "VoiceControlCommand",
+        "type": "object"
+      },
+      "VoiceControlStatus": {
+        "properties": {
+          "acknowledged_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acknowledged At"
+          },
+          "acknowledged_epoch": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acknowledged Epoch"
+          },
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "can_operate": {
+            "title": "Can Operate",
+            "type": "boolean"
+          },
+          "command_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Command Id"
+          },
+          "desired_mode": {
+            "enum": ["ai", "paused"],
+            "title": "Desired Mode",
+            "type": "string"
+          },
+          "epoch": {
+            "title": "Epoch",
+            "type": "integer"
+          },
+          "human_connection": {
+            "const": "not_managed",
+            "default": "not_managed",
+            "title": "Human Connection",
+            "type": "string"
+          },
+          "resume_required": {
+            "default": false,
+            "title": "Resume Required",
+            "type": "boolean"
+          },
+          "session_id": {
+            "format": "uuid",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "status": {
+            "enum": ["pending", "applied", "worker_unavailable"],
+            "title": "Status",
+            "type": "string"
+          },
+          "worker_mode": {
+            "anyOf": [
+              {
+                "enum": ["ai", "paused"],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worker Mode"
+          }
+        },
+        "required": [
+          "session_id",
+          "epoch",
+          "desired_mode",
+          "status",
+          "active",
+          "can_operate"
+        ],
+        "title": "VoiceControlStatus",
+        "type": "object"
+      },
       "VoiceSessionDetail": {
         "properties": {
           "answered": {
@@ -763,6 +1178,9 @@
               }
             ],
             "title": "Contact Id"
+          },
+          "cost": {
+            "$ref": "#/components/schemas/CallCost"
           },
           "created_at": {
             "format": "date-time",
@@ -818,6 +1236,10 @@
             "title": "Provider",
             "type": "string"
           },
+          "recording_available": {
+            "title": "Recording Available",
+            "type": "boolean"
+          },
           "recording_object_id": {
             "anyOf": [
               {
@@ -837,6 +1259,10 @@
           },
           "status": {
             "$ref": "#/components/schemas/SessionStatus"
+          },
+          "transcript_available": {
+            "title": "Transcript Available",
+            "type": "boolean"
           },
           "transcript_object_id": {
             "anyOf": [
@@ -865,8 +1291,11 @@
           "outcome",
           "created_at",
           "ended_at",
-          "events",
           "usage",
+          "cost",
+          "events",
+          "recording_available",
+          "transcript_available",
           "recording_object_id",
           "transcript_object_id"
         ],
@@ -949,6 +1378,9 @@
             ],
             "title": "Contact Id"
           },
+          "cost": {
+            "$ref": "#/components/schemas/CallCost"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -1003,6 +1435,9 @@
           },
           "status": {
             "$ref": "#/components/schemas/SessionStatus"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/CallUsage"
           }
         },
         "required": [
@@ -1015,7 +1450,9 @@
           "answered",
           "outcome",
           "created_at",
-          "ended_at"
+          "ended_at",
+          "usage",
+          "cost"
         ],
         "title": "VoiceSessionSummary",
         "type": "object"
@@ -1034,6 +1471,94 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/orchestration/agents/audio-preview": {
+      "post": {
+        "operationId": "preview_agent_audio",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AudioPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AudioPreviewResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Preview Agent Audio",
+        "tags": ["orchestration"]
+      }
+    },
+    "/api/v1/orchestration/agents/provider-evaluate": {
+      "post": {
+        "operationId": "evaluate_agent_provider",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentProviderEvaluationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentProviderEvaluationResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Evaluate Agent Provider",
+        "tags": ["orchestration"]
+      }
+    },
     "/api/v1/orchestration/flows/validate": {
       "post": {
         "operationId": "validate_canonical_flow",
@@ -1479,6 +2004,106 @@
           }
         ],
         "summary": "List Voice Sessions",
+        "tags": ["voice"]
+      }
+    },
+    "/api/v1/voice/sessions/{session_id}/control": {
+      "get": {
+        "operationId": "get_voice_session_control",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceControlStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Control",
+        "tags": ["voice"]
+      },
+      "post": {
+        "operationId": "set_voice_session_control",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoiceControlCommand"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceControlStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set Control",
         "tags": ["voice"]
       }
     },

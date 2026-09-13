@@ -1,5 +1,13 @@
 .artifacts
 .env
+.env.*
+**/*.env
+**/*.pem
+**/*.key
+.data
+.objects
+postgres-data
+**/*.log
 .git
 .github
 .next
@@ -12,4 +20,8 @@
 **/__pycache__
 docs
 infra/terraform/.terraform
+**/.terraform
+**/*.tfstate*
+**/*.tfvars
+**/*.tfvars.json
 node_modules

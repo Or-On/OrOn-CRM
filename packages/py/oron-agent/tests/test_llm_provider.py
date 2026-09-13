@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 from oron_agent.config import Settings
-from oron_agent.llm import LlmProvider, build_llm, warm_prompt_cache
+from oron_agent.llm import LlmProvider, LlmReasoningEffort, build_llm, warm_prompt_cache
 from pipecat.services.openai.llm import OpenAILLMService
 from pydantic import ValidationError
 
@@ -28,7 +28,8 @@ def _settings(**overrides) -> Settings:
         GOOGLE_CLOUD_PROJECT="p",
         SONIOX_API_KEY="s",
     )
-    return Settings(**{**base, **overrides})
+    # Unit tests must not inherit the operator's real local provider selection.
+    return Settings(_env_file=None, **{**base, **overrides})
 
 
 def test_the_default_provider_is_vertex_so_nothing_changes_without_opting_in():
@@ -46,6 +47,37 @@ def test_compat_provider_reaches_the_configured_endpoint():
     assert isinstance(llm, OpenAILLMService)
     assert str(llm._client.base_url).startswith(COHERE)
     assert llm._settings.model == "command-a-plus-05-2026"
+
+
+def test_compat_provider_receives_voice_latency_controls():
+    llm = build_llm(
+        LlmProvider.OPENAI_COMPAT,
+        **VERTEX_ARGS,
+        api_key="key",
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+        model="gemini-2.5-flash",
+        reasoning_effort=LlmReasoningEffort.NONE,
+        temperature=0.35,
+        max_tokens=192,
+    )
+    params = llm.build_chat_completion_params(
+        {"model": "gemini-2.5-flash", "messages": [], "stream": True}
+    )
+    assert params["reasoning_effort"] == "none"
+    assert params["temperature"] == 0.35
+    assert params["max_tokens"] == 192
+    assert "max_completion_tokens" not in params
+
+
+def test_google_gemini_3_cannot_claim_thinking_is_disabled():
+    with pytest.raises(ValidationError, match="Gemini 2.5"):
+        _settings(
+            LLM_PROVIDER="openai-compat",
+            LLM_API_KEY="key",
+            LLM_BASE_URL="https://generativelanguage.googleapis.com/v1beta/openai/",
+            LLM_MODEL="gemini-3.8-flash",
+            LLM_REASONING_EFFORT="none",
+        )
 
 
 @pytest.mark.parametrize("missing", ["LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL"])
@@ -72,6 +104,35 @@ def test_vertex_settings_are_ignored_by_the_compat_branch():
         model="m",
     )
     assert isinstance(llm, OpenAILLMService)
+
+
+def test_vertex_receives_the_same_output_budget_and_bounded_timeout(monkeypatch):
+    import oron_agent.llm as module
+
+    original = module.GoogleVertexLLMService
+    received = {}
+
+    class ConstructorProbe:
+        Settings = original.Settings
+        ThinkingConfig = original.ThinkingConfig
+
+        def __init__(self, **kwargs):
+            received.update(kwargs)
+
+    monkeypatch.setattr(module, "GoogleVertexLLMService", ConstructorProbe)
+    build_llm(
+        LlmProvider.VERTEX,
+        **VERTEX_ARGS,
+        api_key="",
+        base_url="",
+        model="",
+        max_tokens=192,
+        temperature=0.2,
+        request_timeout_secs=4.5,
+    )
+    assert received["settings"].max_tokens == 192
+    assert received["settings"].temperature == 0.2
+    assert received["http_options"].timeout == 4500
 
 
 class _FakeLLM:

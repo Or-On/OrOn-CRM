@@ -1,145 +1,85 @@
 # Or-On Platform
 
-Or-On Platform is the target home for one operator product spanning voice and
-telephony, CRM and WhatsApp, and browser-local live agents. It integrates three
-working source systems through thin adapters and canonical contracts instead of
-rewriting proven engines for uniformity.
+Or-On Platform is a unified workspace for managing customer relationships,
+WhatsApp conversations, voice operations, campaigns, and automated engagement.
+It brings customer context and operator workflows into one bilingual product
+designed for teams that work across messaging and telephone channels.
 
-## Current status
+> **Development status:** The platform is under active development and is not
+> currently presented as production-ready or compliance-certified. Real provider
+> actions remain opt-in and protected by explicit safety controls.
 
-Phase 7 now includes a bilingual public experience at `/en` and `/he`, localized
-existing-account sign-in, a `/start` guide, and EN/HE working screens with native
-RTL/LTR, light/dark themes and a collapsible operator shell. The authenticated
-Overview remains `/`. Existing workflows and safety boundaries are preserved.
-See the [experience architecture](docs/architecture/bilingual-experience.md),
-[safe isolated preview](docs/runbooks/local-development.md#isolated-ui-review-phase-7)
-and [acceptance record](docs/runbooks/bilingual-ui-acceptance.md). Expanded
-accessibility/performance and full demo rehearsals are still open; this is not
-a declaration of production readiness or completed Phase 7 acceptance.
+## Product overview
 
-Phase 2A established the canonical PostgreSQL model while preserving the Or-on
-lineage and adapting WACRM/OpenLive persistence. Phase 2B live validation is
-complete on PostgreSQL 18.6: clean migration, catalog, roles, RLS, tenant
-isolation, historical encryption backfill, supported downgrade/re-upgrade,
-constraints/delete actions, keyset pagination, idempotency, durable-job
-concurrency, seed, OpenLive JSON/SQLite import, WACRM export mapping, production
-containers, and the complete core Compose health chain all pass.
+Or-On gives operators a shared view of the customer journey instead of
+separating conversations, calls, contacts, and automations into disconnected
+tools.
 
-SQLite appears only as a read-only legacy OpenLive importer input; canonical
-PostgreSQL is the only destination and target runtime database. GNU Make is not
-installed on this host, although the same underlying cross-platform command
-runner used by every Make target passes.
+Current product areas include:
 
-Phase 3 added one canonical, PostgreSQL-backed identity/session boundary: an
-Alembic-owned credential and session schema, Argon2id passwords, opaque
-HMAC-digested session tokens, CSRF/origin enforcement, tenant switching, typed
-RBAC, short-lived live-agent assertions, and an authenticated Next.js shell.
-Phase 4 now integrates a bounded CRM and WhatsApp simulator slice: contacts and
-deduplication, shared inbox, pipelines, durable simulator campaigns, versioned
-automation runs, team/settings, notifications, scoped API keys, and the
-PostgreSQL messaging worker.
+- **Overview** — operational status, recent activity, and actionable summaries.
+- **Inbox** — tenant-isolated WhatsApp conversations and human replies.
+- **Contacts** — customer profiles, channel identities, consent, ownership, and
+  activity history.
+- **Pipelines** — visual deal and opportunity management.
+- **Campaigns** — controlled messaging and voice campaign workflows.
+- **Agents & Flows** — versioned agent definitions and connected cross-channel
+  flow visualization.
+- **Voice operations** — call records, transcripts, outcomes, usage, and
+  simulator-backed validation.
+- **Administration** — workspace details, team access, invitations, roles,
+  account settings, integrations, and API-key metadata.
 
-Phase 5 is simulator-complete. The retained Or-on dispatcher, Hebrew processing,
-Pipecat voice agent, sessions, tenancy, campaigns, flows, and SIP admission
-packages are target-local. The unified shell now provides voice flows, safe DID
-admission diagnostics, consent-aware simulator campaigns, calls, call detail,
-transcript/outcome/artifact/usage/latency views, and a contact call action backed
-by canonical PostgreSQL. Provider execution and model loading remain default-off;
-no real call path is enabled.
+The interface supports English and Hebrew, native left-to-right and
+right-to-left layouts, responsive navigation, keyboard interaction, and light
+and dark themes.
 
-Phase 6 now provides the cross-channel control plane: tenant-scoped immutable
-agent versions, one canonical voice/WhatsApp flow contract with deterministic
-channel-adapter artifacts, idempotent PostgreSQL simulator jobs, consent-aware
-channel transitions, race-safe human handoff, safe contact activity, and honest
-usage/latency/unpriced-cost reporting. The unified shell exposes these under
-**Agents & flows**, and FastAPI OpenAPI generates the cross-language validation
-client. WhatsApp additionally has a simulator-default Meta Cloud API adapter:
-real sends are explicitly selected and confirmed, durably queued in PostgreSQL,
-processed outside database transactions, and updated by raw-body-verified,
-deduplicated status webhooks.
+## Availability
 
-Phase 6 is simulator-complete for the accepted six-node graph subset. Both
-cross-channel workers execute durable work, and published canonical flows run
-ordered CRM/message/voice/handoff actions with persisted wait/resume and failure
-states. Voice actions reference frozen retained Or-on versions; provider-free
-tests verify their native Pipecat binding. Messaging preserves the supported
-WACRM interpolation and template-order semantics. Advanced source branching,
-waits and external actions are not claimed as ported. See the
-[simulator runbook](docs/runbooks/cross-channel-simulator.md) for restart and
-verification instructions; Phase 7 UI/UX polish has not begun.
+| Capability                                           | Current availability                                       |
+| ---------------------------------------------------- | ---------------------------------------------------------- |
+| Unified login and workspace access                   | Available for development                                  |
+| Tenant isolation and role-based access               | Available and PostgreSQL-tested                            |
+| CRM, contacts, inbox, pipelines, and team management | Available for development                                  |
+| WhatsApp simulator                                   | Enabled by default                                         |
+| Meta WhatsApp Cloud API                              | Available only when explicitly configured and confirmed    |
+| Voice and campaign simulator                         | Available for development                                  |
+| LiveKit/SIP control plane                            | Optional, read-only verification available                 |
+| Real carrier calling                                 | Explicitly enabled, consented, and confirmed calls only    |
+| Cross-channel workflow simulation                    | Available for the supported workflow set                   |
+| Visual-agent/Live Lab experience                     | Deliberately deferred to the final integration phase       |
+| Portable single-host deployment                      | OCI/Compose candidate prepared; live deployment not claimed |
 
-It does **not** enable real WhatsApp by default or any real telephony, public signup/OAuth/MFA,
-OpenLive/Live Lab/visual-agent execution, or production GCP infrastructure.
-OpenLive is deliberately reserved for the final integration phase. Planned
-navigation is visibly unavailable rather than presented as finished functionality.
 
-## Source systems
+## Data and tenancy
 
-The sibling repositories are read-only engineering references at locked commits:
+PostgreSQL is the platform's only runtime database and authoritative source of
+application state. Tenant-owned information is protected through database and
+application access controls. Application services use scoped database roles;
+they do not run as PostgreSQL superusers.
 
-| Source | Path | Locked commit | Preserved direction |
-| --- | --- | --- | --- |
-| Or-on | `../or-on` | `cece174f4d590a1b8a283d539dd66e08cc689aa9` | Python/FastAPI/SQLModel/Alembic/RLS, LiveKit/SIP, Pipecat, dispatcher/session/flow/tenancy behavior |
-| WACRM | `../wacrm` | `98b5bd26e8feacacfd4b74ff58411acb8154d212` | Next/React/Tailwind CRM, WhatsApp Cloud API, inbox/contact/pipeline/campaign/automation behavior |
-| OpenLive | `../openlive` | `849173cd1c8c17a95d600b17b428c301722bf5df` | Next/Hono/WebSocket/ACP/MCP, provider harness, browser-local VAD/STT/TTS/WebGPU and desktop behavior |
+The target runtime does not use Firebase, Supabase-hosted services, MongoDB, or
+SQLite persistence. SQLite support is isolated to a one-time legacy import tool
+and is not part of normal application execution.
 
-Do not install, format, migrate, reset, clean, commit, or generate files in those
-repositories. The target builds and runs without them.
+## Prerequisites
 
-## Architectural rules
-
-- Modular monolith plus only the specialized runtime processes justified by
-  media, native dependencies, protocols, or lifecycle.
-- PostgreSQL 18 is the only target runtime database and authoritative application
-  state. No Firebase, Supabase runtime service, SQLite runtime store, MongoDB, or
-  separate application database.
-- Alembic is the only schema migration authority and must converge on one head.
-- Application processes never use PostgreSQL superuser or migrator credentials.
-- pnpm is the sole JavaScript package manager; uv owns the Python workspace.
-- Retained technologies use the newest stable, supported, patched compatible
-  versions. Upstream pins are evidence, not automatic target versions.
-- Real provider actions remain disabled by default and require both an explicit
-  feature flag and explicit user approval when implemented.
-
-See [architecture overview](docs/architecture/overview.md),
-[technology baseline](docs/architecture/technology-baseline.md), and the
-[ADR index](docs/adr/README.md).
-
-## Repository layout
-
-```text
-apps/web/                         unified Next.js shell and same-origin BFF
-apps/desktop/                     documented future OpenLive desktop boundary
-services/py/                      control-api, dispatcher, voice-agent boundaries
-services/ts/                      live-agent and messaging-worker boundaries
-packages/py/platform-integration  new cross-system Python foundation
-packages/ts/                      UI, contracts, client, config, observability, integration
-db/alembic/                       sole 36-revision migration graph/head
-db/bootstrap/                     local role bootstrap, not schema migration
-db/contracts/                     consumer-only schema expectation manifest
-db/importers/                     isolated one-time legacy import tools
-db/seeds/                         deterministic fictional seed
-infra/compose/                    localhost core
-infra/caddy/                      future single-origin edge foundation
-infra/terraform/                  non-deploying one-VM GCP structure
-docs/                             audits, ADRs, architecture, runbooks, security, progress
-scripts/                          developer orchestration and repository checks
-```
-
-## Selected prerequisites
+Install the following before starting locally:
 
 - Git
-- Docker Engine/Desktop and Docker Compose v2
-- Node.js 24.20 LTS-compatible runtime (`>=24.20,<25`)
-- pnpm `>=11.24,<12`
-- Python 3.14.7 through uv
-- uv `>=0.12.7,<0.13`
-- GNU Make or compatible Make implementation
+- Docker Desktop or Docker Engine with Docker Compose v2
+- Node.js 24 LTS (`>=24.20,<25`)
+- pnpm 11 (`>=11.24,<12`)
+- Python 3.14 through `uv`
+- `uv` (`>=0.12.7,<0.13`)
+- GNU Make, if available
 
-Ordinary localhost work does not require Terraform, gcloud, GCP credentials,
-LiveKit, provider credentials, or AI credentials.
+Hosting credentials, telephony credentials, WhatsApp credentials, and AI-provider
+credentials are not required for the default local experience.
 
-## Localhost setup
+## Quick start
+
+From the repository root:
 
 ```bash
 make doctor
@@ -147,79 +87,169 @@ make bootstrap
 make dev
 ```
 
-`bootstrap` is idempotent and creates ignored `.env` from `.env.example` only when
-missing. It synchronizes frozen dependencies, starts PostgreSQL, creates
-least-privilege local roles, migrates the one Alembic lineage, regenerates
-contracts, generates local-only auth material, applies fictional seed data, and
-checks real PostgreSQL readiness. The fictional operator login is written with
-restrictive permissions to ignored `.artifacts/development-login.txt`; it is
-never printed or committed.
+Then open [http://127.0.0.1:3000](http://127.0.0.1:3000).
 
-The retained Pipecat, PyTorch, Torchaudio, ONNX, and Hebrew voice stack is kept
-in the opt-in uv `voice` group so ordinary CRM/control development stays small.
-Install it with `make voice-bootstrap`; this does not download model weights or
-enable LiveKit, speech, LLM, or telephony providers.
+`make bootstrap` prepares the local environment, synchronizes dependencies,
+starts PostgreSQL, applies migrations, generates contracts, and creates the
+local development account. Development credentials are stored in the ignored
+file `.artifacts/development-login.txt` and are never committed.
 
-The default host workflow keeps PostgreSQL in Compose and runs the current app
-processes with hot reload. See the
-[local development runbook](docs/runbooks/local-development.md). CRM simulator
-details are in the [CRM/WhatsApp runbook](docs/runbooks/crm-whatsapp-local.md).
-Real Meta setup and the protected smoke command are documented in the
-[Meta WhatsApp runbook](docs/runbooks/whatsapp-cloud-api.md).
-The opt-in, no-call LiveKit/SIP setup is in the
-[voice control-plane runbook](docs/runbooks/voice-control-plane.md).
+### Windows without GNU Make
 
-## Command surface
+The same workflow is available through the cross-platform runner:
 
-| Command | Purpose |
-| --- | --- |
-| `make doctor` | Report required tools, selected versions, daemon state, and ports |
-| `make bootstrap` | Sync, start PostgreSQL, migrate, generate, seed, and health-check |
-| `make voice-bootstrap` | Install the heavy retained voice dependency group with providers disabled |
-| `make voice-up` / `make voice-down` | Start/stop the private Redis/LiveKit/SIP control plane without enabling a carrier path |
-| `make voice-check` | Read-only list SIP control-plane resources; never creates or mutates provider state |
-| `make dev` | Run host processes; simulator-default, with only explicitly configured gated WhatsApp allowed |
-| `make stop` / `make ps` / `make logs` | Operate the non-destructive local Compose stack |
-| `make migrate` / `make migration-check` | Upgrade/check the sole Alembic lineage |
-| `make migration-graph` / `make migration-sql` | Inspect the graph and deterministic PostgreSQL SQL offline |
-| `make db-contract-check` | Check RLS, indexes, extensions, SQL safety, and the schema manifest |
-| `make db-verify-offline` | Run the repository-controlled Phase 2A database gate without a server |
-| `make db-verify-live` | Run Phase 2B against an explicit disposable PostgreSQL 18.6 URL |
-| `make seed` | Apply idempotent PII-free development metadata |
-| `make lint` / `make format` | Check/apply repository formatting and policy |
-| `make typecheck` / `make test` | Run strict typing and tests in both workspaces |
-| `make verify` | Run the consolidated database-aware acceptance gate |
-
-## Provider and secret safety
-
-`.env.example` contains no real credentials and defaults to:
-
-```dotenv
-ENABLE_REAL_TELEPHONY=false
-ENABLE_REAL_WHATSAPP=false
-ENABLE_REAL_VOICE_PROVIDERS=false
+```powershell
+uv run python scripts/dev.py doctor
+uv run python scripts/dev.py bootstrap
+uv run python scripts/dev.py dev
 ```
 
-Verification/bootstrap refuse non-false values. Host `make dev` accepts real
-WhatsApp only when explicitly configured; each UI send still requires consent,
-selection, acknowledgement, and confirmation, while the worker checks the flag
-again. Never commit `.env`, service-account JSON, provider
-tokens, keys, or secrets; diagnostics and logs must redact sensitive values.
+Run these commands from the `OrOn-Platform` directory. Press `Ctrl+C` to stop
+the host development processes.
+
+When the LiveKit, SIP, STT, TTS, LLM, and database settings are already present,
+real calling is armed by changing both voice flags to `true` and restarting the
+same development command. The runner then starts the guarded dispatcher and
+creates ignored local field-encryption material when it is absent. A call still
+requires an active E.164 contact, granted voice consent, `voice:operate`
+permission, a published voice flow, the real-call checkbox, and the final
+browser confirmation.
+
+## Common commands
+
+| Command                | Description                                                              |
+| ---------------------- | ------------------------------------------------------------------------ |
+| `make doctor`          | Check tools, versions, Docker, and required local ports                  |
+| `make bootstrap`       | Prepare an idempotent local development environment                      |
+| `make dev`             | Start core services and the dispatcher only when both voice flags are on |
+| `make stop`            | Stop local Compose services without deleting stored data                 |
+| `make ps`              | Show the state of local services                                         |
+| `make logs`            | Follow local service logs                                                |
+| `make migrate`         | Apply the canonical database migrations                                  |
+| `make migration-check` | Confirm the database is on the current migration head                    |
+| `make seed`            | Create the minimal local development identity and workspace              |
+| `make lint`            | Run formatting, lint, and repository-policy checks                       |
+| `make typecheck`       | Run strict TypeScript and Python type checks                             |
+| `make test`            | Run the automated test suites                                            |
+| `make verify`          | Run the consolidated verification and production build gate              |
+
+## Optional voice control plane
+
+The retained voice stack is intentionally separate from ordinary CRM and web
+development because it includes larger audio and real-time dependencies.
+
+```bash
+make voice-bootstrap
+make voice-up
+make voice-check
+```
+
+`voice-check` only reads the local LiveKit/SIP configuration. It does not create
+carrier resources or place calls. See the
+[voice control-plane runbook](docs/runbooks/voice-control-plane.md) before
+configuring a real SIP provider.
+
+## Optional WhatsApp provider
+
+The simulator remains the default WhatsApp provider. Real Meta delivery is
+available only after the required environment variables, webhook validation,
+consent, provider selection, and user confirmation are all in place.
+
+Follow the [WhatsApp Cloud API runbook](docs/runbooks/whatsapp-cloud-api.md) for
+configuration and safe testing. Do not paste credentials into source files,
+documentation, screenshots, issue reports, or chat transcripts.
+
+### Optional WhatsApp AI and tenant integrations
+The Inbox operator must
+then explicitly assign a published WhatsApp agent to each conversation.
+Generated messages use the canonical durable outbound queue and all Meta safety
+gates. A human can take over at any time. Automatic WhatsApp-requested callbacks
+remain separately disabled by default; when deliberately enabled, an explicit
+customer request creates one durable call job against the published connected
+flow. See the
+[WhatsApp AI and call-request runbook](docs/runbooks/whatsapp-ai-and-call.md).
+
+Tenant administrators enter Google and Microsoft OAuth client credentials in
+the Email UI. The browser never receives stored secrets or refresh tokens. The
+deployment operator must provide one 32-byte base64
+`CREDENTIAL_ENCRYPTION_KEY` through the selected deployment secret store so the server
+can encrypt tenant credentials with AES-256-GCM.
+
+Campaign funding is unavailable until `ENABLE_REAL_BILLING=true` is set with
+`STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`. A tenant administrator must
+first connect a reusable payment card through Stripe Checkout setup mode. Only
+then can a wallet top-up Checkout session be created, and the wallet is credited
+only by a verified paid webhook. There is no simulator or locally minted demo
+balance. Never send card numbers to an Or-On endpoint.
+
+## Access model
+
+- **Members** work with the product capabilities permitted by their assigned
+  role.
+- **Tenant administrators** manage their own workspace, members, invitations,
+  and workspace-level configuration.
+- **Platform super administrators** may operate across authorized tenants.
+
+Invitations currently produce a secure, one-time link for manual delivery.
+Automated invitation email and verified mailbox-change workflows are not yet
+claimed.
+Invitation acceptance uses a shell-free public route. Workspace owners and
+administrators can revoke pending invitations, immediately invalidating the
+single-use link while retaining an audit record.
+
+## Verification
+
+Before submitting changes, run:
+
+```bash
+make verify
+```
+
+The verification gate covers formatting, linting, type safety, automated tests,
+database migration state, generated contracts, repository safety rules, and the
+production web build. Checks that require real providers remain separate and
+manually authorized.
+
+## Documentation
+
+- [Local development](docs/runbooks/local-development.md)
+- [WhatsApp development](docs/runbooks/crm-whatsapp-local.md)
+- [WhatsApp Cloud API](docs/runbooks/whatsapp-cloud-api.md)
+- [WhatsApp AI and call requests](docs/runbooks/whatsapp-ai-and-call.md)
+- [Voice control plane](docs/runbooks/voice-control-plane.md)
+- [Architecture overview](docs/architecture/overview.md)
+- [Portable deployment](docs/runbooks/deployment.md)
+- [Security threat model](docs/security/threat-model.md)
+- [Architecture decisions](docs/adr/README.md)
+- [Development progress](docs/progress.md)
 
 ## Known limitations
 
-- Docker-backed PostgreSQL health/migration and container builds require a local
-  Docker daemon; the checks intentionally fail rather than report fake health.
-- Public signup/OAuth/MFA/recovery, provider signature/replay controls,
-  uploads, backups, and production telemetry remain planned or Phase 2B controls,
-  not current claims.
-- Or-on has no repository license file; its preserved migration lineage is
-  treated as private/proprietary project code. WACRM/OpenLive adaptations retain
-  MIT notices in `THIRD_PARTY_NOTICES.md`. Future voice/model assets still need
-  separate license review.
-- Terraform declares constraints/documentation only. No resource is provisioned
-  and `terraform apply` remains prohibited in Phase 2A.
+- The platform is a development environment, not a production release.
+- Real voice campaigns are not enabled by this workflow. Automatic callbacks are
+  limited to explicit WhatsApp requests, the assigned published connected flow,
+  and all voice safety gates.
+- Invitation email delivery, public signup, mailbox background synchronization,
+  MFA, account recovery, and verified email-change workflows remain incomplete.
+- The connected flow canvas is currently a visual and operational foundation,
+  not a complete free-form workflow editor.
+- OpenLive visual-agent functionality remains deferred.
+- Production deployment, backup recovery, monitoring, and accessibility
+  certification require their dedicated acceptance phases.
 
-Current task status and exact blockers are recorded in
-[docs/progress.md](docs/progress.md). The full security posture is in the
-[Phase 1 threat model](docs/security/threat-model.md).
+## Source and licensing
+
+Or-On Platform preserves proven concepts and capabilities from Or-on, WACRM,
+and OpenLive while presenting them through one product experience. Those source
+repositories are engineering references and are not required at target runtime.
+
+Third-party attribution and licensing information is maintained in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). No license is implied for
+private or proprietary source material.
+
+## Contributing
+
+Read [AGENTS.md](AGENTS.md) and the relevant scoped instructions before making
+changes. Keep provider actions disabled during normal development, preserve
+tenant isolation, add tests for behavioral changes, and never include secrets or
+real customer information in commits.

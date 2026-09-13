@@ -8,7 +8,7 @@ Run `make doctor`, `make bootstrap`, and `make db-verify-live`. Confirm
 
 ## Operator proof
 
-1. Sign in with the fictional development account and open **Agents & flows**.
+1. Sign in with the fictional development account and open **Agents & Flows**.
 2. Create an agent draft. Its only Phase 6 capabilities are voice and WhatsApp.
 3. Publish the agent version; further update/delete attempts must fail.
 4. Publish a retained voice composition under **Voice flows**, noting its UUID
@@ -20,7 +20,7 @@ Run `make doctor`, `make bootstrap`, and `make db-verify-live`. Confirm
    fail until the contact has explicit granted voice consent.
 7. Request a handoff, accept it once, and resolve it.
 8. Open the contact record and confirm the unified status-only timeline.
-9. In **Agents & flows**, choose a conversation and channel under the published
+9. In **Agents & Flows**, choose a conversation and channel under the published
    flow and select **Queue flow simulation**. The contact must have the relevant
    consent. Refresh **Automations** to see `waiting` then `succeeded`; handoff
    appears only after the child job finishes. Failed/expired work must not show

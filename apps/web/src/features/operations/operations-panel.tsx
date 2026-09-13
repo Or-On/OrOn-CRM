@@ -2,35 +2,73 @@
 
 import { errorMessage } from "../../i18n/error-message";
 import { useCapability } from "../access";
-import { useTranslations } from "next-intl";
-
+import { useLocale, useTranslations } from "next-intl";
+import { Activity, Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
-import { useState, type SyntheticEvent } from "react";
-
+import { useEffect, useState, type SyntheticEvent } from "react";
 import type {
   AutomationRunSummary,
   AutomationSummary,
   BroadcastSummary,
+  TenantOperationalInsights,
 } from "@or-on/crm";
-import { Badge, Button, Input, Surface } from "@or-on/ui";
-
+import { Badge, Button, Dialog, Input, Tabs, Textarea } from "@or-on/ui";
 import { crmMutation } from "../crm";
+import { CampaignsView } from "./campaigns-view";
+import { AutomationsView } from "./automations-view";
+import { AutomationRunHistory } from "./run-history";
+
+type CreationTab = "campaigns" | "automations";
+type OperationsTab = CreationTab | "history";
 
 export function OperationsPanel({
   broadcasts,
   automations,
   runs,
+  initialCreate,
+  initialTab = "campaigns",
+  insights,
 }: {
   readonly broadcasts: readonly BroadcastSummary[];
   readonly automations: readonly AutomationSummary[];
   readonly runs: readonly AutomationRunSummary[];
+  readonly initialCreate?: CreationTab;
+  readonly insights?: TenantOperationalInsights;
+  readonly initialTab?: OperationsTab;
 }) {
   const t = useTranslations();
-  const canEdit = useCapability("campaigns:manage");
+  const locale = useLocale();
+  const canManageCampaigns = useCapability("campaigns:manage");
+  const canManageFlows = useCapability("flows:manage");
   const router = useRouter();
+  const [activeTab, setActiveTab] = useState<OperationsTab>(
+    initialCreate ?? initialTab,
+  );
+  const [creation, setCreation] = useState<CreationTab | undefined>(
+    initialCreate,
+  );
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
+  const [campaignDraft, setCampaignDraft] = useState({ name: "", body: "" });
+  const [automationDraft, setAutomationDraft] = useState({
+    name: "",
+    description: "",
+  });
+  const number = new Intl.NumberFormat(locale);
+
+  useEffect(() => setActiveTab(initialTab), [initialTab]);
+  useEffect(() => {
+    if (initialCreate !== undefined) {
+      setActiveTab(initialCreate);
+      setCreation(initialCreate);
+    }
+  }, [initialCreate]);
+
+  function openCreation(kind: CreationTab) {
+    setCreation(kind);
+    setError(undefined);
+  }
+
   async function run(operation: () => Promise<unknown>) {
     setPending(true);
     setError(undefined);
@@ -45,207 +83,277 @@ export function OperationsPanel({
       setPending(false);
     }
   }
+
   async function createCampaign(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = event.currentTarget;
-    const data = new FormData(form);
-    const saved = await run(() =>
-      crmMutation("/api/campaigns", {
-        name: data.get("name"),
-        body: data.get("body"),
-      }),
-    );
-    if (saved) form.reset();
+    if (await run(() => crmMutation("/api/campaigns", campaignDraft))) {
+      setCampaignDraft({ name: "", body: "" });
+      setCreation(undefined);
+    }
   }
+
   async function createAutomation(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = event.currentTarget;
-    const data = new FormData(form);
-    const saved = await run(() =>
-      crmMutation("/api/automations", {
-        name: data.get("name"),
-        description: data.get("description"),
-      }),
-    );
-    if (saved) form.reset();
+    if (await run(() => crmMutation("/api/automations", automationDraft))) {
+      setAutomationDraft({ name: "", description: "" });
+      setCreation(undefined);
+    }
   }
+
   return (
-    <div className="operations-grid">
-      <Surface level="raised">
-        <h2>{t("operations.campaigns")}</h2>
+    <div className="operation-workspace">
+      <section className="operation-overview">
+        <header className="operation-command">
+          <div className="operation-command__context">
+            <span className="operation-command__icon" aria-hidden="true">
+              <Activity size={19} />
+            </span>
+            <div>
+              <h2>{t("tenantOperations.performance")}</h2>
+              <p>{t("tenantOperations.monthScope")}</p>
+            </div>
+          </div>
+          <div className="operation-command__actions">
+            {(
+              activeTab === "campaigns" ? canManageCampaigns : canManageFlows
+            ) ? (
+              <Button
+                onClick={() =>
+                  openCreation(
+                    activeTab === "history" ? "automations" : activeTab,
+                  )
+                }
+              >
+                <Plus aria-hidden="true" size={16} />
+                {t(
+                  activeTab === "campaigns"
+                    ? "premiumPrimary.newCampaign"
+                    : "premiumPrimary.newAutomation",
+                )}
+              </Button>
+            ) : (
+              <Badge label={t("common.readOnly")} tone="neutral" />
+            )}
+          </div>
+        </header>
+        {insights ? (
+          <section
+            className="tenant-performance-strip"
+            aria-label={t("tenantOperations.performance")}
+          >
+            <dl>
+              {(
+                [
+                  ["outbound", insights.outbound],
+                  ["inbound", insights.inbound],
+                  ["delivered", insights.delivered],
+                  ["failed", insights.failed],
+                ] as const
+              ).map(([key, value]) => (
+                <div
+                  className={`operation-metric operation-metric--${key}`}
+                  key={key}
+                >
+                  <dt>{t(`tenantOperations.${key}`)}</dt>
+                  <dd>{number.format(value)}</dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+        ) : null}
+      </section>
+      <section
+        className="operation-console"
+        aria-label={t("pages.operationsTitle")}
+      >
+        <Tabs
+          activeId={activeTab}
+          ariaLabel={t("pages.operationsTitle")}
+          direction={locale === "he" ? "rtl" : "ltr"}
+          items={[
+            {
+              count: broadcasts.length,
+              id: "campaigns",
+              controls: "operations-campaigns-panel",
+              tabId: "operations-campaigns-tab",
+              label: t("tenantOperations.campaigns"),
+            },
+            {
+              count: automations.length,
+              id: "automations",
+              controls: "operations-automations-panel",
+              tabId: "operations-automations-tab",
+              label: t("tenantOperations.automations"),
+            },
+            {
+              id: "history",
+              controls: "operations-history-panel",
+              tabId: "operations-history-tab",
+              label: t("tenantOperations.runHistory"),
+              count: runs.length,
+            },
+          ]}
+          onChange={(id) => {
+            if (
+              id === "campaigns" ||
+              id === "automations" ||
+              id === "history"
+            ) {
+              setActiveTab(id);
+              const query = new URLSearchParams(window.location.search);
+              query.set("tab", id);
+              query.delete("create");
+              window.history.replaceState(
+                null,
+                "",
+                `/operations?${query.toString()}`,
+              );
+            }
+          }}
+        />
+
+        <CampaignsView
+          broadcasts={broadcasts}
+          activeTab={activeTab}
+          pending={pending}
+          canManageCampaigns={canManageCampaigns}
+          run={run}
+          openCreation={openCreation}
+        />
+        <AutomationsView
+          automations={automations}
+          runs={runs}
+          activeTab={activeTab}
+          pending={pending}
+          canManageFlows={canManageFlows}
+          run={run}
+          openCreation={openCreation}
+        />
+
+        <section
+          id="operations-history-panel"
+          aria-labelledby="operations-history-tab"
+          role="tabpanel"
+          hidden={activeTab !== "history"}
+          className="operation-workspace__panel"
+        >
+          <AutomationRunHistory runs={runs} flows={automations} />
+        </section>
+      </section>
+      {error && creation === undefined ? (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
+      ) : null}
+      <Dialog
+        className="operation-create-dialog"
+        closeLabel={t("common.close")}
+        title={t("operations.draft")}
+        description={t("premiumPrimary.campaignDraftHint")}
+        open={creation === "campaigns"}
+        onClose={() => setCreation(undefined)}
+      >
         <form
           className="feature-form"
           onSubmit={(event) => void createCampaign(event)}
         >
-          <fieldset className="form-fieldset" disabled={pending || !canEdit}>
-            {!canEdit ? (
-              <p className="public-note">{t("common.readOnly")}</p>
-            ) : null}
+          <fieldset
+            className="form-fieldset"
+            disabled={pending || !canManageCampaigns}
+          >
             <Input
+              data-dialog-initial-focus
               id="campaign-name"
               label={t("operations.campaignName")}
               name="name"
               required
+              value={campaignDraft.name}
+              onChange={(event) =>
+                setCampaignDraft((draft) => ({
+                  ...draft,
+                  name: event.target.value,
+                }))
+              }
             />
-            <Input
+            <Textarea
               id="campaign-body"
               label={t("operations.body")}
               name="body"
               required
+              rows={5}
+              value={campaignDraft.body}
+              onChange={(event) =>
+                setCampaignDraft((draft) => ({
+                  ...draft,
+                  body: event.target.value,
+                }))
+              }
             />
-            <Button disabled={pending || !canEdit} type="submit">
+            {error && creation === "campaigns" ? (
+              <p className="form-error" role="alert">
+                {error}
+              </p>
+            ) : null}
+            <Button busy={pending} disabled={!canManageCampaigns} type="submit">
               {t("operations.draft")}
             </Button>
           </fieldset>
         </form>
-        <div className="operation-list">
-          {broadcasts.map((broadcast) => (
-            <article key={broadcast.id}>
-              <div>
-                <strong>{broadcast.name}</strong>
-                <p>
-                  {t("operations.delivered", {
-                    delivered: broadcast.deliveredCount,
-                    total: broadcast.totalRecipients,
-                  })}
-                </p>
-              </div>
-              <Badge
-                label={
-                  t.has(`status.${broadcast.status}`)
-                    ? t(`status.${broadcast.status}`)
-                    : t("common.unknown")
-                }
-                tone={broadcast.status === "sent" ? "positive" : "info"}
-              />
-              {broadcast.status === "draft" ? (
-                <Button
-                  disabled={pending || !canEdit}
-                  onClick={() =>
-                    void run(() =>
-                      crmMutation(`/api/campaigns/${broadcast.id}/deliver`, {}),
-                    )
-                  }
-                  variant="secondary"
-                >
-                  {t("operations.simulate")}
-                </Button>
-              ) : null}
-            </article>
-          ))}
-        </div>
-      </Surface>
-      <Surface>
-        <h2>{t("operations.automations")}</h2>
+      </Dialog>
+      <Dialog
+        className="operation-create-dialog"
+        closeLabel={t("common.close")}
+        title={t("operations.create")}
+        description={t("premiumPrimary.automationDraftHint")}
+        open={creation === "automations"}
+        onClose={() => setCreation(undefined)}
+      >
         <form
           className="feature-form"
           onSubmit={(event) => void createAutomation(event)}
         >
-          <fieldset className="form-fieldset" disabled={pending || !canEdit}>
-            {!canEdit ? (
-              <p className="public-note">{t("common.readOnly")}</p>
-            ) : null}
+          <fieldset
+            className="form-fieldset"
+            disabled={pending || !canManageFlows}
+          >
             <Input
+              data-dialog-initial-focus
               id="automation-name"
               label={t("operations.name")}
               name="name"
               required
+              value={automationDraft.name}
+              onChange={(event) =>
+                setAutomationDraft((draft) => ({
+                  ...draft,
+                  name: event.target.value,
+                }))
+              }
             />
-            <Input
+            <Textarea
               id="automation-description"
               label={t("operations.description")}
               name="description"
+              rows={4}
+              value={automationDraft.description}
+              onChange={(event) =>
+                setAutomationDraft((draft) => ({
+                  ...draft,
+                  description: event.target.value,
+                }))
+              }
             />
-            <Button
-              disabled={pending || !canEdit}
-              type="submit"
-              variant="secondary"
-            >
+            {error && creation === "automations" ? (
+              <p className="form-error" role="alert">
+                {error}
+              </p>
+            ) : null}
+            <Button busy={pending} disabled={!canManageFlows} type="submit">
               {t("operations.create")}
             </Button>
           </fieldset>
         </form>
-        <div className="operation-list">
-          {automations.map((automation) => (
-            <article key={automation.id}>
-              <div>
-                <strong>{automation.name}</strong>
-                <p>
-                  {t("operations.version", {
-                    version: automation.version,
-                    status: t(`status.${automation.validationStatus}`),
-                  })}
-                </p>
-              </div>
-              <Badge
-                label={t(
-                  automation.published ? "status.published" : "status.draft",
-                )}
-                tone={automation.published ? "positive" : "neutral"}
-              />
-              {automation.executionKind !== "empty" ? (
-                <Link className="text-link" href="/orchestration">
-                  {t("operations.canonical")}
-                </Link>
-              ) : !automation.published ? (
-                <Button
-                  disabled={pending || !canEdit}
-                  onClick={() =>
-                    void run(() =>
-                      crmMutation(
-                        `/api/automations/${automation.id}/publish`,
-                        {},
-                      ),
-                    )
-                  }
-                  variant="quiet"
-                >
-                  {t("operations.publish")}
-                </Button>
-              ) : (
-                <Button
-                  disabled={pending || !canEdit}
-                  onClick={() =>
-                    void run(() =>
-                      crmMutation(`/api/automations/${automation.id}/run`, {}),
-                    )
-                  }
-                  variant="quiet"
-                >
-                  {t("operations.run")}
-                </Button>
-              )}
-            </article>
-          ))}
-        </div>
-        <div className="operation-list" aria-label={t("operations.runs")}>
-          {runs.map((automationRun) => (
-            <article key={automationRun.id}>
-              <div>
-                <strong>{t("operations.manual")}</strong>
-                <p>
-                  {t("operations.trace", { id: automationRun.id.slice(0, 8) })}
-                </p>
-              </div>
-              <Badge
-                label={
-                  t.has(`status.${automationRun.status}`)
-                    ? t(`status.${automationRun.status}`)
-                    : t("common.unknown")
-                }
-                tone={
-                  automationRun.status === "succeeded" ? "positive" : "info"
-                }
-              />
-            </article>
-          ))}
-        </div>
-      </Surface>
-      {error === undefined ? null : (
-        <p className="form-error" role="alert">
-          {error}
-        </p>
-      )}
+      </Dialog>
     </div>
   );
 }

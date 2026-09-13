@@ -18,6 +18,47 @@ def test_processor_order_without_gender_classifier():
     ]
 
 
+def test_complete_turn_planner_sits_between_llm_and_tts():
+    tin, stt, ua, llm, tts, tout, aa = _PROCESSORS
+    processors = build_agent_processors(
+        tin,
+        stt,
+        ua,
+        llm,
+        tts,
+        tout,
+        aa,
+        turn_planner="turn-planner",
+    )
+
+    assert processors == [tin, stt, ua, llm, "turn-planner", tts, tout, aa]
+
+
+def test_ownership_gates_cover_all_producers_before_buffers():
+    tin, stt, ua, llm, tts, tout, aa = _PROCESSORS
+    processors = build_agent_processors(
+        tin,
+        stt,
+        ua,
+        llm,
+        tts,
+        tout,
+        aa,
+        ownership_input="input-gate",
+        ownership_model="model-gate",
+        ownership_generated="generated-gate",
+        ownership_speech="speech-gate",
+        ownership_output="audio-gate",
+        tts_trim="trim",
+        turn_planner="planner",
+    )
+    assert processors.index("input-gate") < processors.index(stt)
+    assert processors.index("model-gate") < processors.index(llm)
+    assert processors.index(llm) < processors.index("generated-gate") < processors.index("planner")
+    assert processors.index("speech-gate") < processors.index(tts)
+    assert processors.index(tts) < processors.index("audio-gate") < processors.index("trim")
+
+
 def test_rtvi_sits_directly_after_transport_input():
     tin, stt, ua, llm, tts, tout, aa = _PROCESSORS
     processors = build_agent_processors(tin, stt, ua, llm, tts, tout, aa, rtvi="rtvi")
@@ -40,6 +81,22 @@ def test_gender_classifier_runs_parallel_to_stt():
     assert processors[2:] == [ua, llm, tts, tout, aa]
     # STT must not be reachable in series from the classifier.
     assert stt not in processors
+
+
+def test_explicit_gender_context_sits_between_stt_and_user_aggregator():
+    tin, stt, ua, llm, tts, tout, aa = _PROCESSORS
+    processors = build_agent_processors(
+        tin,
+        stt,
+        ua,
+        llm,
+        tts,
+        tout,
+        aa,
+        caller_gender_context="gender-context",
+    )
+
+    assert processors == [tin, stt, "gender-context", ua, llm, tts, tout, aa]
 
 
 def test_the_idle_nudge_does_not_have_to_cross_the_llm_to_be_heard():

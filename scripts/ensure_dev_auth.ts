@@ -133,7 +133,7 @@ async function main(): Promise<void> {
         : `Password: ${password}`;
     await writeFile(
       loginPath,
-      `Or-On fictional local operator\nEmail: ${email}\n${passwordLine}\n`,
+      `Or-On local development operator\nEmail: ${email}\n${passwordLine}\n`,
       "utf8",
     );
   }

@@ -5,6 +5,8 @@ import { redirect } from "next/navigation";
 
 import {
   listAgentProfiles,
+  listAutomationRuns,
+  tenantOperationalInsights,
   listAutomations,
   listContactActivity,
   listContacts,
@@ -24,16 +26,25 @@ import { OrchestrationPanel } from "../../features/orchestration";
 export default async function OrchestrationPage({
   searchParams,
 }: {
-  readonly searchParams: Promise<{ readonly contact?: string }>;
+  readonly searchParams: Promise<{
+    readonly contact?: string;
+    readonly tab?: string;
+  }>;
 }) {
   try {
-    const requested = (await searchParams).contact;
+    const { contact: requested, tab } = await searchParams;
+    const initialTab =
+      tab === "flows" || tab === "activity" || tab === "handoffs"
+        ? tab
+        : "agents";
     const data = await withCurrentTenant("crm:read", async (sql) => {
       const contacts = await listContacts(sql, { limit: 50 });
       const selected =
         contacts.find((contact) => contact.id === requested) ?? contacts[0];
       return {
         agents: await listAgentProfiles(sql),
+        runs: await listAutomationRuns(sql),
+        insights: await tenantOperationalInsights(sql),
         flows: await listAutomations(sql),
         handoffs: await listHandoffs(sql),
         contacts,
@@ -48,9 +59,9 @@ export default async function OrchestrationPage({
       };
     });
     return (
-      <main className="page page--wide">
-        <ProductHeading page="orchestration" />
-        <OrchestrationPanel {...data} />
+      <main className="page page--wide page--workspace-premium">
+        <ProductHeading page="orchestration" premium />
+        <OrchestrationPanel {...data} initialTab={initialTab} />
       </main>
     );
   } catch (error) {

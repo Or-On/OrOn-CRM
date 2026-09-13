@@ -2,9 +2,60 @@
 
 Status: living architecture threat model
 
-Last reviewed: 2026-09-02 (Phase 6 WhatsApp provider boundary)
+Last reviewed: 2026-09-13 (portable deployment and runtime dependency review)
 
-Scope: Phase 1 foundation and the explicitly planned unified platform
+Scope: current tenant platform, authentication, uploads, OAuth, billing, workers,
+voice and messaging boundaries. Historical phase sections below describe their
+original scope, **not current readiness**. The active findings and evidence are
+in [the readiness register](../readiness/findings.md).
+
+## Current readiness assessment — 2026-09-12
+
+The application now contains real Meta/voice adapters, image uploads, encrypted
+OAuth credential persistence and Stripe checkout/webhook code. Earlier statements
+that these paths do not exist are historical. Neither staging nor production is
+approved by this audit. All real-provider/AI/billing flags remain off in the
+isolated acceptance stack; no live side effects or cloud deployment occurred.
+
+Repairs are in a separate candidate while the user's hot-reload runner is active;
+they are not yet protections in the running checkout. Candidate tests cover
+inactive-tenant API-key revocation, OAuth tenant/user/session binding and single
+use, expected Stripe tenant/customer/mode/currency/amount/session binding,
+invitation failure cookie clearing, row-import savepoints, worker claim scopes,
+post-queue consent/ownership/sender checks and ambiguous-send quarantine. Each
+server remains responsible for authorization; UI visibility is not enforcement.
+
+Raw external payloads and model decisions remain untrusted even with valid
+signatures. A call-request model decision is not independent proof of consent or
+a tenant spending budget. Autonomous calls remain blocked for staging. Prompt
+wording alone cannot enforce tool or data permissions. Ambiguous provider outcomes
+must not be advertised as exactly-once delivery; reconcile before a new send.
+
+OAuth now has narrower identity scopes because mailbox sync/send is not implemented.
+Refresh/disconnect, key rotation, verified email changes, MFA and recovery need
+explicit production acceptance. A successful OAuth callback is not a mail client.
+
+The full voice dependency graph contains transitive NLTK 3.10.3
+`PYSEC-2026-3740`/`GHSA-8mgp-746c-j5xp`. The
+[maintainer advisory](https://github.com/nltk/nltk/security/advisories/GHSA-8mgp-746c-j5xp)
+still reports no patched version. The platform and retained Pipecat runtime do
+not import NLTK, and the deployable dispatcher image removes it after locked
+dependency installation. A 30-day audit exception covers the development
+environment only and expires 2026-10-13; this is a mitigation, not a clean
+upstream resolution. Fresh final-image vulnerability scans remain mandatory.
+
+Prepared deployment controls include private database networking, non-root/read-only
+application images, fixed provider-off settings, Caddy body/header/access controls,
+digest image manifests, a serialized one-shot migration, private secret retrieval,
+backup checksums and restore-to-new-database tooling. The fresh-schema local
+restore passed; populated data/media, real hosting IAM/TLS/backups, incident
+alerts, and authenticated release smoke remain separate gates. No hosting
+resources were created or changed.
+
+Authorization review uses the
+[OWASP deny-by-default guidance](https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html)
+as a checklist, not a certification claim. Missing negative/browser/provider/fault
+coverage remains visible in readiness documentation rather than marked passed.
 
 ## Security objective
 
@@ -49,28 +100,28 @@ until their boundary validates identity, integrity, authorization, type, and siz
   backup mistakes;
 - compromised internal process attempting lateral movement.
 
-## Threat register
+## Historical Phase 1 threat register
 
-| Threat | Impact / likely path | Implemented Phase 1 controls | Planned controls before affected feature ships |
-| --- | --- | --- | --- |
-| Tenant breakout | Missing context, IDOR, unsafe joins, pooled-session leakage | PostgreSQL-only direction; separate non-superuser runtime role; no tenant feature is represented as complete | Canonical memberships/permissions; `SET LOCAL` tenant/user/role; forced fail-closed RLS; cross-tenant negative and pool-reset tests |
-| Broken authorization | UI-only checks, role confusion, direct object access | Canonical membership roles, deny-by-default typed permission matrix, server-side session resolution, last-owner database guard | Object-level policies for each feature, audited admin elevation, permission fixtures for ported domains |
-| Credential leakage | Source, image layer, log, diagnostics, fixture, Terraform state | `.env*` ignored except examples; typed diagnostics and structured log redaction; tracked-file secret scan; no real credentials or service-account JSON | Secret Manager and VM identity; envelope encryption with external master key; rotation/revocation runbooks and credential access audit |
-| Webhook forgery | Fake WhatsApp/telephony events create work | No provider webhook or traffic exists in Phase 1 | Raw-body signature verification, constant-time comparison, provider/account binding, timestamp validation, narrow route limits |
-| Webhook replay | Captured valid request repeats side effects | No provider side-effect implementation | Durable inbox unique provider-event ID, replay window, idempotent transaction, duplicate metrics and quarantine |
-| CSRF | Authenticated browser tricked into mutation | `SameSite=Lax` opaque session cookie, session-bound double-submit token, Origin and Fetch Metadata checks on unsafe auth routes, no state-changing GET | Apply the same shared guard to every future mutation and add edge-level CSP/header enforcement |
-| XSS | Stored message/contact/model output executes in operator browser | React escaping and CSP-compatible architecture; no rich-text/HTML product feature | Strict renderers/sanitization, CSP with nonces, Trusted Types evaluation, URL allowlists, stored-XSS tests |
-| SSRF | Webhook/tool/media URL reaches metadata or internal services | No URL-fetching provider adapter; service boundaries documented | Central egress policy, parsed URL/IP validation after DNS, redirect revalidation, metadata/private/link-local denylist, size/time budgets |
-| Malicious uploads | Parser exploit, polyglot, oversized object, cross-tenant access | Full upload path absent; object-storage ADR separates bytes from PostgreSQL metadata | Streaming limits, MIME/signature checks, random tenant-bound keys, quarantine/scanning, checksum, safe download disposition, retention/deletion |
-| WebSocket authentication | Stolen/anonymous socket observes or controls live sessions | 60-second issuer/audience/capability-bound signed live-session grant and live-agent validator | Bind grant to actual OpenLive session, validate browser origin, authorize every message, add rate/size limits and revocation fan-out |
-| Service-to-service trust | Compromised web/worker impersonates another runtime | Private Compose network, distinct future roles, loopback-only host ports, no shared superuser app DSN | Workload identities or rotated service credentials, audience-bound tokens/mTLS evaluation, network segmentation, per-service DB grants |
-| Prompt/tool abuse | Content induces agent to exfiltrate secrets or invoke dangerous tools | No product tool execution; explicit contract boundaries and secret references | Versioned tool allowlists, argument schemas, tenant authorization, confirmation for consequential actions, sandboxing, output filtering, audit trail |
-| Call abuse | Fraud, premium dialing, harassment, runaway retries | `ENABLE_REAL_TELEPHONY=false` default; developer runner refuses enabled flag; development endpoint accepts only simulator mode; real boundary requires both flag and explicit per-action approval; idempotent simulator never resolves a phone number | Destination policy, budget/concurrency/rate limits, consent/legal checks, kill switch, and protected manual real-provider smoke |
-| WhatsApp abuse | Spam, unauthorized campaign, template/account misuse | `ENABLE_REAL_WHATSAPP=false` default tested in both languages; no send adapter; developer runner refuses enabled flag | Explicit approval plus flag, RBAC, recipient/template policy, opt-out/suppression, campaign caps, outbox idempotency, audit and kill switch |
-| PostgreSQL exposure | Internet access, shared superuser, weak tenant boundary | Loopback-only Compose mapping, private network, pinned PostgreSQL, named volume, app uses `platform_web`, Alembic uses migrator | VM firewall/private binding, TLS where crossing hosts, forced RLS, per-service grants, connection limits, audit/monitoring and patch runbook |
-| Backup exposure | Snapshot contains all tenants/credentials and is copied or restored unsafely | Backups not implemented or claimed in Phase 1 | Encrypted versioned GCS bucket, narrow backup identity, retention/lock policy, checksums, restore-to-new-DB drills, access logging and deletion process |
-| Supply-chain compromise | Malicious action/package/image/model alters build/runtime | Frozen pnpm/uv locks; package age/build allowlist; CI actions pinned to commit; target-only build; secret and architecture scans | Signed images/SBOM/provenance, digest pins, protected dependency updates, model checksums/licenses, isolated builders, incident revocation |
-| Dependency compromise | Known vulnerable framework/native library exploited | Patched baseline, `pnpm audit`, `pip-audit`, strict compatibility gates, critical issues block by policy | Container/OS scanning, scheduled updates, VEX/time-bounded exceptions, full retained-engine regression tests before upgrades |
+| Threat                   | Impact / likely path                                                          | Implemented Phase 1 controls                                                                                                                                                                                                                                                                                                                       | Planned controls before affected feature ships                                                                                                          |
+| ------------------------ | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tenant breakout          | Missing context, IDOR, unsafe joins, pooled-session leakage                   | PostgreSQL-only direction; separate non-superuser runtime role; no tenant feature is represented as complete                                                                                                                                                                                                                                       | Canonical memberships/permissions; `SET LOCAL` tenant/user/role; forced fail-closed RLS; cross-tenant negative and pool-reset tests                     |
+| Broken authorization     | UI-only checks, role confusion, direct object access                          | Canonical membership roles, deny-by-default typed permission matrix, server-side session resolution, last-owner database guard                                                                                                                                                                                                                     | Object-level policies for each feature, audited admin elevation, permission fixtures for ported domains                                                 |
+| Credential leakage       | Source, image layer, log, diagnostics, fixture, infrastructure state          | `.env*` ignored except examples; typed diagnostics and structured log redaction; tracked-file secret scan; no real credentials or static hosting keys                                                                                                                                                                                               | External secret store and least-privilege runtime identity; envelope encryption with external master key; rotation/revocation runbooks and credential access audit |
+| Webhook forgery          | Fake WhatsApp/telephony events create work                                    | No provider webhook or traffic exists in Phase 1                                                                                                                                                                                                                                                                                                   | Raw-body signature verification, constant-time comparison, provider/account binding, timestamp validation, narrow route limits                          |
+| Webhook replay           | Captured valid request repeats side effects                                   | No provider side-effect implementation                                                                                                                                                                                                                                                                                                             | Durable inbox unique provider-event ID, replay window, idempotent transaction, duplicate metrics and quarantine                                         |
+| CSRF                     | Authenticated browser tricked into mutation                                   | `SameSite=Lax` opaque session cookie, session-bound double-submit token, Origin and Fetch Metadata checks on unsafe auth routes, no state-changing GET                                                                                                                                                                                             | Apply the same shared guard to every future mutation and add edge-level CSP/header enforcement                                                          |
+| XSS                      | Stored message/contact/model output executes in operator browser              | React escaping and CSP-compatible architecture; no rich-text/HTML product feature                                                                                                                                                                                                                                                                  | Strict renderers/sanitization, CSP with nonces, Trusted Types evaluation, URL allowlists, stored-XSS tests                                              |
+| SSRF                     | Webhook/tool/media URL reaches metadata or internal services                  | No URL-fetching provider adapter; service boundaries documented                                                                                                                                                                                                                                                                                    | Central egress policy, parsed URL/IP validation after DNS, redirect revalidation, metadata/private/link-local denylist, size/time budgets               |
+| Malicious uploads        | Parser exploit, polyglot, oversized object, cross-tenant access               | Full upload path absent; object-storage ADR separates bytes from PostgreSQL metadata                                                                                                                                                                                                                                                               | Streaming limits, MIME/signature checks, random tenant-bound keys, quarantine/scanning, checksum, safe download disposition, retention/deletion         |
+| WebSocket authentication | Stolen/anonymous socket observes or controls live sessions                    | 60-second issuer/audience/capability-bound signed live-session grant and live-agent validator                                                                                                                                                                                                                                                      | Bind grant to actual OpenLive session, validate browser origin, authorize every message, add rate/size limits and revocation fan-out                    |
+| Service-to-service trust | Compromised web/worker impersonates another runtime                           | Private Compose network, distinct future roles, loopback-only host ports, no shared superuser app DSN                                                                                                                                                                                                                                              | Workload identities or rotated service credentials, audience-bound tokens/mTLS evaluation, network segmentation, per-service DB grants                  |
+| Prompt/tool abuse        | Content induces agent to exfiltrate secrets or invoke dangerous tools         | No product tool execution; explicit contract boundaries and secret references                                                                                                                                                                                                                                                                      | Versioned tool allowlists, argument schemas, tenant authorization, confirmation for consequential actions, sandboxing, output filtering, audit trail    |
+| Call abuse               | Fraud, premium dialing, harassment, false-positive AI intent, runaway retries | `ENABLE_REAL_TELEPHONY=false`, `ENABLE_REAL_VOICE_PROVIDERS=false`, and `ENABLE_WHATSAPP_AUTO_CALLS=false` defaults; explicit WhatsApp request is pinned to its inbound message; tenant/contact/actor/consent/E.164/flow revalidation; ten-minute conversation cap; idempotent bounded job; signed dispatcher boundary; terminal failure hands off | Configurable tenant budgets and allow/deny destinations, aggregate concurrency/rate limits, anomaly alerting, and protected manual real-provider smoke  |
+| WhatsApp abuse           | Spam, unauthorized campaign, template/account misuse                          | `ENABLE_REAL_WHATSAPP=false` default tested in both languages; no send adapter; developer runner refuses enabled flag                                                                                                                                                                                                                              | Explicit approval plus flag, RBAC, recipient/template policy, opt-out/suppression, campaign caps, outbox idempotency, audit and kill switch             |
+| PostgreSQL exposure      | Internet access, shared superuser, weak tenant boundary                       | Loopback-only Compose mapping, private network, pinned PostgreSQL, named volume, app uses `platform_web`, Alembic uses migrator                                                                                                                                                                                                                    | VM firewall/private binding, TLS where crossing hosts, forced RLS, per-service grants, connection limits, audit/monitoring and patch runbook            |
+| Backup exposure          | Snapshot contains all tenants/credentials and is copied or restored unsafely  | Backups not implemented or claimed in Phase 1                                                                                                                                                                                                                                                                                                      | Encrypted versioned backup destination, narrow backup identity, retention/lock policy, checksums, restore-to-new-DB drills, access logging and deletion process |
+| Supply-chain compromise  | Malicious action/package/image/model alters build/runtime                     | Frozen pnpm/uv locks; package age/build allowlist; CI actions pinned to commit; target-only build; secret and architecture scans                                                                                                                                                                                                                   | Signed images/SBOM/provenance, digest pins, protected dependency updates, model checksums/licenses, isolated builders, incident revocation              |
+| Dependency compromise    | Known vulnerable framework/native library exploited                           | Patched baseline, `pnpm audit`, `pip-audit`, strict compatibility gates, critical issues block by policy                                                                                                                                                                                                                                           | Container/OS scanning, scheduled updates, VEX/time-bounded exceptions, full retained-engine regression tests before upgrades                            |
 
 ## Implemented Phase 1 controls
 
@@ -173,6 +224,23 @@ until their boundary validates identity, integrity, authorization, type, and siz
 - GET webhook verification uses an env-only token. POST signatures cover exact
   raw bytes, and provider events are persisted/deduplicated before acknowledgement.
   Status application is tenant-scoped and monotonic.
+- WhatsApp AI is separately default-off. Admission requires explicit conversation
+  ownership by a published WhatsApp agent and, for Meta conversations, the real
+  provider kill switch. The worker revalidates the active tenant and authorizing
+  operator before model execution and again before writing a result.
+- Customer content is treated as untrusted prompt input. A fixed instruction layer
+  prevents it from overriding safety rules, structured output admits only reply,
+  handoff, or call-request decisions, and model-provided prose is never persisted
+  as a security-sensitive reason. Provider errors persist bounded safe codes only.
+- Automatic callbacks have a third default-off kill switch in addition to both
+  real-voice switches. Only an explicit immediate-call model decision can enqueue
+  a minimal identifier-only job from a Meta conversation; simulator input is
+  ineligible. The worker re-resolves the tenant contact and
+  E.164 identity, rejects revoked voice consent, checks the active enabling actor
+  and exact published flow, and calls the signed dispatcher only after releasing
+  the transaction. A bounded transcript is labeled untrusted before reaching the
+  voice prompt and is never logged or copied into the job payload. Permanent or
+  exhausted failure creates one idempotent human handoff.
 
 ## Phase 6 simulator execution controls (implemented)
 
@@ -193,13 +261,14 @@ until their boundary validates identity, integrity, authorization, type, and siz
 
 ## Outstanding security work
 
-The 2026-09-02 dependency scan reports high-severity
+The 2026-09-13 dependency review confirms high-severity
 `GHSA-8mgp-746c-j5xp` in transitive `nltk==3.10.3`, with no patched release
 available. The affected model-artifact APIs are not called by the platform and
-no caller-controlled NLTK model path is accepted. This is a time-bounded
-non-exploitability exception, not a clean scan: review weekly and upgrade as
-soon as an upstream patched stable release is compatible. Next review:
-2026-09-09; exception owner: platform security.
+no caller-controlled NLTK model path is accepted. The runtime dispatcher image
+also uninstalls the unused package. This is a time-bounded non-exploitability
+exception for development tooling, not a clean upstream scan: review weekly and
+upgrade as soon as a patched stable release is compatible. Exception expiry:
+2026-10-13; exception owner: platform security.
 
 Public signup, OAuth/OIDC, MFA/WebAuthn, self-service recovery, full WebSocket session
 binding, object scanning,
@@ -276,5 +345,5 @@ delivery remains a separate user-performed acceptance step. See the
 
 Review this model before adding authentication, tenant tables/RLS, public
 webhooks, real provider adapters, uploads, WebSocket protocol messages, tool
-execution, GCP resources, backup automation, or any new externally reachable
+execution, hosting resources, backup automation, or any new externally reachable
 port. Record material architecture changes in an ADR.

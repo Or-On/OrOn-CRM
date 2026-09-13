@@ -6,7 +6,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from typing import Literal, Protocol
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -15,9 +15,20 @@ from or_on_platform.database import create_database_probe
 from or_on_platform.logging import configure_logging
 from pydantic import BaseModel
 
+from control_api.agent_evaluation import (
+    AgentEvaluationService,
+    PostgresAgentEvaluationRepository,
+    create_agent_evaluation_router,
+)
+from control_api.audio_preview import (
+    AudioPreviewService,
+    PostgresAudioPreviewRepository,
+    create_audio_preview_router,
+)
 from control_api.auth import ServiceAssertionVerifier
 from control_api.orchestration import create_orchestration_router
 from control_api.voice import PostgresVoiceRepository, VoiceRepository, create_voice_router
+from control_api.voice_control import PostgresVoiceControlRepository, create_voice_control_router
 from control_api.voice_jobs import run_voice_simulations
 
 
@@ -49,6 +60,8 @@ def create_app(
     database_probe: ReadinessProbe | None = None,
     voice_repository: VoiceRepository | None = None,
     assertion_verifier: ServiceAssertionVerifier | None = None,
+    audio_preview_service: AudioPreviewService | None = None,
+    agent_evaluation_service: AgentEvaluationService | None = None,
 ) -> FastAPI:
     """Create a process-owned app; tests inject dependencies without module globals."""
 
@@ -109,12 +122,44 @@ def create_app(
     )
     app.include_router(create_voice_router(resolved_voice_repository, resolved_assertion_verifier))
     app.include_router(create_orchestration_router(resolved_assertion_verifier))
+    paid_admission: set[UUID] = set()
+    if audio_preview_service is None and isinstance(
+        resolved_voice_repository, PostgresVoiceRepository
+    ):
+        audio_preview_service = AudioPreviewService(
+            PostgresAudioPreviewRepository(resolved_voice_repository.session_factory),
+            enabled=resolved_settings.enable_real_voice_providers,
+            admission=paid_admission,
+        )
+    app.include_router(
+        create_audio_preview_router(audio_preview_service, resolved_assertion_verifier)
+    )
+    if agent_evaluation_service is None and isinstance(
+        resolved_voice_repository, PostgresVoiceRepository
+    ):
+        agent_evaluation_service = AgentEvaluationService(
+            PostgresAgentEvaluationRepository(resolved_voice_repository.session_factory),
+            enabled=resolved_settings.enable_real_voice_providers,
+            admission=paid_admission,
+        )
+    app.include_router(
+        create_agent_evaluation_router(agent_evaluation_service, resolved_assertion_verifier)
+    )
+    control_repository = (
+        PostgresVoiceControlRepository(resolved_voice_repository.session_factory)
+        if isinstance(resolved_voice_repository, PostgresVoiceRepository)
+        else None
+    )
+    app.include_router(create_voice_control_router(control_repository, resolved_assertion_verifier))
 
     @app.middleware("http")
     async def correlation_id(request: Request, call_next):  # type: ignore[no-untyped-def]
         request_id = request.headers.get("x-request-id", str(uuid4()))
         response = await call_next(request)
         response.headers["x-request-id"] = request_id
+        if request.url.path.endswith(("/audio-preview", "/provider-evaluate")):
+            response.headers["Cache-Control"] = "private, no-store"
+            response.headers["Pragma"] = "no-cache"
         return response
 
     @app.get(

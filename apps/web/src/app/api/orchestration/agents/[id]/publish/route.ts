@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { publishAgentProfile } from "@or-on/crm";
 
-import { withCurrentTenant } from "../../../../../../features/auth";
+import { withFreshCurrentTenant } from "../../../../../../features/auth";
 import {
   assertCrmMutation,
   crmErrorResponse,
@@ -15,8 +15,9 @@ export async function POST(
   try {
     await assertCrmMutation(request);
     const { id } = await context.params;
-    const published = await withCurrentTenant("flows:manage", (sql, session) =>
-      publishAgentProfile(sql, session.userId, id),
+    const published = await withFreshCurrentTenant(
+      "flows:manage",
+      (sql, session) => publishAgentProfile(sql, session.userId, id),
     );
     if (!published) throw new TypeError("no valid unpublished version exists");
     return NextResponse.json({ published: true });

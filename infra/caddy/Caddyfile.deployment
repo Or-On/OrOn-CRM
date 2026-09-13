@@ -1,0 +1,26 @@
+{
+	admin off
+	email {$TLS_CONTACT_EMAIL}
+}
+
+{$PLATFORM_ORIGIN} {
+	encode zstd gzip
+	request_body {
+		max_size 2MB
+	}
+	header {
+		-Server
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy no-referrer
+		Permissions-Policy "camera=(self), microphone=(self), geolocation=()"
+		Strict-Transport-Security "max-age=31536000"
+	}
+
+	# Access logs are deliberately disabled because callbacks may carry bearer
+	# state, authorization codes, or provider-specific identifiers.
+	@simulators path /api/messaging/simulate/* /api/voice/simulated-calls /api/orchestration/simulate /api/orchestration/flows/*/simulate /api/campaigns/*/deliver /api/automations/*/run
+	respond @simulators "Unavailable outside local development" 403
+
+	reverse_proxy web:3000
+}

@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { whatsAppFailureReasons } from "@or-on/crm";
 import { localized, renderMarkup } from "./localized";
 import { DeliveryFailure } from "../src/features/inbox";
+import en from "../src/i18n/messages/en.json";
+import he from "../src/i18n/messages/he.json";
 
 afterEach(cleanup);
 const diagnostic = {
@@ -21,7 +23,7 @@ describe("WhatsApp safe diagnostic display", () => {
       localized(<DeliveryFailure failure={{ code: "meta_100", diagnostic }} />),
     );
     expect(screen.getByText(/unavailable or inaccessible/)).toBeTruthy();
-    const summary = screen.getByText("Safe diagnostic details");
+    const summary = screen.getByText(en.deliveryFailure.details);
     fireEvent.click(summary);
     expect(summary.closest("details")?.open).toBe(true);
     expect(screen.getByText("meta_100")).toBeTruthy();
@@ -51,7 +53,7 @@ describe("WhatsApp safe diagnostic display", () => {
           locale,
         );
         expect(markup).toContain(
-          locale === "he" ? "פרטי אבחון בטוחים" : "Safe diagnostic details",
+          (locale === "he" ? he : en).deliveryFailure.details,
         );
         expect(markup).not.toContain("MISSING_MESSAGE");
         expect(markup).toContain("<bdi>meta_100</bdi>");

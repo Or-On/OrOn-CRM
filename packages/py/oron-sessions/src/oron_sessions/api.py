@@ -17,9 +17,8 @@ from oron_common import PriceBook, price
 from oron_common.phone import validate_e164
 from oron_flows import Composition, FlowListing, FlowSpec, FlowStore, expand
 from oron_flows.components import export_catalog
-from oron_flows.seeds import SEED_COMPOSITIONS
 from oron_tenancy import require_tenant
-from oron_tenancy.flow_store import FlowNotFound
+from oron_tenancy.flow_store import FlowNotFound, FlowVersionConflict
 from pydantic import BaseModel, ValidationError
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -120,15 +119,10 @@ async def publish_flow(
 ) -> FlowPublished:
     """Expand, freeze and store a flow under the calling tenant.
 
-    A published version is immutable here even though the store can overwrite one
-    — that capability exists for boot-time convergence of the packaged catalog.
-    Letting an author silently replace a version live would change what a DID
-    already bound to it answers with, mid-traffic and with no reviewable diff.
+    A published version is immutable. Letting an author silently replace a
+    version live would change what a DID already bound to it answers with,
+    mid-traffic and with no reviewable diff.
     """
-    if composition.flow.id in SEED_COMPOSITIONS:
-        raise HTTPException(
-            status_code=409, detail=f"flow id {composition.flow.id} belongs to the packaged catalog"
-        )
     if composition.flow.version in await store.list_versions(str(tenant_id), composition.flow.id):
         raise HTTPException(
             status_code=409,
@@ -136,6 +130,9 @@ async def publish_flow(
         )
     try:
         version = await store.publish(str(tenant_id), composition)
+    except FlowVersionConflict as exc:
+        # Another author may have published after the friendly pre-check above.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except (ValidationError, ValueError) as exc:
         # The graph is only checked when it is expanded, so a composition that
         # parses can still describe an unreachable or dangling node.
@@ -167,7 +164,7 @@ async def list_flows(
     store: FlowStore = Depends(get_flow_store),
     tenant_id: uuid.UUID = Depends(require_tenant),
 ) -> list[FlowListing]:
-    """Every flow this tenant may open — its own, plus the packaged catalog."""
+    """Every published flow owned by this tenant."""
     return await store.list_flows(str(tenant_id))
 
 
@@ -200,7 +197,7 @@ async def get_flow(
     store: FlowStore = Depends(get_flow_store),
     tenant_id: uuid.UUID = Depends(require_tenant),
 ) -> FlowSpec:
-    """The frozen spec a call should run: this tenant's flow, or the packaged one.
+    """The latest frozen spec for a flow published by this tenant.
 
     Returns the latest version — a DID binds a flow_id and never a version, so
     "which version" is the store's decision, not the caller's.

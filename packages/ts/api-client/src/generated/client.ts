@@ -1,6 +1,10 @@
 // Generated from control-api OpenAPI. Do not edit by hand.
 
 import type {
+  AgentProviderEvaluationRequest,
+  AgentProviderEvaluationResult,
+  AudioPreviewRequest,
+  AudioPreviewResult,
   CanonicalFlowContract,
   CanonicalFlowValidationResult,
   ComponentCatalog,
@@ -21,6 +25,8 @@ import type {
   VoiceCampaignRun,
   VoiceCampaignRunResult,
   VoiceCampaignSummary,
+  VoiceControlCommand,
+  VoiceControlStatus,
   VoiceSessionDetail,
   VoiceSessionList,
   VoiceSessionLookup,
@@ -42,6 +48,32 @@ export class GeneratedControlApiClient {
     private readonly baseUrl: string,
     private readonly fetcher: FetchLike = fetch,
   ) {}
+
+  public async previewAgentAudio(
+    body: AudioPreviewRequest,
+  ): Promise<ApiResponse<AudioPreviewResult>> {
+    return this.request<AudioPreviewResult>(
+      "/api/v1/orchestration/agents/audio-preview",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    );
+  }
+
+  public async evaluateAgentProvider(
+    body: AgentProviderEvaluationRequest,
+  ): Promise<ApiResponse<AgentProviderEvaluationResult>> {
+    return this.request<AgentProviderEvaluationResult>(
+      "/api/v1/orchestration/agents/provider-evaluate",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    );
+  }
 
   public async validateCanonicalFlow(
     body: CanonicalFlowContract,
@@ -144,6 +176,28 @@ export class GeneratedControlApiClient {
 
   public async listVoiceSessions(): Promise<ApiResponse<VoiceSessionList>> {
     return this.request<VoiceSessionList>("/api/v1/voice/sessions");
+  }
+
+  public async getVoiceSessionControl(parameters: {
+    readonly session_id: string;
+  }): Promise<ApiResponse<VoiceControlStatus>> {
+    return this.request<VoiceControlStatus>(
+      `/api/v1/voice/sessions/${encodeURIComponent(String(parameters.session_id))}/control`,
+    );
+  }
+
+  public async setVoiceSessionControl(
+    parameters: { readonly session_id: string },
+    body: VoiceControlCommand,
+  ): Promise<ApiResponse<VoiceControlStatus>> {
+    return this.request<VoiceControlStatus>(
+      `/api/v1/voice/sessions/${encodeURIComponent(String(parameters.session_id))}/control`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    );
   }
 
   public async simulateVoiceCall(

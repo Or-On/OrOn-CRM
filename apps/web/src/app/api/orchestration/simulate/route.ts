@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { simulationRefusal } from "../../../../features/simulation-policy";
 
 import {
   queueCallOutcomeWhatsAppFollowup,
@@ -13,6 +14,8 @@ import {
 
 export async function POST(request: Request) {
   try {
+    const refusal = simulationRefusal();
+    if (refusal) return refusal;
     await assertCrmMutation(request);
     const body = await jsonObject(request);
     const idempotencyKey = request.headers.get("idempotency-key")?.trim();

@@ -34,13 +34,13 @@ flowchart LR
   Dispatcher --> LiveKit[LiveKit and SIP]
   Voice --> LiveKit
   LiveKit --> Redis[(Redis infrastructure)]
-  Objects[Local objects / GCS] --- BFF
+  Objects[Configured object storage] --- BFF
   Objects --- Control
 ```
 
 PostgreSQL owns authoritative business state. Redis is permitted only for
 LiveKit coordination or disposable cache. Object bytes live in a mounted local
-directory during localhost development and GCS on the future VM; PostgreSQL owns
+directory during localhost development and a configured object-store adapter in deployment; PostgreSQL owns
 their metadata and authorization.
 
 ## Integration method

@@ -42,6 +42,9 @@ class PlatformSettings(BaseSettings):
     ] = "INFO"
     enable_real_telephony: bool = Field(default=False, validation_alias="ENABLE_REAL_TELEPHONY")
     enable_real_whatsapp: bool = Field(default=False, validation_alias="ENABLE_REAL_WHATSAPP")
+    enable_real_voice_providers: bool = Field(
+        default=False, validation_alias="ENABLE_REAL_VOICE_PROVIDERS"
+    )
     livekit_api_secret: SecretStr | None = Field(
         default=None, validation_alias="LIVEKIT_API_SECRET"
     )
@@ -51,7 +54,7 @@ class PlatformSettings(BaseSettings):
     whatsapp_access_token: SecretStr | None = Field(
         default=None, validation_alias="WHATSAPP_ACCESS_TOKEN"
     )
-    ai_api_key: SecretStr | None = Field(default=None, validation_alias="AI_API_KEY")
+    llm_api_key: SecretStr | None = Field(default=None, validation_alias="LLM_API_KEY")
 
     @classmethod
     def load(cls, *, require_database: bool = False, service: str | None = None) -> Self:
@@ -77,10 +80,11 @@ class PlatformSettings(BaseSettings):
             "log_level": self.log_level,
             "enable_real_telephony": self.enable_real_telephony,
             "enable_real_whatsapp": self.enable_real_whatsapp,
+            "enable_real_voice_providers": self.enable_real_voice_providers,
             "livekit_api_secret": self._secret_state(self.livekit_api_secret),
             "auth_service_secret": self._secret_state(self.auth_service_secret),
             "whatsapp_access_token": self._secret_state(self.whatsapp_access_token),
-            "ai_api_key": self._secret_state(self.ai_api_key),
+            "llm_api_key": self._secret_state(self.llm_api_key),
         }
 
     @staticmethod

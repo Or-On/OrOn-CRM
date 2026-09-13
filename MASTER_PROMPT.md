@@ -48,7 +48,7 @@ without searching through the entire codebase.
 The finished system must:
 
 - Run locally on the developer’s computer.
-- Later run as a development environment on one GCP Compute Engine VM.
+- Later run as a development environment on a compatible container host.
 - Present one product, one login, one navigation system, and one design language.
 - Use PostgreSQL as its only database and authoritative persistence system.
 - Integrate telephony, WhatsApp CRM, automation, browser-local voice/vision, AI
@@ -59,7 +59,7 @@ The finished system must:
   usability, accessibility, or performance.
 
 Assume telephony, LiveKit, WhatsApp, AI-provider, STT, and TTS credentials will
-be supplied later through environment variables or GCP Secret Manager.
+be supplied later through environment variables or the selected external secret store.
 
 Do not ask for real API keys during normal implementation. All CI and local
 development flows must work with provider simulators and mocks. Real calls and
@@ -186,7 +186,7 @@ Large binary objects must not be stored inefficiently in PostgreSQL. Call
 recordings, message attachments, uploaded media, and model artifacts must use:
 
 - a mounted local object directory in localhost development
-- a GCS bucket on the GCP VM deployment
+- a configured object-store adapter in the deployed environment
 
 All object metadata, ownership, tenant scope, checksums, retention state, and
 access controls must live in PostgreSQL. PostgreSQL remains the source of truth
@@ -232,14 +232,14 @@ This is not currently a production or multi-region deployment.
 Optimize for:
 
 - excellent localhost development
-- one reliable GCP development VM
+- one reliable provider-neutral development host
 - low operational complexity
 - safe provider testing
 - straightforward debugging
 - deterministic setup and teardown
 - clean future migration paths
 
-Do not introduce Kubernetes, GKE, service meshes, multi-region databases,
+Do not introduce Kubernetes, service meshes, multi-region databases,
 Kafka, or production-scale orchestration.
 
 Do not claim production readiness or regulatory compliance.
@@ -251,7 +251,7 @@ real customer data in:
 
 - source files
 - Compose files
-- Terraform variables committed to Git
+- infrastructure-state or deployment configuration committed to Git
 - CI logs
 - Docker layers
 - test snapshots
@@ -316,9 +316,8 @@ shows that another layout reduces risk, and record the reason in an ADR.
 ├── infra/
 │   ├── compose/
 │   ├── caddy/
-│   ├── terraform/
-│   │   ├── modules/
-│   │   └── environments/dev/
+│   ├── deployment/
+│   ├── images/
 │   ├── github-actions/
 │   └── scripts/
 ├── docs/
@@ -984,7 +983,7 @@ Requirements:
 - WebSocket reconnect behavior is robust
 - backpressure and message ordering are handled
 - local model support and remote-provider support remain explicit choices
-- desktop packaging remains compiling but is not a first GCP acceptance gate
+- desktop packaging remains compiling but is not a first deployment acceptance gate
 
 Migrate OpenLive runtime persistence:
 
@@ -1025,11 +1024,11 @@ Local secrets:
 - restrictive filesystem permissions
 - never copied into images
 
-GCP secrets:
-- Secret Manager
-- least-privilege VM service-account access
-- no secret values in Terraform state
-- no long-lived GCP JSON service-account key in GitHub Actions
+Deployment secrets:
+- an external secret store selected by the operator
+- least-privilege runtime identity or private host-mounted files
+- no secret values in infrastructure state
+- no long-lived hosting credentials in GitHub Actions
 
 LOCAL DEVELOPMENT EXPERIENCE
 
@@ -1047,7 +1046,7 @@ make doctor must validate:
 - Python version
 - uv
 - PostgreSQL client tools where required
-- Terraform and gcloud only for GCP tasks
+- deployment tooling only for separately authorized deployment tasks
 - required ports
 - environment-file presence
 
@@ -1114,31 +1113,18 @@ make tunnel
 Do not make the tunnel service mandatory for normal development.
 
 Use one public local origin wherever practical so cookies, CORS, and WebSockets
-match the GCP topology.
+match the deployed one-origin topology.
 
-GCP DEVELOPMENT VM
+PORTABLE DEVELOPMENT DEPLOYMENT
 
-Deploy to one GCP Compute Engine VM using Docker Compose.
+Deploy to one compatible Linux host using Docker Compose and standard OCI images.
 
-Do not use Kubernetes or GKE.
+Do not use Kubernetes.
 
-Create Terraform for:
-
-- remote Terraform-state bootstrap/documentation
-- VPC/network
-- minimal firewall rules
-- reserved static external IP
-- Compute Engine VM
-- attached persistent SSD disk
-- least-privilege service account
-- Artifact Registry
-- GCS media/object bucket
-- GCS PostgreSQL backup bucket
-- Secret Manager resource names and IAM bindings
-- optional DNS records when a domain is supplied
-- OS Login and IAP-compatible administration
-
-Do not put secret values into Terraform.
+Keep hosting-account provisioning, network/firewall resources, DNS, registry,
+secret delivery, and backup destinations outside this application repository.
+Document the runtime inputs and security requirements without binding them to a
+specific provider.
 
 Use a supported Debian or Ubuntu LTS image suitable for Docker Compose.
 
@@ -1149,9 +1135,8 @@ Mount persistent application data under a clearly defined path such as:
 PostgreSQL runs on this VM for the initial development deployment and stores its
 data on the attached persistent disk.
 
-Do not use Cloud SQL in the first deployment. Keep the application’s PostgreSQL
-configuration portable enough to move to Cloud SQL later without rewriting
-domain code.
+Keep the application’s PostgreSQL configuration portable enough to move to a
+managed PostgreSQL service later without rewriting domain code.
 
 Run on the VM:
 
@@ -1199,12 +1184,13 @@ Use Docker:
 - private networks
 - no floating latest tags
 
-GCP CI/CD
+PROVIDER-NEUTRAL CI/CD
 
 Consolidate source CI/CD into root GitHub Actions workflows.
 
-Use GitHub Actions with GCP Workload Identity Federation. Do not use a committed
-or long-lived service-account JSON key.
+Use GitHub Actions for source verification and image builds. Publishing and
+deployment require an explicitly configured short-lived identity for the chosen
+environment; never commit long-lived hosting credentials.
 
 CI on every pull request must include:
 
@@ -1232,8 +1218,8 @@ Deployment workflow must:
 2. Tag them with the Git commit SHA.
 3. Generate an SBOM.
 4. Scan images.
-5. Push to Artifact Registry.
-6. Connect to the VM using OS Login/IAP or another keyless approved method.
+5. Push to the selected OCI registry using short-lived credentials.
+6. Connect to the host using a separately reviewed keyless administration method.
 7. Create a database backup before schema changes.
 8. Run migrations through a one-shot migrator container.
 9. Deploy the release manifest.
@@ -1242,15 +1228,15 @@ Deployment workflow must:
 12. Roll back to the prior image set when health verification fails.
 13. Record the deployed commit and migration revision.
 
-Make GCP dev deployment manually triggerable and environment-protected.
+Make deployment manually triggerable and environment-protected.
 
 POSTGRESQL BACKUP AND RECOVERY
 
-For the GCP VM:
+For the deployment host:
 
 - run scheduled compressed PostgreSQL backups
-- encrypt data in transit to GCS
-- use bucket versioning/lifecycle retention
+- encrypt data in transit to the configured backup destination
+- use destination versioning/lifecycle retention
 - record checksums
 - alert or surface failed backups
 - supply make backup and make restore
@@ -1299,7 +1285,7 @@ OpenLive:
 - Preserve the live-agent WebSocket protocol through a versioned contract.
 - Preserve useful provider and ACP adapters.
 - Migrate SQLite and JSON persistence to PostgreSQL.
-- Keep desktop code compiling, but prioritize localhost web and GCP web
+- Keep desktop code compiling, but prioritize localhost web and deployed web
   deployment.
 - Do not force large model files into PostgreSQL.
 
@@ -1550,7 +1536,7 @@ Create ADRs for at least:
 - canonical flow graph
 - unified agent profile
 - object/media storage
-- GCP single-VM deployment
+- provider-neutral single-host deployment
 - authentication selection
 - UI design system
 
@@ -1632,16 +1618,15 @@ PHASE 7 — UI/UX POLISH
 - Test desktop, tablet, and mobile layouts.
 - Run accessibility and production-build performance checks.
 
-PHASE 8 — GCP DEVELOPMENT DEPLOYMENT
+PHASE 8 — PORTABLE DEVELOPMENT DEPLOYMENT
 
-- Create Terraform.
-- Create GCP Compose profile.
+- Create a provider-neutral Compose deployment profile.
 - Configure Caddy/TLS/WebSockets.
-- Configure Artifact Registry.
-- Configure Secret Manager integration.
-- Configure persistent disk and GCS object storage.
+- Configure immutable OCI image inputs.
+- Configure an external secret boundary.
+- Configure persistent storage and the object-store adapter.
 - Configure PostgreSQL backup and restore.
-- Create keyless GitHub Actions deployment.
+- Create provider-neutral GitHub Actions verification and image builds.
 - Implement health-based rollback.
 - Deploy and run dev smoke tests.
 
@@ -1653,7 +1638,7 @@ PHASE 9 — OPENLIVE LIVE LAB AND VISUAL AGENT — FINAL INTEGRATION
 - Integrate unified auth, agent profiles, and cross-channel flows.
 - Use the canonical PostgreSQL persistence and existing legacy import tooling.
 - Keep the desktop build working.
-- Complete Live Lab persistence/reconnect, accessibility, performance, and GCP
+- Complete Live Lab persistence/reconnect, accessibility, performance, and
   routing/deployment tests.
 
 PHASE 10 — FINAL HARDENING
@@ -1664,7 +1649,7 @@ PHASE 10 — FINAL HARDENING
 - Verify licenses and notices.
 - Test clean-machine bootstrap.
 - Test backup restoration.
-- Test GCP rollback.
+- Test deployment rollback.
 - Update architecture and runbooks.
 - Complete the parity matrix.
 - Remove superseded runtime entrypoints only after parity is proven.
@@ -1755,15 +1740,15 @@ The project is complete only when all of the following are true:
 
 21. The platform builds and runs using production-mode containers locally.
 
-22. Terraform can create the GCP development environment.
+22. The portable deployment topology renders without hosting credentials.
 
-23. GitHub Actions can deploy immutable images without a static GCP key.
+23. GitHub Actions verifies and builds immutable images without static hosting keys.
 
-24. The GCP VM serves the unified platform through Caddy.
+24. A compatible Linux host serves the unified platform through Caddy.
 
 25. PostgreSQL is not publicly reachable.
 
-26. A GCP database backup can be restored successfully.
+26. A database backup can be restored successfully into a new database.
 
 27. Failed deployment health checks roll back to the prior image set.
 

@@ -166,6 +166,10 @@ class PriceBook(BaseModel):
                 output_audio_per_second=30_000 / 3600 * 21.50e-6,
                 input_text_per_second=15_000 / 3600 * 4.00e-6,
             ),
+            "tts-rt-v2": TtsRates(
+                output_audio_per_second=30_000 / 3600 * 21.50e-6,
+                input_text_per_second=15_000 / 3600 * 4.00e-6,
+            ),
         }
     )
 

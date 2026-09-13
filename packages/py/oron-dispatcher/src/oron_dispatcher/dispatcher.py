@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from livekit.protocol.models import ParticipantInfo
@@ -20,6 +20,14 @@ logger = logging.getLogger(__name__)
 
 class PersistenceUnavailable(RuntimeError):
     """The dispatcher cannot durably record a lifecycle transition."""
+
+
+class AgentStartupUnavailable(RuntimeError):
+    """The provider-backed conversational agent failed before dialing."""
+
+
+class IdempotencyConflict(RuntimeError):
+    """A previously admitted call key was reused with different parameters."""
 
 
 class BotHandle(Protocol):
@@ -158,6 +166,11 @@ class Dispatcher:
         *,
         idempotency_key: str,
         explicit_approval: bool,
+        flow_version: int | None = None,
+        agent_version_id: UUID | None = None,
+        caller_gender: Literal["male", "female"] | None = None,
+        source_conversation_id: UUID | None = None,
+        conversation_context: str | None = None,
         overrides: Mapping[str, object] | None = None,
     ) -> DispatchResult:
         normalized = validate_e164(phone_number)
@@ -167,16 +180,35 @@ class Dispatcher:
             f"or-on-platform:livekit-outbound:{tenant_id}:{idempotency_key}",
         )
         room = f"{self._settings.room_prefix}{session_id.hex[:12]}"
-        if room in self._active:
-            return DispatchResult(session_id=session_id, room=room, created=False)
         context = CallContext(
             call_id=room,
             direction=Direction.OUTBOUND,
             to_number=normalized,
             flow_id=flow_id,
+            flow_version=flow_version,
+            agent_version_id=agent_version_id,
             tenant_id=tenant_id,
             session_id=session_id,
+            caller_gender=caller_gender,
+            source_conversation_id=source_conversation_id,
+            conversation_context=conversation_context,
         )
+        if active := self._active.get(room):
+            binding_fields = (
+                "to_number",
+                "flow_id",
+                "flow_version",
+                "agent_version_id",
+                "caller_gender",
+                "source_conversation_id",
+                "conversation_context",
+            )
+            if any(
+                getattr(active.context, field) != getattr(context, field)
+                for field in binding_fields
+            ):
+                raise IdempotencyConflict("call parameters differ for the existing key")
+            return DispatchResult(session_id=session_id, room=room, created=False)
         created = await self._start(
             room,
             context,
@@ -258,10 +290,17 @@ class Dispatcher:
             return False
         try:
             handle = await self._launch(room, context, overrides)
-        except Exception:
+        except Exception as error:
+            logger.error(
+                "Voice agent startup refused before dial (error_type=%s)",
+                type(error).__name__,
+            )
             if not await self._sessions.finalize(context, status=SessionStatus.FAILED):
                 raise PersistenceUnavailable("failed to persist failed call startup") from None
-            raise
+            public_reason = getattr(error, "public_reason", None)
+            if not isinstance(public_reason, str) or not public_reason:
+                public_reason = "voice agent startup preflight failed"
+            raise AgentStartupUnavailable(public_reason) from None
         self._active[room] = _Active(context=context, handle=handle)
         return True
 

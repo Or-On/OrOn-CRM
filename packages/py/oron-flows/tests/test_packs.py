@@ -28,6 +28,8 @@ def test_every_pack_declares_the_full_contract():
     for code in ("he", "en"):
         pack = load_language_pack(code)
         assert pack.persona_template and pack.code == code
+        assert "ONE question at a time" in pack.persona_template
+        assert "latest point first" in pack.persona_template
 
 
 def test_brand_pronunciation_comes_from_the_flow_not_the_pack():
@@ -50,3 +52,31 @@ def test_no_pronunciations_leaves_no_dangling_header():
         load_language_pack("he"), agent_name="a", org="o", gender="female", pronunciations={}
     )
     assert "PRONUNCIATION" not in persona
+
+
+def test_voice_personas_forbid_model_self_identification_and_offer_a_next_step():
+    for language in ("he", "en"):
+        persona = build_persona(
+            load_language_pack(language),
+            agent_name="Noa",
+            org="Or-On",
+            gender="female",
+            pronunciations={},
+        )
+        assert "Never identify yourself as an AI" in persona
+        assert 'Never say "as an AI"' in persona
+        assert "offer one\n  useful next step" in persona
+        assert "Never write or spell a punctuation name" in persona
+
+
+def test_hebrew_persona_stays_neutral_without_trusted_gender_context():
+    persona = build_persona(
+        load_language_pack("he"),
+        agent_name="Noa",
+        org="Or-On",
+        gender="female",
+        pronunciations={},
+    )
+    assert "Do not guess the caller's gender" in persona
+    assert "Never fall back to masculine" in persona
+    assert 'Say "סליחה, טעיתי"' in persona

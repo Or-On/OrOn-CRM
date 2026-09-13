@@ -15,8 +15,8 @@ export default async function FlowsPage() {
       client.listVoiceFlows(),
     ]);
     return (
-      <main className="page page--wide">
-        <ProductHeading page="flows" />
+      <main className="page page--wide page--workspace-premium">
+        <ProductHeading page="flows" premium />
         <VoiceFlowPanel catalog={catalog.data} flows={flows.data.items} />
       </main>
     );

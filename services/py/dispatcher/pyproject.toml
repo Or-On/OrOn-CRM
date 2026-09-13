@@ -5,7 +5,10 @@ description = "Host entrypoint for the retained Or-on dispatcher"
 requires-python = ">=3.14,<3.15"
 dependencies = [
   "or-on-platform-integration==0.1.0",
+  "oron-db==0.1.0",
   "oron-dispatcher==0.1.0",
+  "oron-sessions==0.1.0",
+  "oron-tenancy==0.1.0",
   "uvicorn[standard]==0.52.4",
 ]
 
@@ -22,7 +25,10 @@ build-backend = "uv_build"
 [tool.uv.sources]
 or-on-platform-integration = { workspace = true }
 oron-agent = { path = "../../../packages/py/oron-agent", editable = true }
+oron-db = { workspace = true }
 oron-dispatcher = { workspace = true }
+oron-sessions = { workspace = true }
+oron-tenancy = { workspace = true }
 
 [tool.uv.build-backend]
 module-name = "dispatcher_runtime"

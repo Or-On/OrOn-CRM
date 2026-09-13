@@ -97,6 +97,26 @@ async def test_a_finalize_without_usage_omits_it_rather_than_sending_zeros():
     await client.aclose()
 
 
+async def test_live_usage_checkpoint_does_not_finalize_the_session():
+    seen: dict = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen["tenant"] = request.headers.get("X-Tenant-Id")
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"session_id": str(SID), "status": "started"})
+
+    http = httpx.AsyncClient(base_url="http://s", transport=httpx.MockTransport(handler))
+    client = SessionsClient("http://s", client=http)
+    usage = CallUsage(call_seconds=3.5, llm_prompt_tokens=21)
+
+    assert await client.checkpoint_usage(SID, tenant_id=TENANT_ID, usage=usage) is True
+    assert seen["tenant"] == str(TENANT_ID)
+    assert seen["body"]["usage"]["call_seconds"] == 3.5
+    assert seen["body"]["usage"]["llm_prompt_tokens"] == 21
+    assert "status" not in seen["body"]
+    await client.aclose()
+
+
 async def test_api_key_sets_authorization_header_on_owned_client():
     client = SessionsClient("http://s", api_key="oron_secret")
     assert client._client.headers["Authorization"] == "Bearer oron_secret"

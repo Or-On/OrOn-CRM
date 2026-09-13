@@ -36,7 +36,7 @@ def test_diagnostics_redact_database_and_provider_secrets() -> None:
         AUTH_SERVICE_SECRET="auth-service-secret-that-must-not-print",
         LIVEKIT_API_SECRET="livekit-secret",
         WHATSAPP_ACCESS_TOKEN="whatsapp-secret",
-        AI_API_KEY="ai-secret",
+        LLM_API_KEY="llm-secret",
     )
 
     rendered = str(settings.diagnostics())
@@ -45,5 +45,5 @@ def test_diagnostics_redact_database_and_provider_secrets() -> None:
     assert "auth-service-secret" not in rendered
     assert "livekit-secret" not in rendered
     assert "whatsapp-secret" not in rendered
-    assert "ai-secret" not in rendered
+    assert "llm-secret" not in rendered
     assert "[REDACTED]" in rendered

@@ -8,7 +8,7 @@ export interface ReplyDraft {
 }
 
 export const emptyReply: ReplyDraft = {
-  provider: "simulator",
+  provider: "meta",
   kind: "text",
   text: "",
   templateName: "",

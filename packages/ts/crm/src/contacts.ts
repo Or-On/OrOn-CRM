@@ -147,11 +147,21 @@ export async function createContact(
   const email = input.email?.trim();
   const company = input.company?.trim();
 
+  // Channel-specific uniqueness is insufficient: an existing phone identity must
+  // not acquire a new, granted WhatsApp contact through manual or API creation.
+  if (await contactRecipientExists(sql, phone, email))
+    throw Object.assign(new Error("A matching record already exists"), {
+      code: "23505",
+    });
+
+  // Current tenant product policy grants permission only at creation. Never use
+  // this INSERT policy to rewrite existing unknown, revoked, or opted-out records.
   const rows = await sql<{ id: string }[]>`
-    INSERT INTO crm.contacts (tenant_id, created_by_user_id, name, email, company)
+    INSERT INTO crm.contacts
+      (tenant_id, created_by_user_id, name, email, company, voice_consent, whatsapp_consent)
     VALUES (platform.current_tenant_id(), ${actorUserId}::uuid, ${name},
             ${email === undefined || email === "" ? null : email},
-            ${company === undefined || company === "" ? null : company})
+            ${company === undefined || company === "" ? null : company}, 'granted', 'granted')
     RETURNING id
   `;
   const id = rows[0]?.id;
@@ -177,6 +187,33 @@ export async function createContact(
   if (contact === undefined)
     throw new Error("created contact could not be read");
   return contact;
+}
+
+async function contactRecipientExists(
+  sql: postgres.TransactionSql,
+  phone: string | undefined,
+  email: string | undefined,
+): Promise<boolean> {
+  const candidateEmail = email?.trim().toLowerCase();
+  const normalizedEmail =
+    candidateEmail === undefined || candidateEmail === ""
+      ? null
+      : candidateEmail;
+  const duplicates = await sql<{ found: boolean }[]>`
+    SELECT EXISTS (
+      SELECT 1 FROM crm.contacts contact
+      WHERE (${normalizedEmail}::text IS NOT NULL AND lower(contact.email) = ${normalizedEmail})
+      UNION ALL
+      SELECT 1 FROM crm.contact_channel_identities identity
+      WHERE (${phone ?? null}::text IS NOT NULL AND identity.channel IN ('phone', 'whatsapp')
+             AND identity.normalized_value = ${phone ?? null})
+         OR (${normalizedEmail}::text IS NOT NULL AND identity.channel = 'email'
+             AND lower(identity.normalized_value) = ${normalizedEmail})
+    ) AS found
+  `;
+  // No lifecycle or permission predicate: archived/revoked/opted-out records
+  // remain matches. Tenant RLS scopes every lookup without disclosing other tenants.
+  return duplicates[0]?.found === true;
 }
 
 export async function archiveContact(
@@ -347,33 +384,54 @@ export async function importContacts(
   const errors: { row: number; reason: string }[] = [];
   for (const [index, row] of rows.entries()) {
     try {
-      const phone =
-        row.phone === undefined ? undefined : normalizeE164(row.phone);
-      if (row.phone !== undefined && phone === undefined)
-        throw new TypeError("phone must be explicit E.164");
-      const email = row.email?.trim().toLowerCase();
-      const duplicates = await sql<{ found: boolean }[]>`
-        SELECT EXISTS (
-          SELECT 1 FROM crm.contacts contact
-          WHERE (${email ?? null}::text IS NOT NULL AND lower(contact.email) = ${email ?? null})
-          UNION ALL
-          SELECT 1 FROM crm.contact_channel_identities identity
-          WHERE (${phone ?? null}::text IS NOT NULL AND identity.channel IN ('phone', 'whatsapp')
-                 AND identity.normalized_value = ${phone ?? null})
-        ) AS found
-      `;
-      if (duplicates[0]?.found === true) {
-        skipped += 1;
-        continue;
-      }
-      await createContact(sql, actorUserId, row);
-      created += 1;
+      // PostgreSQL errors abort a transaction until rollback. Recover each row
+      // at a savepoint before continuing, and count only released row work.
+      const outcome = await sql.savepoint(async (rowSql) => {
+        const phone =
+          row.phone === undefined ? undefined : normalizeE164(row.phone);
+        if (row.phone !== undefined && phone === undefined)
+          throw new TypeError("phone must be explicit E.164");
+        if (await contactRecipientExists(rowSql, phone, row.email))
+          return "skipped";
+        await createContact(rowSql, actorUserId, row);
+        return "created";
+      });
+      if (outcome === "created") created += 1;
+      else skipped += 1;
     } catch (error) {
+      const reason = importRowError(error);
+      // Outages, access failures, deadlocks and unexpected defects fail the
+      // whole import; they must never look like a successful partial import.
+      if (reason === undefined) throw error;
       errors.push({
         row: index + 2,
-        reason: error instanceof Error ? error.message : "invalid contact",
+        reason,
       });
     }
   }
   return { created, skipped, errors };
+}
+
+function importRowError(error: unknown): string | undefined {
+  if (
+    error instanceof TypeError &&
+    (error.message === "phone must be explicit E.164" ||
+      error.message === "contact name is required")
+  )
+    return error.message;
+  const code =
+    error !== null && typeof error === "object" && "code" in error
+      ? error.code
+      : undefined;
+  if (code === "23505") return "A matching contact already exists";
+  if (code === "23503") return "Related contact data was not found";
+  if (
+    code === "23502" ||
+    code === "23514" ||
+    code === "22001" ||
+    code === "22021" ||
+    code === "22P02"
+  )
+    return "Contact data is invalid";
+  return undefined;
 }

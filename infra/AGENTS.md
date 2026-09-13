@@ -5,6 +5,7 @@
 - Pin images, use health checks, private networks, named volumes, loopback-only
   database ports, non-root app containers where practical, and graceful shutdown.
 - Never bake secrets into images or publish PostgreSQL publicly.
-- The GCP development target is one Compute Engine VM with Docker Compose.
-- Terraform is structure and validation only in Phase 1. Never run `terraform
-  apply`, require GCP credentials, or create billable resources.
+- Deployment artifacts must remain hosting-provider neutral: standard OCI
+  images, Docker Compose, HTTPS, PostgreSQL, and externally supplied secrets.
+- Never provision infrastructure, publish images, alter DNS, or create billable
+  resources without a separately reviewed plan and explicit authorization.

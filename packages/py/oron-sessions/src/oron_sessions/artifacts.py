@@ -13,6 +13,7 @@ import asyncio
 from enum import StrEnum
 from pathlib import Path
 from urllib.parse import unquote, urlparse
+from urllib.request import url2pathname
 
 
 class ArtifactKind(StrEnum):
@@ -33,7 +34,10 @@ class ArtifactUnavailable(Exception):
 
 
 def _read_file(uri: str) -> bytes:
-    path = Path(unquote(urlparse(uri).path))
+    # file:// URIs store Windows drive paths as /C:/..., which Path interprets
+    # as a rooted path on the current drive. url2pathname performs the platform
+    # conversion while leaving POSIX paths unchanged.
+    path = Path(url2pathname(unquote(urlparse(uri).path)))
     if not path.is_file():
         raise ArtifactUnavailable(f"no artifact at {uri}")
     return path.read_bytes()

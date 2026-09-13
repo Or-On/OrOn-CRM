@@ -10,6 +10,8 @@ import {
   MetaWhatsAppProvider,
   SimulatorWhatsAppProvider,
 } from "./providers.js";
+import { OpenAiCompatibleChatProvider } from "./ai-provider.js";
+import { DispatcherAutomaticCallProvider } from "./call-provider.js";
 
 async function main(): Promise<void> {
   const config = loadConfig(process.env, {
@@ -38,6 +40,32 @@ async function main(): Promise<void> {
       }),
     },
     (failure) => logger.warn({ ...failure }, "whatsapp_outbound_failed"),
+    {
+      simulatorEnabled: config.environment === "development",
+      realWhatsAppEnabled: config.enableRealWhatsApp,
+      automaticCallsEnabled: config.enableWhatsAppAutoCalls,
+      automaticCallProvider: new DispatcherAutomaticCallProvider({
+        dispatcherUrl: config.dispatcherUrl,
+        enabled:
+          config.enableWhatsAppAutoCalls &&
+          config.enableRealTelephony &&
+          config.enableRealVoiceProviders,
+        serviceSecret: config.secrets.authServiceSecret,
+      }),
+      ...(config.enableWhatsAppAi &&
+      config.llm.provider === "openai-compat" &&
+      config.secrets.llmApiKey &&
+      config.llm.baseUrl &&
+      config.llm.model
+        ? {
+            aiProvider: new OpenAiCompatibleChatProvider({
+              apiKey: config.secrets.llmApiKey,
+              baseUrl: config.llm.baseUrl,
+              model: config.llm.model,
+            }),
+          }
+        : {}),
+    },
   );
   const abortController = new AbortController();
   const stop = Promise.race([

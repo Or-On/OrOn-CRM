@@ -74,8 +74,8 @@ class Flow(Timestamped, table=True):
     # is immutable — republishing means inserting the next one.
     flow_id: uuid.UUID = Field(primary_key=True)
     version: int = Field(primary_key=True)
-    # NULL means the packaged catalog this build ships: owned by no tenant and
-    # runnable by all. RLS lets every tenant read those and write only its own.
+    # NULL is retained for explicit development-fixture compatibility only.
+    # Runtime tenant repositories never expose unowned flows.
     tenant_id: uuid.UUID | None = Field(default=None, foreign_key="tenants.id", index=True)
     # pyrefly: ignore[no-matching-overload]  # sa_type is only on the
     # sa_column-less overload, which sqlmodel's stubs do not expose.
@@ -176,6 +176,16 @@ class User(Timestamped, table=True):
     # pyrefly: ignore[no-matching-overload]  # sa_type is only on the
     # sa_column-less overload, which sqlmodel's stubs do not expose.
     email: str = Field(sa_type=CITEXT, unique=True, index=True)
+    display_name: str | None = Field(default=None, max_length=120)
+    avatar_data: bytes | None = Field(
+        default=None, sa_column=sa.Column(sa.LargeBinary(), nullable=True)
+    )
+    avatar_content_type: str | None = Field(
+        default=None, sa_column=sa.Column(sa.Text(), nullable=True)
+    )
+    avatar_updated_at: dt.datetime | None = Field(
+        default=None, sa_column=sa.Column(DateTime(timezone=True), nullable=True)
+    )
     # Selects which tenants may be chosen, never what may be done inside one.
     is_superuser: bool = False
     # pyrefly: ignore[no-matching-overload]  # see email above.

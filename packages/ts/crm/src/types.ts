@@ -89,6 +89,10 @@ export interface ConversationSummary {
   readonly lastMessageAt: string | null;
   readonly lastMessagePreview: string | null;
   readonly assignedUserId: string | null;
+  readonly ownershipMode?: "ai" | "human";
+  readonly aiAgentProfileVersionId?: string | null;
+  readonly aiEnabledAt?: string | null;
+  readonly handoffReasonSafe?: string | null;
   readonly channelKind: string;
   readonly provider: string;
   readonly senderAddress: string | null;
@@ -140,7 +144,16 @@ export interface MessageDeliveryEvent {
 export interface TeamMember {
   readonly userId: string;
   readonly email: string;
+  readonly displayName: string | null;
   readonly role: "owner" | "admin" | "agent" | "viewer";
+}
+
+export interface TenantInvitationSummary {
+  readonly id: string;
+  readonly email: string;
+  readonly role: "admin" | "agent" | "viewer";
+  readonly expiresAt: string;
+  readonly createdAt: string;
 }
 
 export interface TenantSettings {
@@ -150,12 +163,21 @@ export interface TenantSettings {
   readonly timezone: string;
 }
 
+export interface StoredIdentityImage {
+  readonly data: Uint8Array;
+  readonly contentType: "image/jpeg" | "image/png" | "image/webp";
+  readonly updatedAt: string;
+}
+
 export interface NotificationSummary {
   readonly id: string;
   readonly title: string;
   readonly body: string | null;
   readonly read: boolean;
   readonly createdAt: string;
+  readonly referenceType?: string | null;
+  readonly referenceId?: string | null;
+  readonly type?: string;
 }
 
 export interface QuickReply {
@@ -198,6 +220,10 @@ export interface DashboardMetrics {
   readonly openConversations: number;
   readonly unreadMessages: number;
   readonly openPipelineValue: string;
+  readonly openPipelineValues: readonly {
+    readonly currency: string;
+    readonly value: string;
+  }[];
   readonly messagesToday: number;
 }
 
@@ -219,6 +245,7 @@ export interface BroadcastSummary {
 }
 
 export interface AutomationSummary {
+  readonly definition?: JsonValue;
   readonly executionKind?: "empty" | "canonical" | "unsupported";
   readonly id: string;
   readonly name: string;
@@ -251,4 +278,128 @@ export interface SimulatedOutboundInput {
   readonly senderUserId: string;
   readonly text: string;
   readonly idempotencyKey: string;
+}
+
+export type ExpenseStatus = "pending" | "recorded" | "void";
+
+export interface Expense {
+  readonly id: string;
+  readonly createdByUserId: string | null;
+  readonly title: string;
+  readonly vendor: string | null;
+  readonly category: string;
+  readonly amount: string;
+  readonly currency: string;
+  readonly status: ExpenseStatus;
+  readonly sourceKind: "manual" | "provider_invoice";
+  readonly sourceReference: string | null;
+  readonly notes: string | null;
+  readonly incurredAt: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface ExpenseInput {
+  readonly title: string;
+  readonly vendor?: string | null;
+  readonly category: string;
+  /** A base-10 decimal string. JavaScript numbers are intentionally rejected. */
+  readonly amount: string;
+  readonly currency: string;
+  readonly status?: Exclude<ExpenseStatus, "void">;
+  readonly notes?: string | null;
+  readonly incurredAt: string;
+}
+
+export interface ExpenseCurrencySummary {
+  readonly currency: string;
+  readonly recordedTotal: string;
+  readonly pendingTotal: string;
+  readonly recordedCount: number;
+  readonly pendingCount: number;
+}
+
+export interface ExpenseSummary {
+  readonly totals: readonly ExpenseCurrencySummary[];
+  readonly expenseCount: number;
+  readonly recordedCount: number;
+  readonly pendingCount: number;
+  readonly voidCount: number;
+}
+
+export interface ExpenseCursor {
+  readonly incurredAt: string;
+  readonly id: string;
+}
+
+export interface ExpensePage {
+  readonly expenses: readonly Expense[];
+  readonly nextCursor: ExpenseCursor | null;
+}
+
+export type TaskStatus = "todo" | "in_progress" | "completed" | "cancelled";
+export type TaskPriority = "low" | "medium" | "high" | "urgent";
+
+export interface Task {
+  readonly id: string;
+  readonly createdByUserId: string | null;
+  readonly assigneeUserId: string | null;
+  readonly title: string;
+  readonly description: string | null;
+  readonly status: TaskStatus;
+  readonly priority: TaskPriority;
+  readonly dueAt: string | null;
+  readonly completedAt: string | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface TaskInput {
+  readonly title: string;
+  readonly description?: string | null;
+  readonly status?: Exclude<TaskStatus, "cancelled">;
+  readonly priority?: TaskPriority;
+  readonly assigneeUserId?: string | null;
+  readonly dueAt?: string | null;
+}
+
+export type CalendarEventStatus = "confirmed" | "tentative" | "cancelled";
+
+export interface CalendarEvent {
+  readonly id: string;
+  readonly createdByUserId: string | null;
+  readonly organizerUserId: string | null;
+  readonly title: string;
+  readonly description: string | null;
+  readonly location: string | null;
+  readonly startsAt: string;
+  readonly endsAt: string;
+  readonly allDay: boolean;
+  readonly timezone: string;
+  readonly status: CalendarEventStatus;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface CalendarEventInput {
+  readonly title: string;
+  readonly description?: string | null;
+  readonly location?: string | null;
+  readonly startsAt: string;
+  readonly endsAt: string;
+  readonly allDay?: boolean;
+  readonly timezone: string;
+  readonly status?: Exclude<CalendarEventStatus, "cancelled">;
+  readonly organizerUserId?: string | null;
+}
+
+export interface CalendarEventCursor {
+  readonly startsAt: string;
+  readonly endsAt: string;
+  readonly id: string;
+}
+
+export interface CalendarEventPage {
+  readonly events: readonly CalendarEvent[];
+  readonly nextCursor: CalendarEventCursor | null;
 }

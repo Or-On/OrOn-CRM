@@ -11,12 +11,23 @@ def build_agent_processors(
     assistant_agg,
     *,
     gender_classifier=None,
+    caller_gender_context=None,
+    turn_planner=None,
+    evidence_context=None,
+    evidence_gate=None,
+    recognition=None,
     audio_buffer=None,
     tts_trim=None,
     user_idle=None,
     bot_speaking=None,
     hold_opener=None,
     rtvi=None,
+    ownership_input=None,
+    ownership_recognition=None,
+    ownership_model=None,
+    ownership_generated=None,
+    ownership_speech=None,
+    ownership_output=None,
 ) -> list:
     """Ordered pipeline: input -> {gender classifier || STT} -> user ctx -> LLM
     -> TTS -> output -> assistant ctx -> [audio buffer].
@@ -36,10 +47,12 @@ def build_agent_processors(
     `tts_trim` sits between TTS and the transport, dropping each response's
     silent head before it is played out.
 
-    Deferred (NOT here yet): HebrewSpeechGate.
+    Evidence is refreshed before inference; full-turn validation precedes TTS.
     """
     listen = ParallelPipeline([gender_classifier], [stt]) if gender_classifier is not None else stt
     processors = [transport_in]
+    if ownership_input is not None:
+        processors.append(ownership_input)
     # Immediately after input, before STT and before the gender branch: the hold
     # works by dropping caller audio, and anything placed after a consumer would
     # let that consumer start a turn the hold then has to unwind.
@@ -49,7 +62,30 @@ def build_agent_processors(
     # conclusion.
     if rtvi is not None:
         processors.append(rtvi)
-    processors += [listen, user_agg, llm]
+    processors.append(listen)
+    if recognition is not None:
+        processors.append(recognition)
+    if ownership_recognition is not None:
+        processors.append(ownership_recognition)
+    # Explicit self-identification in the transcript must become authoritative
+    # context before the user aggregator emits the LLM frame for that same turn.
+    if caller_gender_context is not None:
+        processors.append(caller_gender_context)
+    processors.append(user_agg)
+    if evidence_context is not None:
+        processors.append(evidence_context)
+    if ownership_model is not None:
+        processors.append(ownership_model)
+    processors.append(llm)
+    if ownership_generated is not None:
+        processors.append(ownership_generated)
+    # Text filters run after TTS aggregation and cannot repair a clause that was
+    # already sent. The planner emits one AggregatedTextFrame for the complete,
+    # bounded LLM turn, bypassing the comma fast path.
+    if turn_planner is not None:
+        processors.append(turn_planner)
+    if evidence_gate is not None:
+        processors.append(evidence_gate)
     # BETWEEN the LLM and TTS, not before both. Its prompt is a TTSSpeakFrame — a
     # DataFrame, so it waits in the queue of every processor ahead of it — and
     # `OpenAILLMService.process_frame` awaits the completion inline. A provider
@@ -60,7 +96,11 @@ def build_agent_processors(
     # take the priority path and reach it wherever it sits.
     if user_idle is not None:
         processors.append(user_idle)
+    if ownership_speech is not None:
+        processors.append(ownership_speech)
     processors.append(tts)
+    if ownership_output is not None:
+        processors.append(ownership_output)
     # Before the transport — the only place dropping silence shortens the wait.
     if tts_trim is not None:
         processors.append(tts_trim)

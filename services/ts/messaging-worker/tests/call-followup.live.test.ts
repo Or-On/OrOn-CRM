@@ -80,6 +80,17 @@ describe.skipIf(sourceUrl === undefined)("isolated call-outcome worker", () => {
     });
     admin = postgres(url.toString(), { max: 1 });
     cleanup.push(() => admin.end());
+    await admin`
+      INSERT INTO public.tenants (id, name, slug, status)
+      VALUES (${otherTenantId}::uuid, 'Other fictional tenant',
+              ${`other-${databaseName}`}, 'active')
+    `;
+    await admin`
+      INSERT INTO messaging.quick_replies
+        (tenant_id, title, body, shortcut, created_by_user_id)
+      VALUES (${tenantId}::uuid, 'Fictional reply', 'Fixture only',
+              '/fixture', ${userId}::uuid)
+    `;
     url.searchParams.set("options", "-c role=platform_web");
     web = postgres(url.toString(), { max: 2 });
     cleanup.push(() => web.end());
@@ -95,6 +106,13 @@ describe.skipIf(sourceUrl === undefined)("isolated call-outcome worker", () => {
     await web.begin(async (tx) => {
       await tx`SELECT set_config('app.current_tenant', ${tenantId}, true),
                       set_config('app.current_user', ${userId}, true)`;
+      await ingestSimulatedInbound(tx, userId, {
+        providerEventId: `fixture-${randomUUID()}`,
+        providerMessageId: `fixture-${randomUUID()}`,
+        from: "+12025550199",
+        profileName: "Fictional Inbox contact",
+        text: "Fixture message",
+      });
       const members = await listTeamMembers(tx);
       expect(members.map((member) => member.userId)).toContain(userId);
       const conversations = await listConversations(tx);
@@ -351,10 +369,16 @@ asyncio.run(main())
       });
       const simulator = new SimulatorWhatsAppProvider();
       const simulatorSend = vi.spyOn(simulator, "send");
-      const store = createMessagingStore(workerUrl, "canonical-worker", {
-        simulator,
-        meta: { name: "meta", send },
-      });
+      const store = createMessagingStore(
+        workerUrl,
+        "canonical-worker",
+        {
+          simulator,
+          meta: { name: "meta", send },
+        },
+        undefined,
+        { simulatorEnabled: true },
+      );
       try {
         if (scenario === "revoked-actor")
           await admin`UPDATE users SET status='disabled' WHERE id=${userId}::uuid`;
@@ -524,10 +548,16 @@ asyncio.run(main())
   }
 
   async function runWorker(workerId: string) {
-    const store = createMessagingStore(workerUrl, workerId, {
-      simulator: { name: "simulator", send },
-      meta: { name: "meta", send },
-    });
+    const store = createMessagingStore(
+      workerUrl,
+      workerId,
+      {
+        simulator: { name: "simulator", send },
+        meta: { name: "meta", send },
+      },
+      undefined,
+      { simulatorEnabled: true },
+    );
     try {
       return await store.processAvailable();
     } finally {

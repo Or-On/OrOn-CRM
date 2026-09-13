@@ -15,7 +15,7 @@ from control_api.voice import (
 )
 from httpx import ASGITransport, AsyncClient
 from or_on_platform.config import PlatformSettings
-from oron_common import Direction
+from oron_common import CallCost, CallUsage, Direction
 from oron_sessions.models import SessionStatus
 
 SECRET = "phase5-service-assertion-secret-long-enough"
@@ -48,6 +48,8 @@ class FakeVoiceRepository:
                 outcome="fixture_complete",
                 created_at=dt.datetime(2026, 9, 2, tzinfo=dt.UTC),
                 ended_at=dt.datetime(2026, 9, 2, 0, 1, tzinfo=dt.UTC),
+                usage=CallUsage(call_seconds=60),
+                cost=CallCost(stt=0.002, llm=0.001, tts=0.003),
             )
         ]
 
@@ -65,6 +67,10 @@ class FakeVoiceRepository:
                 "voice.call.ended.v1",
             ],
         )
+
+    async def get_recording(self, principal: ServicePrincipal, session_id: UUID) -> bytes | None:
+        self.principal = principal
+        return b"RIFFfixture-wave"
 
     async def close(self) -> None:
         self.closed = True
@@ -118,9 +124,38 @@ async def test_voice_sessions_require_and_propagate_canonical_identity() -> None
 
     assert response.status_code == 200
     assert response.json()["items"][0]["provider"] == "simulator"
+    assert response.json()["items"][0]["cost"]["total"] == 0.006
     assert repository.principal is not None
     assert repository.principal.tenant_id == tenant_id
     assert repository.closed
+
+
+async def test_voice_recording_is_tenant_authorized_and_streamed_as_wav() -> None:
+    tenant_id = uuid4()
+    repository = FakeVoiceRepository()
+    app = create_app(
+        settings=_settings(),
+        database_probe=FakeProbe(),
+        voice_repository=repository,
+        assertion_verifier=ServiceAssertionVerifier(SECRET),
+    )
+    async with (
+        app.router.lifespan_context(app),
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client,
+    ):
+        denied = await client.get(f"/api/v1/voice/sessions/{uuid4()}/recording")
+        accepted = await client.get(
+            f"/api/v1/voice/sessions/{uuid4()}/recording",
+            headers={"authorization": f"Bearer {_token(tenant_id=tenant_id)}"},
+        )
+
+    assert denied.status_code == 401
+    assert accepted.status_code == 200
+    assert accepted.headers["content-type"] == "audio/wav"
+    assert accepted.headers["cache-control"] == "private, no-store"
+    assert accepted.content == b"RIFFfixture-wave"
+    assert repository.principal is not None
+    assert repository.principal.tenant_id == tenant_id
 
 
 async def test_voice_sessions_reject_wrong_audience_and_missing_capability() -> None:

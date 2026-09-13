@@ -3,6 +3,7 @@
 import { useLocale, useTranslations } from "next-intl";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import { SelectInput } from "@or-on/ui";
 import { changeLocale } from "./actions";
 import { resolveLocale } from "./direction";
 
@@ -17,7 +18,9 @@ export function LanguageControl() {
     <div className="language-control">
       <label>
         <span className="or-visually-hidden">{t("language")}</span>
-        <select
+        <SelectInput
+          aria-label={t("language")}
+          title={t("language")}
           value={locale}
           disabled={pending}
           onChange={(event) => {
@@ -50,7 +53,7 @@ export function LanguageControl() {
           <option value="he" lang="he">
             עברית
           </option>
-        </select>
+        </SelectInput>
       </label>
       {failed ? <p role="alert">{t("languageFailed")}</p> : null}
     </div>

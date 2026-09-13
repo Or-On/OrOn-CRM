@@ -6,7 +6,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 import { InboxWorkspace } from "../src/features/inbox";
 
 describe("WhatsApp delivery surface", () => {
-  it("defaults to simulator and labels real delivery unmistakably", () => {
+  it("presents one delivery workflow without exposing internal routing or permission controls", () => {
     const markup = renderToStaticMarkup(
       <InboxWorkspace
         conversations={[
@@ -36,11 +36,16 @@ describe("WhatsApp delivery surface", () => {
         teamMembers={[]}
       />,
     );
-    expect(markup).toContain("Simulator — no external delivery");
-    expect(markup).toContain("REAL Meta WhatsApp delivery");
-    expect(markup).toContain("Free-form text (24-hour window only)");
-    expect(markup).toContain("Confirm real WhatsApp delivery");
-    expect(markup).toContain("Queue simulator reply");
+    expect(markup).not.toContain("Simulator — no external delivery");
+    expect(markup).not.toContain("REAL Meta WhatsApp delivery");
+    expect(markup).not.toContain("WhatsApp simulator");
+    expect(markup).not.toContain("Delivery mode");
+    expect(markup).not.toContain("delivery mode");
+    expect(markup).not.toContain("Consent");
+    expect(markup).toContain('aria-label="Compose"');
+    expect(markup).toContain("Template");
+    expect(markup).toContain("Send message");
+    expect(markup).not.toContain("Send this message?");
     expect(markup).toContain("Reply message");
   });
 });

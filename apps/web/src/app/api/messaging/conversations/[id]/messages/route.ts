@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { simulationRefusal } from "../../../../../../features/simulation-policy";
 
 import { NextResponse } from "next/server";
 
@@ -44,6 +45,10 @@ export async function POST(
     const { id } = await context.params;
     const body = await jsonObject(request);
     const provider = body.provider === "meta" ? "meta" : "simulator";
+    if (provider === "simulator") {
+      const refusal = simulationRefusal();
+      if (refusal) return refusal;
+    }
     const kind = body.kind === "template" ? "template" : "text";
     const suppliedIdempotencyKey = request.headers
       .get("idempotency-key")

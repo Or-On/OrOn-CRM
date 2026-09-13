@@ -7,9 +7,11 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConversationSummary, Message, MessagePage } from "@or-on/crm";
+import { NextIntlClientProvider } from "next-intl";
 
 const transport = vi.hoisted(() => ({ read: vi.fn(), mutate: vi.fn() }));
 vi.mock("../src/features/crm", () => ({
@@ -61,7 +63,7 @@ const messagesA = [message("alpha", "Alpha private fixture")];
 const messagesB = [message("beta", "Beta private fixture")];
 const conversations = [alpha, beta];
 
-function mount(real = false, canOperate = true) {
+function mount(real = true, canOperate = true) {
   return render(
     localized(
       <InboxWorkspace
@@ -106,9 +108,645 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
+function sendMessage() {
+  fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+}
+
 describe("Inbox interaction safety (no provider network)", () => {
+  function compactViewport() {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({
+        matches: true,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })),
+    );
+  }
+
+  it("uses the persisted account avatar in the Inbox profile link", () => {
+    const view = render(
+      localized(
+        <InboxWorkspace
+          conversations={conversations}
+          initialMessages={messagesA}
+          quickReplies={[]}
+          teamMembers={[
+            {
+              userId: "operator-current",
+              email: "support@or-on.io",
+              displayName: "Or-On Support",
+              role: "owner",
+            },
+          ]}
+          realWhatsAppEnabled
+          metaSenderId="fictional-sender-id"
+          canOperate
+          currentUserId="operator-current"
+        />,
+      ),
+    );
+
+    const profile = screen.getByRole("link", { name: /Or-On Support/u });
+    expect(profile.getAttribute("href")).toBe("/profile");
+    expect(
+      profile.querySelector<HTMLImageElement>(".identity-image__media")?.src,
+    ).toContain("/api/account/avatar?v=0");
+    expect(
+      profile.querySelector(".identity-image__fallback")?.textContent,
+    ).toBe("OR");
+    expect(
+      view.container.querySelector(".inbox-channel-profile__avatar"),
+    ).not.toBeNull();
+  });
+
+  it("contains compact channel focus, makes the background inert and restores focus on every dismissal", () => {
+    compactViewport();
+    const view = mount();
+    const trigger = view.container.querySelector<HTMLButtonElement>(
+      ".inbox-channel-toggle",
+    );
+    if (!trigger) throw new Error("Channel trigger missing");
+    const background = document.createElement("div");
+    background.setAttribute("inert", "preexisting");
+    document.body.append(background);
+    const open = () => {
+      trigger.focus();
+      fireEvent.click(trigger);
+      const panel = screen.getByRole("dialog", { name: "Inbox navigation" });
+      expect(panel.getAttribute("aria-modal")).toBe("true");
+      expect(
+        view.container.querySelector(".inbox-navigator")?.hasAttribute("inert"),
+      ).toBe(true);
+      expect(
+        view.container
+          .querySelector(".inbox-conversation")
+          ?.hasAttribute("inert"),
+      ).toBe(true);
+      expect(document.body.style.overflow).toBe("hidden");
+      return panel;
+    };
+    const panel = open();
+    const first = within(panel).getByRole("button", {
+      name: "Close navigation",
+    });
+    const last = within(panel).getByRole("link", { name: /Account/ });
+    expect(document.activeElement).toBe(first);
+    fireEvent.keyDown(first, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(last);
+    fireEvent.keyDown(last, { key: "Tab" });
+    expect(document.activeElement).toBe(first);
+    trigger.focus();
+    expect(document.activeElement).toBe(first);
+    fireEvent.keyDown(first, { key: "Escape" });
+    expect(document.activeElement).toBe(trigger);
+    expect(
+      view.container.querySelector(".inbox-navigator")?.hasAttribute("inert"),
+    ).toBe(false);
+    expect(background.getAttribute("inert")).toBe("preexisting");
+    expect(document.body.style.overflow).not.toBe("hidden");
+    open();
+    const scrim = view.container.querySelector<HTMLButtonElement>(
+      ".inbox-channel-scrim",
+    );
+    if (!scrim) throw new Error("Channel scrim missing");
+    fireEvent.click(scrim);
+    expect(document.activeElement).toBe(trigger);
+    const reopened = open();
+    fireEvent.click(
+      within(reopened).getByRole("button", {
+        name: /Filter conversations: Unread/,
+      }),
+    );
+    expect(document.activeElement).toBe(trigger);
+    const finalPanel = open();
+    fireEvent.click(
+      within(finalPanel).getByRole("button", { name: "Close navigation" }),
+    );
+    expect(document.activeElement).toBe(trigger);
+    background.remove();
+    expect(transport.mutate).not.toHaveBeenCalled();
+  });
+
+  it("keeps the collapsed desktop channel navigation inert", () => {
+    const view = mount();
+    const trigger = view.container.querySelector<HTMLButtonElement>(
+      ".inbox-channel-toggle",
+    );
+    if (!trigger) throw new Error("Channel trigger missing");
+    fireEvent.click(trigger);
+    expect(
+      view.container
+        .querySelector(".inbox-channel-sidebar")
+        ?.hasAttribute("inert"),
+    ).toBe(true);
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(trigger);
+    expect(
+      view.container
+        .querySelector(".inbox-channel-sidebar")
+        ?.hasAttribute("inert"),
+    ).toBe(false);
+  });
+
+  it("transfers contact drawer focus, traps compact focus and restores its trigger with the draft intact", () => {
+    compactViewport();
+    mount();
+    const draft = screen.getByRole<HTMLTextAreaElement>("textbox", {
+      name: "Reply message",
+    });
+    fireEvent.change(draft, { target: { value: "Preserved context draft" } });
+    const trigger = screen.getByRole("button", { name: "Contact details" });
+    fireEvent.click(trigger);
+    const panel = screen.getByRole("dialog", { name: "Details" });
+    const close = within(panel).getByRole("button", { name: "Close" });
+    const link = within(panel).getByRole("link", { name: "Open contact" });
+    expect(document.activeElement).toBe(close);
+    fireEvent.keyDown(close, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(link);
+    fireEvent.keyDown(link, { key: "Tab" });
+    expect(document.activeElement).toBe(close);
+    fireEvent.keyDown(close, { key: "Escape" });
+    expect(document.activeElement).toBe(trigger);
+    expect(draft.value).toBe("Preserved context draft");
+    fireEvent.click(trigger);
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "Details" })).getByRole(
+        "button",
+        { name: "Close" },
+      ),
+    );
+    expect(document.activeElement).toBe(trigger);
+    expect(transport.mutate).not.toHaveBeenCalled();
+  });
+
+  it("labels actual channels and filters WhatsApp without exposing other channels to its send action", async () => {
+    const email = {
+      ...beta,
+      channelKind: "email",
+      provider: "meta",
+      recipientAddress: "fixture@example.invalid",
+    };
+    transport.read.mockResolvedValue({ messages: messagesB, nextCursor: null });
+    render(
+      localized(
+        <InboxWorkspace
+          conversations={[alpha, email]}
+          initialMessages={messagesB}
+          initialConversationId="beta"
+          quickReplies={[]}
+          teamMembers={[]}
+          realWhatsAppEnabled
+          canOperate
+        />,
+      ),
+    );
+    await screen.findByText("Beta private fixture");
+    const thread = screen.getByRole("region", { name: /Fictional Beta/ });
+    expect(within(thread).getAllByText("Email").length).toBeGreaterThan(0);
+    expect(
+      within(thread).getByRole<HTMLButtonElement>("button", {
+        name: "Send message",
+      }).disabled,
+    ).toBe(true);
+    const composer = thread.querySelector("form");
+    if (!composer) throw new Error("Composer missing");
+    fireEvent.submit(composer);
+    expect(
+      screen.queryByRole("dialog", { name: "Send this message?" }),
+    ).toBeNull();
+    const channel = screen.getByRole("button", { name: /^WhatsApp\s*1$/ });
+    fireEvent.click(channel);
+    expect(channel.getAttribute("aria-pressed")).toBe("true");
+    expect(
+      screen.getByRole("button", { name: /Fictional Alpha/ }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Fictional Beta/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /^All/ }));
+    expect(screen.getByRole("button", { name: /Fictional Beta/ })).toBeTruthy();
+    expect(transport.mutate).not.toHaveBeenCalled();
+  });
+
+  it("uses the app timezone for thread dates, times and delivery history", async () => {
+    const createdAt = "2026-09-11T01:30:00Z";
+    const localizedMessage = {
+      ...message("alpha", "Timezone fixture"),
+      createdAt,
+      deliveryEvents: [{ status: "delivered", occurredAt: createdAt }],
+    };
+    transport.read.mockResolvedValue({
+      messages: [localizedMessage],
+      nextCursor: null,
+    });
+    const view = render(
+      localized(
+        <NextIntlClientProvider locale="en" timeZone="America/Los_Angeles">
+          <InboxWorkspace
+            conversations={[{ ...alpha, lastMessageAt: createdAt }]}
+            initialMessages={[localizedMessage]}
+            quickReplies={[]}
+            teamMembers={[]}
+            realWhatsAppEnabled={false}
+          />
+        </NextIntlClientProvider>,
+      ),
+    );
+    await screen.findByText("Timezone fixture");
+    const thread = view.container.querySelector(".message-thread");
+    expect(thread?.textContent).toContain("September 10, 2026");
+    expect(thread?.textContent).toContain("06:30 PM");
+    expect(thread?.textContent).toContain(
+      new Date(createdAt).toLocaleString("en", {
+        timeZone: "America/Los_Angeles",
+      }),
+    );
+  });
+
+  it("scrolls the already-selected mobile thread to latest when opened without losing its draft", async () => {
+    const view = mount();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const thread = view.container.querySelector<HTMLElement>(".message-thread");
+    if (!thread) throw new Error("Thread missing");
+    Object.defineProperty(thread, "scrollHeight", {
+      value: 1400,
+      configurable: true,
+    });
+    const scroll = vi.spyOn(HTMLElement.prototype, "scrollTo");
+    scroll.mockClear();
+    fireEvent.change(screen.getByRole("textbox", { name: "Reply message" }), {
+      target: { value: "Retained mobile draft" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Fictional Alpha/ }));
+    expect(scroll).toHaveBeenCalledWith({ top: 1400 });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Back to conversations" }),
+    );
+    scroll.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: /Fictional Alpha/ }));
+    expect(scroll).toHaveBeenCalledWith({ top: 1400 });
+    expect(
+      screen.getByRole<HTMLTextAreaElement>("textbox", {
+        name: "Reply message",
+      }).value,
+    ).toBe("Retained mobile draft");
+    expect(transport.mutate).not.toHaveBeenCalled();
+  });
+
+  it("does not reset mobile scroll or read cursors while earlier history is open", async () => {
+    const cursor = { createdAt: "2026-09-03T10:00:00Z", id: "message-alpha" };
+    const earlier = {
+      ...message("alpha", "Earlier private fixture"),
+      id: "older-alpha",
+      createdAt: "2026-09-02T10:00:00Z",
+    };
+    transport.read.mockImplementation((url: string) =>
+      Promise.resolve({
+        messages: url.includes("before=") ? [earlier] : messagesA,
+        nextCursor: url.includes("before=") ? null : cursor,
+      }),
+    );
+    const view = render(
+      localized(
+        <InboxWorkspace
+          conversations={conversations}
+          initialMessages={messagesA}
+          initialNextCursor={cursor}
+          quickReplies={[]}
+          teamMembers={[]}
+          realWhatsAppEnabled={false}
+          canOperate
+        />,
+      ),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Fictional Alpha/ }));
+    fireEvent.click(screen.getByRole("button", { name: /earlier messages/i }));
+    await screen.findByText("Earlier private fixture");
+    const thread = view.container.querySelector<HTMLElement>(".message-thread");
+    if (!thread) throw new Error("Thread missing");
+    thread.scrollTop = 37;
+    const scroll = vi.spyOn(HTMLElement.prototype, "scrollTo");
+    scroll.mockClear();
+    transport.read.mockClear();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Back to conversations" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Fictional Alpha/ }));
+    expect(thread.scrollTop).toBe(37);
+    expect(scroll).not.toHaveBeenCalled();
+    expect(transport.read).not.toHaveBeenCalled();
+    expect(
+      screen.getByText("Viewing history · live updates paused"),
+    ).toBeTruthy();
+    expect(screen.getByText("Earlier private fixture")).toBeTruthy();
+  });
+
+  it("keeps failed status changes visible in the conversation controls dialog", async () => {
+    transport.mutate.mockRejectedValueOnce(new Error("fixture failure"));
+    mount();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Conversation controls" }),
+    );
+    const dialog = screen.getByRole("dialog", {
+      name: "Conversation controls",
+    });
+    fireEvent.change(within(dialog).getByRole("combobox", { name: "Status" }), {
+      target: { value: "pending" },
+    });
+    expect((await within(dialog).findByRole("alert")).textContent).toBeTruthy();
+    expect(transport.mutate).toHaveBeenCalledExactlyOnceWith(
+      "/api/messaging/conversations/alpha",
+      { status: "pending" },
+      { method: "PATCH" },
+    );
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+  });
+
+  it("requires confirmation before permanently deleting only the selected conversation", async () => {
+    transport.read.mockImplementation((url: string) =>
+      Promise.resolve(
+        url === "/api/messaging/conversations"
+          ? { conversations: [beta] }
+          : { messages: messagesB, nextCursor: null },
+      ),
+    );
+    mount();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Conversation controls" }),
+    );
+    const controls = screen.getByRole("dialog", {
+      name: "Conversation controls",
+    });
+    fireEvent.click(
+      within(controls).getByRole("button", { name: "Delete conversation" }),
+    );
+    const confirmation = screen.getByRole("dialog", {
+      name: "Delete this conversation?",
+    });
+    expect(transport.mutate).not.toHaveBeenCalled();
+    fireEvent.click(
+      within(confirmation).getByRole("button", { name: "Cancel" }),
+    );
+    expect(transport.mutate).not.toHaveBeenCalled();
+
+    fireEvent.click(
+      within(controls).getByRole("button", { name: "Delete conversation" }),
+    );
+    fireEvent.click(
+      within(
+        screen.getByRole("dialog", { name: "Delete this conversation?" }),
+      ).getByRole("button", { name: "Delete permanently" }),
+    );
+
+    await waitFor(() =>
+      expect(transport.mutate).toHaveBeenCalledExactlyOnceWith(
+        "/api/messaging/conversations/alpha",
+        {},
+        { method: "DELETE" },
+      ),
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Fictional Beta" }),
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: /Fictional Alpha/ }),
+    ).toBeNull();
+    expect(screen.getByText("Conversation deleted.")).toBeTruthy();
+  });
+
+  it("keeps the confirmation open when active messaging work blocks deletion", async () => {
+    transport.mutate.mockRejectedValueOnce(
+      new Error(
+        "This conversation still has queued or in-progress work. Wait for it to finish before deleting.",
+      ),
+    );
+    mount();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Conversation controls" }),
+    );
+    fireEvent.click(
+      within(
+        screen.getByRole("dialog", { name: "Conversation controls" }),
+      ).getByRole("button", { name: "Delete conversation" }),
+    );
+    const confirmation = screen.getByRole("dialog", {
+      name: "Delete this conversation?",
+    });
+    fireEvent.click(
+      within(confirmation).getByRole("button", {
+        name: "Delete permanently",
+      }),
+    );
+    expect(
+      await within(confirmation).findByText(
+        "This conversation is still processing a message or AI reply. Wait for it to finish, then try again.",
+      ),
+    ).toBeTruthy();
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    expect(
+      screen.getByRole("heading", { name: "Fictional Alpha" }),
+    ).toBeTruthy();
+  });
+
+  it("does not expose conversation deletion to read-only users", () => {
+    mount(true, false);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Conversation controls" }),
+    );
+    expect(
+      within(
+        screen.getByRole("dialog", { name: "Conversation controls" }),
+      ).queryByRole("button", { name: "Delete conversation" }),
+    ).toBeNull();
+  });
+
+  it("lets an operator explicitly switch between a published AI agent and human takeover", async () => {
+    render(
+      localized(
+        <InboxWorkspace
+          agentProfiles={[
+            {
+              id: "agent",
+              name: "Fictional support agent",
+              description: null,
+              version: 1,
+              versionId: "00000000-0000-4000-8000-000000000091",
+              channels: ["whatsapp"],
+              published: true,
+              validationStatus: "valid",
+            },
+          ]}
+          aiRepliesEnabled
+          conversations={conversations}
+          initialMessages={messagesA}
+          quickReplies={[]}
+          teamMembers={[]}
+          realWhatsAppEnabled={false}
+          canOperate
+        />,
+      ),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Conversation controls" }),
+    );
+    const responder = screen.getByRole("combobox", {
+      name: "Conversation responder",
+    });
+    fireEvent.change(responder, {
+      target: { value: "00000000-0000-4000-8000-000000000091" },
+    });
+    await waitFor(() =>
+      expect(transport.mutate).toHaveBeenCalledWith(
+        "/api/messaging/conversations/alpha",
+        {
+          ownershipMode: "ai",
+          agentProfileVersionId: "00000000-0000-4000-8000-000000000091",
+        },
+        { method: "PATCH" },
+      ),
+    );
+    fireEvent.change(responder, { target: { value: "human" } });
+    await waitFor(() =>
+      expect(transport.mutate).toHaveBeenCalledWith(
+        "/api/messaging/conversations/alpha",
+        expect.objectContaining({ ownershipMode: "human" }),
+        { method: "PATCH" },
+      ),
+    );
+  });
+
+  it("opens directly on the unread queue from a route-backed intent", () => {
+    render(
+      localized(
+        <InboxWorkspace
+          conversations={[alpha, { ...beta, unreadCount: 2 }]}
+          initialFilter="unread"
+          initialMessages={messagesA}
+          quickReplies={[]}
+          teamMembers={[]}
+          realWhatsAppEnabled={false}
+          canOperate
+        />,
+      ),
+    );
+
+    expect(
+      screen
+        .getByRole("button", { name: /^Unread/ })
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(screen.getByRole("button", { name: /Fictional Beta/ })).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: /Fictional Alpha/ }),
+    ).toBeNull();
+  });
+
+  it("initializes route search and applies truthful assignment/status filters", () => {
+    const assignedAlpha: ConversationSummary = {
+      ...alpha,
+      assignedUserId: "operator-current",
+    };
+    const waitingBeta: ConversationSummary = {
+      ...beta,
+      status: "pending",
+    };
+    const resolvedGamma: ConversationSummary = {
+      ...alpha,
+      id: "gamma",
+      contactId: "contact-c",
+      contactName: "Fictional Gamma",
+      assignedUserId: "operator-other",
+      status: "resolved",
+    };
+    const initial = render(
+      localized(
+        <InboxWorkspace
+          conversations={[assignedAlpha, waitingBeta, resolvedGamma]}
+          currentUserId="operator-current"
+          initialMessages={messagesA}
+          initialSearch="Beta"
+          quickReplies={[]}
+          teamMembers={[]}
+          realWhatsAppEnabled={false}
+          canOperate
+        />,
+      ),
+    );
+
+    expect(screen.getByRole("button", { name: /Fictional Beta/ })).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: /Fictional Alpha/ }),
+    ).toBeNull();
+
+    initial.unmount();
+    render(
+      localized(
+        <InboxWorkspace
+          conversations={[assignedAlpha, waitingBeta, resolvedGamma]}
+          currentUserId="operator-current"
+          initialMessages={messagesA}
+          quickReplies={[]}
+          teamMembers={[]}
+          realWhatsAppEnabled={false}
+          canOperate
+        />,
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Mine/ }));
+    expect(
+      screen.getByRole("button", { name: /Fictional Alpha/ }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Fictional Beta/ })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Waiting/ }));
+    expect(screen.getByRole("button", { name: /Fictional Beta/ })).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: /Fictional Alpha/ }),
+    ).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Closed/ }));
+    expect(
+      screen.getByRole("button", { name: /Fictional Gamma/ }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Fictional Beta/ })).toBeNull();
+  });
+
+  it("keeps the Mine filter unavailable without a current operator identity", () => {
+    mount();
+    expect(
+      screen.getByRole<HTMLButtonElement>("button", { name: /^Mine/ }).disabled,
+    ).toBe(true);
+  });
+
+  it("shows only available contact context and links to the canonical contact", () => {
+    mount();
+    expect(screen.queryByRole("complementary", { name: "Details" })).toBeNull();
+    const trigger = screen.getByRole("button", { name: "Contact details" });
+    fireEvent.click(trigger);
+    expect(screen.getByRole("complementary", { name: "Details" })).toBeTruthy();
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "Close" }),
+    );
+    expect(
+      screen
+        .getByRole<HTMLAnchorElement>("link", { name: "Open contact" })
+        .getAttribute("href"),
+    ).toBe("/contacts/contact-a");
+    expect(screen.getAllByText("Unassigned").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Granted")).toBeNull();
+    expect(screen.queryByText(/consent/i)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("complementary", { name: "Details" })).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
   it("renders a polled send failure in the actual thread without resubmitting", async () => {
     transport.read.mockResolvedValue({
       messages: [
@@ -137,7 +775,7 @@ describe("Inbox interaction safety (no provider network)", () => {
     expect(screen.getByText(/unavailable or inaccessible/)).toBeTruthy();
     expect(transport.mutate).not.toHaveBeenCalled();
   });
-  it("preserves a draft when locale changes and keeps real confirmation in Hebrew", async () => {
+  it("preserves a draft when locale changes and localizes direct send in Hebrew", async () => {
     const content = () => (
       <InboxWorkspace
         conversations={conversations}
@@ -159,14 +797,15 @@ describe("Inbox interaction safety (no provider network)", () => {
       screen.getByRole<HTMLTextAreaElement>("textbox", { name: "הודעת תשובה" })
         .value,
     ).toBe("Fictional bilingual draft");
-    fireEvent.change(screen.getByRole("combobox", { name: "מצב שליחה" }), {
-      target: { value: "meta" },
-    });
+    expect(screen.queryByRole("combobox", { name: "מצב שליחה" })).toBeNull();
     expect(
-      screen.getByRole<HTMLButtonElement>("button", {
-        name: "בדיקת הודעה אמיתית לפני שליחה",
-      }).disabled,
-    ).toBe(true);
+      screen.getByRole<HTMLButtonElement>("button", { name: "שליחת הודעה" })
+        .disabled,
+    ).toBe(false);
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    expect(
+      screen.queryByRole("dialog", { name: "לשלוח את ההודעה?" }),
+    ).toBeNull();
     expect(transport.mutate).not.toHaveBeenCalled();
   });
   it("ignores delayed Alpha results after selecting Beta and aborts the obsolete read", async () => {
@@ -229,9 +868,7 @@ describe("Inbox interaction safety (no provider network)", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Reply message" }), {
       target: { value: "Fictional reply" },
     });
-    fireEvent.click(
-      screen.getByRole("button", { name: "Queue simulator reply" }),
-    );
+    sendMessage();
     await screen.findByText(
       "Could not queue the message. Your draft is preserved.",
     );
@@ -240,9 +877,7 @@ describe("Inbox interaction safety (no provider network)", () => {
         name: "Reply message",
       }).value,
     ).toBe("Fictional reply");
-    fireEvent.click(
-      screen.getByRole("button", { name: "Queue simulator reply" }),
-    );
+    sendMessage();
     await waitFor(() => expect(transport.mutate).toHaveBeenCalledTimes(2));
     expect(transport.mutate.mock.calls[0]?.[2]).toEqual(
       transport.mutate.mock.calls[1]?.[2],
@@ -263,41 +898,24 @@ describe("Inbox interaction safety (no provider network)", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Reply message" }), {
       target: { value: "Fictional routed reply" },
     });
-    fireEvent.click(
-      screen.getByRole("button", { name: "Queue simulator reply" }),
-    );
+    sendMessage();
     await screen.findByRole("heading", { name: "Fictional Beta" });
     expect(screen.queryByText("Alpha private fixture")).toBeNull();
   });
 
-  it("requires both confirmation stages and clears consent to send when the draft changes", async () => {
+  it("uses the composer send action without a second confirmation dialog", async () => {
     mount(true);
     await screen.findByText("Alpha private fixture");
-    fireEvent.change(screen.getByRole("combobox", { name: "Delivery mode" }), {
-      target: { value: "meta" },
-    });
     fireEvent.change(screen.getByRole("textbox", { name: "Reply message" }), {
-      target: { value: "Fictional confirmed content" },
+      target: { value: "Fictional direct content" },
     });
+    expect(transport.mutate).not.toHaveBeenCalled();
+    sendMessage();
+    await waitFor(() => expect(transport.mutate).toHaveBeenCalledOnce());
+    expect(screen.queryByRole("checkbox")).toBeNull();
     expect(
-      screen.getByRole<HTMLButtonElement>("button", {
-        name: "Review real message",
-      }).disabled,
-    ).toBe(true);
-    fireEvent.click(screen.getByRole("checkbox"));
-    fireEvent.click(
-      screen.getByRole("button", { name: "Review real message" }),
-    );
-    await screen.findByRole("dialog", {
-      name: "Confirm real WhatsApp delivery",
-    });
-    expect(transport.mutate).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Close" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Reply message" }), {
-      target: { value: "Changed content" },
-    });
-    expect(screen.getByRole<HTMLInputElement>("checkbox").checked).toBe(false);
-    expect(transport.mutate).not.toHaveBeenCalled();
+      screen.queryByRole("dialog", { name: "Send this message?" }),
+    ).toBeNull();
   });
 
   it("does not expose write controls to a read-only operator", () => {
@@ -307,41 +925,33 @@ describe("Inbox interaction safety (no provider network)", () => {
     expect(screen.queryByText("Fictional demo tools")).toBeNull();
   });
 
-  it("refuses real delivery when the flag is disabled, even after a forced selection", async () => {
+  it("has no mode control or simulator fallback when delivery is disabled", async () => {
     mount(false);
     await screen.findByText("Alpha private fixture");
-    fireEvent.change(screen.getByRole("combobox", { name: "Delivery mode" }), {
-      target: { value: "meta" },
-    });
     fireEvent.change(screen.getByRole("textbox", { name: "Reply message" }), {
       target: { value: "Never sent" },
     });
-    fireEvent.click(screen.getByRole("checkbox"));
-    fireEvent.click(
-      screen.getByRole("button", { name: "Review real message" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     expect(screen.queryByRole("dialog")).toBeNull();
+    expect(
+      screen.queryByRole("combobox", { name: "Delivery mode" }),
+    ).toBeNull();
+    expect(screen.queryByRole("button", { name: /simulator/i })).toBeNull();
+    expect(
+      screen.getByRole<HTMLButtonElement>("button", { name: "Send message" })
+        .disabled,
+    ).toBe(true);
     expect(transport.mutate).not.toHaveBeenCalled();
   });
 
-  it("queues a real-provider request only after the final review confirmation (mock transport)", async () => {
+  it("queues a real-provider request from the explicit composer send action (mock transport)", async () => {
     mount(true);
     await screen.findByText("Alpha private fixture");
-    fireEvent.change(screen.getByRole("combobox", { name: "Delivery mode" }), {
-      target: { value: "meta" },
-    });
     fireEvent.change(screen.getByRole("textbox", { name: "Reply message" }), {
       target: { value: "Fictional reviewed content" },
     });
-    fireEvent.click(screen.getByRole("checkbox"));
-    fireEvent.click(
-      screen.getByRole("button", { name: "Review real message" }),
-    );
-    await screen.findByRole("dialog", {
-      name: "Confirm real WhatsApp delivery",
-    });
     expect(transport.mutate).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Send real WhatsApp" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(transport.mutate).toHaveBeenCalledOnce());
     expect(transport.mutate.mock.calls[0]?.[1]).toMatchObject({
       provider: "meta",
@@ -361,9 +971,7 @@ describe("Inbox interaction safety (no provider network)", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Reply message" }), {
       target: { value: "Fictional queued content" },
     });
-    fireEvent.click(
-      screen.getByRole("button", { name: "Queue simulator reply" }),
-    );
+    sendMessage();
     await screen.findByText(
       /Message queued, but the conversation list could not refresh/,
     );
@@ -371,5 +979,88 @@ describe("Inbox interaction safety (no provider network)", () => {
     expect(
       screen.getByText("Message queued. Delivery is not yet confirmed."),
     ).toBeTruthy();
+  });
+
+  it("clears the unread badge after a reply and shows it again only for new inbound activity", async () => {
+    let latest = [{ ...alpha, unreadCount: 8 }, beta];
+    transport.read.mockImplementation((url: string) =>
+      Promise.resolve(
+        url.includes("/messages")
+          ? { messages: messagesA, nextCursor: null }
+          : { conversations: latest },
+      ),
+    );
+    render(
+      localized(
+        <InboxWorkspace
+          conversations={latest}
+          initialMessages={messagesA}
+          quickReplies={[]}
+          teamMembers={[]}
+          realWhatsAppEnabled
+          canOperate
+          metaSenderId="fictional-sender-id"
+        />,
+      ),
+    );
+    expect(screen.getByLabelText("8 unread messages")).toBeTruthy();
+    fireEvent.change(screen.getByRole("textbox", { name: "Reply message" }), {
+      target: { value: "Fictional operator response" },
+    });
+    latest = [{ ...alpha, unreadCount: 0 }, beta];
+    sendMessage();
+    await waitFor(() =>
+      expect(screen.queryByLabelText(/unread message/)).toBeNull(),
+    );
+
+    latest = [
+      {
+        ...alpha,
+        unreadCount: 1,
+        lastMessageAt: "2026-09-12T12:01:00.000Z",
+      },
+      beta,
+    ];
+    fireEvent.click(
+      screen.getByRole("button", { name: "Filter conversations" }),
+    );
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Refresh conversations" }),
+    );
+    expect(await screen.findByLabelText("1 unread message")).toBeTruthy();
+  });
+
+  it("leaves cross-page message announcements to the shell notification center", async () => {
+    let latest = conversations;
+    transport.read.mockImplementation((url: string) =>
+      Promise.resolve(
+        url.includes("/messages")
+          ? { messages: messagesA, nextCursor: null }
+          : { conversations: latest },
+      ),
+    );
+    mount();
+    latest = [
+      {
+        ...alpha,
+        unreadCount: 1,
+        lastMessageAt: "2026-09-12T12:02:00.000Z",
+      },
+      beta,
+    ];
+    fireEvent.click(
+      screen.getByRole("button", { name: "Filter conversations" }),
+    );
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Refresh conversations" }),
+    );
+    await waitFor(() =>
+      expect(transport.mutate).toHaveBeenCalledWith(
+        "/api/messaging/conversations/alpha",
+        { read: true },
+        expect.objectContaining({ method: "PATCH" }),
+      ),
+    );
+    expect(screen.queryByText("New message from Fictional Alpha")).toBeNull();
   });
 });

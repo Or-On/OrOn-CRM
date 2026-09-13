@@ -25,6 +25,7 @@ const session: PublicSession = {
   user: {
     id: "00000000-0000-4000-8000-000000000002",
     email: "operator@example.test",
+    isSuperuser: false,
   },
   tenant: membership,
   memberships: [membership],

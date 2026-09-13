@@ -2,39 +2,141 @@
 
 import { errorMessage } from "../../i18n/error-message";
 import { useCapability } from "../access";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 
-import { Plus, Search, UsersRound } from "lucide-react";
+import { Plus, Search, Upload } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, type SyntheticEvent } from "react";
+import { useEffect, useMemo, useState, type SyntheticEvent } from "react";
 
-import type { ContactSummary, ContactImportResult } from "@or-on/crm";
-import { Badge, Button, EmptyState, Input, Surface } from "@or-on/ui";
+import type { ContactImportResult, ContactSummary } from "@or-on/crm";
+import {
+  Button,
+  Dialog,
+  EmptyState,
+  Input,
+  Select,
+  Surface,
+  Textarea,
+} from "@or-on/ui";
 
 import { crmMutation } from "../crm";
+import { ContactResults } from "./contact-results";
+
+type ContactPanel = "create" | "import";
+type ContactChannel = ContactSummary["identities"][number]["channel"];
+type LifecycleStatus = ContactSummary["lifecycleStatus"];
+
+const lifecycleFilters = ["active", "blocked"] as const;
+const channelFilters = [
+  "whatsapp",
+  "phone",
+  "email",
+  "sip",
+  "external",
+] as const satisfies readonly ContactChannel[];
+
+function contactSearchText(contact: ContactSummary): string {
+  return [
+    contact.name,
+    contact.company,
+    contact.email,
+    ...contact.identities.flatMap((identity) => [
+      identity.normalizedValue,
+      identity.displayValue,
+      identity.channel,
+    ]),
+    ...contact.tags.map((tag) => tag.name),
+  ]
+    .filter((value): value is string => value !== null)
+    .join(" ")
+    .toLocaleLowerCase();
+}
 
 export function ContactManager({
   contacts,
   query = "",
+  initialPanel,
 }: {
   readonly contacts: readonly ContactSummary[];
   readonly query?: string;
+  readonly initialPanel?: ContactPanel;
 }) {
   const t = useTranslations();
+  const locale = useLocale();
   const canEdit = useCapability("crm:write");
   const router = useRouter();
-  const [creating, setCreating] = useState(false);
-  const [importing, setImporting] = useState(false);
+  const [panel, setPanel] = useState<ContactPanel | undefined>(initialPanel);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
   const [importResult, setImportResult] = useState<ContactImportResult>();
+  const [localQuery, setLocalQuery] = useState(query);
+  const [lifecycle, setLifecycle] = useState<LifecycleStatus | "all">("all");
+  const [sort, setSort] = useState("recent");
+  const [tag, setTag] = useState("all");
+  const [resultPage, setResultPage] = useState(0);
+  const [channel, setChannel] = useState<ContactChannel | "all">("all");
+
+  useEffect(() => setLocalQuery(query), [query]);
+  useEffect(() => setPanel(initialPanel), [initialPanel]);
+
+  const visibleContacts = useMemo(() => {
+    const search = localQuery.trim().toLocaleLowerCase();
+    const matches = contacts.filter(
+      (contact) =>
+        (search.length === 0 || contactSearchText(contact).includes(search)) &&
+        (lifecycle === "all" || contact.lifecycleStatus === lifecycle) &&
+        (tag === "all" || contact.tags.some((item) => item.id === tag)) &&
+        (channel === "all" ||
+          contact.identities.some((identity) => identity.channel === channel)),
+    );
+    return matches.sort((a, b) =>
+      sort === "recent"
+        ? new Date(b.lastActivityAt ?? b.createdAt).getTime() -
+            new Date(a.lastActivityAt ?? a.createdAt).getTime() ||
+          a.id.localeCompare(b.id)
+        : (sort === "nameAsc" ? 1 : -1) *
+            a.name.localeCompare(b.name, locale) || a.id.localeCompare(b.id),
+    );
+  }, [channel, contacts, lifecycle, localQuery, locale, sort, tag]);
+  const availableTags = [
+    ...new Map(
+      contacts.flatMap((contact) =>
+        contact.tags.map((item) => [item.id, item] as const),
+      ),
+    ).values(),
+  ];
+  const pageSize = 25;
+  const currentPage = Math.min(
+    resultPage,
+    Math.max(0, Math.ceil(visibleContacts.length / pageSize) - 1),
+  );
+  const pageContacts = visibleContacts.slice(
+    currentPage * pageSize,
+    (currentPage + 1) * pageSize,
+  );
+  const availableChannels = channelFilters.filter((candidate) =>
+    contacts.some((contact) =>
+      contact.identities.some((identity) => identity.channel === candidate),
+    ),
+  );
+
+  function channelLabel(value: ContactChannel): string {
+    if (t.has(`status.${value}`)) return t(`status.${value}`);
+    if (value === "sip") return "SIP";
+    return t("common.unknown");
+  }
+
+  function togglePanel(nextPanel: ContactPanel) {
+    setPanel((current) => (current === nextPanel ? undefined : nextPanel));
+  }
 
   async function submit(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
     setPending(true);
     setError(undefined);
-    const data = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const data = new FormData(form);
     try {
       await crmMutation("/api/crm/contacts", {
         name: data.get("name"),
@@ -42,7 +144,8 @@ export function ContactManager({
         email: data.get("email"),
         company: data.get("company"),
       });
-      setCreating(false);
+      form.reset();
+      setPanel(undefined);
       router.refresh();
     } catch (caught) {
       setError(errorMessage(caught, t, "contacts.addFailed"));
@@ -65,7 +168,7 @@ export function ContactManager({
       setImportResult(result);
       if (result.errors.length === 0) {
         form.reset();
-        setImporting(false);
+        setPanel(undefined);
       }
       router.refresh();
     } catch (caught) {
@@ -76,9 +179,38 @@ export function ContactManager({
   }
 
   return (
-    <div className="feature-stack">
+    <div className="feature-stack contacts-workspace">
+      <header className="contacts-resource-header">
+        <div>
+          <h2 className="or-visually-hidden">{t("contacts.directory")}</h2>
+          <p>{t("contacts.count", { count: contacts.length })}</p>
+        </div>
+        <div className="contacts-index-actions">
+          <Button
+            aria-controls="contacts-import-panel"
+            aria-expanded={panel === "import"}
+            disabled={!canEdit || pending}
+            onClick={() => togglePanel("import")}
+            size="small"
+            variant="secondary"
+          >
+            <Upload aria-hidden="true" size={15} />
+            {t("contacts.importCsv")}
+          </Button>
+          <Button
+            aria-controls="contacts-create-panel"
+            aria-expanded={panel === "create"}
+            disabled={!canEdit || pending}
+            onClick={() => togglePanel("create")}
+            size="small"
+          >
+            <Plus aria-hidden="true" size={15} />
+            {t("contacts.add")}
+          </Button>
+        </div>
+      </header>
       {importResult ? (
-        <div role="status" className="import-result">
+        <div role="status" className="import-result contacts-import-result">
           <p>
             {t("contacts.importResult", {
               created: importResult.created,
@@ -99,196 +231,302 @@ export function ContactManager({
           ) : null}
         </div>
       ) : null}
-      <div className="feature-toolbar">
-        <form action="/contacts" className="feature-search" role="search">
+
+      <div className="contacts-index-toolbar">
+        <form
+          action="/contacts"
+          className="feature-search"
+          role="search"
+          onSubmit={(event) => {
+            event.preventDefault();
+            router.push(`/contacts?q=${encodeURIComponent(localQuery.trim())}`);
+          }}
+        >
           <Search aria-hidden="true" size={16} />
           <input
             aria-label={t("contacts.search")}
             name="q"
-            defaultValue={query}
+            onChange={(event) => {
+              setLocalQuery(event.target.value);
+              setResultPage(0);
+            }}
             placeholder={t("contacts.searchHint")}
+            type="search"
+            value={localQuery}
           />
+          <Button type="submit" size="small" variant="secondary">
+            {t("tenantPrimary.searchDirectory")}
+          </Button>
+          {localQuery ? (
+            query ? (
+              <Link className="text-link" href="/contacts">
+                {t("contacts.searchClear")}
+              </Link>
+            ) : (
+              <Button
+                className="contacts-search-clear"
+                onClick={() => setLocalQuery("")}
+                size="small"
+                variant="quiet"
+              >
+                {t("contacts.searchClear")}
+              </Button>
+            )
+          ) : null}
         </form>
-        <div className="form-actions">
-          <Button
-            disabled={!canEdit || pending}
-            onClick={() => setImporting((value) => !value)}
-            variant="secondary"
+
+        <div className="contacts-index-filters">
+          <Select
+            id="contacts-status-filter"
+            label={t("inbox.status")}
+            onChange={(event) => {
+              setLifecycle(event.target.value as LifecycleStatus | "all");
+              setResultPage(0);
+            }}
+            value={lifecycle}
           >
-            {t("contacts.importCsv")}
-          </Button>
-          <Button
-            disabled={!canEdit || pending}
-            onClick={() => setCreating((value) => !value)}
+            <option value="all">{t("contacts.allStatuses")}</option>
+            {lifecycleFilters.map((value) => (
+              <option key={value} value={value}>
+                {t(`status.${value}`)}
+              </option>
+            ))}
+          </Select>
+          <Select
+            id="contacts-channel-filter"
+            label={t("contacts.channel")}
+            onChange={(event) => {
+              setChannel(event.target.value as ContactChannel | "all");
+              setResultPage(0);
+            }}
+            value={channel}
           >
-            <Plus aria-hidden="true" size={16} />
-            {t("contacts.add")}
-          </Button>
+            <option value="all">{t("contacts.allChannels")}</option>
+            {availableChannels.map((value) => (
+              <option key={value} value={value}>
+                {channelLabel(value)}
+              </option>
+            ))}
+          </Select>
+          {availableTags.length ? (
+            <Select
+              id="contacts-tag-filter"
+              label={t("tenantPrimary.tag")}
+              value={tag}
+              onChange={(event) => {
+                setTag(event.target.value);
+                setResultPage(0);
+              }}
+            >
+              <option value="all">{t("tenantPrimary.allTags")}</option>
+              {availableTags.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
+              ))}
+            </Select>
+          ) : null}
+          <Select
+            id="contacts-sort"
+            label={t("tenantPrimary.sort")}
+            value={sort}
+            onChange={(event) => {
+              setSort(event.target.value);
+              setResultPage(0);
+            }}
+          >
+            {["recent", "nameAsc", "nameDesc"].map((value) => (
+              <option key={value} value={value}>
+                {t(`tenantPrimary.${value}`)}
+              </option>
+            ))}
+          </Select>
         </div>
       </div>
 
-      <p className="public-note">
-        {t("contacts.count", { count: contacts.length })}
-        {contacts.length >= 100 ? " · " + t("contacts.limit") : ""}
-      </p>
-      {query ? (
-        <Link className="text-link" href="/contacts">
-          {t("contacts.searchClear")}
-        </Link>
-      ) : null}
-      {error && !creating ? (
+      <div className="contacts-index-meta" aria-live="polite">
+        <p>{t("tenantPrimary.resultsScope", { count: contacts.length })}</p>
+      </div>
+
+      {error && panel === undefined ? (
         <p className="form-error" role="alert">
           {error}
         </p>
       ) : null}
-      {importing ? (
-        <Surface className="feature-form" level="raised">
-          <form onSubmit={(event) => void importCsv(event)}>
-            <fieldset className="form-fieldset" disabled={pending || !canEdit}>
-              {!canEdit ? (
-                <p className="public-note">{t("common.readOnly")}</p>
-              ) : null}
-              <label htmlFor="contacts-csv">{t("contacts.csvLabel")}</label>
-              <textarea id="contacts-csv" name="csv" required rows={7} />
-              <div className="form-actions">
-                <Button disabled={pending || !canEdit} type="submit">
-                  {t("contacts.importAction")}
-                </Button>
-                <Button
-                  onClick={() => setImporting(false)}
-                  type="button"
-                  variant="quiet"
-                >
-                  {t("common.cancel")}
-                </Button>
-              </div>
-            </fieldset>
-          </form>
-        </Surface>
-      ) : null}
 
-      {creating ? (
-        <Surface className="feature-form" level="raised">
-          <form onSubmit={(event) => void submit(event)}>
-            <fieldset className="form-fieldset" disabled={pending || !canEdit}>
-              {!canEdit ? (
-                <p className="public-note">{t("common.readOnly")}</p>
-              ) : null}
-              <div className="form-grid">
-                <Input
-                  id="contact-name"
-                  label={t("common.name")}
-                  name="name"
+      <div className="contacts-body">
+        <Dialog
+          className="contacts-editor"
+          closeLabel={t("common.close")}
+          open={panel !== undefined}
+          onClose={() => setPanel(undefined)}
+          title={t(panel === "import" ? "contacts.importCsv" : "contacts.add")}
+        >
+          <Surface
+            className="feature-form contacts-command-panel"
+            id="contacts-import-panel"
+            level="raised"
+            hidden={panel !== "import"}
+          >
+            <form onSubmit={(event) => void importCsv(event)}>
+              <fieldset
+                className="form-fieldset"
+                disabled={pending || !canEdit}
+              >
+                {!canEdit ? (
+                  <p className="public-note">{t("common.readOnly")}</p>
+                ) : null}
+                <Textarea
+                  data-dialog-initial-focus={
+                    panel === "import" ? "" : undefined
+                  }
+                  id="contacts-csv"
+                  label={t("contacts.csvLabel")}
+                  name="csv"
                   required
+                  rows={7}
                 />
-                <Input
-                  id="contact-phone"
-                  label={t("contacts.phone")}
-                  name="phone"
-                  type="tel"
-                  dir="ltr"
-                  placeholder="+14155550123"
-                  required
-                />
-                <Input
-                  id="contact-email"
-                  label={t("common.email")}
-                  name="email"
-                  type="email"
-                />
-                <Input
-                  id="contact-company"
-                  label={t("common.company")}
-                  name="company"
-                />
-              </div>
-              {error === undefined ? null : (
-                <p className="form-error" role="alert">
-                  {error}
-                </p>
-              )}
-              <div className="form-actions">
-                <Button disabled={pending || !canEdit} type="submit">
-                  {pending ? t("contacts.adding") : t("contacts.add")}
-                </Button>
-                <Button
-                  onClick={() => setCreating(false)}
-                  type="button"
-                  variant="quiet"
-                >
-                  {t("common.cancel")}
-                </Button>
-              </div>
-            </fieldset>
-          </form>
-        </Surface>
-      ) : null}
-
-      {contacts.length === 0 ? (
-        <EmptyState
-          description={t("contacts.emptyHint")}
-          title={t("contacts.empty")}
-        />
-      ) : (
-        <div className="contact-grid">
-          {contacts.map((contact) => {
-            const primary = contact.identities.find(
-              (identity) => identity.isPrimary,
-            );
-            return (
-              <Surface className="contact-card" key={contact.id}>
-                <div className="contact-card__heading">
-                  <span className="contact-avatar" aria-hidden="true">
-                    <UsersRound size={17} />
-                  </span>
-                  <div>
-                    <h2>{contact.name}</h2>
-                    <p>{contact.company ?? t("contacts.independent")}</p>
-                  </div>
-                  <Badge
-                    label={
-                      t.has(`status.${contact.lifecycleStatus}`)
-                        ? t(`status.${contact.lifecycleStatus}`)
-                        : t("common.unknown")
+                {error === undefined ? null : (
+                  <p className="form-error" role="alert">
+                    {error}
+                  </p>
+                )}
+                <div className="form-actions">
+                  <Button busy={pending} disabled={!canEdit} type="submit">
+                    {t("contacts.importAction")}
+                  </Button>
+                  <Button
+                    onClick={() => setPanel(undefined)}
+                    type="button"
+                    variant="quiet"
+                  >
+                    {t("common.cancel")}
+                  </Button>
+                </div>
+              </fieldset>
+            </form>
+          </Surface>
+          <Surface
+            className="feature-form contacts-command-panel"
+            id="contacts-create-panel"
+            level="raised"
+            hidden={panel !== "create"}
+          >
+            <p>{t("contacts.profileHint")}</p>
+            <form onSubmit={(event) => void submit(event)}>
+              <fieldset
+                className="form-fieldset"
+                disabled={pending || !canEdit}
+              >
+                {!canEdit ? (
+                  <p className="public-note">{t("common.readOnly")}</p>
+                ) : null}
+                <div className="form-grid">
+                  <Input
+                    data-dialog-initial-focus={
+                      panel === "create" ? "" : undefined
                     }
-                    tone={
-                      contact.lifecycleStatus === "blocked"
-                        ? "critical"
-                        : "positive"
-                    }
+                    id="contact-name"
+                    label={t("common.name")}
+                    name="name"
+                    required
+                  />
+                  <Input
+                    id="contact-phone"
+                    label={t("contacts.phone")}
+                    name="phone"
+                    type="tel"
+                    dir="ltr"
+                    placeholder="+14155550123"
+                    required
+                  />
+                  <Input
+                    id="contact-email"
+                    label={t("common.email")}
+                    name="email"
+                    type="email"
+                  />
+                  <Input
+                    id="contact-company"
+                    label={t("common.company")}
+                    name="company"
                   />
                 </div>
-                <dl className="contact-card__details">
-                  <div>
-                    <dt>{t("contacts.channel")}</dt>
-                    <dd>
-                      <bdi dir="ltr">
-                        {primary?.normalizedValue ?? t("common.notSet")}
-                      </bdi>
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>{t("common.email")}</dt>
-                    <dd>
-                      <bdi dir="ltr">{contact.email ?? t("common.notSet")}</bdi>
-                    </dd>
-                  </div>
-                </dl>
-                <div className="tag-row">
-                  {contact.tags.map((tag) => (
-                    <span key={tag.id} style={{ borderColor: tag.color }}>
-                      {tag.name}
-                    </span>
-                  ))}
+                {error === undefined ? null : (
+                  <p className="form-error" role="alert">
+                    {error}
+                  </p>
+                )}
+                <div className="form-actions">
+                  <Button busy={pending} disabled={!canEdit} type="submit">
+                    {pending ? t("contacts.adding") : t("contacts.add")}
+                  </Button>
+                  <Button
+                    onClick={() => setPanel(undefined)}
+                    type="button"
+                    variant="quiet"
+                  >
+                    {t("common.cancel")}
+                  </Button>
                 </div>
-                <Link className="text-link" href={`/contacts/${contact.id}`}>
-                  {t("contacts.open")}
-                </Link>
-              </Surface>
-            );
-          })}
+              </fieldset>
+            </form>
+          </Surface>
+        </Dialog>
+        <div className="contacts-results">
+          {contacts.length === 0 ? (
+            <EmptyState
+              description={t("contacts.emptyHint")}
+              title={t("contacts.empty")}
+            />
+          ) : visibleContacts.length === 0 ? (
+            <EmptyState
+              description={t("inbox.searchHelp")}
+              title={t("inbox.noMatches")}
+            />
+          ) : (
+            <ContactResults contacts={pageContacts} />
+          )}
         </div>
-      )}
+        {visibleContacts.length > pageSize ? (
+          <nav
+            className="contacts-pagination"
+            aria-label={t("tenantPrimary.page", {
+              start: currentPage * pageSize + 1,
+              end: Math.min(
+                (currentPage + 1) * pageSize,
+                visibleContacts.length,
+              ),
+              count: visibleContacts.length,
+            })}
+          >
+            <span>
+              {t("tenantPrimary.page", {
+                start: currentPage * pageSize + 1,
+                end: Math.min(
+                  (currentPage + 1) * pageSize,
+                  visibleContacts.length,
+                ),
+                count: visibleContacts.length,
+              })}
+            </span>
+            <Button
+              disabled={currentPage === 0}
+              onClick={() => setResultPage(currentPage - 1)}
+              variant="secondary"
+            >
+              {t("tenantPrimary.previous")}
+            </Button>
+            <Button
+              disabled={(currentPage + 1) * pageSize >= visibleContacts.length}
+              onClick={() => setResultPage(currentPage + 1)}
+              variant="secondary"
+            >
+              {t("tenantPrimary.next")}
+            </Button>
+          </nav>
+        ) : null}
+      </div>
     </div>
   );
 }

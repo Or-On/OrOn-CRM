@@ -12,6 +12,8 @@ export type WhatsAppDelivery =
     };
 
 export interface WhatsAppSendRequest {
+  readonly beforeAttempt?: () => Promise<void>;
+  readonly senderPhoneNumberId?: string;
   readonly idempotencyKey: string;
   readonly recipient: string;
   readonly delivery: WhatsAppDelivery;
@@ -72,8 +74,10 @@ export function validateWhatsAppRequest(request: WhatsAppSendRequest): void {
 export class SimulatorWhatsAppProvider implements WhatsAppProvider {
   public readonly name = "simulator" as const;
 
-  public send(request: WhatsAppSendRequest): Promise<WhatsAppSendResult> {
+  public async send(request: WhatsAppSendRequest): Promise<WhatsAppSendResult> {
     validateWhatsAppRequest(request);
+    await request.beforeAttempt?.();
+
     const digest = createHash("sha256")
       .update(`simulator:${request.idempotencyKey}`)
       .digest("hex");
@@ -156,12 +160,20 @@ export class MetaWhatsAppProvider implements WhatsAppProvider {
       throw new WhatsAppProviderError("provider_not_configured", false);
     validateWhatsAppRequest(request);
 
+    if (
+      request.senderPhoneNumberId !== undefined &&
+      request.senderPhoneNumberId !== phoneNumberId
+    )
+      throw new WhatsAppProviderError("sender_configuration_changed", false);
     const execute = this.#options.fetch ?? fetch;
     const maxAttempts = Math.min(
       Math.max(this.#options.maxAttempts ?? 3, 1),
       5,
     );
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      // Authorization is re-read after every rate-limit delay. Refusal occurs
+      // before HTTP and is not an ambiguous provider outcome or a retry signal.
+      await request.beforeAttempt?.();
       const controller = new AbortController();
       const timeout = setTimeout(
         () => controller.abort(),
@@ -195,13 +207,21 @@ export class MetaWhatsAppProvider implements WhatsAppProvider {
           const id = record?.messages?.[0]?.id;
           if (typeof id !== "string" || id.length === 0)
             throw new WhatsAppProviderError(
-              "invalid_meta_response",
+              "delivery_outcome_unknown",
               false,
               response.status,
             );
           return { messageId: id };
         }
-        const retryable = response.status === 429 || response.status >= 500;
+        // Only explicit rate-limit rejection is safe to repeat. A gateway/server
+        // error may have happened after provider acceptance of a POST.
+        const retryable = response.status === 429;
+        if (response.status >= 500)
+          throw new WhatsAppProviderError(
+            "delivery_outcome_unknown",
+            false,
+            response.status,
+          );
         if (!retryable || attempt === maxAttempts) {
           const diagnostic = metaDiagnostic(
             payload,
@@ -219,14 +239,9 @@ export class MetaWhatsAppProvider implements WhatsAppProvider {
         }
       } catch (error) {
         if (error instanceof WhatsAppProviderError) throw error;
-        if (attempt === maxAttempts) {
-          throw new WhatsAppProviderError(
-            error instanceof DOMException && error.name === "AbortError"
-              ? "timeout"
-              : "network_error",
-            true,
-          );
-        }
+        // Meta does not guarantee deduplication of our local idempotency key.
+        // Never automatically replay an ambiguous network/timeout outcome.
+        throw new WhatsAppProviderError("delivery_outcome_unknown", false);
       } finally {
         clearTimeout(timeout);
       }

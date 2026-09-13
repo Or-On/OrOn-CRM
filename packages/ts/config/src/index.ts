@@ -10,6 +10,39 @@ const optionalSecret = z.preprocess(
   z.string().min(1).optional(),
 );
 
+const optionalText = z.preprocess(
+  (value) => (value === "" ? undefined : value),
+  z.string().trim().min(1).optional(),
+);
+
+const optionalNumericIdentifier = z.preprocess(
+  (value) => (value === "" ? undefined : value),
+  z.string().regex(/^\d+$/u).optional(),
+);
+
+const optionalProviderUrl = z.preprocess(
+  (value) => (value === "" ? undefined : value),
+  z
+    .url()
+    .refine(
+      (value) => {
+        const url = new URL(value);
+        return (
+          ["http:", "https:"].includes(url.protocol) &&
+          !url.username &&
+          !url.password &&
+          !url.search &&
+          !url.hash
+        );
+      },
+      {
+        message:
+          "must be an HTTP(S) URL without credentials, query or fragment",
+      },
+    )
+    .optional(),
+);
+
 const sourceSchema = z.object({
   PLATFORM_ENV: z
     .enum(["development", "test", "production"])
@@ -30,6 +63,7 @@ const sourceSchema = z.object({
     })
     .optional(),
   CONTROL_API_URL: z.url().default("http://127.0.0.1:8000"),
+  DISPATCHER_URL: optionalProviderUrl.default("http://127.0.0.1:8082"),
   PUBLIC_SITE_URL: z
     .url()
     .refine(
@@ -61,18 +95,28 @@ const sourceSchema = z.object({
     .pipe(z.enum(["trace", "debug", "info", "warn", "error", "fatal"]))
     .default("info"),
   ENABLE_REAL_TELEPHONY: booleanFlag,
+  ENABLE_REAL_VOICE_PROVIDERS: booleanFlag,
   ENABLE_REAL_WHATSAPP: booleanFlag,
+  ENABLE_WHATSAPP_AI: booleanFlag,
+  ENABLE_WHATSAPP_AUTO_CALLS: booleanFlag,
+  ENABLE_REAL_BILLING: booleanFlag,
   LIVEKIT_API_SECRET: optionalSecret,
   WHATSAPP_ACCESS_TOKEN: optionalSecret,
   WHATSAPP_APP_SECRET: optionalSecret,
   WHATSAPP_WEBHOOK_VERIFY_TOKEN: optionalSecret,
-  WHATSAPP_PHONE_NUMBER_ID: z.string().regex(/^\d+$/u).optional(),
-  WHATSAPP_WABA_ID: z.string().regex(/^\d+$/u).optional(),
+  WHATSAPP_PHONE_NUMBER_ID: optionalNumericIdentifier,
+  WHATSAPP_WABA_ID: optionalNumericIdentifier,
   WHATSAPP_GRAPH_API_VERSION: z
     .string()
     .regex(/^v\d+\.0$/u)
     .optional(),
-  AI_API_KEY: optionalSecret,
+  LLM_PROVIDER: z.enum(["vertex", "openai-compat"]).default("vertex"),
+  LLM_API_KEY: optionalSecret,
+  LLM_MODEL: optionalText,
+  LLM_BASE_URL: optionalProviderUrl,
+  CREDENTIAL_ENCRYPTION_KEY: optionalSecret,
+  STRIPE_SECRET_KEY: optionalSecret,
+  STRIPE_WEBHOOK_SECRET: optionalSecret,
   AUTH_TOKEN_PEPPER: z.preprocess(
     (value) => (value === "" ? undefined : value),
     z.string().min(32).optional(),
@@ -109,9 +153,19 @@ export interface PlatformConfig {
   readonly databaseUrl: string | undefined;
   readonly messagingDatabaseUrl: string | undefined;
   readonly controlApiUrl: string;
+  readonly dispatcherUrl: string;
   readonly logLevel: "trace" | "debug" | "info" | "warn" | "error" | "fatal";
   readonly enableRealTelephony: boolean;
+  readonly enableRealVoiceProviders: boolean;
   readonly enableRealWhatsApp: boolean;
+  readonly enableWhatsAppAi: boolean;
+  readonly enableWhatsAppAutoCalls: boolean;
+  readonly enableRealBilling: boolean;
+  readonly llm: {
+    readonly provider: "vertex" | "openai-compat";
+    readonly model: string | undefined;
+    readonly baseUrl: string | undefined;
+  };
   readonly whatsApp: {
     readonly graphApiVersion: string | undefined;
     readonly phoneNumberId: string | undefined;
@@ -122,7 +176,10 @@ export interface PlatformConfig {
     readonly whatsappAccessToken: string | undefined;
     readonly whatsappAppSecret: string | undefined;
     readonly whatsappWebhookVerifyToken: string | undefined;
-    readonly aiApiKey: string | undefined;
+    readonly llmApiKey: string | undefined;
+    readonly credentialEncryptionKey: string | undefined;
+    readonly stripeSecretKey: string | undefined;
+    readonly stripeWebhookSecret: string | undefined;
     readonly authTokenPepper: string | undefined;
     readonly authServiceSecret: string | undefined;
     readonly authDummyPasswordHash: string | undefined;
@@ -189,6 +246,41 @@ export function loadConfig(
     );
   }
 
+  if (
+    result.data.ENABLE_WHATSAPP_AI &&
+    (result.data.LLM_PROVIDER !== "openai-compat" ||
+      result.data.LLM_API_KEY === undefined ||
+      result.data.LLM_BASE_URL === undefined ||
+      result.data.LLM_MODEL === undefined)
+  ) {
+    throw new ConfigurationError(
+      "Invalid platform configuration: WhatsApp AI requires LLM_PROVIDER=openai-compat plus LLM_API_KEY, LLM_BASE_URL, and LLM_MODEL",
+    );
+  }
+
+  if (
+    result.data.ENABLE_WHATSAPP_AUTO_CALLS &&
+    (!result.data.ENABLE_WHATSAPP_AI ||
+      !result.data.ENABLE_REAL_WHATSAPP ||
+      !result.data.ENABLE_REAL_TELEPHONY ||
+      !result.data.ENABLE_REAL_VOICE_PROVIDERS ||
+      result.data.AUTH_SERVICE_SECRET === undefined)
+  ) {
+    throw new ConfigurationError(
+      "Invalid platform configuration: WhatsApp automatic calls require WhatsApp AI, real WhatsApp, both real voice flags, and AUTH_SERVICE_SECRET",
+    );
+  }
+
+  if (
+    result.data.ENABLE_REAL_BILLING &&
+    (result.data.STRIPE_SECRET_KEY === undefined ||
+      result.data.STRIPE_WEBHOOK_SECRET === undefined)
+  ) {
+    throw new ConfigurationError(
+      "Invalid platform configuration: real billing requires STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET",
+    );
+  }
+
   return {
     environment: result.data.PLATFORM_ENV,
     service:
@@ -196,10 +288,20 @@ export function loadConfig(
     databaseUrl: result.data.DATABASE_URL,
     messagingDatabaseUrl: result.data.MESSAGING_DATABASE_URL,
     controlApiUrl: result.data.CONTROL_API_URL,
+    dispatcherUrl: result.data.DISPATCHER_URL,
     publicSiteUrl: result.data.PUBLIC_SITE_URL,
     logLevel: result.data.LOG_LEVEL,
     enableRealTelephony: result.data.ENABLE_REAL_TELEPHONY,
+    enableRealVoiceProviders: result.data.ENABLE_REAL_VOICE_PROVIDERS,
     enableRealWhatsApp: result.data.ENABLE_REAL_WHATSAPP,
+    enableWhatsAppAi: result.data.ENABLE_WHATSAPP_AI,
+    enableWhatsAppAutoCalls: result.data.ENABLE_WHATSAPP_AUTO_CALLS,
+    enableRealBilling: result.data.ENABLE_REAL_BILLING,
+    llm: {
+      provider: result.data.LLM_PROVIDER,
+      model: result.data.LLM_MODEL,
+      baseUrl: result.data.LLM_BASE_URL,
+    },
     whatsApp: {
       graphApiVersion: result.data.WHATSAPP_GRAPH_API_VERSION,
       phoneNumberId: result.data.WHATSAPP_PHONE_NUMBER_ID,
@@ -210,7 +312,10 @@ export function loadConfig(
       whatsappAccessToken: result.data.WHATSAPP_ACCESS_TOKEN,
       whatsappAppSecret: result.data.WHATSAPP_APP_SECRET,
       whatsappWebhookVerifyToken: result.data.WHATSAPP_WEBHOOK_VERIFY_TOKEN,
-      aiApiKey: result.data.AI_API_KEY,
+      llmApiKey: result.data.LLM_API_KEY,
+      credentialEncryptionKey: result.data.CREDENTIAL_ENCRYPTION_KEY,
+      stripeSecretKey: result.data.STRIPE_SECRET_KEY,
+      stripeWebhookSecret: result.data.STRIPE_WEBHOOK_SECRET,
       authTokenPepper: result.data.AUTH_TOKEN_PEPPER,
       authServiceSecret: result.data.AUTH_SERVICE_SECRET,
       authDummyPasswordHash: result.data.AUTH_DUMMY_PASSWORD_HASH,
@@ -228,9 +333,14 @@ export function configDiagnostics(
     messagingDatabaseUrl:
       config.messagingDatabaseUrl === undefined ? "unset" : "[REDACTED]",
     controlApiUrl: config.controlApiUrl,
+    dispatcherUrl: config.dispatcherUrl,
     logLevel: config.logLevel,
     enableRealTelephony: config.enableRealTelephony,
+    enableRealVoiceProviders: config.enableRealVoiceProviders,
     enableRealWhatsApp: config.enableRealWhatsApp,
+    enableWhatsAppAi: config.enableWhatsAppAi,
+    enableWhatsAppAutoCalls: config.enableWhatsAppAutoCalls,
+    enableRealBilling: config.enableRealBilling,
     livekitApiSecret:
       config.secrets.livekitApiSecret === undefined ? "unset" : "[REDACTED]",
     whatsappAccessToken:
@@ -246,7 +356,18 @@ export function configDiagnostics(
       config.whatsApp.phoneNumberId === undefined ? "unset" : "configured",
     whatsappWabaId:
       config.whatsApp.wabaId === undefined ? "unset" : "configured",
-    aiApiKey: config.secrets.aiApiKey === undefined ? "unset" : "[REDACTED]",
+    llmApiKey: config.secrets.llmApiKey === undefined ? "unset" : "[REDACTED]",
+    llmProvider: config.llm.provider,
+    llmBaseUrl: config.llm.baseUrl === undefined ? "unset" : "configured",
+    llmModel: config.llm.model ?? "unset",
+    credentialEncryptionKey:
+      config.secrets.credentialEncryptionKey === undefined
+        ? "unset"
+        : "[REDACTED]",
+    stripeSecretKey:
+      config.secrets.stripeSecretKey === undefined ? "unset" : "[REDACTED]",
+    stripeWebhookSecret:
+      config.secrets.stripeWebhookSecret === undefined ? "unset" : "[REDACTED]",
     authTokenPepper:
       config.secrets.authTokenPepper === undefined ? "unset" : "[REDACTED]",
     authServiceSecret:

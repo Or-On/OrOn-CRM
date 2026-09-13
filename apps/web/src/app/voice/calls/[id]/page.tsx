@@ -2,13 +2,20 @@ import { productMetadata } from "../../../../i18n/product-metadata";
 import { AccessDenied } from "../../../../i18n/access-denied";
 import { getTranslations, getLocale } from "next-intl/server";
 import { notFound, redirect } from "next/navigation";
+import Link from "next/link";
+import { ArrowLeft, FileText, Mic2 } from "lucide-react";
 
-import { Badge, Surface } from "@or-on/ui";
+import { PageHeader, SectionHeader, StatusIndicator, Surface } from "@or-on/ui";
 
 import {
   ForbiddenError,
   UnauthenticatedError,
 } from "../../../../features/auth";
+import {
+  CallRecordingPlayer,
+  LiveCallSummary,
+  transcriptEntries,
+} from "../../../../features/voice";
 import { voiceClient } from "../../../../features/voice-server";
 
 export default async function CallDetailPage({
@@ -25,80 +32,155 @@ export default async function CallDetailPage({
     ).getVoiceSession({ session_id: id });
     if (result.status === 404) notFound();
     const call = result.data;
+    const transcript = transcriptEntries(call.events);
     return (
-      <main className="page page--wide">
-        <header className="page-heading">
-          <p className="eyebrow">{t("pages.callTitle")}</p>
-          <h1>{call.session_id.slice(0, 8)}</h1>
-          <p>{t("pages.callDescription")}</p>
-        </header>
-        <div className="voice-grid">
-          <Surface level="raised">
-            <div className="feature-heading">
-              <h2>{t("voice.outcome")}</h2>
-              <Badge
-                label={t(`status.${call.status}`)}
-                tone={call.status === "ended" ? "positive" : "info"}
+      <main className="page page--wide call-detail-page">
+        <PageHeader
+          actions={
+            <Link className="or-button or-button--secondary" href="/voice">
+              <ArrowLeft
+                aria-hidden="true"
+                className="directional-icon"
+                size={16}
               />
-            </div>
-            <dl className="detail-list">
-              <div>
-                <dt>{t("voice.provider")}</dt>
-                <dd>{call.provider}</dd>
-              </div>
-              <div>
-                <dt>{t("voice.outcome")}</dt>
-                <dd>{call.outcome ?? t("voice.notRecorded")}</dd>
-              </div>
-              <div>
-                <dt>{t("voice.answered")}</dt>
-                <dd>
-                  {call.answered === null
-                    ? t("voice.notApplicable")
-                    : call.answered
-                      ? t("voice.yes")
-                      : t("voice.no")}
-                </dd>
-              </div>
-              <div>
-                <dt>{t("voice.duration")}</dt>
-                <dd>
-                  {t("voice.seconds", { count: call.usage.call_seconds ?? 0 })}
-                </dd>
-              </div>
-              <div>
-                <dt>{t("voice.transcript")}</dt>
-                <dd>
-                  {call.transcript_object_id?.slice(0, 8) ?? t("voice.none")}
-                </dd>
-              </div>
-              <div>
-                <dt>{t("voice.recording")}</dt>
-                <dd>
-                  {call.recording_object_id?.slice(0, 8) ?? t("voice.none")}
-                </dd>
-              </div>
-            </dl>
-          </Surface>
-          <Surface>
-            <h2>{t("voice.lifecycle")}</h2>
-            <ol className="timeline">
-              {call.events.map((event) => (
-                <li key={`${String(event.sequence)}-${event.event_type}`}>
-                  <div>
-                    <strong>{event.event_type}</strong>
-                    <time dateTime={event.occurred_at}>
-                      {new Date(event.occurred_at).toLocaleString(locale)}
-                    </time>
-                  </div>
-                  <details className="technical-details">
-                    <summary>{t("voice.technical")}</summary>
-                    <pre>{JSON.stringify(event.payload, null, 2)}</pre>
-                  </details>
-                </li>
-              ))}
-            </ol>
-          </Surface>
+              {t("voice.backToCalls")}
+            </Link>
+          }
+          description={t("pages.callDescription")}
+          eyebrow={t("pages.callTitle")}
+          meta={
+            <StatusIndicator
+              label={t(`status.${call.status}`)}
+              tone={call.status === "ended" ? "positive" : "info"}
+            />
+          }
+          title={call.session_id.slice(0, 8)}
+        />
+
+        <div className="voice-investigation">
+          <section
+            className="voice-investigation__conversation"
+            aria-label={t("premiumVoice.conversationRecord")}
+          >
+            <Surface className="voice-recording-stage">
+              <SectionHeader
+                description={t("voice.assetsHint")}
+                title={t("premiumVoice.conversationRecord")}
+              />
+              {call.recording_available ? (
+                <CallRecordingPlayer
+                  label={t("voice.playRecording")}
+                  sessionId={call.session_id}
+                  unsupported={t("voice.audioUnsupported")}
+                />
+              ) : (
+                <p className="voice-recording-unavailable">
+                  <Mic2 aria-hidden="true" size={20} />
+                  {t("premiumVoice.noRecording")}
+                </p>
+              )}
+              <dl className="voice-artifact-facts">
+                <div>
+                  <FileText aria-hidden="true" size={18} />
+                  <dt>{t("premiumVoice.transcriptFile")}</dt>
+                  <dd>
+                    {call.transcript_available
+                      ? (call.transcript_object_id?.slice(0, 8) ??
+                        t("voice.availableFile"))
+                      : t("voice.none")}
+                  </dd>
+                </div>
+                <div>
+                  <Mic2 aria-hidden="true" size={18} />
+                  <dt>{t("voice.recording")}</dt>
+                  <dd>
+                    {call.recording_available
+                      ? (call.recording_object_id?.slice(0, 8) ??
+                        t("voice.availableFile"))
+                      : t("voice.none")}
+                  </dd>
+                </div>
+              </dl>
+            </Surface>
+
+            <section
+              className="voice-transcript"
+              aria-labelledby="call-transcript-heading"
+            >
+              <header>
+                <FileText aria-hidden="true" size={20} />
+                <h2 id="call-transcript-heading">{t("voice.transcript")}</h2>
+                <span>
+                  {t("premiumVoice.recordedEvents", {
+                    count: transcript.length,
+                  })}
+                </span>
+              </header>
+              {transcript.length === 0 ? (
+                <p className="voice-transcript__empty">
+                  {t("premiumVoice.noTranscriptText")}
+                </p>
+              ) : (
+                <ol>
+                  {transcript.map((entry) => (
+                    <li key={entry.sequence}>
+                      <div>
+                        <span>
+                          {entry.speaker ? (
+                            <bdi>{entry.speaker}</bdi>
+                          ) : (
+                            t("premiumVoice.transcriptEntry")
+                          )}
+                        </span>
+                        <time dateTime={entry.occurredAt}>
+                          {new Date(entry.occurredAt).toLocaleTimeString(
+                            locale,
+                          )}
+                        </time>
+                      </div>
+                      <p dir="auto">{entry.text}</p>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </section>
+
+            <Surface className="call-detail-timeline voice-chronology">
+              <SectionHeader
+                description={t("voice.lifecycleHint")}
+                title={t("voice.lifecycle")}
+              />
+              {call.events.length === 0 ? (
+                <p className="muted">{t("voice.noEvents")}</p>
+              ) : (
+                <ol className="timeline">
+                  {call.events.map((event) => (
+                    <li key={`${String(event.sequence)}-${event.event_type}`}>
+                      <span className="call-event-sequence">
+                        {String(event.sequence).padStart(2, "0")}
+                      </span>
+                      <div>
+                        <strong>{event.event_type}</strong>
+                        <time dateTime={event.occurred_at}>
+                          {new Date(event.occurred_at).toLocaleString(locale)}
+                        </time>
+                        <details className="technical-details">
+                          <summary>{t("voice.technical")}</summary>
+                          <pre>{JSON.stringify(event.payload, null, 2)}</pre>
+                        </details>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </Surface>
+          </section>
+          <aside
+            className="voice-investigation__inspector"
+            aria-label={t("premiumVoice.callInspector")}
+          >
+            <LiveCallSummary initial={call} />
+          </aside>
         </div>
       </main>
     );

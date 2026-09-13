@@ -13,32 +13,35 @@ import { ProductHeading } from "../src/i18n/product-heading";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 
+function flattenMessages(
+  value: Record<string, unknown>,
+  prefix = "",
+): readonly (readonly [string, string])[] {
+  return Object.entries(value).flatMap(([key, item]) => {
+    const path = prefix.length === 0 ? key : `${prefix}.${key}`;
+    if (typeof item === "string") return [[path, item] as const];
+    if (typeof item === "object" && item !== null)
+      return flattenMessages(item as Record<string, unknown>, path);
+    throw new Error(`Unsupported message value at ${path}`);
+  });
+}
+
 describe("English and Hebrew interface contracts", () => {
   it("has identical semantic keys and compatible ICU arguments", () => {
     expect(Object.keys(he).sort()).toEqual(Object.keys(en).sort());
-    const english = Object.entries(en);
-    for (const [namespace, entries] of english) {
-      const hebrewEntries = Object.entries(he).find(
-        ([key]) => key === namespace,
-      )?.[1];
-      expect(Object.keys(hebrewEntries ?? {}).sort()).toEqual(
-        Object.keys(entries).sort(),
-      );
-      for (const [key, value] of Object.entries(entries)) {
-        const hebrewValue =
-          Object.entries(hebrewEntries ?? {}).find(
-            ([name]) => name === key,
-          )?.[1] ?? "";
-        const args = (text: string) =>
-          [
-            ...new Set(
-              [...text.matchAll(/\{([A-Za-z]\w*)\s*[,}]/gu)].map(
-                (match) => match[1],
-              ),
-            ),
-          ].sort();
-        expect(args(hebrewValue), `${namespace}.${key}`).toEqual(args(value));
-      }
+    const english = new Map(flattenMessages(en));
+    const hebrew = new Map(flattenMessages(he));
+    expect([...hebrew.keys()].sort()).toEqual([...english.keys()].sort());
+    const args = (text: string) =>
+      [
+        ...new Set(
+          [...text.matchAll(/\{([A-Za-z]\w*)\s*[,}]/gu)].map(
+            (match) => match[1],
+          ),
+        ),
+      ].sort();
+    for (const [key, value] of english) {
+      expect(args(hebrew.get(key) ?? ""), key).toEqual(args(value));
     }
   });
   it.each(["en", "he"] as const)(
@@ -52,21 +55,19 @@ describe("English and Hebrew interface contracts", () => {
           throw error;
         },
       });
-      for (const [namespace, entries] of Object.entries(messages)) {
-        for (const [key, value] of Object.entries(entries)) {
-          const args: Record<string, string | number> = {};
-          for (const match of value.matchAll(/\{([A-Za-z]\w*)\s*([,}])/gu)) {
-            const name = match[1] ?? "";
-            args[name] = new RegExp("\\{" + name + ",\\s*(number|plural)").test(
-              value,
-            )
-              ? 2
-              : "fixture";
-          }
-          expect(
-            t(`${namespace}.${key}` as Parameters<typeof t>[0], args),
-          ).not.toContain("MISSING_MESSAGE");
+      for (const [key, value] of flattenMessages(messages)) {
+        const args: Record<string, string | number> = {};
+        for (const match of value.matchAll(/\{([A-Za-z]\w*)\s*([,}])/gu)) {
+          const name = match[1] ?? "";
+          args[name] = new RegExp("\\{" + name + ",\\s*(number|plural)").test(
+            value,
+          )
+            ? 2
+            : "fixture";
         }
+        expect(t(key as Parameters<typeof t>[0], args)).not.toContain(
+          "MISSING_MESSAGE",
+        );
       }
     },
   );
@@ -82,7 +83,7 @@ describe("English and Hebrew interface contracts", () => {
         <OperationsPanel automations={[]} broadcasts={[]} runs={[]} />,
         "he",
       ),
-    ).toContain("טיוטות אוטומציה");
+    ).toContain(he.operations.emptyCampaignsTitle);
     expect(
       renderMarkup(<VoiceCampaignPanel flows={[]} campaigns={[]} />, "he"),
     ).toContain("אין עדיין קמפיינים קוליים");
@@ -100,12 +101,12 @@ describe("English and Hebrew interface contracts", () => {
       "voiceCampaigns",
       "health",
     ]) {
-      expect(renderMarkup(<ProductHeading page={page} />, "he")).toContain(
-        "<h1>",
-      );
+      const heading = renderMarkup(<ProductHeading page={page} />, "he");
+      expect(heading).toContain("<h1>");
+      expect(heading).toContain('class="or-page-header page-heading"');
     }
   });
-  it("localizes consent/window errors without exposing arbitrary backend details", () => {
+  it("localizes contact eligibility/window errors without exposing consent or backend details", () => {
     const translate = createTranslator({ locale: "he", messages: he });
     const t = (key: string) =>
       translate(key as Parameters<typeof translate>[0]);
@@ -115,7 +116,7 @@ describe("English and Hebrew interface contracts", () => {
         t,
         "common.changeFailed",
       ),
-    ).toContain("נדרשת הסכמה");
+    ).toBe(he.tenantPrimary.notEligible);
     expect(
       errorMessage(
         new Error("24-hour window closed"),

@@ -69,8 +69,8 @@ fixtures and fakes.
 
 Never commit or log passwords, tokens, API keys, private keys, decrypted provider
 credentials, or service-account JSON. Configuration diagnostics must redact
-sensitive values. Terraform must not contain secret values or be applied during
-Phase 1.
+sensitive values. Hosting-provider provisioning and credentials remain outside
+this application repository and require separate explicit authorization.
 
 ## Provenance and boundaries
 
@@ -84,8 +84,8 @@ grounds named `utils`, `helpers`, or `components`.
 
 ## Branch and verification discipline
 
-Phase 1 work belongs on `codex/phase-1-foundation`, based exactly on the recorded
-clean Phase 0 HEAD. Use coherent commits; isolate major dependency upgrades.
+Use the current `main` integration line and coherent commits; isolate major
+dependency upgrades.
 Update `docs/progress.md` as tasks move through the acceptance gate.
 
 Every change must run the smallest relevant tests, followed by the consolidated

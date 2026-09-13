@@ -52,6 +52,9 @@ export async function acceptWhatsAppWebhook(
               from: envelope.from,
               profileName: envelope.profileName,
               text: envelope.text,
+              ...(envelope.occurredAt === undefined
+                ? {}
+                : { occurredAt: envelope.occurredAt }),
             })}
           )).id
         `;

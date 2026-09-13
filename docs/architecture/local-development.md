@@ -38,7 +38,7 @@ separate runtime databases.
 - uv 0.12
 - GNU Make or a compatible invocation environment
 
-Terraform, gcloud, GCP credentials, LiveKit, Redis, and provider credentials are
+Hosting credentials, LiveKit, Redis, and provider credentials are
 not localhost core prerequisites.
 
 ## Safety defaults
@@ -74,7 +74,7 @@ single-database rule.
 Commands are repeatable and fail with clear messages. Destructive reset/restore
 commands require exact development database targets and explicit confirmation;
 they are not part of ordinary Phase 1 verification. No normal command contacts a
-provider, creates a tunnel, modifies a webhook, or runs Terraform apply.
+provider, creates a tunnel, modifies a webhook, or provisions infrastructure.
 
 The canonical port registry is maintained in
 [runtime-topology.md](runtime-topology.md).

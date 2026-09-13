@@ -142,11 +142,9 @@ WebSocket contracts, and small service foundations are expected in Phase 1.
 | --- | --- | --- | --- | --- |
 | PostgreSQL image | 18 dev/CI; 16 Alpine deployment | 18.6 | `postgres:18.6-bookworm` | Core Compose service; loopback host binding only. Digest pin follows daemon-backed pull inspection. |
 | Redis image | 7 Alpine | Redis 8.10 line current | `redis:8.10.1-alpine` | P5-011 pins digest `sha256:becdda…f0576`; private, ephemeral LiveKit/SIP coordination only, never application truth. |
-| Caddy | floating `2-alpine` | 2.11.4 | `caddy:2.11.4-alpine` | Architecture/config foundation; public routing is not enabled in Phase 1. |
+| Caddy | floating `2-alpine` | 2.11.4 | `caddy:2.11.4-alpine` | Portable HTTPS edge for the deployment Compose contract. |
 | Node base image | 20 Alpine upstream WACRM | 24.20.0 LTS | `node:24.20.0-bookworm-slim` | Debian slim preferred over musl for native-module compatibility. |
 | Python base image | 3.12 slim upstream | 3.14.7 | `python:3.14.7-slim-bookworm` | Matches selected runtime; voice-native image compatibility remains a separate build. |
-| Terraform | no target baseline | 1.16.0 stable | `>=1.16.0,<1.17.0` | Phase 1 structure/validation only; no apply and no GCP credentials required. |
-| Google provider | no target baseline | 8.0.0 | `~>8.0` candidate | Pin only when real resources are implemented; Phase 1 documents the resource graph. |
 
 Relevant GitHub Actions stable majors discovered from official project releases:
 

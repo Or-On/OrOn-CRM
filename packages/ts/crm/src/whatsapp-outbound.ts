@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type postgres from "postgres";
 
 import { normalizeE164 } from "./phone.js";
@@ -11,6 +12,7 @@ export type WhatsAppOutboundInput =
       readonly provider: "simulator" | "meta";
       readonly realProviderEnabled: boolean;
       readonly senderUserId: string;
+      readonly senderType?: "user" | "agent";
       readonly text: string;
     }
   | {
@@ -23,6 +25,7 @@ export type WhatsAppOutboundInput =
       readonly provider: "simulator" | "meta";
       readonly realProviderEnabled: boolean;
       readonly senderUserId: string;
+      readonly senderType?: "user" | "agent";
       readonly templateName: string;
     };
 
@@ -135,20 +138,46 @@ export async function queueWhatsAppOutbound(
   channelConfiguration?: WhatsAppChannelConfiguration,
 ): Promise<QueuedWhatsAppOutbound> {
   validateInput(input);
+  const fingerprint = createHash("sha256")
+    .update(
+      JSON.stringify({
+        conversationId: input.conversationId,
+        provider: input.provider,
+        senderUserId: input.senderUserId,
+        senderType: input.senderType ?? "user",
+        delivery:
+          input.kind === "text"
+            ? { kind: "text", text: input.text.trim() }
+            : {
+                kind: "template",
+                name: input.templateName,
+                language: input.language,
+                parameters: input.parameters,
+              },
+      }),
+    )
+    .digest("hex");
+  // Serialize only equal tenant/key admissions; no network I/O in this transaction.
+  await sql`SELECT pg_advisory_xact_lock(hashtextextended(platform.current_tenant_id()::text || ':' || ${input.idempotencyKey}, 0))`;
   const existing = await sql<
     {
       id: string;
       message_id: string;
       conversation_id: string;
       provider: "simulator" | "meta";
+      request_fingerprint: string | null;
     }[]
   >`
-    SELECT id, message_id, conversation_id, provider
+    SELECT id, message_id, conversation_id, provider, request_fingerprint
     FROM messaging.outbound_requests
     WHERE tenant_id = platform.current_tenant_id()
       AND idempotency_key = ${input.idempotencyKey}
   `;
   if (existing[0] !== undefined) {
+    if (existing[0].request_fingerprint !== fingerprint)
+      throw new TypeError(
+        "idempotency key belongs to a different outbound request",
+      );
     return {
       requestId: existing[0].id,
       messageId: existing[0].message_id,
@@ -197,13 +226,17 @@ export async function queueWhatsAppOutbound(
     channelConfiguration,
   );
   const conversations = await sql<
-    { id: string; customer_service_window_expires_at: Date | null }[]
+    {
+      id: string;
+      customer_service_window_expires_at: Date | null;
+      ownership_epoch: string;
+    }[]
   >`
     INSERT INTO messaging.conversations (tenant_id, channel_id, contact_id, status)
     VALUES (platform.current_tenant_id(), ${channelId}::uuid, ${contact.contact_id}::uuid, 'open')
     ON CONFLICT (tenant_id, channel_id, contact_id)
     DO UPDATE SET status = 'open', updated_at = CURRENT_TIMESTAMP
-    RETURNING id, customer_service_window_expires_at
+    RETURNING id, customer_service_window_expires_at, ownership_epoch
   `;
   const conversation = conversations[0];
   if (conversation === undefined)
@@ -231,7 +264,7 @@ export async function queueWhatsAppOutbound(
     INSERT INTO messaging.messages
       (tenant_id, conversation_id, direction, sender_type, sender_user_id,
        content_type, content_text, structured_content, provider, status)
-    VALUES (platform.current_tenant_id(), ${conversation.id}::uuid, 'outbound', 'user',
+    VALUES (platform.current_tenant_id(), ${conversation.id}::uuid, 'outbound', ${input.senderType ?? "user"},
             ${input.senderUserId}::uuid, ${input.kind}, ${content},
             ${structured === undefined ? null : sql.json(structured)}, ${input.provider}, 'queued')
     RETURNING id
@@ -243,19 +276,28 @@ export async function queueWhatsAppOutbound(
     INSERT INTO messaging.outbound_requests
       (tenant_id, conversation_id, message_id, channel_id, recipient_identity_id,
        requested_by_user_id, provider, message_kind, template_name, template_language,
-       template_parameters, explicitly_confirmed, idempotency_key)
+       template_parameters, explicitly_confirmed, idempotency_key, ai_ownership_epoch, request_fingerprint)
     VALUES (platform.current_tenant_id(), ${conversation.id}::uuid, ${messageId}::uuid,
             ${channelId}::uuid, ${contact.recipient_identity_id}::uuid,
             ${input.senderUserId}::uuid, ${input.provider}, ${input.kind},
             ${input.kind === "template" ? input.templateName : null},
             ${input.kind === "template" ? input.language : null},
             ${input.kind === "template" ? sql.json(input.parameters) : null},
-            ${input.explicitlyConfirmed}, ${input.idempotencyKey})
+            ${input.explicitlyConfirmed}, ${input.idempotencyKey},
+            ${input.senderType === "agent" ? conversation.ownership_epoch : null}, ${fingerprint})
     RETURNING id
   `;
   const requestId = requests[0]?.id;
   if (requestId === undefined)
     throw new Error("outbound request insert failed");
+  // Admitting a human/agent reply acknowledges the inbound messages currently
+  // visible to the operator. A later inbound webhook increments the counter
+  // again, so the badge represents new customer activity after this reply.
+  await sql`
+    UPDATE messaging.conversations
+    SET unread_count = 0, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ${conversation.id}::uuid
+  `;
   await sql`
     INSERT INTO ops.jobs
       (tenant_id, queue, job_type, reference_type, reference_id, payload,

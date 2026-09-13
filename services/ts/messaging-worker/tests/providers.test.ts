@@ -31,6 +31,40 @@ function provider(
 }
 
 describe("WhatsApp providers", () => {
+  it("rechecks ownership after a 429 delay before a second HTTP request", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response("{}", { status: 429 }));
+    const beforeAttempt = vi
+      .fn<() => Promise<void>>()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(
+        new WhatsAppProviderError("outbound_eligibility_changed", false),
+      );
+    await expect(
+      provider(fetcher, { maxAttempts: 3 }).send({ ...request, beforeAttempt }),
+    ).rejects.toMatchObject({
+      code: "outbound_eligibility_changed",
+      retryable: false,
+    });
+    expect(beforeAttempt).toHaveBeenCalledTimes(2);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not start HTTP after a stale claim or revoked evidence check", async () => {
+    const fetcher = vi.fn<typeof fetch>();
+    await expect(
+      provider(fetcher).send({
+        ...request,
+        beforeAttempt: () =>
+          Promise.reject(
+            new WhatsAppProviderError("ai_evidence_changed", false),
+          ),
+      }),
+    ).rejects.toMatchObject({ code: "ai_evidence_changed", retryable: false });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it.each([
     [{ code: 100, error_subcode: 33 }, 400, "resource_access"],
     [
@@ -58,7 +92,6 @@ describe("WhatsApp providers", () => {
     [{ code: 131005 }, 403, "permission"],
     [{ code: 100 }, 400, "invalid_parameter"],
     [{ code: 130429 }, 429, "rate_limit"],
-    [{ code: 131000 }, 503, "provider_unavailable"],
   ] as const)("retains safe details for %j", async (error, status, reason) => {
     const fetcher = vi
       .fn<typeof fetch>()
@@ -73,12 +106,10 @@ describe("WhatsApp providers", () => {
         httpStatus: status,
         metaCode: error.code,
         reason,
-        retryable: status >= 500 || status === 429,
+        retryable: status === 429,
       },
     });
-    expect(fetcher).toHaveBeenCalledTimes(
-      status >= 500 || status === 429 ? 2 : 1,
-    );
+    expect(fetcher).toHaveBeenCalledTimes(status === 429 ? 2 : 1);
   });
 
   it("cannot echo secrets or PII through any provider error field", async () => {
@@ -136,7 +167,7 @@ describe("WhatsApp providers", () => {
       .fn<typeof fetch>()
       .mockResolvedValue(new Response("null", { status: 200 }));
     await expect(provider(fetcher).send(request)).rejects.toMatchObject({
-      code: "invalid_meta_response",
+      code: "delivery_outcome_unknown",
     });
     expect(fetcher).toHaveBeenCalledOnce();
   });
@@ -219,7 +250,7 @@ describe("WhatsApp providers", () => {
     },
   );
 
-  it.each([429, 500, 503])(
+  it.each([429])(
     "retries transient Meta %s responses with a bound",
     async (status) => {
       const fetcher = vi
@@ -252,9 +283,49 @@ describe("WhatsApp providers", () => {
       request,
     );
     await expect(failure).rejects.toMatchObject({
-      code: "timeout",
-      message: "WhatsApp provider request failed (timeout)",
+      code: "delivery_outcome_unknown",
+      retryable: false,
+      message: "WhatsApp provider request failed (delivery_outcome_unknown)",
     });
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
+  it.each([500, 502, 503])(
+    "does not replay ambiguous Meta %s responses",
+    async (status) => {
+      const fetcher = vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(new Response("{}", { status }));
+      await expect(provider(fetcher).send(request)).rejects.toMatchObject({
+        code: "delivery_outcome_unknown",
+        retryable: false,
+      });
+      expect(fetcher).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("does not replay a lost response even when multiple attempts are configured", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockRejectedValue(new TypeError("connection lost"));
+    await expect(
+      provider(fetcher, { maxAttempts: 5 }).send(request),
+    ).rejects.toMatchObject({
+      code: "delivery_outcome_unknown",
+      retryable: false,
+    });
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
+  it("refuses queued sender mismatch before HTTP", async () => {
+    const fetcher = vi.fn<typeof fetch>();
+    await expect(
+      provider(fetcher).send({ ...request, senderPhoneNumberId: "999999999" }),
+    ).rejects.toMatchObject({
+      code: "sender_configuration_changed",
+      retryable: false,
+    });
+    expect(fetcher).not.toHaveBeenCalled();
   });
 
   it("never exposes secrets, message bodies, or full recipients in failures", async () => {

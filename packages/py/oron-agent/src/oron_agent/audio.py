@@ -4,6 +4,18 @@ from enum import StrEnum
 
 from pipecat.audio.filters import rnnoise_filter
 from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
+from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
+    Frame,
+    InterimTranscriptionFrame,
+    TranscriptionFrame,
+    VADUserStartedSpeakingFrame,
+)
+from pipecat.turns.types import ProcessFrameResult
+from pipecat.turns.user_start.base_user_turn_start_strategy import (
+    BaseUserTurnStartStrategy,
+)
 from pipecat.turns.user_start.min_words_user_turn_start_strategy import (
     MinWordsUserTurnStartStrategy,
 )
@@ -26,21 +38,57 @@ class TurnStart(StrEnum):
 
     VAD = "vad"  # today's behaviour: ~200ms of audio over the thresholds
     MIN_WORDS = "min_words"  # a transcribed word is required
+    RESPONSIVE = "responsive"  # VAD barge-in; transcript start while listening
     KRISP_IP = "krisp_ip"  # Krisp: a real interruption, not a backchannel
 
 
 class TurnEnd(StrEnum):
     """What decides the caller has finished speaking.
 
-    `vad` is our own floor: VAD silence plus a speech timeout that always runs to
-    completion, ~602ms before anything downstream starts. `soniox` hands the
-    decision to the STT model, which is the only candidate that covers Hebrew —
-    smart-turn's model does not, and an LLM deciding the turn was rejected by
-    design in #70.
+    `vad` is a fixed floor: VAD silence plus a speech timeout that always runs to
+    completion. `soniox` hands only the STOP decision to the STT model's Hebrew-
+    aware semantic endpointing; the configured start strategy remains local so
+    the transcript word gate can still protect against false interruptions.
     """
 
     VAD = "vad"
     SONIOX = "soniox"
+
+
+class ResponsiveUserTurnStartStrategy(BaseUserTurnStartStrategy):
+    """Cut off bot speech on VAD, but require words while listening.
+
+    A transcription-only start takes roughly one STT partial to stop TTS, which
+    made the latest caller talk over the agent for about 650 ms. Pure VAD fixes
+    that but lets wordless background noise start turns while the bot is quiet.
+    This strategy uses each signal only where it is strongest: VAD for barge-in,
+    and transcript evidence for a normal user turn.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._bot_speaking = False
+
+    async def handle_user_turn_started(self):
+        self._bot_speaking = False
+
+    async def process_frame(self, frame: Frame) -> ProcessFrameResult:
+        if isinstance(frame, BotStartedSpeakingFrame):
+            self._bot_speaking = True
+            return ProcessFrameResult.CONTINUE
+        if isinstance(frame, BotStoppedSpeakingFrame):
+            self._bot_speaking = False
+            return ProcessFrameResult.CONTINUE
+        if self._bot_speaking and isinstance(frame, VADUserStartedSpeakingFrame):
+            await self.trigger_user_turn_started()
+            return ProcessFrameResult.STOP
+        if (
+            isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame))
+            and frame.text.split()
+        ):
+            await self.trigger_user_turn_started()
+            return ProcessFrameResult.STOP
+        return ProcessFrameResult.CONTINUE
 
 
 def build_turn_start_strategy(
@@ -52,6 +100,8 @@ def build_turn_start_strategy(
         return VADUserTurnStartStrategy()
     if kind is TurnStart.MIN_WORDS:
         return MinWordsUserTurnStartStrategy(min_words=min_words, use_interim=True)
+    if kind is TurnStart.RESPONSIVE:
+        return ResponsiveUserTurnStartStrategy()
     if not krisp_api_key or not krisp_ip_model_path:
         raise RuntimeError(
             "TURN_START=krisp_ip needs KRISP_VIVA_API_KEY and KRISP_VIVA_IP_MODEL_PATH "

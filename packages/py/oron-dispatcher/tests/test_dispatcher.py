@@ -6,7 +6,12 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import pytest
 from livekit.protocol.models import ParticipantInfo
-from oron_dispatcher.dispatcher import Dispatcher, PersistenceUnavailable
+from oron_dispatcher.dispatcher import (
+    AgentStartupUnavailable,
+    Dispatcher,
+    IdempotencyConflict,
+    PersistenceUnavailable,
+)
 from oron_dispatcher.sip_client import RealTelephonyDenied, SipClient
 from oron_dispatcher.tenancy_client import PhoneResolution
 
@@ -125,6 +130,7 @@ async def test_outbound_is_denied_before_persistence_when_real_telephony_is_off(
             FLOW_ID,
             idempotency_key="request-0001",
             explicit_approval=True,
+            caller_gender="male",
         )
 
     sessions.begin.assert_not_awaited()
@@ -140,6 +146,7 @@ async def test_outbound_requires_explicit_approval_and_trunk() -> None:
             FLOW_ID,
             idempotency_key="request-0002",
             explicit_approval=False,
+            caller_gender="male",
         )
     sessions.begin.assert_not_awaited()
 
@@ -151,6 +158,7 @@ async def test_outbound_requires_explicit_approval_and_trunk() -> None:
             FLOW_ID,
             idempotency_key="request-0003",
             explicit_approval=True,
+            caller_gender="male",
         )
     sessions.begin.assert_not_awaited()
 
@@ -168,9 +176,31 @@ async def test_outbound_persistence_failure_never_reaches_sip() -> None:
             FLOW_ID,
             idempotency_key="request-0004",
             explicit_approval=True,
+            caller_gender="male",
         )
 
     launch.assert_not_awaited()
+    dial.assert_not_awaited()
+
+
+async def test_agent_startup_failure_is_safe_and_never_reaches_sip() -> None:
+    dial = AsyncMock()
+    sip = _sip(enabled=True, dial=dial)
+    dispatcher, sessions, launch, _ = _dispatcher(sip=sip)
+    launch.side_effect = RuntimeError("https://secret-endpoint.invalid?token=secret")
+
+    with pytest.raises(AgentStartupUnavailable, match="startup preflight failed") as captured:
+        await dispatcher.place_outbound_call(
+            "+14155550100",
+            TENANT_ID,
+            FLOW_ID,
+            idempotency_key="request-agent-startup-failure",
+            explicit_approval=True,
+            caller_gender="male",
+        )
+
+    assert "secret" not in str(captured.value)
+    sessions.finalize.assert_awaited_once()
     dial.assert_not_awaited()
 
 
@@ -186,9 +216,74 @@ async def test_outbound_replay_does_not_launch_or_dial() -> None:
         FLOW_ID,
         idempotency_key="request-0005",
         explicit_approval=True,
+        caller_gender="male",
     )
 
     assert result.created is False
     sessions.begin.assert_awaited_once()
     launch.assert_not_awaited()
     dial.assert_not_awaited()
+
+
+async def test_outbound_carries_cross_channel_context_into_the_agent() -> None:
+    dial = AsyncMock()
+    dispatcher, sessions, launch, _ = _dispatcher(sip=_sip(enabled=True, dial=dial))
+    conversation_id = uuid4()
+
+    await dispatcher.place_outbound_call(
+        "+14155550100",
+        TENANT_ID,
+        FLOW_ID,
+        idempotency_key="request-gender-context",
+        explicit_approval=True,
+        caller_gender="female",
+        source_conversation_id=conversation_id,
+        conversation_context="Customer: Please call me now.",
+    )
+
+    context = sessions.begin.await_args.args[0]
+    assert context.caller_gender == "female"
+    assert context.source_conversation_id == conversation_id
+    assert context.conversation_context == "Customer: Please call me now."
+    assert launch.await_args.args[1].caller_gender == "female"
+    assert launch.await_args.args[1].conversation_context == "Customer: Please call me now."
+    dial.assert_awaited_once()
+
+
+async def test_outbound_pins_agent_and_flow_versions_through_persistence_and_launch() -> None:
+    dial = AsyncMock()
+    dispatcher, sessions, launch, _ = _dispatcher(sip=_sip(enabled=True, dial=dial))
+    agent_version_id = uuid4()
+    kwargs = {
+        "idempotency_key": "request-pinned-version",
+        "explicit_approval": True,
+        "flow_version": 4,
+        "agent_version_id": agent_version_id,
+    }
+    created = await dispatcher.place_outbound_call("+14155550100", TENANT_ID, FLOW_ID, **kwargs)
+    replay = await dispatcher.place_outbound_call("+14155550100", TENANT_ID, FLOW_ID, **kwargs)
+    assert created.created and not replay.created
+    assert sessions.begin.await_args.args[0].flow_version == 4
+    assert sessions.begin.await_args.args[0].agent_version_id == agent_version_id
+    assert launch.await_args.args[1].flow_version == 4
+    assert launch.await_args.args[1].agent_version_id == agent_version_id
+    dial.assert_awaited_once()
+
+
+@pytest.mark.parametrize("changed", ["agent_version_id", "flow_version"])
+async def test_active_idempotency_key_cannot_be_rebound_to_another_published_version(changed):
+    dial = AsyncMock()
+    dispatcher, sessions, launch, _ = _dispatcher(sip=_sip(enabled=True, dial=dial))
+    kwargs = {
+        "idempotency_key": "request-conflicting-version",
+        "explicit_approval": True,
+        "flow_version": 1,
+        "agent_version_id": uuid4(),
+    }
+    await dispatcher.place_outbound_call("+14155550100", TENANT_ID, FLOW_ID, **kwargs)
+    kwargs[changed] = 2 if changed == "flow_version" else uuid4()
+    with pytest.raises(IdempotencyConflict):
+        await dispatcher.place_outbound_call("+14155550100", TENANT_ID, FLOW_ID, **kwargs)
+    sessions.begin.assert_awaited_once()
+    launch.assert_awaited_once()
+    dial.assert_awaited_once()

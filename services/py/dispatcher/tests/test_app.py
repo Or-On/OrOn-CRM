@@ -5,9 +5,9 @@ import pytest
 from dispatcher_runtime.app import build, compose_dispatcher
 from fastapi.testclient import TestClient
 from or_on_platform.config import PlatformSettings
-from oron_agent.bot import RealVoiceProvidersDenied
 from oron_agent.config import Settings as AgentSettings
 from oron_dispatcher.config import DispatcherSettings
+from oron_dispatcher.dispatcher import AgentStartupUnavailable
 from oron_dispatcher.sip_client import SipClient
 from oron_sessions import SessionStatus
 
@@ -70,7 +70,7 @@ async def test_composition_injects_provider_safe_retained_agent_launcher() -> No
         mint_token=lambda _room, _identity: "fixture-token",
     )
 
-    with pytest.raises(RealVoiceProvidersDenied, match="disabled"):
+    with pytest.raises(AgentStartupUnavailable, match="preflight failed"):
         await dispatcher.start_browser_call(flow_id=uuid4(), tenant_id=uuid4())
 
     sessions.begin.assert_awaited_once()

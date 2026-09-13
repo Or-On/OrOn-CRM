@@ -15,8 +15,8 @@ export default async function VoiceCampaignsPage() {
       client.listVoiceFlows(),
     ]);
     return (
-      <main className="page page--wide">
-        <ProductHeading page="voiceCampaigns" />
+      <main className="page page--wide page--workspace-premium">
+        <ProductHeading page="voiceCampaigns" premium />
         <VoiceCampaignPanel
           campaigns={campaigns.data.items}
           flows={flows.data.items}

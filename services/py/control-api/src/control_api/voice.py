@@ -11,13 +11,14 @@ from typing import Annotated, Any, Literal, Protocol, cast
 from uuid import NAMESPACE_URL, UUID, uuid5
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from oron_common import E164, CallUsage, Direction
+from oron_common import E164, CallCost, CallUsage, Direction, PriceBook, price
 from oron_db import make_engine, make_sessionmaker, set_tenant
 from oron_flows.components import SPEC_VERSION, export_catalog
 from oron_flows.compose import Composition, expand
 from oron_flows.graph import FlowSpec
+from oron_sessions.artifacts import ArtifactUnavailable, read_artifact
 from oron_sessions.models import Session, SessionEvent, SessionStatus
 from oron_tenancy.models import Flow, PhoneNumber
 from pydantic import BaseModel, Field
@@ -41,6 +42,12 @@ _FLOW_TABLE = cast(Any, Flow).__table__
 _DEFAULT_CALLING_HOURS = {0: [9, 18], 1: [9, 18], 2: [9, 18], 3: [9, 18], 4: [9, 14], 6: [9, 18]}
 
 
+def _tenant_flow_owner_clause(tenant_id: UUID) -> Any:
+    """Match only a tenant-owned flow; NULL fixture rows are never runtime input."""
+
+    return _FLOW_TABLE.c.tenant_id == tenant_id
+
+
 class VoiceSessionSummary(BaseModel):
     session_id: UUID
     contact_id: UUID | None
@@ -52,6 +59,8 @@ class VoiceSessionSummary(BaseModel):
     outcome: str | None
     created_at: dt.datetime
     ended_at: dt.datetime | None
+    usage: CallUsage
+    cost: CallCost
 
 
 class VoiceSessionList(BaseModel):
@@ -68,6 +77,8 @@ class VoiceSessionEvent(BaseModel):
 class VoiceSessionDetail(VoiceSessionSummary):
     events: list[VoiceSessionEvent]
     usage: CallUsage
+    recording_available: bool
+    transcript_available: bool
     recording_object_id: UUID | None
     transcript_object_id: UUID | None
 
@@ -210,6 +221,10 @@ class VoiceRepository(Protocol):
         self, principal: ServicePrincipal, session_id: UUID
     ) -> VoiceSessionDetail | None: ...
 
+    async def get_recording(
+        self, principal: ServicePrincipal, session_id: UUID
+    ) -> bytes | None: ...
+
     async def simulate_call(
         self, principal: ServicePrincipal, command: SimulatedCallRequest
     ) -> SimulatedCallResult: ...
@@ -248,10 +263,22 @@ class VoiceRepository(Protocol):
 class PostgresVoiceRepository:
     """One role-scoped repository; every request sets transaction-local identity."""
 
-    def __init__(self, database_url: str, *, engine: AsyncEngine | None = None) -> None:
+    def __init__(
+        self,
+        database_url: str,
+        *,
+        engine: AsyncEngine | None = None,
+        price_book: PriceBook | None = None,
+    ) -> None:
         normalized = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
         self._engine = engine if engine is not None else make_engine(normalized)
         self._sessionmaker = make_sessionmaker(self._engine)
+        self._price_book = price_book or PriceBook()
+
+    @property
+    def session_factory(self) -> Any:
+        """Share the retained process-owned engine with bounded control services."""
+        return self._sessionmaker
 
     async def list_sessions(self, principal: ServicePrincipal) -> list[VoiceSessionSummary]:
         async with self._sessionmaker() as database, database.begin():
@@ -271,7 +298,7 @@ class PostgresVoiceRepository:
                     )
                 ).scalars()
             )
-            return [_summary(row) for row in rows]
+            return [_summary(row, self._price_book) for row in rows]
 
     async def get_session(
         self, principal: ServicePrincipal, session_id: UUID
@@ -293,7 +320,7 @@ class PostgresVoiceRepository:
                 ).scalars()
             )
             return VoiceSessionDetail(
-                **_summary(row).model_dump(),
+                **_summary(row, self._price_book).model_dump(),
                 events=[
                     VoiceSessionEvent(
                         sequence=event.sequence,
@@ -303,10 +330,26 @@ class PostgresVoiceRepository:
                     )
                     for event in events
                 ],
-                usage=CallUsage.model_validate(row, from_attributes=True),
+                recording_available=bool(row.recording_uri),
+                transcript_available=bool(row.transcript_uri),
                 recording_object_id=row.recording_object_id,
                 transcript_object_id=row.transcript_object_id,
             )
+
+    async def get_recording(self, principal: ServicePrincipal, session_id: UUID) -> bytes | None:
+        """Read the tenant-scoped stereo WAV without exposing its storage URI."""
+        async with self._sessionmaker() as database, database.begin():
+            await self._scope(database, principal)
+            session = (
+                await database.execute(select(Session).where(col(Session.session_id) == session_id))
+            ).scalar_one_or_none()
+            uri = session.recording_uri if session is not None else None
+        if not uri:
+            return None
+        try:
+            return await read_artifact(uri)
+        except ArtifactUnavailable:
+            return None
 
     async def _scope(self, database: Any, principal: ServicePrincipal) -> None:
         await set_tenant(database, principal.tenant_id)
@@ -557,7 +600,7 @@ class PostgresVoiceRepository:
                 if first_event.payload.get("flowVersion") != retained_flow.version:
                     raise SimulatedCallConflict("idempotency key is bound to another flow version")
             return SimulatedCallResult(
-                session=_summary(row),
+                session=_summary(row, self._price_book),
                 created=created,
                 event_types=[event_type for event_type, _ in event_payloads],
             )
@@ -586,8 +629,7 @@ class PostgresVoiceRepository:
                 .select_from(_FLOW_TABLE)
                 .where(
                     _FLOW_TABLE.c.flow_id == command.flow_id,
-                    (_FLOW_TABLE.c.tenant_id == principal.tenant_id)
-                    | (_FLOW_TABLE.c.tenant_id.is_(None)),
+                    _tenant_flow_owner_clause(principal.tenant_id),
                 )
             )
             if not known_flow:
@@ -638,11 +680,9 @@ class PostgresVoiceRepository:
             await self._scope(database, principal)
             statement = (
                 select(Flow)
-                .where((col(Flow.tenant_id) == principal.tenant_id) | col(Flow.tenant_id).is_(None))
+                .where(_tenant_flow_owner_clause(principal.tenant_id))
                 .distinct(col(Flow.flow_id))
-                .order_by(
-                    col(Flow.flow_id), col(Flow.tenant_id).is_(None), col(Flow.version).desc()
-                )
+                .order_by(col(Flow.flow_id), col(Flow.version).desc())
             )
             rows = list((await database.execute(statement)).scalars())
             return [_flow_summary(row) for row in rows]
@@ -695,6 +735,7 @@ class PostgresVoiceRepository:
                     select(Flow).where(
                         col(Flow.flow_id) == composition.flow.id,
                         col(Flow.version) == composition.flow.version,
+                        _tenant_flow_owner_clause(principal.tenant_id),
                     )
                 )
             ).scalar_one()
@@ -756,8 +797,7 @@ class PostgresVoiceRepository:
                 .select_from(_FLOW_TABLE)
                 .where(
                     _FLOW_TABLE.c.flow_id == command.flow_id,
-                    (_FLOW_TABLE.c.tenant_id == principal.tenant_id)
-                    | (_FLOW_TABLE.c.tenant_id.is_(None)),
+                    _tenant_flow_owner_clause(principal.tenant_id),
                 )
             )
             if not known_flow:
@@ -902,9 +942,10 @@ class PostgresVoiceRepository:
         await self._engine.dispose()
 
 
-def _summary(row: Session) -> VoiceSessionSummary:
+def _summary(row: Session, book: PriceBook) -> VoiceSessionSummary:
     if row.created_at is None:
         raise RuntimeError("persisted session is missing created_at")
+    usage = CallUsage.model_validate(row, from_attributes=True)
     return VoiceSessionSummary(
         session_id=row.session_id,
         contact_id=row.contact_id,
@@ -916,6 +957,8 @@ def _summary(row: Session) -> VoiceSessionSummary:
         outcome=row.outcome,
         created_at=row.created_at,
         ended_at=row.ended_at,
+        usage=usage,
+        cost=price(usage, book),
     )
 
 
@@ -1030,6 +1073,28 @@ def create_voice_router(
         if detail is None:
             raise HTTPException(status_code=404, detail="voice session not found")
         return detail
+
+    @router.get(
+        "/sessions/{session_id}/recording",
+        include_in_schema=False,
+    )
+    async def get_voice_recording(
+        session_id: UUID,
+        principal: ServicePrincipal = Depends(require_voice_read),
+        store: VoiceRepository = Depends(configured_repository),
+    ) -> Response:
+        """Stream a tenant-authorized full-call WAV to the authenticated web BFF."""
+        recording = await store.get_recording(principal, session_id)
+        if recording is None:
+            raise HTTPException(status_code=404, detail="voice recording not found")
+        return Response(
+            content=recording,
+            media_type="audio/wav",
+            headers={
+                "Cache-Control": "private, no-store",
+                "Content-Disposition": f'inline; filename="call-{session_id}.wav"',
+            },
+        )
 
     @router.post(
         "/simulated-calls",

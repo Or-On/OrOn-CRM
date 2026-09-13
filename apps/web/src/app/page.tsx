@@ -1,9 +1,18 @@
 import type { Metadata } from "next";
-import { getLocale, getTranslations } from "next-intl/server";
+import { getTranslations } from "next-intl/server";
 import { redirect } from "next/navigation";
-import { listConversations, overviewMetrics } from "@or-on/crm";
-import { loadConfig } from "@or-on/config";
-import { UnauthenticatedError, withCurrentTenant } from "../features/auth";
+import {
+  dashboardMetrics,
+  overviewMetrics,
+  overviewInsights,
+  tenantOperationalInsights,
+} from "@or-on/crm";
+import {
+  ForbiddenError,
+  UnauthenticatedError,
+  withCurrentTenant,
+} from "../features/auth";
+import { AccessDenied } from "../i18n/access-denied";
 import { Overview } from "../features/overview";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -15,18 +24,23 @@ export async function generateMetadata(): Promise<Metadata> {
 
 export default async function OverviewPage() {
   try {
-    const data = await withCurrentTenant("crm:read", async (sql, session) => ({
-      metrics: await overviewMetrics(sql),
-      conversations: await listConversations(sql),
-      tenantName: session.tenant.tenantName,
-    }));
-    const config = loadConfig(process.env, { service: "web" });
-    return (
-      <Overview {...data} realWhatsAppEnabled={config.enableRealWhatsApp} />
-    );
+    const data = await withCurrentTenant("crm:read", async (sql, session) => {
+      const metrics = await overviewMetrics(sql);
+      const dashboard = await dashboardMetrics(sql);
+      const insights = await overviewInsights(sql);
+      const operations = await tenantOperationalInsights(sql);
+      return {
+        dashboard,
+        metrics,
+        insights,
+        operations,
+        tenantName: session.tenant.tenantName,
+      };
+    });
+    return <Overview {...data} />;
   } catch (error) {
-    if (error instanceof UnauthenticatedError)
-      redirect(`/${await getLocale()}`);
+    if (error instanceof ForbiddenError) return <AccessDenied />;
+    if (error instanceof UnauthenticatedError) redirect("/login");
     throw error;
   }
 }

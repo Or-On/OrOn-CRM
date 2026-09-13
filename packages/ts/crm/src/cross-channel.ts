@@ -1,6 +1,9 @@
 import type postgres from "postgres";
 
 import type { JsonValue } from "./types.js";
+import { parseKnowledgeSourceIds } from "./agent-quality.js";
+import { assertAgentKnowledgePublishable } from "./agent-quality-store.js";
+import { assertKnowledgeManager } from "./knowledge.js";
 
 export const supportedChannels = ["voice", "whatsapp"] as const;
 export type SupportedChannel = (typeof supportedChannels)[number];
@@ -239,6 +242,9 @@ export interface AgentProfileSummary {
   readonly channels: readonly SupportedChannel[];
   readonly published: boolean;
   readonly validationStatus: "pending" | "valid" | "invalid" | null;
+  readonly systemPrompt?: string | null;
+  readonly locale?: string | null;
+  readonly isDefaultWhatsApp?: boolean;
 }
 
 interface AgentProfileRow {
@@ -250,6 +256,9 @@ interface AgentProfileRow {
   channel_capabilities: SupportedChannel[] | null;
   published_at: Date | null;
   validation_status: AgentProfileSummary["validationStatus"];
+  system_prompt: string | null;
+  locale: string | null;
+  is_default_whatsapp: boolean;
 }
 
 export async function listAgentProfiles(
@@ -259,15 +268,20 @@ export async function listAgentProfiles(
     SELECT profile.id, profile.name, profile.description, version.version,
            version.id AS version_id,
            version.channel_capabilities, version.published_at,
-           version.validation_status
+           version.validation_status, version.system_prompt, version.locale,
+           COALESCE(settings.whatsapp_ai_agent_profile_id = profile.id, false)
+             AS is_default_whatsapp
     FROM agents.agent_profiles profile
+    LEFT JOIN crm.tenant_settings settings ON settings.tenant_id = profile.tenant_id
     LEFT JOIN LATERAL (
       SELECT candidate.id, candidate.version, candidate.channel_capabilities,
-             candidate.published_at, candidate.validation_status
+             candidate.published_at, candidate.validation_status,
+             candidate.system_prompt, candidate.locale
       FROM agents.agent_profile_versions candidate
       WHERE candidate.agent_profile_id = profile.id
       ORDER BY candidate.version DESC LIMIT 1
     ) version ON true
+    WHERE profile.archived_at IS NULL
     ORDER BY profile.updated_at DESC, profile.id DESC
   `;
   return rows.map((row) => ({
@@ -279,7 +293,118 @@ export async function listAgentProfiles(
     channels: row.channel_capabilities ?? [],
     published: row.published_at !== null,
     validationStatus: row.validation_status,
+    systemPrompt: row.system_prompt,
+    locale: row.locale,
+    isDefaultWhatsApp: row.is_default_whatsapp,
   }));
+}
+
+export async function renameAgentProfile(
+  sql: postgres.TransactionSql,
+  actorUserId: string,
+  profileId: string,
+  name: string,
+): Promise<boolean> {
+  const normalized = name.trim();
+  if (!normalized || normalized.length > 120)
+    throw new TypeError("agent name must contain 1–120 characters");
+  const rows = await sql<{ id: string }[]>`
+    UPDATE agents.agent_profiles
+    SET name=${normalized}, updated_at=CURRENT_TIMESTAMP
+    WHERE id=${profileId}::uuid AND archived_at IS NULL
+    RETURNING id
+  `;
+  if (rows.length === 1)
+    await auditAction(
+      sql,
+      actorUserId,
+      "agent_profile.renamed",
+      "agent_profile",
+      profileId,
+    );
+  return rows.length === 1;
+}
+
+export async function setDefaultWhatsAppAgent(
+  sql: postgres.TransactionSql,
+  actorUserId: string,
+  profileId: string,
+): Promise<boolean> {
+  const rows = await sql<{ tenant_id: string }[]>`
+    SELECT profile.tenant_id
+    FROM agents.agent_profiles profile
+    WHERE profile.id=${profileId}::uuid AND profile.archived_at IS NULL
+      AND EXISTS (
+        SELECT 1 FROM agents.agent_profile_versions version
+        WHERE version.agent_profile_id=profile.id
+          AND version.published_at IS NOT NULL
+          AND version.validation_status='valid'
+          AND version.channel_capabilities @> ARRAY['whatsapp']::text[]
+      )
+    LIMIT 1
+  `;
+  if (rows[0] === undefined)
+    throw new TypeError("a published WhatsApp agent is required");
+  const updated = await sql<{ tenant_id: string }[]>`
+    UPDATE crm.tenant_settings
+    SET whatsapp_ai_agent_profile_id=${profileId}::uuid,
+        whatsapp_ai_enabled_by_user_id=${actorUserId}::uuid,
+        whatsapp_ai_enabled_at=CURRENT_TIMESTAMP,
+        updated_at=CURRENT_TIMESTAMP
+    WHERE tenant_id=platform.current_tenant_id()
+    RETURNING tenant_id
+  `;
+  if (updated.length === 1)
+    await auditAction(
+      sql,
+      actorUserId,
+      "agent_profile.whatsapp_defaulted",
+      "agent_profile",
+      profileId,
+    );
+  return updated.length === 1;
+}
+
+export async function archiveAgentProfile(
+  sql: postgres.TransactionSql,
+  actorUserId: string,
+  profileId: string,
+): Promise<"archived" | "active" | "not_found"> {
+  const active = await sql<{ present: boolean }[]>`
+    SELECT EXISTS(
+      SELECT 1 FROM messaging.conversations conversation
+      JOIN agents.agent_profile_versions version
+        ON version.id=conversation.ai_agent_profile_version_id
+      WHERE version.agent_profile_id=${profileId}::uuid
+        AND conversation.ownership_mode='ai'
+    ) AS present
+  `;
+  if (active[0]?.present === true) return "active";
+  await sql`
+    UPDATE crm.tenant_settings
+    SET whatsapp_ai_agent_profile_id=NULL,
+        whatsapp_ai_enabled_by_user_id=NULL,
+        whatsapp_ai_enabled_at=NULL,
+        updated_at=CURRENT_TIMESTAMP
+    WHERE whatsapp_ai_agent_profile_id=${profileId}::uuid
+  `;
+  const rows = await sql<{ id: string }[]>`
+    UPDATE agents.agent_profiles
+    SET archived_at=CURRENT_TIMESTAMP,
+        name=name || ' · archived ' || left(id::text, 8),
+        updated_at=CURRENT_TIMESTAMP
+    WHERE id=${profileId}::uuid AND archived_at IS NULL
+    RETURNING id
+  `;
+  if (rows[0] === undefined) return "not_found";
+  await auditAction(
+    sql,
+    actorUserId,
+    "agent_profile.archived",
+    "agent_profile",
+    profileId,
+  );
+  return "archived";
 }
 
 export interface AgentProfileDraftInput {
@@ -344,17 +469,53 @@ export async function publishAgentProfile(
   actorUserId: string,
   profileId: string,
 ): Promise<boolean> {
+  await assertKnowledgeManager(sql);
+  const profiles = await sql<{ id: string }[]>`
+    SELECT id FROM agents.agent_profiles
+    WHERE id=${profileId}::uuid AND archived_at IS NULL
+    FOR UPDATE
+  `;
+  if (profiles.length === 0) return false;
+  // Recheck current source eligibility at publication; a prior draft test may be stale.
+  const drafts = await sql<
+    {
+      id: string;
+      published_at: Date | null;
+      validation_status: string;
+      knowledge_configuration: Record<string, unknown>;
+    }[]
+  >`
+    SELECT id,published_at,validation_status,knowledge_configuration FROM agents.agent_profile_versions
+    WHERE agent_profile_id=${profileId}::uuid
+    ORDER BY version DESC LIMIT 1 FOR UPDATE
+  `;
+  const draft = drafts[0];
+  if (draft?.published_at !== null || draft.validation_status !== "valid")
+    return false;
+  await assertAgentKnowledgePublishable(
+    sql,
+    parseKnowledgeSourceIds(draft.knowledge_configuration.sourceIds ?? []),
+  );
   const rows = await sql<{ id: string }[]>`
     UPDATE agents.agent_profile_versions SET published_at = CURRENT_TIMESTAMP
-    WHERE id = (
-      SELECT id FROM agents.agent_profile_versions
-      WHERE agent_profile_id = ${profileId}::uuid AND published_at IS NULL
-        AND validation_status = 'valid'
-      ORDER BY version DESC LIMIT 1
-    )
+    WHERE id = ${draft.id}::uuid AND published_at IS NULL AND validation_status='valid'
     RETURNING id
   `;
-  if (rows.length === 1)
+  if (rows.length === 1) {
+    await sql`
+      UPDATE crm.tenant_settings settings
+      SET whatsapp_ai_agent_profile_id=${profileId}::uuid,
+          whatsapp_ai_enabled_by_user_id=${actorUserId}::uuid,
+          whatsapp_ai_enabled_at=CURRENT_TIMESTAMP,
+          updated_at=CURRENT_TIMESTAMP
+      WHERE settings.tenant_id=platform.current_tenant_id()
+        AND settings.whatsapp_ai_agent_profile_id IS NULL
+        AND EXISTS (
+          SELECT 1 FROM agents.agent_profile_versions version
+          WHERE version.id=${draft.id}::uuid
+            AND version.channel_capabilities @> ARRAY['whatsapp']::text[]
+        )
+    `;
     await auditAction(
       sql,
       actorUserId,
@@ -362,6 +523,7 @@ export async function publishAgentProfile(
       "agent_profile",
       profileId,
     );
+  }
   return rows.length === 1;
 }
 
@@ -420,6 +582,10 @@ export async function publishCanonicalFlow(
     UPDATE automation.flow_versions SET published_at = CURRENT_TIMESTAMP
     WHERE id = (
       SELECT flow.id FROM automation.flow_versions flow
+      JOIN automation.flow_definitions definition
+        ON definition.id=flow.flow_definition_id
+       AND definition.tenant_id=flow.tenant_id
+       AND definition.archived_at IS NULL
       JOIN agents.agent_profile_versions agent
         ON agent.id = flow.agent_profile_version_id
        AND agent.tenant_id = flow.tenant_id
@@ -593,6 +759,191 @@ export async function queueWhatsAppTriggeredCall(
   );
 }
 
+export interface AutomaticCallCommand {
+  readonly flowId: string;
+  readonly flowVersion: number;
+  readonly jobId: string;
+  readonly queued: boolean;
+}
+
+interface AutomaticCallCandidate {
+  contact_id: string;
+  agent_version_id: string;
+  canonical_flow_version_id: string;
+  ownership_epoch: string;
+  trigger_text: string;
+  voice_configuration: unknown;
+}
+
+/** Conservative accepted intent; quoted, negated and future requests need clarification. */
+export function explicitWhatsAppCallbackIntent(text: string): boolean {
+  const normalized = text.normalize("NFKC").trim();
+  return /^(?:(?:please\s+)?call\s+me(?:\s+now)?(?:\s+please)?|(?:אפשר\s+)?(?:תתקשרו|תתקשר|תתקשרי|התקשרו|התקשר|התקשרי)\s+אליי(?:\s+עכשיו)?(?:\s+בבקשה)?|(?:אפשר\s+)?להתקשר\s+אליי(?:\s+עכשיו)?)[.!?\s]*$/iu.test(
+    normalized,
+  );
+}
+
+/**
+ * Admit one customer-requested WhatsApp callback into the durable messaging
+ * queue. The explicit inbound message is action-scoped consent when the contact
+ * has not revoked voice contact; it never silently rewrites the contact's
+ * persisted consent preference.
+ */
+export async function queueWhatsAppAutomaticCall(
+  sql: postgres.TransactionSql,
+  actorUserId: string,
+  conversationId: string,
+  triggerMessageId: string,
+  idempotencyKey: string,
+): Promise<AutomaticCallCommand> {
+  if (
+    idempotencyKey.length < 8 ||
+    idempotencyKey.length > 128 ||
+    !/^[A-Za-z0-9._:-]+$/u.test(idempotencyKey)
+  )
+    throw new TypeError("automatic call idempotency key is invalid");
+
+  const candidates = await sql<AutomaticCallCandidate[]>`
+    SELECT conversation.contact_id, conversation.ownership_epoch, trigger.content_text AS trigger_text,
+           conversation.ai_agent_profile_version_id AS agent_version_id, flow.id AS canonical_flow_version_id,
+           node -> 'configuration' AS voice_configuration
+    FROM messaging.conversations conversation
+    JOIN messaging.channels channel
+      ON channel.id = conversation.channel_id
+     AND channel.tenant_id = conversation.tenant_id
+     AND channel.provider = 'meta'
+    JOIN crm.contacts contact
+      ON contact.id = conversation.contact_id
+     AND contact.tenant_id = conversation.tenant_id
+    JOIN messaging.messages trigger
+      ON trigger.id = ${triggerMessageId}::uuid
+     AND trigger.conversation_id = conversation.id
+     AND trigger.direction = 'inbound'
+     AND trigger.content_type = 'text'
+     AND trigger.provider = 'meta'
+    JOIN automation.flow_versions flow
+      ON flow.tenant_id = conversation.tenant_id
+     AND flow.agent_profile_version_id = conversation.ai_agent_profile_version_id
+     AND flow.published_at IS NOT NULL
+     AND flow.validation_status = 'valid'
+    JOIN automation.flow_definitions definition
+      ON definition.id = flow.flow_definition_id
+     AND definition.tenant_id = flow.tenant_id
+     AND definition.archived_at IS NULL
+     AND definition.channel_capabilities @> ARRAY['voice','whatsapp']::text[]
+    CROSS JOIN LATERAL jsonb_array_elements(flow.definition -> 'nodes') node
+    WHERE conversation.id = ${conversationId}::uuid
+      AND conversation.ownership_mode = 'ai'
+      AND conversation.ai_enabled_by_user_id = ${actorUserId}::uuid
+      AND contact.lifecycle_status = 'active'
+      AND contact.voice_consent <> 'revoked'
+      AND node ->> 'type' = 'voice.call'
+      AND platform.messaging_ai_actor_authorized(${actorUserId}::uuid)
+      AND trigger.id=(SELECT latest.id FROM messaging.messages latest
+        WHERE latest.conversation_id=conversation.id AND latest.direction='inbound'
+        ORDER BY latest.created_at DESC,latest.id DESC LIMIT 1)
+      AND NOT EXISTS (
+        SELECT 1 FROM ops.jobs recent
+        WHERE recent.tenant_id = conversation.tenant_id
+          AND recent.job_type = 'whatsapp.ai.call'
+          AND recent.idempotency_key IS DISTINCT FROM ${idempotencyKey}
+          AND recent.reference_id = conversation.id
+          AND recent.status IN ('queued','running','retry','succeeded')
+          AND recent.created_at > CURRENT_TIMESTAMP - INTERVAL '10 minutes'
+      )
+    ORDER BY flow.published_at DESC, flow.version DESC
+    LIMIT 1
+    FOR SHARE OF conversation, contact, trigger
+  `;
+  const candidate = candidates[0];
+  if (candidate === undefined)
+    throw new TypeError(
+      "automatic call policy or published flow is unavailable",
+    );
+  if (!explicitWhatsAppCallbackIntent(candidate.trigger_text))
+    throw new TypeError(
+      "automatic call requires explicit current callback intent",
+    );
+  if (
+    candidate.voice_configuration === null ||
+    typeof candidate.voice_configuration !== "object" ||
+    Array.isArray(candidate.voice_configuration)
+  )
+    throw new TypeError("published voice action configuration is invalid");
+  const configuration = candidate.voice_configuration as Readonly<
+    Record<string, unknown>
+  >;
+  const flowId = configuration.flowId;
+  const flowVersion = configuration.flowVersion;
+  if (
+    typeof flowId !== "string" ||
+    !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/iu.test(flowId) ||
+    typeof flowVersion !== "number" ||
+    !Number.isInteger(flowVersion) ||
+    flowVersion < 1
+  )
+    throw new TypeError("published voice action configuration is invalid");
+  const available = await sql<
+    { available: boolean }[]
+  >`SELECT platform.voice_flow_available(${flowId}::uuid, ${flowVersion}) AS available`;
+  if (available[0]?.available !== true)
+    throw new TypeError("published retained voice flow is unavailable");
+
+  const payload = {
+    actorUserId,
+    contactId: candidate.contact_id,
+    conversationId,
+    flowId,
+    flowVersion,
+    mode: "real",
+    ownershipEpoch: candidate.ownership_epoch,
+    agentVersionId: candidate.agent_version_id,
+    canonicalFlowVersionId: candidate.canonical_flow_version_id,
+    triggerMessageId,
+  } as const;
+  const inserted = await sql<{ id: string }[]>`
+    INSERT INTO ops.jobs
+      (tenant_id, queue, job_type, reference_type, reference_id, payload,
+       idempotency_key, max_attempts)
+    VALUES (platform.current_tenant_id(), 'messaging', 'whatsapp.ai.call',
+            'conversation', ${conversationId}::uuid,
+            ${sql.json(databaseJson(payload))}, ${idempotencyKey}, 3)
+    ON CONFLICT (COALESCE(tenant_id, '00000000-0000-0000-0000-000000000000'::uuid),
+                 queue, idempotency_key) WHERE idempotency_key IS NOT NULL
+    DO NOTHING RETURNING id
+  `;
+  const created = inserted[0] !== undefined;
+  const rows = created
+    ? inserted
+    : await sql<{ id: string }[]>`
+        SELECT id FROM ops.jobs
+        WHERE tenant_id = platform.current_tenant_id()
+          AND queue = 'messaging' AND job_type = 'whatsapp.ai.call'
+          AND reference_id = ${conversationId}::uuid
+          AND idempotency_key = ${idempotencyKey}
+          AND payload = ${sql.json(databaseJson(payload))}::jsonb
+        LIMIT 1
+      `;
+  const job = rows[0];
+  if (job === undefined)
+    throw new TypeError("idempotency key belongs to different call work");
+  if (created)
+    await auditAction(
+      sql,
+      actorUserId,
+      "conversation.call_queued",
+      "job",
+      job.id,
+      {
+        conversationId,
+        consentSource: "explicit_whatsapp_request",
+        flowId,
+        flowVersion,
+      },
+    );
+  return { flowId, flowVersion, jobId: job.id, queued: created };
+}
+
 export interface HandoffSummary {
   readonly id: string;
   readonly contactId: string;
@@ -625,6 +976,12 @@ function mapHandoff(row: HandoffRow): HandoffSummary {
   };
 }
 
+export interface HandoffIdentityReferences {
+  readonly flowRunId?: string | null;
+  readonly conversationId?: string | null;
+  readonly sessionId?: string | null;
+}
+
 export async function requestHandoff(
   sql: postgres.TransactionSql,
   actorUserId: string,
@@ -632,6 +989,7 @@ export async function requestHandoff(
   sourceChannel: SupportedChannel,
   reasonSafe: string,
   idempotencyKey: string,
+  references: HandoffIdentityReferences = {},
 ): Promise<HandoffSummary> {
   const reason = reasonSafe.trim();
   if (!reason || reason.length > 500)
@@ -639,16 +997,30 @@ export async function requestHandoff(
   const rows = await sql<HandoffRow[]>`
     INSERT INTO automation.handoffs
       (tenant_id, contact_id, requested_by_user_id, source_channel,
-       reason_safe, idempotency_key)
+       reason_safe, idempotency_key, flow_run_id, conversation_id, session_id)
     VALUES (platform.current_tenant_id(), ${contactId}::uuid,
-            ${actorUserId}::uuid, ${sourceChannel}, ${reason}, ${idempotencyKey})
+            ${actorUserId}::uuid, ${sourceChannel}, ${reason}, ${idempotencyKey},
+            ${references.flowRunId ?? null}::uuid,
+            ${references.conversationId ?? null}::uuid,
+            ${references.sessionId ?? null}::uuid)
     ON CONFLICT (tenant_id, idempotency_key)
     DO UPDATE SET idempotency_key = EXCLUDED.idempotency_key
+    WHERE handoffs.contact_id = EXCLUDED.contact_id
+      AND handoffs.requested_by_user_id IS NOT DISTINCT FROM EXCLUDED.requested_by_user_id
+      AND handoffs.source_channel = EXCLUDED.source_channel
+      AND handoffs.reason_safe = EXCLUDED.reason_safe
+      AND handoffs.flow_run_id IS NOT DISTINCT FROM EXCLUDED.flow_run_id
+      AND handoffs.conversation_id IS NOT DISTINCT FROM EXCLUDED.conversation_id
+      AND handoffs.session_id IS NOT DISTINCT FROM EXCLUDED.session_id
     RETURNING id, contact_id, source_channel, reason_safe, status,
               assigned_user_id, requested_at
   `;
   const row = rows[0];
-  if (row === undefined) throw new Error("handoff insert failed");
+  if (row === undefined)
+    throw Object.assign(
+      new Error("idempotency key belongs to different handoff work"),
+      { code: "23505" },
+    );
   await auditAction(sql, actorUserId, "handoff.requested", "handoff", row.id, {
     sourceChannel,
   });

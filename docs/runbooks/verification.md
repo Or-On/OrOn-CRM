@@ -20,5 +20,5 @@ Docker-backed failures are not replaced with fake green checks. When Docker is
 unavailable, record the precise skipped gates and keep Phase 1 blocked rather than
 claiming PostgreSQL/container acceptance.
 
-No verification command requires GCP, Terraform credentials, provider
+No verification command requires hosting credentials, provider
 credentials, a real message/call, or external webhook mutation.

@@ -2,6 +2,7 @@
 
 import uuid
 
+import pytest
 from oron_flows.seeds import (
     EXAMPLE_EN,
     EXAMPLE_EN_ID,
@@ -24,7 +25,6 @@ def test_picks_the_composition_the_did_is_bound_to():
     assert composition_for(EXAMPLE_HE_ID) is EXAMPLE_HE
 
 
-def test_unknown_flow_falls_back_instead_of_dropping_the_call():
-    """A DID can name a flow this build does not ship. The caller is already
-    connected by the time we look."""
-    assert composition_for(uuid.uuid4()) is EXAMPLE_HE
+def test_unknown_fixture_id_never_substitutes_the_hebrew_example():
+    with pytest.raises(KeyError):
+        composition_for(uuid.uuid4())

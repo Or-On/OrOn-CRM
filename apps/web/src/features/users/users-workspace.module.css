@@ -1,0 +1,403 @@
+.workspace {
+  display: grid;
+  gap: 1.25rem;
+  min-inline-size: 0;
+}
+.pageHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.pageHeader h1 {
+  margin: 0;
+  font-size: 1.75rem;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.035em;
+}
+.pageHeader p {
+  margin: 0.3rem 0 0;
+  color: var(--or-text-muted);
+  font-size: 0.8125rem;
+}
+.card {
+  min-inline-size: 0;
+  overflow: hidden;
+  border: 1px solid var(--or-border);
+  border-radius: 0.9rem;
+  background: var(--or-surface);
+  box-shadow: var(--or-shadow-1);
+}
+.cardHeader {
+  display: grid;
+  gap: 1rem;
+  padding: 1.15rem;
+  border-block-end: 1px solid var(--or-border);
+}
+.tabs {
+  display: flex;
+  gap: 1.5rem;
+  margin-block: -0.25rem;
+}
+.tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-block-size: 2.25rem;
+  padding: 0;
+  border: 0;
+  border-block-end: 2px solid transparent;
+  color: var(--or-text-muted);
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+.tabs button[aria-pressed="true"] {
+  color: var(--or-text);
+  border-block-end-color: var(--or-text);
+  font-weight: 600;
+}
+.tabs button span {
+  display: grid;
+  place-items: center;
+  min-inline-size: 1.25rem;
+  block-size: 1.25rem;
+  padding-inline: 0.25rem;
+  border-radius: 999px;
+  background: var(--or-surface-subtle);
+  font-size: 0.75rem;
+}
+.filters {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.search {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  inline-size: min(22rem, 100%);
+  min-block-size: 2.25rem;
+  padding-inline: 0.6rem;
+  border: 1px solid var(--or-border);
+  border-radius: 0.55rem;
+  color: var(--or-text-muted);
+  background: var(--or-bg);
+}
+.search input {
+  inline-size: 100%;
+  min-inline-size: 0;
+  border: 0;
+  outline: 0;
+  color: var(--or-text);
+  background: transparent;
+  font-size: 0.78rem;
+}
+.filters select,
+.table select {
+  min-block-size: 2.25rem;
+  padding: 0.3rem 1.8rem 0.3rem 0.55rem;
+  border: 1px solid var(--or-border);
+  border-radius: 0.55rem;
+  color: var(--or-text);
+  background: var(--or-bg);
+  font-size: 0.75rem;
+}
+:global([dir="rtl"]) .filters select,
+:global([dir="rtl"]) .table select {
+  padding: 0.3rem 0.55rem 0.3rem 1.8rem;
+}
+.tableWrap {
+  max-inline-size: 100%;
+  overflow-x: auto;
+}
+.tableWrap:focus-visible {
+  outline: 2px solid var(--or-focus);
+  outline-offset: -2px;
+}
+.table {
+  inline-size: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.table th {
+  block-size: 2.7rem;
+  padding-inline: 1rem;
+  color: var(--or-text-muted);
+  background: var(--or-surface-subtle);
+  font-size: 0.75rem;
+  font-weight: 550;
+  text-align: start;
+}
+.table th:first-child {
+  inline-size: 46%;
+}
+.table th:nth-child(2) {
+  inline-size: 20%;
+}
+.table th:nth-child(3) {
+  inline-size: 20%;
+}
+.table th:last-child {
+  inline-size: 3.5rem;
+}
+.table td {
+  block-size: 4.35rem;
+  padding: 0.65rem 1rem;
+  border-block-start: 1px solid var(--or-border);
+  font-size: 0.78rem;
+  vertical-align: middle;
+}
+.table tbody tr:hover {
+  background: color-mix(in srgb, var(--or-surface-hover) 65%, transparent);
+}
+.person {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-inline-size: 0;
+}
+.person > div {
+  min-inline-size: 0;
+}
+.person strong,
+.person small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.person strong {
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+.person small {
+  margin-block-start: 0.12rem;
+  color: var(--or-text-muted);
+  font-size: 0.75rem;
+}
+.avatar {
+  display: grid;
+  place-items: center;
+  inline-size: 2rem;
+  block-size: 2rem;
+  flex: 0 0 auto;
+  border: 1px solid var(--or-border);
+  border-radius: 50%;
+  background: var(--or-surface-subtle);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.roleBadge,
+.pendingBadge,
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-block-size: 1.45rem;
+  padding: 0.15rem 0.45rem;
+  border: 1px solid var(--or-border);
+  border-radius: 0.3rem;
+  font-size: 0.75rem;
+  font-weight: 550;
+  text-transform: capitalize;
+}
+.pendingBadge {
+  color: var(--or-warning);
+  border-color: color-mix(in srgb, var(--or-warning) 30%, var(--or-border));
+  background: color-mix(in srgb, var(--or-warning) 7%, transparent);
+}
+.status {
+  border: 0;
+  padding-inline: 0;
+  color: var(--or-text-secondary);
+}
+.status i {
+  inline-size: 0.4rem;
+  block-size: 0.4rem;
+  border-radius: 50%;
+  background: var(--or-positive);
+}
+.actionCell {
+  text-align: end;
+}
+.iconButton {
+  display: inline-grid;
+  place-items: center;
+  inline-size: 2rem;
+  block-size: 2rem;
+  border: 0;
+  border-radius: 0.35rem;
+  color: var(--or-text-muted);
+  background: transparent;
+  cursor: pointer;
+}
+.iconButton:hover {
+  color: var(--or-critical);
+  background: color-mix(in srgb, var(--or-critical) 8%, transparent);
+}
+.iconButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.empty {
+  display: grid;
+  place-items: center;
+  gap: 0.5rem;
+  min-block-size: 15rem;
+  color: var(--or-text-muted);
+  font-size: 0.8rem;
+}
+.empty p {
+  margin: 0;
+}
+.invitationList article {
+  display: grid;
+  grid-template-columns:
+    2rem minmax(12rem, 1fr) auto auto minmax(9rem, auto)
+    2rem;
+  align-items: center;
+  gap: 0.7rem;
+  min-block-size: 4.25rem;
+  padding: 0.7rem 1rem;
+  border-block-start: 1px solid var(--or-border);
+  font-size: 0.75rem;
+}
+.invitationList article:first-child {
+  border-block-start: 0;
+}
+.invitationList strong,
+.invitationList small {
+  display: block;
+}
+.invitationList small,
+.invitationList time {
+  color: var(--or-text-muted);
+  font-size: 0.75rem;
+}
+.error,
+.success {
+  margin: 0.75rem 1rem 0;
+  padding: 0.6rem 0.7rem;
+  border-radius: 0.4rem;
+  font-size: 0.75rem;
+}
+.error {
+  color: var(--or-critical);
+  background: color-mix(in srgb, var(--or-critical) 8%, transparent);
+}
+.success {
+  color: var(--or-positive);
+  background: color-mix(in srgb, var(--or-positive) 8%, transparent);
+}
+.dialog {
+  inline-size: min(31rem, calc(100dvi - 2rem));
+}
+.dialog :global(.or-dialog__heading) {
+  margin-block-end: 1rem;
+}
+.inviteForm fieldset {
+  display: grid;
+  gap: 1rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.invitationLink {
+  display: grid;
+  gap: 0.65rem;
+  margin-block-start: 1rem;
+  padding: 0.8rem;
+  border: 1px solid var(--or-border);
+  border-radius: 0.45rem;
+  background: var(--or-surface-subtle);
+}
+.invitationLink code {
+  max-inline-size: 100%;
+  overflow-wrap: anywhere;
+  color: var(--or-text-secondary);
+  font-size: 0.75rem;
+}
+@media (max-width: 46rem) {
+  .pageHeader {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .pageHeader > button {
+    inline-size: 100%;
+  }
+  .filters {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .search {
+    inline-size: 100%;
+  }
+  .filters label:last-child,
+  .filters select {
+    inline-size: 100%;
+  }
+  .table thead {
+    display: none;
+  }
+  .table,
+  .table tbody,
+  .table tr,
+  .table td {
+    display: block;
+    inline-size: 100%;
+  }
+  .table tr {
+    position: relative;
+    padding: 0.85rem 3.25rem 0.85rem 0.85rem;
+    border-block-start: 1px solid var(--or-border);
+  }
+  :global([dir="rtl"]) .table tr {
+    padding: 0.85rem 0.85rem 0.85rem 3.25rem;
+  }
+  .table td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    block-size: auto;
+    min-block-size: 2.25rem;
+    padding: 0.25rem 0;
+    border: 0;
+  }
+  .table td::before {
+    content: attr(data-label);
+    flex: 0 0 auto;
+    color: var(--or-text-muted);
+    font-size: 0.75rem;
+  }
+  .table td:first-child {
+    display: block;
+    min-block-size: 2.5rem;
+  }
+  .table td:first-child::before,
+  .table .actionCell::before {
+    content: none;
+  }
+  .table .actionCell {
+    position: absolute;
+    inset-block-start: 0.85rem;
+    inset-inline-end: 0.85rem;
+    display: block;
+  }
+  .invitationList article {
+    grid-template-columns: 2rem minmax(0, 1fr) auto;
+  }
+  .invitationList article > time {
+    grid-column: 2 / -1;
+  }
+  .invitationList article > button {
+    grid-column: 3;
+    grid-row: 1;
+  }
+  .pendingBadge {
+    display: none;
+  }
+}

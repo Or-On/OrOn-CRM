@@ -1,0 +1,527 @@
+.workspace {
+  min-inline-size: 0;
+  overflow: hidden;
+  background: var(--or-surface);
+  border: 1px solid var(--or-border);
+  border-radius: 0.75rem;
+  box-shadow: var(--or-shadow-1);
+}
+
+.header,
+.headerActions,
+.navigator,
+.viewTabs,
+.eventTop,
+.dialogActions,
+.agendaMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.header {
+  min-block-size: 5.25rem;
+  padding: 1rem;
+  background: var(--or-surface-subtle);
+  border-block-end: 1px solid var(--or-divider);
+}
+
+.titleBlock {
+  min-inline-size: 0;
+}
+
+.titleBlock h1 {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 620;
+  line-height: 1.2;
+  letter-spacing: -0.025em;
+}
+
+.titleBlock p,
+.agendaMeta,
+.empty,
+.loading,
+.error {
+  margin: 0.25rem 0 0;
+  color: var(--or-text-muted);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.limitNotice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.7rem 1rem;
+  color: var(--or-text-secondary);
+  background: var(--or-surface-subtle);
+  border-block-start: 1px solid var(--or-divider);
+  font-size: 0.75rem;
+}
+
+.headerActions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.navigator,
+.viewTabs {
+  gap: 0;
+  overflow: hidden;
+  background: var(--or-surface);
+  border: 1px solid var(--or-border);
+  border-radius: 0.55rem;
+}
+
+.navigator button,
+.viewTabs button {
+  min-block-size: 2.2rem;
+  padding: 0.4rem 0.65rem;
+  color: var(--or-text-secondary);
+  background: transparent;
+  border: 0;
+  border-inline-end: 1px solid var(--or-divider);
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.navigator button:last-child,
+.viewTabs button:last-child {
+  border-inline-end: 0;
+}
+
+.navigator button:hover,
+.viewTabs button:hover,
+.viewTabs button[aria-pressed="true"] {
+  color: var(--or-text);
+  background: var(--or-surface-hover);
+}
+
+.weekdays,
+.monthGrid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.weekdays {
+  background: var(--or-surface-subtle);
+  border-block-end: 1px solid var(--or-divider);
+}
+
+.weekdays span {
+  padding: 0.55rem 0.65rem;
+  color: var(--or-text-muted);
+  border-inline-end: 1px solid var(--or-divider);
+  font-size: 0.7rem;
+  font-weight: 580;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.weekdays span:last-child {
+  border-inline-end: 0;
+}
+
+.monthGrid {
+  background: var(--or-divider);
+  gap: 1px;
+}
+
+.dayCell {
+  position: relative;
+  min-block-size: 7.8rem;
+  padding: 0.45rem;
+  overflow: hidden;
+  background: var(--or-surface);
+}
+
+.dayCell:hover {
+  background: color-mix(
+    in srgb,
+    var(--or-surface-hover) 55%,
+    var(--or-surface)
+  );
+}
+
+.outside {
+  background: var(--or-surface-subtle);
+}
+
+.dayNumber {
+  display: grid;
+  inline-size: 1.75rem;
+  block-size: 1.75rem;
+  margin-inline-start: auto;
+  place-items: center;
+  color: var(--or-text-secondary);
+  border-radius: 50%;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.today .dayNumber {
+  color: var(--or-on-accent);
+  background: var(--or-action);
+  font-weight: 650;
+}
+
+.outside .dayNumber {
+  color: var(--or-text-disabled);
+}
+
+.events {
+  display: grid;
+  gap: 0.2rem;
+  margin-block-start: 0.3rem;
+}
+
+.event {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.35rem;
+  align-items: center;
+  inline-size: 100%;
+  min-block-size: 1.45rem;
+  padding: 0.18rem 0.35rem;
+  overflow: hidden;
+  color: var(--or-text-secondary);
+  background: color-mix(in srgb, var(--or-chart-1) 12%, var(--or-surface));
+  border: 1px solid color-mix(in srgb, var(--or-chart-1) 22%, var(--or-border));
+  border-radius: 0.35rem;
+  font: inherit;
+  font-size: 0.7rem;
+  text-align: start;
+  cursor: pointer;
+}
+
+.event::before {
+  inline-size: 0.4rem;
+  block-size: 0.4rem;
+  background: var(--or-chart-1);
+  border-radius: 50%;
+  content: "";
+}
+
+.event[data-status="tentative"] {
+  background: color-mix(in srgb, var(--or-warning) 11%, var(--or-surface));
+  border-color: color-mix(in srgb, var(--or-warning) 25%, var(--or-border));
+}
+
+.event[data-status="tentative"]::before {
+  background: var(--or-warning);
+}
+
+.event[data-status="cancelled"] {
+  color: var(--or-text-muted);
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
+.event span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.more {
+  padding-inline: 0.35rem;
+  color: var(--or-text-muted);
+  font-size: 0.68rem;
+}
+
+.agenda {
+  display: grid;
+  min-block-size: 36rem;
+}
+
+.mobileAgenda {
+  display: none;
+}
+
+.agendaDay {
+  display: grid;
+  grid-template-columns: 8.5rem minmax(0, 1fr);
+  border-block-end: 1px solid var(--or-divider);
+}
+
+.agendaDay:last-child {
+  border-block-end: 0;
+}
+
+.agendaDate {
+  padding: 1rem;
+  color: var(--or-text-secondary);
+  background: var(--or-surface-subtle);
+  border-inline-end: 1px solid var(--or-divider);
+  font-size: 0.8125rem;
+  font-weight: 580;
+}
+
+.agendaDate strong {
+  display: block;
+  margin-block-end: 0.2rem;
+  color: var(--or-text);
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.agendaEvents {
+  display: grid;
+  align-content: start;
+  gap: 0.5rem;
+  min-block-size: 6.3rem;
+  padding: 0.8rem;
+}
+
+.agendaEvent {
+  display: grid;
+  grid-template-columns: 5.5rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.8rem;
+  inline-size: 100%;
+  padding: 0.7rem;
+  color: var(--or-text);
+  background: var(--or-surface-subtle);
+  border: 1px solid var(--or-border);
+  border-radius: 0.55rem;
+  text-align: start;
+  cursor: pointer;
+}
+
+.agendaEvent:hover {
+  background: var(--or-surface-hover);
+}
+
+.agendaTime {
+  color: var(--or-text-muted);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.agendaIdentity {
+  min-inline-size: 0;
+}
+
+.agendaIdentity strong {
+  display: block;
+  overflow: hidden;
+  font-size: 0.875rem;
+  font-weight: 590;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agendaIdentity small {
+  display: block;
+  margin-block-start: 0.15rem;
+  overflow: hidden;
+  color: var(--or-text-muted);
+  font-size: 0.7rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--or-text-muted);
+  font-size: 0.7rem;
+  text-transform: capitalize;
+}
+
+.status::before {
+  inline-size: 0.4rem;
+  block-size: 0.4rem;
+  background: var(--or-positive);
+  border-radius: 50%;
+  content: "";
+}
+
+.status[data-status="tentative"]::before {
+  background: var(--or-warning);
+}
+
+.status[data-status="cancelled"]::before {
+  background: var(--or-text-disabled);
+}
+
+.empty,
+.loading {
+  display: grid;
+  min-block-size: 5rem;
+  place-items: center;
+  padding: 1rem;
+  text-align: center;
+}
+
+.loadingBar {
+  block-size: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--or-accent),
+    transparent
+  );
+  background-size: 45% 100%;
+  animation: loading 850ms linear infinite;
+}
+
+.error {
+  padding: 0.65rem 1rem;
+  color: var(--or-critical);
+  background: color-mix(in srgb, var(--or-critical) 7%, var(--or-surface));
+  border-block-end: 1px solid var(--or-divider);
+}
+
+.warning {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0.65rem 1rem;
+  color: var(--or-text);
+  background: color-mix(in srgb, var(--or-warning) 10%, var(--or-surface));
+  border-block-end: 1px solid
+    color-mix(in srgb, var(--or-warning) 28%, var(--or-divider));
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.warning svg {
+  flex: none;
+  color: var(--or-warning);
+}
+
+.dialog {
+  inline-size: min(38rem, calc(100dvi - 2rem));
+}
+
+.dialogForm,
+.formGrid {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.formGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.full {
+  grid-column: 1 / -1;
+}
+
+.checkboxRow {
+  display: flex;
+  align-items: center;
+  min-block-size: 2.6rem;
+}
+
+.dialogActions {
+  justify-content: space-between;
+  margin-block-start: 0.2rem;
+}
+
+.dialogPrimaryActions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+@keyframes loading {
+  to {
+    background-position: 220% 0;
+  }
+}
+
+@media (max-width: 64rem) {
+  .header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .headerActions {
+    justify-content: flex-start;
+  }
+
+  .dayCell {
+    min-block-size: 6.7rem;
+  }
+}
+
+@media (max-width: 47.99rem) {
+  .headerActions,
+  .navigator,
+  .viewTabs {
+    inline-size: 100%;
+  }
+
+  .navigator button,
+  .viewTabs button {
+    flex: 1;
+  }
+
+  .headerActions > :last-child {
+    inline-size: 100%;
+  }
+
+  .weekdays,
+  .monthGrid {
+    display: none;
+  }
+
+  .mobileAgenda {
+    display: grid;
+    min-block-size: 28rem;
+  }
+
+  .agenda {
+    min-block-size: 28rem;
+  }
+
+  .agendaDay {
+    grid-template-columns: 4.7rem minmax(0, 1fr);
+  }
+
+  .agendaDate {
+    padding: 0.8rem 0.55rem;
+    text-align: center;
+  }
+
+  .agendaEvent {
+    grid-template-columns: 1fr auto;
+    gap: 0.4rem;
+  }
+
+  .agendaTime {
+    grid-column: 1 / -1;
+  }
+
+  .formGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .dialogActions {
+    align-items: stretch;
+    flex-direction: column-reverse;
+  }
+
+  .limitNotice {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .dialogPrimaryActions,
+  .dialogPrimaryActions > * {
+    flex: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loadingBar {
+    animation: none;
+  }
+}

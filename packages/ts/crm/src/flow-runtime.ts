@@ -87,7 +87,12 @@ export async function queueCanonicalSimulation(
     { id: string; definition: unknown; channel_capabilities: string[] }[]
   >`
     SELECT flow.id, flow.definition, agent.channel_capabilities
-    FROM automation.flow_versions flow JOIN agents.agent_profile_versions agent
+    FROM automation.flow_versions flow
+    JOIN automation.flow_definitions definition
+      ON definition.id=flow.flow_definition_id
+     AND definition.tenant_id=flow.tenant_id
+     AND definition.archived_at IS NULL
+    JOIN agents.agent_profile_versions agent
       ON agent.id=flow.agent_profile_version_id AND agent.tenant_id=flow.tenant_id
     WHERE flow.flow_definition_id=${definitionId}::uuid AND flow.published_at IS NOT NULL
       AND agent.published_at IS NOT NULL ORDER BY flow.version DESC LIMIT 1`;
@@ -209,6 +214,7 @@ export async function advanceCanonicalSimulation(
           channel as SupportedChannel,
           configurationText(cfg, "reason"),
           key,
+          { flowRunId: runId, conversationId: conversation },
         );
         break;
       case "voice.call":

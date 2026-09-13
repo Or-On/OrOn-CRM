@@ -158,12 +158,33 @@ class SessionsClient:
             return False
         return True
 
+    async def checkpoint_usage(
+        self,
+        session_id: uuid.UUID,
+        *,
+        tenant_id: uuid.UUID,
+        usage: CallUsage,
+    ) -> bool:
+        """Persist an in-progress usage snapshot without finalizing the call.
+
+        The same tenant-scoped PATCH path owns both checkpoints and the final
+        write. A failed checkpoint is best-effort: it must not interrupt audio,
+        and the final write still carries the complete counters.
+        """
+        resp = await self._send(
+            HTTPMethod.PATCH,
+            f"/sessions/{session_id}",
+            SessionUpdate(usage=usage).model_dump(mode="json", exclude_none=True),
+            headers={"X-Tenant-Id": str(tenant_id)},
+        )
+        return resp is not None
+
     async def get_flow(self, flow_id: uuid.UUID, *, tenant_id: uuid.UUID) -> FlowSpec | None:
         """The frozen spec this call should run, or None if it could not be fetched.
 
-        None is a real answer, not an error: the caller falls back to the flow
-        packaged with this build. Unlike a session write, this one is on the
-        answer path — a caller is already connected and waiting.
+        Unlike best-effort session writes, a flow is executable configuration.
+        The voice runtime treats None as fatal and must not substitute packaged
+        behavior after a missing, unreachable, or invalid database response.
         """
         resp = await self._send(
             HTTPMethod.GET, f"/flows/{flow_id}", headers={"X-Tenant-Id": str(tenant_id)}
@@ -174,7 +195,7 @@ class SessionsClient:
             return FlowSpec.model_validate(resp.json())
         except ValidationError as exc:
             # A spec the store served but this build cannot parse: the component
-            # library moved on. Say so — the fallback is otherwise silent.
+            # library moved on. Say so without logging the rejected definition.
             logger.warning(
                 "flow %s did not validate against this build (%d validation errors)",
                 flow_id,

@@ -1,6 +1,5 @@
 import { productMetadata } from "../../i18n/product-metadata";
 import { AccessDenied } from "../../i18n/access-denied";
-import { ProductHeading } from "../../i18n/product-heading";
 import { redirect } from "next/navigation";
 
 import {
@@ -8,6 +7,7 @@ import {
   listMessagePage,
   listQuickReplies,
   listTeamMembers,
+  listAgentProfiles,
 } from "@or-on/crm";
 import { loadConfig } from "@or-on/config";
 import { hasPermission } from "@or-on/auth";
@@ -29,7 +29,21 @@ export default async function InboxPage({
       requireWhatsApp: true,
       service: "web",
     });
-    const requested = (await searchParams).conversation;
+    const params = await searchParams;
+    const requested = params.conversation;
+    const initialSearch =
+      typeof params.search === "string" ? params.search.slice(0, 120) : "";
+    const initialFilter = [
+      "mine",
+      "unassigned",
+      "unread",
+      "open",
+      "waiting",
+      "closed",
+    ].includes(typeof params.filter === "string" ? params.filter : "")
+      ? (params.filter as
+          "mine" | "unassigned" | "unread" | "open" | "waiting" | "closed")
+      : "all";
     const requestedId =
       typeof requested === "string" &&
       /^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/iu.test(requested)
@@ -52,30 +66,47 @@ export default async function InboxPage({
         first === undefined
           ? { messages: [], nextCursor: null }
           : await listMessagePage(sql, first.id);
-      const quickReplies = await listQuickReplies(sql);
-      const teamMembers = await listTeamMembers(sql);
+      const [quickReplies, teamMembers, agentProfiles] = await Promise.all([
+        listQuickReplies(sql),
+        listTeamMembers(sql),
+        listAgentProfiles(sql),
+      ]);
       return {
         conversations,
         ...page,
         selectedId: first?.id,
         quickReplies,
         teamMembers,
-        canOperate: hasPermission(session.tenant.role, "messaging:operate"),
+        agentProfiles: agentProfiles.filter(
+          (profile) =>
+            profile.published &&
+            profile.validationStatus === "valid" &&
+            profile.versionId !== null &&
+            profile.channels.includes("whatsapp"),
+        ),
+        canOperate:
+          session.isSuperuser ||
+          hasPermission(session.tenant.role, "messaging:operate"),
+        currentUserId: session.userId,
       };
     });
     return (
       <main className="page page--inbox">
-        <ProductHeading page="inbox" />
         <InboxWorkspace
           conversations={data.conversations}
           initialMessages={data.messages}
           initialConversationId={data.selectedId}
           initialNextCursor={data.nextCursor}
           canOperate={data.canOperate}
+          currentUserId={data.currentUserId}
+          initialSearch={initialSearch}
+          initialFilter={initialFilter}
           metaSenderId={platformConfig.whatsApp.phoneNumberId}
           quickReplies={data.quickReplies}
           realWhatsAppEnabled={platformConfig.enableRealWhatsApp}
           teamMembers={data.teamMembers}
+          agentProfiles={data.agentProfiles}
+          aiRepliesEnabled={platformConfig.enableWhatsAppAi}
         />
       </main>
     );

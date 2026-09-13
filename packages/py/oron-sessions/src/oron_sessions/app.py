@@ -7,13 +7,11 @@ from fastapi import FastAPI
 from oron_common import PriceBook
 from oron_db import make_engine, make_sessionmaker
 from oron_flows import FlowStore
-from oron_flows.seeds import SEED_COMPOSITIONS
 from oron_tenancy import SipSettings, build_sip_provisioner
 from oron_tenancy import router as tenancy_router
 from oron_tenancy.admission import converge_sip_admission
 from oron_tenancy.flow_store import PostgresFlowStore
 from oron_tenancy.models import Tenant
-from oron_tenancy.packaged_flows import converge_packaged_flows
 from oron_tenancy.provisioner import SipProvisioner
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -88,12 +86,10 @@ def create_app(
             else build_sip_provisioner(sip_settings or SipSettings())
         )
 
-        # Flows are read from the database now, so the packaged catalog has to
-        # get in there. Publishing on boot means a fresh database — or a build
-        # that adds a flow — needs no deploy step, and the DIDs already bound to
-        # a packaged flow_id keep answering.
+        # PostgreSQL is the sole runtime flow source. Publishing is an explicit
+        # tenant action; process startup must never insert or refresh fictional
+        # packaged flows behind an operator's back.
         app.state.flow_store = flow_store or PostgresFlowStore(app.state.sessionmaker)
-        await converge_packaged_flows(store=app.state.flow_store, catalog=SEED_COMPOSITIONS)
 
         # A wiped LiveKit Redis admits nothing while every phone_numbers row still
         # names a rule, and that failure is silent — calls just stop arriving.
