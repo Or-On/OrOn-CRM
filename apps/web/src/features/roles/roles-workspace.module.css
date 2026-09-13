@@ -1,7 +1,14 @@
 .workspace {
   display: grid;
-  gap: 1rem;
+  gap: 1.5rem;
+  inline-size: 100%;
+  max-inline-size: none;
+  margin-inline: 0;
   min-inline-size: 0;
+}
+.workspace:global(.platform-admin-workspace) {
+  max-inline-size: none;
+  margin-inline: 0;
 }
 .pageHeader {
   display: flex;

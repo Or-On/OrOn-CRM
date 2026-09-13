@@ -100,6 +100,7 @@ async def main(
             for key, value in os.environ.items()
             if key.upper()
             in {
+                "CI",
                 "PATH",
                 "SYSTEMROOT",
                 "WINDIR",
