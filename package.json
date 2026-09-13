@@ -18,7 +18,7 @@
     "dev": "pnpm --parallel --filter @or-on/web --filter @or-on/live-agent --filter @or-on/messaging-worker run dev",
     "format": "prettier --write --ignore-unknown package.json pnpm-workspace.yaml tsconfig.base.json eslint.config.mjs apps packages/ts services/ts \".github/**/*.yml\" \"infra/compose/*.yaml\"",
     "format:check": "prettier --check --ignore-unknown package.json pnpm-workspace.yaml tsconfig.base.json eslint.config.mjs apps packages/ts services/ts \".github/**/*.yml\" \"infra/compose/*.yaml\"",
-    "lint": "eslint . --max-warnings 0",
+    "lint": "pnpm --filter @or-on/web exec next typegen && eslint . --max-warnings 0",
     "test": "pnpm -r --if-present run test",
     "typecheck": "pnpm -r --if-present run typecheck"
   },

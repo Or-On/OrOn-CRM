@@ -159,6 +159,13 @@ async def test_tenant_work_tables_have_least_privilege_runtime_grants(
             assert not row["can_insert"]
             assert not row["can_update"]
             assert not row["can_delete"]
+        elif row["role_name"] == "platform_messaging" and row["table_name"] == "crm.tasks":
+            # The messaging worker may create a tenant-scoped handoff ticket,
+            # but it cannot mutate or delete a ticket after admission.
+            assert row["can_read"]
+            assert row["can_insert"]
+            assert not row["can_update"]
+            assert not row["can_delete"]
         else:
             assert not row["can_read"]
             assert not row["can_insert"]

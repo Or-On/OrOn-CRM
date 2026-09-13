@@ -99,11 +99,22 @@ async def test_runtime_domain_separation_ddl_denial_and_audit_immutability(
     voice_can_read_messages = await pg.fetchval(
         "SELECT has_table_privilege('platform_voice', 'messaging.messages', 'SELECT')"
     )
-    messaging_can_read_sessions = await pg.fetchval(
-        "SELECT has_table_privilege('platform_messaging', 'public.sessions', 'SELECT')"
+    messaging_session_privileges = await pg.fetchrow(
+        """
+        SELECT has_table_privilege('platform_messaging', 'public.sessions', 'SELECT') AS can_read,
+               has_table_privilege('platform_messaging', 'public.sessions', 'INSERT') AS can_insert,
+               has_table_privilege('platform_messaging', 'public.sessions', 'UPDATE') AS can_update,
+               has_table_privilege('platform_messaging', 'public.sessions', 'DELETE') AS can_delete
+        """
     )
     assert not voice_can_read_messages
-    assert not messaging_can_read_sessions
+    assert messaging_session_privileges is not None
+    # Cross-channel investigation needs tenant-RLS-scoped voice history, but
+    # the messaging worker remains unable to write the voice session domain.
+    assert messaging_session_privileges["can_read"]
+    assert not messaging_session_privileges["can_insert"]
+    assert not messaging_session_privileges["can_update"]
+    assert not messaging_session_privileges["can_delete"]
 
     with pytest.raises(asyncpg.InsufficientPrivilegeError):
         async with pg.transaction():
