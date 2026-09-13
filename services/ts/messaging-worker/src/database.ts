@@ -34,6 +34,7 @@ import {
   explicitlyRequestsImmediateCall,
   factDigest,
   groundAiReply,
+  safeConversationalReply,
   type EligibleKnowledgeFact,
   type GroundedReply,
 } from "./ai-grounding.js";
@@ -984,17 +985,23 @@ async function loadAutomaticCallWork(
              contact.lifecycle_status
       FROM messaging.conversations conversation
       JOIN agents.agent_profile_versions agent
-        ON agent.id=conversation.ai_agent_profile_version_id AND agent.tenant_id=conversation.tenant_id
-        AND agent.id=${payload.agentVersionId}::uuid AND agent.published_at IS NOT NULL
+        ON agent.id=${payload.agentVersionId}::uuid AND agent.tenant_id=conversation.tenant_id
+        AND agent.published_at IS NOT NULL
         AND agent.validation_status='valid' AND 'voice'=ANY(agent.channel_capabilities)
       JOIN automation.flow_versions canonical
         ON canonical.id=${payload.canonicalFlowVersionId}::uuid AND canonical.tenant_id=conversation.tenant_id
-        AND canonical.agent_profile_version_id=agent.id AND canonical.published_at IS NOT NULL
+        AND canonical.agent_profile_version_id=conversation.ai_agent_profile_version_id
+        AND canonical.published_at IS NOT NULL
         AND canonical.validation_status='valid'
         AND EXISTS (SELECT 1 FROM jsonb_array_elements(canonical.definition->'nodes') node
           WHERE node->>'type'='voice.call'
             AND node#>>'{configuration,flowId}'=${payload.flowId}
-            AND node#>>'{configuration,flowVersion}'=${String(payload.flowVersion)})
+            AND node#>>'{configuration,flowVersion}'=${String(payload.flowVersion)}
+            AND (
+              (node#>>'{configuration,agentVersionId}' IS NULL
+               AND agent.id=conversation.ai_agent_profile_version_id)
+              OR node#>>'{configuration,agentVersionId}'=agent.id::text
+            ))
       JOIN crm.contacts contact
         ON contact.id = conversation.contact_id
        AND contact.tenant_id = conversation.tenant_id
@@ -1381,6 +1388,11 @@ async function requireGroundedOutbound(
         [],
         metadata.locale,
       ).text;
+    else if (
+      evidence.code === "generated" &&
+      safeConversationalReply(row.content_text ?? "")
+    )
+      expected = row.content_text ?? "";
   } else if (evidence.kind === "receipt" && uuid(evidence.resourceId)) {
     if (evidence.operation === "handoff") {
       const receipt = await transaction<{ id: string }[]>`

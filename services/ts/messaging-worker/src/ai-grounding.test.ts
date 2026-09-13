@@ -119,7 +119,7 @@ describe("WhatsApp deterministic grounding (typed fixtures, no provider evaluati
     expect(safeConversationalReply(text)).toBe(true);
     expect(groundAiReply({ action: "reply", text }, [], "he")).toMatchObject({
       text,
-      evidence: { kind: "conversation" },
+      evidence: { kind: "conversation", code: "generated" },
     });
   });
 

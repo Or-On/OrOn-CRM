@@ -13,6 +13,7 @@ from oron_agent.grounding import (
     eligible_facts,
     grounding_instruction,
     render_reply,
+    safe_diagnostic_question,
 )
 from pipecat.frames.frames import AggregatedTextFrame, InterruptionFrame, LLMContextFrame
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -111,6 +112,67 @@ def test_ordinary_conversation_does_not_need_a_business_tool(language):
         reply = render_reply(json.dumps({"kind": "conversation", "intent": intent}), [], language)
         assert reply.text == CONVERSATION[language][intent]
         assert reply.decision == intent
+
+
+@pytest.mark.parametrize(
+    ("language", "question"),
+    [
+        ("he", "איזו נורה מהבהבת כרגע?"),
+        ("en", "Which light is blinking now?"),
+    ],
+)
+def test_one_safe_diagnostic_question_can_continue_investigation(language, question):
+    reply = render_reply(
+        json.dumps({"kind": "question", "text": question}, ensure_ascii=False),
+        [],
+        language,
+    )
+    assert reply.text == question
+    assert reply.decision == "diagnostic_question"
+
+
+@pytest.mark.parametrize(
+    ("language", "question"),
+    [
+        ("he", "מה הסיסמה שלך?"),
+        ("he", "מאחר שההחזר אושר, מתי תרצה לקבל אותו?"),
+        ("en", "What is your one-time code?"),
+        ("en", "Unplug the electrical panel and tell me what happens?"),
+        ("en", "Which light is on? What color is it?"),
+        ("he", "Which light is blinking?"),
+        ("en", "איזו נורה מהבהבת?"),
+    ],
+)
+def test_sensitive_leading_unsafe_multi_question_and_wrong_language_are_rejected(
+    language, question
+):
+    assert safe_diagnostic_question(question, language) is None
+    reply = render_reply(
+        json.dumps({"kind": "question", "text": question}, ensure_ascii=False), [], language
+    )
+    assert reply.decision == "unverified"
+
+
+@pytest.mark.asyncio
+async def test_grounding_processors_use_current_turn_language(monkeypatch):
+    current = "he"
+
+    async def load():
+        return []
+
+    gate = VoiceEvidenceGate(tenant_id=TENANT, language=lambda: current, load_records=load)
+    pushed = []
+
+    async def capture(frame, _direction):
+        pushed.append(frame)
+
+    monkeypatch.setattr(gate, "push_frame", capture)
+    current = "en"
+    await gate.process_frame(
+        AggregatedTextFrame('{"kind":"conversation","intent":"clarify"}', AggregationType.SENTENCE),
+        FrameDirection.DOWNSTREAM,
+    )
+    assert pushed[0].text == CONVERSATION["en"]["clarify"]
 
 
 def test_receipt_schema_does_not_collapse_pending_into_confirmed():

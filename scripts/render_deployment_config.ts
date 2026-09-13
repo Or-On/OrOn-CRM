@@ -273,6 +273,9 @@ async function main(): Promise<void> {
       DATABASE_URL: databaseUrl("platform_web", passwords.web),
       VOICE_DATABASE_URL: databaseUrl("platform_voice", passwords.voice),
       AUTH_SERVICE_SECRET: authServiceSecret,
+      ENABLE_REAL_VOICE_PROVIDERS: flags.ENABLE_REAL_VOICE_PROVIDERS,
+      ...voice,
+      ...llm,
     }),
   );
   await privateFile(

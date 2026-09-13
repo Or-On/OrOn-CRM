@@ -498,9 +498,14 @@ class PostgresVoiceRuntime:
             SELECT DISTINCT agent.id, agent.system_prompt, agent.channel_configuration,
               node #>> '{configuration,flowVersion}' AS voice_version
             FROM candidates flow
-            JOIN agents.agent_profile_versions agent
-              ON agent.id = flow.agent_profile_version_id AND agent.tenant_id = flow.tenant_id
             CROSS JOIN LATERAL jsonb_array_elements(flow.definition->'nodes') node
+            JOIN agents.agent_profile_versions agent
+              ON agent.tenant_id = flow.tenant_id
+             AND (
+               (node #>> '{configuration,agentVersionId}' IS NULL
+                AND agent.id = flow.agent_profile_version_id)
+               OR node #>> '{configuration,agentVersionId}' = agent.id::text
+             )
             WHERE flow.tenant_id = :tenant_id AND flow.validation_status = 'valid'
               AND platform.current_tenant_active()
               AND agent.published_at IS NOT NULL AND agent.validation_status = 'valid'
@@ -645,19 +650,21 @@ class PostgresVoiceRuntime:
             """
             SELECT agent.system_prompt
             FROM automation.flow_versions AS flow
+            CROSS JOIN LATERAL jsonb_array_elements(flow.definition -> 'nodes') AS node
             JOIN agents.agent_profile_versions AS agent
-              ON agent.id = flow.agent_profile_version_id
-             AND agent.tenant_id = flow.tenant_id
+              ON agent.tenant_id = flow.tenant_id
+             AND (
+               (node #>> '{configuration,agentVersionId}' IS NULL
+                AND agent.id = flow.agent_profile_version_id)
+               OR node #>> '{configuration,agentVersionId}' = agent.id::text
+             )
             WHERE flow.tenant_id = :tenant_id
               AND flow.published_at IS NOT NULL
               AND agent.published_at IS NOT NULL
+              AND agent.validation_status = 'valid'
               AND 'voice' = ANY(agent.channel_capabilities)
-              AND EXISTS (
-                SELECT 1
-                FROM jsonb_array_elements(flow.definition -> 'nodes') AS node
-                WHERE node ->> 'type' = 'voice.call'
-                  AND node #>> '{configuration,flowId}' = :flow_id
-              )
+              AND node ->> 'type' = 'voice.call'
+              AND node #>> '{configuration,flowId}' = :flow_id
             ORDER BY flow.published_at DESC, flow.version DESC
             LIMIT 1
             """

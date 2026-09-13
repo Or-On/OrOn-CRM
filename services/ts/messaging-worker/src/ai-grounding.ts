@@ -24,7 +24,10 @@ export type ConversationReplyCode = (typeof conversationReplyCodes)[number];
 export interface GroundedReply {
   readonly text: string;
   readonly evidence:
-    | { readonly kind: "conversation"; readonly code: ConversationReplyCode }
+    | {
+        readonly kind: "conversation";
+        readonly code: ConversationReplyCode | "generated";
+      }
     | {
         readonly kind: "knowledge";
         readonly sourceId: string;
@@ -148,7 +151,10 @@ export function groundAiReply(
     if (safeConversationalReply(decision.text)) {
       return {
         text: decision.text.trim(),
-        evidence: { kind: "conversation", code: "clarify" },
+        // Natural diagnostic questions must retain a distinct evidence code.
+        // Treating them as the canned `clarify` reply makes the delivery-time
+        // revalidation compare different text and reject every useful answer.
+        evidence: { kind: "conversation", code: "generated" },
       };
     }
     return conversationalReply("knowledge_unavailable", locale);

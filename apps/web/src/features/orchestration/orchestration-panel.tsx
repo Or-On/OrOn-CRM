@@ -198,6 +198,7 @@ export function OrchestrationPanel({
               configuration: {
                 flowId: data.get("voiceFlowId"),
                 flowVersion: Number(data.get("voiceFlowVersion")),
+                agentVersionId: data.get("voiceAgentProfileVersionId"),
               },
             },
             {
@@ -793,13 +794,40 @@ export function OrchestrationPanel({
                 />
                 <Select
                   id="flow-agent"
-                  label={t("orchestration.agentVersion")}
+                  label={t("orchestration.whatsappAgentVersion")}
                   name="agentProfileVersionId"
                   required
                 >
                   <option value="">{t("orchestration.selectAgent")}</option>
                   {agents
-                    .filter((agent) => agent.published && agent.versionId)
+                    .filter(
+                      (agent) =>
+                        agent.published &&
+                        agent.versionId &&
+                        agent.channels.includes("whatsapp"),
+                    )
+                    .map((agent) => (
+                      <option key={agent.id} value={agent.versionId ?? ""}>
+                        {agent.name} · v{agent.version}
+                      </option>
+                    ))}
+                </Select>
+                <Select
+                  id="flow-voice-agent"
+                  label={t("orchestration.voiceAgentVersion")}
+                  name="voiceAgentProfileVersionId"
+                  required
+                >
+                  <option value="">
+                    {t("orchestration.selectVoiceAgent")}
+                  </option>
+                  {agents
+                    .filter(
+                      (agent) =>
+                        agent.published &&
+                        agent.versionId &&
+                        agent.channels.includes("voice"),
+                    )
                     .map((agent) => (
                       <option key={agent.id} value={agent.versionId ?? ""}>
                         {agent.name} · v{agent.version}

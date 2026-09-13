@@ -29,7 +29,9 @@ def language_profile(language: str) -> LanguageProfile:
     """
     profiles: dict[SupportedLanguage, LanguageProfile] = {
         SupportedLanguage.he: LanguageProfile(
-            stt_hints=[Language.HE],
+            # Soniox v5 can identify language within one stream. Bias toward the
+            # authored language first while allowing a caller to switch naturally.
+            stt_hints=[Language.HE, Language.EN],
             tts_language=Language.HE_IL,
             idle_prompts=[
                 "הלו, אתם עדיין איתי?",
@@ -38,7 +40,7 @@ def language_profile(language: str) -> LanguageProfile:
             ],
         ),
         SupportedLanguage.en: LanguageProfile(
-            stt_hints=[Language.EN],
+            stt_hints=[Language.EN, Language.HE],
             tts_language=Language.EN_US,
             idle_prompts=[
                 "Hello, are you still there?",

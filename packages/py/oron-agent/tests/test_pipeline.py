@@ -99,6 +99,35 @@ def test_explicit_gender_context_sits_between_stt_and_user_aggregator():
     assert processors == [tin, stt, "gender-context", ua, llm, tts, tout, aa]
 
 
+def test_language_context_and_tts_switch_surround_model_and_grounding():
+    tin, stt, ua, llm, tts, tout, aa = _PROCESSORS
+    processors = build_agent_processors(
+        tin,
+        stt,
+        ua,
+        llm,
+        tts,
+        tout,
+        aa,
+        caller_language_context="language-context",
+        evidence_gate="evidence-gate",
+        response_language="tts-language",
+    )
+
+    assert processors == [
+        tin,
+        stt,
+        "language-context",
+        ua,
+        llm,
+        "evidence-gate",
+        "tts-language",
+        tts,
+        tout,
+        aa,
+    ]
+
+
 def test_the_idle_nudge_does_not_have_to_cross_the_llm_to_be_heard():
     """Measured live 2026-08-05 06:03 on session b728717f.
 

@@ -57,6 +57,11 @@ from oron_agent.caller_gender import (
     caller_gender_instruction,
 )
 from oron_agent.config import AgentOverrides, Settings, load_settings, settings_for_call
+from oron_agent.conversation_language import (
+    CallerLanguageContextProcessor,
+    ConversationLanguageState,
+    ResponseLanguageTTSProcessor,
+)
 from oron_agent.cost import UsageObserver
 from oron_agent.flows import initial_node_from_spec
 from oron_agent.flows.resolve import StoredFlowUnavailable, resolve_flow_spec
@@ -243,7 +248,9 @@ async def run_bot(
         settings=OwnershipSonioxSTTService.Settings(
             model=st.soniox_stt_model,
             language_hints=profile.stt_hints,
-            language_hints_strict=True,
+            # This platform is bilingual. Hints keep the authored language
+            # preferred while Soniox can still identify a language switch.
+            language_hints_strict=False,
             context=build_soniox_context(quality_config),
             endpoint_latency_adjustment_level=(
                 st.soniox_endpoint_latency_adjustment_level
@@ -436,6 +443,9 @@ async def run_bot(
         session_id=str(ctx.session_id),
         persona_gender=spec.persona_gender,
     )
+    conversation_language = ConversationLanguageState(spec.language)
+    caller_language_context = CallerLanguageContextProcessor(conversation_language)
+    response_language = ResponseLanguageTTSProcessor(conversation_language)
     turn_planner = HebrewTurnPlanner()
     # Artifacts are staged locally during the call and uploaded at teardown.
     session_dir = SessionDir(ctx.session_id)
@@ -474,17 +484,21 @@ async def run_bot(
         context_aggregator.assistant(),
         gender_classifier=gender_classifier,
         caller_gender_context=caller_gender_context,
+        caller_language_context=caller_language_context,
         turn_planner=turn_planner,
         evidence_context=VoiceEvidenceContext(
-            tenant_id=str(ctx.tenant_id), language=spec.language, load_records=load_knowledge
+            tenant_id=str(ctx.tenant_id),
+            language=lambda: conversation_language.current.value,
+            load_records=load_knowledge,
         ),
         evidence_gate=VoiceEvidenceGate(
             tenant_id=str(ctx.tenant_id),
-            language=spec.language,
+            language=lambda: conversation_language.current.value,
             load_records=load_knowledge,
             speaking_style=quality_config.speakingStyle,
             fallback_behavior=quality_config.fallbackBehavior,
         ),
+        response_language=response_language,
         recognition=RecognitionAcceptanceProcessor(),
         audio_buffer=audiobuffer,
         tts_trim=TrimLeadingSilence(),

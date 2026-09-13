@@ -57,7 +57,7 @@ export function validateAction(node: CanonicalFlowNode): void {
   const keys: Record<CanonicalFlowNode["type"], readonly string[]> = {
     start: [],
     end: [],
-    "voice.call": ["flowId", "flowVersion"],
+    "voice.call": ["flowId", "flowVersion", "agentVersionId"],
     "message.send": ["kind", "text", "template_name", "language", "variables"],
     "crm.update": ["field", "value"],
     handoff: ["reason"],
@@ -100,12 +100,16 @@ export function validateAction(node: CanonicalFlowNode): void {
         !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/iu.test(
           configurationText(cfg, "flowId"),
         ) ||
+        (cfg.agentVersionId !== undefined &&
+          !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/iu.test(
+            configurationText(cfg, "agentVersionId"),
+          )) ||
         typeof cfg.flowVersion !== "number" ||
         !Number.isInteger(cfg.flowVersion) ||
         cfg.flowVersion < 1
       )
         throw new TypeError(
-          "voice action requires an immutable retained flow ID/version",
+          "voice action requires immutable retained flow, version, and optional agent version IDs",
         );
   }
 }

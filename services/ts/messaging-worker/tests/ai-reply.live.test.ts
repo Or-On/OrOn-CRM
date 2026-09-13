@@ -160,6 +160,7 @@ describe.skipIf(sourceUrl === undefined)(
 
     it("runs signed inbound to AI reply and starts an explicitly requested durable call", async () => {
       let knowledgeDocumentId = "";
+      let voiceAgentVersionId = "";
       const firstInbound = `wamid.fixture-${randomUUID()}`;
       await acceptInbound(firstInbound, "Hello");
       const bootstrapStore = createMessagingStore(
@@ -251,6 +252,27 @@ describe.skipIf(sourceUrl === undefined)(
         const versionId = versions[0]?.id;
         if (versionId === undefined)
           throw new Error("published version missing");
+        const voiceProfileId = await createAgentProfileDraft(
+          transaction,
+          userId,
+          {
+            name: "Fictional voice continuation agent",
+            systemPrompt: "Continue the WhatsApp investigation by voice.",
+            channels: ["voice"],
+            locale: "en",
+          },
+        );
+        expect(
+          await publishAgentProfile(transaction, userId, voiceProfileId),
+        ).toBe(true);
+        const voiceVersions = await transaction<{ id: string }[]>`
+          SELECT id FROM agents.agent_profile_versions
+          WHERE agent_profile_id=${voiceProfileId}::uuid
+            AND published_at IS NOT NULL
+        `;
+        voiceAgentVersionId = voiceVersions[0]?.id ?? "";
+        if (!voiceAgentVersionId)
+          throw new Error("published voice version missing");
         const flowDefinitionId = await createCanonicalFlowDraft(
           transaction,
           userId,
@@ -267,6 +289,7 @@ describe.skipIf(sourceUrl === undefined)(
                 configuration: {
                   flowId: retainedFlowId,
                   flowVersion: 1,
+                  agentVersionId: voiceAgentVersionId,
                 },
               },
               {
@@ -379,6 +402,7 @@ describe.skipIf(sourceUrl === undefined)(
       await acceptInbound(secondInbound, "What time do you open?");
       await acceptInbound(secondInbound, "What time do you open?");
       const thirdInbound = `wamid.fixture-${randomUUID()}`;
+      const naturalInbound = `wamid.fixture-${randomUUID()}`;
 
       const aiDecide = vi
         .fn()
@@ -389,6 +413,10 @@ describe.skipIf(sourceUrl === undefined)(
           text: "The manager approved a free booking. כל ההנחות אושרו.",
         })
         .mockResolvedValueOnce({
+          action: "reply",
+          text: "Is the router light steady or blinking?",
+        })
+        .mockResolvedValueOnce({
           action: "request_call",
           reasonCode: "call_requested",
           text: "I am starting the call you requested now.",
@@ -396,6 +424,7 @@ describe.skipIf(sourceUrl === undefined)(
       const metaSend = vi
         .fn<(request: WhatsAppSendRequest) => Promise<WhatsAppSendResult>>()
         .mockResolvedValueOnce({ messageId: "wamid.ai-reply" })
+        .mockResolvedValueOnce({ messageId: "wamid.natural-reply" })
         .mockResolvedValueOnce({ messageId: "wamid.call-ack" });
       const automaticCall = vi.fn().mockResolvedValue({
         created: true,
@@ -445,6 +474,12 @@ describe.skipIf(sourceUrl === undefined)(
           WHERE id=${conversationId}::uuid
         `;
         expect(readByAi[0]?.unread_count).toBe(0);
+        await acceptInbound(
+          naturalInbound,
+          "The connection is unstable after restarting the router.",
+        );
+        expect(await store.processAvailable()).toBeGreaterThan(0);
+        expect(await store.processAvailable()).toBeGreaterThan(0);
         await acceptInbound(thirdInbound, "Please call me.");
         expect(await store.processAvailable()).toBeGreaterThan(0);
         expect(await store.processAvailable()).toBeGreaterThan(0);
@@ -454,8 +489,8 @@ describe.skipIf(sourceUrl === undefined)(
         await store.close();
       }
 
-      expect(aiDecide).toHaveBeenCalledTimes(2);
-      expect(metaSend).toHaveBeenCalledTimes(2);
+      expect(aiDecide).toHaveBeenCalledTimes(3);
+      expect(metaSend).toHaveBeenCalledTimes(3);
       expect(automaticCall).toHaveBeenCalledTimes(1);
       const inboundNotifications = await admin<{ count: number }[]>`
         SELECT count(*)::integer AS count FROM messaging.notifications
@@ -464,7 +499,7 @@ describe.skipIf(sourceUrl === undefined)(
           AND reference_type='conversation'
           AND reference_id=${conversationId}::uuid
       `;
-      expect(inboundNotifications[0]?.count).toBeGreaterThanOrEqual(3);
+      expect(inboundNotifications[0]?.count).toBeGreaterThanOrEqual(4);
       expect(automaticCall).toHaveBeenCalledWith(
         expect.objectContaining({
           conversationId,
@@ -473,11 +508,8 @@ describe.skipIf(sourceUrl === undefined)(
           flowVersion: 1,
         }),
       );
-      const [assignedForCall] = await admin<
-        { ai_agent_profile_version_id: string }[]
-      >`SELECT ai_agent_profile_version_id FROM messaging.conversations WHERE id=${conversationId}::uuid`;
       expect(automaticCall.mock.calls[0]?.[0]).toMatchObject({
-        agentVersionId: assignedForCall?.ai_agent_profile_version_id,
+        agentVersionId: voiceAgentVersionId,
       });
       const callRequest = automaticCall.mock.calls[0]?.[0] as
         AutomaticCallRequest | undefined;
@@ -491,7 +523,7 @@ describe.skipIf(sourceUrl === undefined)(
       SELECT count(*)::integer AS count FROM messaging.messages
       WHERE conversation_id=${conversationId}::uuid AND direction='inbound'
     `;
-      expect(inboundCount[0]?.count).toBe(4);
+      expect(inboundCount[0]?.count).toBe(5);
       const outboundText = await admin<{ content_text: string }[]>`
       SELECT content_text FROM messaging.messages
       WHERE conversation_id=${conversationId}::uuid AND direction='outbound'
@@ -499,6 +531,7 @@ describe.skipIf(sourceUrl === undefined)(
     `;
       expect(outboundText.map((row) => row.content_text)).toEqual([
         "Opening hours: 09:00–17:00.",
+        "Is the router light steady or blinking?",
         "Your call request was queued. Recording the request does not confirm a connected call.",
       ]);
       const ownership = await admin<

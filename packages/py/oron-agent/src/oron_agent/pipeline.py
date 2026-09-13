@@ -12,9 +12,11 @@ def build_agent_processors(
     *,
     gender_classifier=None,
     caller_gender_context=None,
+    caller_language_context=None,
     turn_planner=None,
     evidence_context=None,
     evidence_gate=None,
+    response_language=None,
     recognition=None,
     audio_buffer=None,
     tts_trim=None,
@@ -71,6 +73,10 @@ def build_agent_processors(
     # context before the user aggregator emits the LLM frame for that same turn.
     if caller_gender_context is not None:
         processors.append(caller_gender_context)
+    # Language must be selected before the user aggregator emits the context
+    # that triggers inference for this same accepted turn.
+    if caller_language_context is not None:
+        processors.append(caller_language_context)
     processors.append(user_agg)
     if evidence_context is not None:
         processors.append(evidence_context)
@@ -86,6 +92,10 @@ def build_agent_processors(
         processors.append(turn_planner)
     if evidence_gate is not None:
         processors.append(evidence_gate)
+    # The grounded response now has its final language. Update TTS before that
+    # frame reaches the synthesis service.
+    if response_language is not None:
+        processors.append(response_language)
     # BETWEEN the LLM and TTS, not before both. Its prompt is a TTSSpeakFrame — a
     # DataFrame, so it waits in the queue of every processor ahead of it — and
     # `OpenAILLMService.process_frame` awaits the completion inline. A provider

@@ -104,6 +104,43 @@ CONVERSATION = {
     },
 }
 
+_UNSAFE_DIAGNOSTIC_QUESTION = re.compile(
+    r"(?:https?://|[<>{}\[\]]|"
+    r"\b(?:password|passcode|one[- ]?time code|otp|cvv|credit card|bank account|"
+    r"social security|government id|identity number|confirmed|approved|refunded|"
+    r"booked|completed|paid|unplug|dismantle|open the electrical|send me)\b|"
+    r"(?:סיסמ[הת]|קוד\s+אימות|כרטיס\s+אשראי|חשבון\s+בנק|תעודת\s+זהות|"
+    r"מספר\s+זהות|אושר|אושרה|זוכה|נקבע|בוצע|הושלם|שולם|נתק\s+את\s+החשמל|"
+    r"פתח\s+את\s+לוח\s+החשמל|שלח\s+לי))",
+    re.IGNORECASE,
+)
+
+
+def safe_diagnostic_question(text: object, language: str) -> str | None:
+    """Allow one bounded observation question, never a claim or an action.
+
+    This gives a support call enough freedom to investigate without turning
+    model prose into evidence. Advice and material assertions still require an
+    approved knowledge selector; secrets and dangerous physical steps are not
+    valid diagnostic questions.
+    """
+
+    if not isinstance(text, str):
+        return None
+    question = " ".join(text.split())
+    if not 4 <= len(question) <= 240 or not question.endswith("?"):
+        return None
+    if question.count("?") != 1 or any(mark in question[:-1] for mark in ".!"):
+        return None
+    if _UNSAFE_DIAGNOSTIC_QUESTION.search(question) or re.search(r"\d{5,}", question):
+        return None
+    locale = "he" if language.startswith("he") else "en"
+    if locale == "he" and len(re.findall(r"[\u05d0-\u05ea]", question)) < 2:
+        return None
+    if locale == "en" and len(re.findall(r"[A-Za-z]", question)) < 2:
+        return None
+    return question
+
 
 def eligible_facts(records: list[dict[str, Any]], tenant_id: str) -> list[KnowledgeFact]:
     """Validate adapter output and reject conflicting keys, not just chosen IDs."""
@@ -168,9 +205,19 @@ def grounding_instruction(facts: list[KnowledgeFact], language: str) -> str:
         payload.append({**fact.selector(), "value": fact.value})
     return (
         "VOICE EVIDENCE PROTOCOL v1. Continue using the existing routing tools when needed. "
+        f"The latest accepted caller turn is in {'Hebrew' if locale == 'he' else 'English'}; "
+        "select the intent for that language and the renderer will speak it in that language. "
         "For spoken output return ONE JSON object, without markdown or other text. "
         'Use {"kind":"fact","sourceId":"...","documentId":"...","version":1,'
         '"factKey":"..."} to select an exact eligible approved statement. '
+        'Use {"kind":"question","text":"..."} only to ask ONE short, non-leading '
+        "diagnostic question about an observation, symptom, preference, timing, device "
+        "or clarification. It must end with one question mark. It must not instruct an "
+        "action, request a password, authentication code, financial or government "
+        "identifier, or contain a claim that something was approved or completed. "
+        "Prefer a safe diagnostic question when one missing observation can advance the "
+        "investigation. Use unverified only when the caller asks for an answer that "
+        "requires a missing approved business fact, not merely because details are incomplete. "
         'Otherwise use {"kind":"conversation","intent":"..."}. Allowed intents: '
         + ", ".join(CONVERSATION[locale])
         + ". "
@@ -233,6 +280,16 @@ def render_reply(
                     else "I want to make sure I understand. Could you explain what needs to happen?"
                 )
             return GroundedReply(rendered, intent)
+    if (
+        value.get("kind") == "question"
+        and set(value)
+        == {
+            "kind",
+            "text",
+        }
+        and (question := safe_diagnostic_question(value.get("text"), language))
+    ):
+        return GroundedReply(question, "diagnostic_question")
     if value.get("kind") == "fact" and set(value) == {
         "kind",
         "sourceId",
@@ -254,7 +311,7 @@ class VoiceEvidenceGate(FrameProcessor):
         self,
         *,
         tenant_id: str,
-        language: str,
+        language: str | Callable[[], str],
         load_records: Callable[[], Awaitable[list[dict[str, Any]]]],
         speaking_style: str = "concise",
         fallback_behavior: str = "clarify",
@@ -282,10 +339,11 @@ class VoiceEvidenceGate(FrameProcessor):
                 facts = []
             if generation != self._generation:
                 return
+            language = self._language() if callable(self._language) else self._language
             reply = render_reply(
                 frame.text,
                 facts,
-                self._language,
+                language,
                 speaking_style=self._speaking_style,
                 fallback_behavior=self._fallback_behavior,
             )
@@ -302,7 +360,7 @@ class VoiceEvidenceContext(FrameProcessor):
         self,
         *,
         tenant_id: str,
-        language: str,
+        language: str | Callable[[], str],
         load_records: Callable[[], Awaitable[list[dict[str, Any]]]],
         **kwargs,
     ):
@@ -336,7 +394,8 @@ class VoiceEvidenceContext(FrameProcessor):
                 )
             ]
             frame.context.set_messages(messages)
+            language = self._language() if callable(self._language) else self._language
             frame.context.add_message(
-                {"role": "system", "content": grounding_instruction(facts, self._language)}
+                {"role": "system", "content": grounding_instruction(facts, language)}
             )
         await self.push_frame(frame, direction)

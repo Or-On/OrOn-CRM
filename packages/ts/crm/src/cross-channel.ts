@@ -805,7 +805,7 @@ export async function queueWhatsAppAutomaticCall(
 
   const candidates = await sql<AutomaticCallCandidate[]>`
     SELECT conversation.contact_id, conversation.ownership_epoch, trigger.content_text AS trigger_text,
-           conversation.ai_agent_profile_version_id AS agent_version_id, flow.id AS canonical_flow_version_id,
+           voice_agent.id AS agent_version_id, flow.id AS canonical_flow_version_id,
            node -> 'configuration' AS voice_configuration
     FROM messaging.conversations conversation
     JOIN messaging.channels channel
@@ -832,6 +832,16 @@ export async function queueWhatsAppAutomaticCall(
      AND definition.archived_at IS NULL
      AND definition.channel_capabilities @> ARRAY['voice','whatsapp']::text[]
     CROSS JOIN LATERAL jsonb_array_elements(flow.definition -> 'nodes') node
+    JOIN agents.agent_profile_versions voice_agent
+      ON voice_agent.tenant_id=conversation.tenant_id
+     AND voice_agent.published_at IS NOT NULL
+     AND voice_agent.validation_status='valid'
+     AND 'voice'=ANY(voice_agent.channel_capabilities)
+     AND (
+       (node #>> '{configuration,agentVersionId}' IS NULL
+        AND voice_agent.id=conversation.ai_agent_profile_version_id)
+       OR node #>> '{configuration,agentVersionId}'=voice_agent.id::text
+     )
     WHERE conversation.id = ${conversationId}::uuid
       AND conversation.ownership_mode = 'ai'
       AND conversation.ai_enabled_by_user_id = ${actorUserId}::uuid
@@ -853,7 +863,7 @@ export async function queueWhatsAppAutomaticCall(
       )
     ORDER BY flow.published_at DESC, flow.version DESC
     LIMIT 1
-    FOR SHARE OF conversation, contact, trigger
+    FOR SHARE OF conversation, contact, trigger, voice_agent
   `;
   const candidate = candidates[0];
   if (candidate === undefined)
