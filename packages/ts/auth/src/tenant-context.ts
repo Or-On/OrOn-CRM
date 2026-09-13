@@ -10,8 +10,16 @@ export interface TenantExecutionIdentity {
   readonly role: Role;
 }
 
+// PostgreSQL's uuid type accepts canonical UUID identifiers independently of
+// RFC version/variant bits. Keep the application check equally strict about
+// shape while allowing reserved identifiers such as the migration bootstrap
+// tenant (00000000-0000-0000-0000-000000000001).
 const uuidPattern =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+
+export function isUuidIdentifier(value: string): boolean {
+  return uuidPattern.test(value);
+}
 
 export async function withTenantTransaction<T>(
   databaseUrl: string,
@@ -21,8 +29,8 @@ export async function withTenantTransaction<T>(
   if (!/^postgres(?:ql)?:\/\//u.test(databaseUrl))
     throw new TypeError("databaseUrl must use PostgreSQL");
   if (
-    !uuidPattern.test(identity.tenantId) ||
-    !uuidPattern.test(identity.userId)
+    !isUuidIdentifier(identity.tenantId) ||
+    !isUuidIdentifier(identity.userId)
   ) {
     throw new TypeError("tenant and user context must use UUID identifiers");
   }
