@@ -4088,8 +4088,31 @@ textarea,
 }
 
 @media (max-width: 47.999rem) {
+  .shell--inbox,
+  .shell--expanded.shell--inbox {
+    --or-header-height: 6.25rem;
+  }
+
   .shell--inbox .shell__topbar {
-    padding-inline: 0.55rem;
+    display: grid;
+    grid-template-rows: 3.25rem 3rem;
+    align-items: center;
+    min-block-size: var(--or-header-height);
+    padding: 0;
+  }
+
+  .shell--inbox .shell__topbar .topbar-leading {
+    inline-size: 100%;
+    min-block-size: 3.25rem;
+    padding-inline: 0.75rem;
+  }
+
+  .shell--inbox .shell__topbar .topbar-actions {
+    justify-content: flex-end;
+    inline-size: 100%;
+    min-block-size: 3rem;
+    padding-inline: 0.75rem;
+    border-block-start: 1px solid var(--or-border);
   }
 
   .inbox-topbar-brand span {
@@ -4097,11 +4120,20 @@ textarea,
   }
 
   .inbox-topbar-search {
-    inline-size: min(100%, 20rem);
+    flex: 1 1 auto;
+    inline-size: auto;
+    max-inline-size: none;
   }
 
   .shell--inbox .topbar-actions .language-control {
-    display: none;
+    display: block;
+  }
+
+  .shell--inbox .topbar-actions .language-control .or-select {
+    inline-size: 7rem;
+    min-block-size: 2.25rem;
+    padding-inline: 0.6rem 1.65rem;
+    font-size: 0.78rem;
   }
 
   .shell--inbox .inbox-workspace,
@@ -4174,8 +4206,14 @@ textarea,
     pointer-events: auto;
   }
 
-  .shell--inbox .inbox-navigator,
+  .shell--inbox .inbox-navigator {
+    display: flex;
+    flex-direction: column;
+    grid-column: 1;
+  }
+
   .shell--inbox .inbox-conversation {
+    display: grid;
     grid-column: 1;
   }
 
@@ -4190,6 +4228,25 @@ textarea,
 
   .shell--inbox .conversation-header__state {
     display: none;
+  }
+
+  .shell--inbox .inbox-workspace .inbox-navigator,
+  .shell--inbox .inbox-workspace .inbox-conversation {
+    transition-duration: 160ms;
+  }
+
+  .shell--inbox .inbox-workspace .inbox-conversation {
+    visibility: hidden;
+  }
+
+  .shell--inbox .inbox-workspace.inbox-layout--thread .inbox-navigator {
+    display: flex;
+    visibility: hidden;
+  }
+
+  .shell--inbox .inbox-workspace.inbox-layout--thread .inbox-conversation {
+    display: grid;
+    visibility: visible;
   }
 
   .conversation-composer .composer-footer {

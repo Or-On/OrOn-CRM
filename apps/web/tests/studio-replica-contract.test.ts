@@ -34,6 +34,16 @@ describe("Studio Admin replica contract", () => {
     );
   });
 
+  it("keeps the phone Inbox navigator compact and restores every utility", () => {
+    expect(css).toMatch(
+      /@media\s*\(max-width:\s*47\.999rem\)[\s\S]*\.shell--inbox \.inbox-navigator\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;/u,
+    );
+    expect(css).toMatch(
+      /\.shell--inbox \.topbar-actions \.language-control\s*\{[^}]*display:\s*block;/u,
+    );
+    expect(css).toContain("--or-header-height: 6.25rem");
+  });
+
   it("isolates the root theme reveal and keeps reduced motion instantaneous", () => {
     expect(css).toMatch(
       /::view-transition-old\(root\),\s*::view-transition-new\(root\)\s*\{[^}]*pointer-events:\s*none;[^}]*animation:\s*none;[^}]*mix-blend-mode:\s*normal;/su,
