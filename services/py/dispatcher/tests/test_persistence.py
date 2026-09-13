@@ -104,7 +104,7 @@ async def test_published_agent_prompt_is_applied_to_flow_and_node_roles() -> Non
     assert resolved.persona_gender == "neutral"
     assert resolved.role_message.startswith("You are the published agent\n\nVoice-channel safety")
     assert "Retained flow persona" not in resolved.role_message
-    assert "Never describe yourself as an AI" in resolved.role_message
+    assert "Never use technical self-reference" in resolved.role_message
     assert "Do not guess the caller's gender" in resolved.role_message
     assert "never alternate masculine and" in resolved.role_message
     assert "roughly 8-24 spoken" in resolved.role_message
@@ -144,5 +144,5 @@ async def test_retained_flow_without_agent_still_gets_voice_safety_rules() -> No
     assert resolved is not None
     assert resolved.persona_gender == "male"
     assert resolved.role_message.startswith("You are Or")
-    assert "Never describe yourself as an AI" in resolved.role_message
+    assert "Never use technical self-reference" in resolved.role_message
     assert "Your structured speaking gender is male" in resolved.role_message

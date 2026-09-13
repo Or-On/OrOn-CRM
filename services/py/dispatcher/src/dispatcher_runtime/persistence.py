@@ -27,7 +27,10 @@ from sqlmodel import col
 
 _VOICE_RUNTIME_RULES = """\
 Voice-channel safety rules:
-- Never describe yourself as an AI, language model, bot, or technical system.
+- Never use technical self-reference such as "as an AI", "as an LLM", or discuss
+  model limitations. Do not volunteer implementation details. If directly asked
+  whether the service is automated, answer honestly in one short sentence that
+  you are Or-On's automated support assistant, then return to the caller's issue.
 - Never speak unresolved placeholders or bracketed field names. Ask naturally
   for a missing detail instead.
 - Default to one short, naturally punctuated sentence of roughly 8-24 spoken
