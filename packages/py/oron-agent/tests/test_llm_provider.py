@@ -102,6 +102,48 @@ def test_compat_provider_does_not_inject_a_start_event_after_customer_speech():
     assert params["messages"] == messages
 
 
+def test_compat_provider_drops_empty_streamed_tool_placeholder_pair():
+    """Gemini emits an empty tool delta before the named call on some turns.
+
+    Pipecat retains both pairs; sending the placeholder back makes Google's
+    OpenAI-compatible endpoint reject the next node because a native function
+    response name cannot be empty.
+    """
+    llm = build_llm(
+        LlmProvider.OPENAI_COMPAT,
+        **VERTEX_ARGS,
+        api_key="key",
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+        model="gemini-2.5-flash",
+    )
+    messages = [
+        {"role": "user", "content": "I need help."},
+        {
+            "role": "assistant",
+            "tool_calls": [
+                {"id": "", "function": {"name": "", "arguments": "{}"}, "type": "function"}
+            ],
+        },
+        {"role": "tool", "content": "IN_PROGRESS", "tool_call_id": ""},
+        {
+            "role": "assistant",
+            "tool_calls": [
+                {
+                    "id": "function-call-1",
+                    "function": {"name": "continue_support_done", "arguments": "{}"},
+                    "type": "function",
+                }
+            ],
+        },
+        {"role": "tool", "content": '{"status":"acknowledged"}', "tool_call_id": "function-call-1"},
+    ]
+
+    params = llm.build_chat_completion_params({"messages": messages})
+
+    assert params["messages"] == [messages[0], messages[3], messages[4]]
+    assert messages[1]["tool_calls"][0]["id"] == ""
+
+
 def test_google_gemini_3_cannot_claim_thinking_is_disabled():
     with pytest.raises(ValidationError, match="Gemini 2.5"):
         _settings(

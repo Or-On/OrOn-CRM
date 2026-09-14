@@ -78,6 +78,62 @@ class _BoundedOpenAILLMService(OpenAILLMService):
         super().__init__(*args, **kwargs)
         self._request_timeout_secs = request_timeout_secs
 
+    @staticmethod
+    def _without_empty_tool_calls(messages: list[Any]) -> list[Any]:
+        """Remove provider-generated placeholder tool calls with no identity.
+
+        Google's OpenAI-compatible stream can emit an empty tool-call delta
+        immediately before the real, named call. Pipecat 1.8.1 retains both as
+        completed context entries. On the next node Gemini converts the empty
+        pair to a native ``function_response`` whose name is empty and rejects
+        the entire request with HTTP 400. The placeholder has no callable name,
+        arguments or result, so it carries no conversational information.
+
+        Copy only messages that need changing; the shared LLM context must stay
+        untouched because the other processors still own it.
+        """
+
+        cleaned: list[Any] = []
+        valid_call_ids: set[str] = set()
+        for message in messages:
+            if not isinstance(message, dict) or message.get("role") != "assistant":
+                cleaned.append(message)
+                continue
+            tool_calls = message.get("tool_calls")
+            if not isinstance(tool_calls, list):
+                cleaned.append(message)
+                continue
+            valid_calls = [
+                call
+                for call in tool_calls
+                if isinstance(call, dict)
+                and isinstance(call.get("id"), str)
+                and bool(call["id"].strip())
+                and isinstance(call.get("function"), dict)
+                and isinstance(call["function"].get("name"), str)
+                and bool(call["function"]["name"].strip())
+            ]
+            valid_call_ids.update(call["id"] for call in valid_calls)
+            if valid_calls:
+                cleaned.append({**message, "tool_calls": valid_calls})
+            elif message.get("content"):
+                cleaned.append(
+                    {key: value for key, value in message.items() if key != "tool_calls"}
+                )
+
+        # A placeholder tool result follows its placeholder assistant call.
+        # Keep only results whose call survived the pass above. Ordinary
+        # contexts without tool calls are returned byte-for-byte equivalent.
+        return [
+            message
+            for message in cleaned
+            if not (
+                isinstance(message, dict)
+                and message.get("role") == "tool"
+                and message.get("tool_call_id") not in valid_call_ids
+            )
+        ]
+
     def build_chat_completion_params(self, params_from_context) -> dict:
         params = super().build_chat_completion_params(params_from_context)
         # Pipecat includes both names in the dict, with one set to a NotGiven
@@ -90,6 +146,9 @@ class _BoundedOpenAILLMService(OpenAILLMService):
         elif isinstance(params.get("max_completion_tokens"), int):
             params.pop("max_tokens", None)
         messages = params.get("messages")
+        if isinstance(messages, list):
+            messages = self._without_empty_tool_calls(messages)
+            params["messages"] = messages
         if isinstance(messages, list) and not any(
             not isinstance(message, dict) or message.get("role") not in {"system", "developer"}
             for message in messages
