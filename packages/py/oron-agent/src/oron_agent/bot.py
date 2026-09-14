@@ -474,6 +474,13 @@ async def run_bot(
         stt.enable_ownership()
         voice_control.track_producer(llm)
         voice_control.track_producer(tts, synthesis=True)
+    evidence_gate = VoiceEvidenceGate(
+        tenant_id=str(ctx.tenant_id),
+        language=lambda: conversation_language.current.value,
+        load_records=load_knowledge,
+        speaking_style=quality_config.speakingStyle,
+        fallback_behavior=quality_config.fallbackBehavior,
+    )
     processors = build_agent_processors(
         transport.input(),
         stt,
@@ -490,14 +497,9 @@ async def run_bot(
             tenant_id=str(ctx.tenant_id),
             language=lambda: conversation_language.current.value,
             load_records=load_knowledge,
+            on_caller_text=evidence_gate.observe_caller_text,
         ),
-        evidence_gate=VoiceEvidenceGate(
-            tenant_id=str(ctx.tenant_id),
-            language=lambda: conversation_language.current.value,
-            load_records=load_knowledge,
-            speaking_style=quality_config.speakingStyle,
-            fallback_behavior=quality_config.fallbackBehavior,
-        ),
+        evidence_gate=evidence_gate,
         response_language=response_language,
         recognition=RecognitionAcceptanceProcessor(),
         audio_buffer=audiobuffer,

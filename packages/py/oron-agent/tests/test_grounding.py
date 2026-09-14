@@ -7,6 +7,9 @@ from unittest.mock import AsyncMock
 import pytest
 from oron_agent.grounding import (
     CONVERSATION,
+    DUPLICATE_RECOVERY_QUESTION,
+    MODEL_CONVERSATION_INTENTS,
+    PROGRESS_QUESTION,
     ActionReceipt,
     VoiceEvidenceContext,
     VoiceEvidenceGate,
@@ -114,6 +117,73 @@ def test_ordinary_conversation_does_not_need_a_business_tool(language):
         assert reply.decision == intent
 
 
+def test_bare_acknowledgement_is_not_advertised_as_a_complete_support_turn():
+    instruction = grounding_instruction([], "he")
+    allowed = instruction.split("Allowed intents: ", 1)[1].split(". Caller claims", 1)[0]
+    assert "acknowledge" not in allowed
+    assert "acknowledge" not in MODEL_CONVERSATION_INTENTS
+    assert "asks what happens next" in instruction
+
+
+@pytest.mark.parametrize(
+    ("language", "caller_text"),
+    [
+        ("he", "אני רוצה להמשיך לדבר על הבעיה בממיר"),
+        ("he", "אוקיי, מה הלאה?"),
+        ("en", "I need to continue with this issue"),
+        ("en", "What happens next?"),
+    ],
+)
+def test_acknowledgement_fallback_advances_an_active_support_turn(language, caller_text):
+    reply = render_reply(
+        '{"kind":"conversation","intent":"acknowledge"}',
+        [],
+        language,
+        latest_caller_text=caller_text,
+    )
+    locale = "he" if language == "he" else "en"
+    assert reply.text == PROGRESS_QUESTION[locale]
+    assert reply.decision == "progress_question"
+
+
+def test_duplicate_model_reply_is_replaced_before_tts():
+    reply = render_reply(
+        json.dumps({"kind": "question", "text": "האם הממיר עדיין מנותק?"}, ensure_ascii=False),
+        [],
+        "he",
+        previous_spoken_text="האם הממיר עדיין מנותק?",
+    )
+    assert reply.text == PROGRESS_QUESTION["he"]
+    assert reply.decision == "duplicate_recovery"
+
+
+@pytest.mark.asyncio
+async def test_repeated_acknowledgement_cannot_repeat_its_spoken_recovery(monkeypatch):
+    async def load():
+        return []
+
+    gate = VoiceEvidenceGate(tenant_id=TENANT, language="he", load_records=load)
+    gate.observe_caller_text("אוקיי, מה הלאה?")
+    pushed = []
+
+    async def capture(frame, _direction):
+        pushed.append(frame)
+
+    monkeypatch.setattr(gate, "push_frame", capture)
+    for _ in range(2):
+        await gate.process_frame(
+            AggregatedTextFrame(
+                '{"kind":"conversation","intent":"acknowledge"}', AggregationType.SENTENCE
+            ),
+            FrameDirection.DOWNSTREAM,
+        )
+    assert [frame.text for frame in pushed] == [
+        PROGRESS_QUESTION["he"],
+        DUPLICATE_RECOVERY_QUESTION["he"],
+    ]
+    assert all("תודה על השיתוף" not in frame.text for frame in pushed)
+
+
 @pytest.mark.parametrize(
     ("language", "question"),
     [
@@ -173,6 +243,40 @@ async def test_grounding_processors_use_current_turn_language(monkeypatch):
         FrameDirection.DOWNSTREAM,
     )
     assert pushed[0].text == CONVERSATION["en"]["clarify"]
+
+
+@pytest.mark.asyncio
+async def test_current_caller_turn_reaches_the_final_evidence_gate(monkeypatch):
+    async def load():
+        return []
+
+    gate = VoiceEvidenceGate(tenant_id=TENANT, language="he", load_records=load)
+    context_processor = VoiceEvidenceContext(
+        tenant_id=TENANT,
+        language="he",
+        load_records=load,
+        on_caller_text=gate.observe_caller_text,
+    )
+    pushed = []
+
+    async def capture_context(_frame, _direction):
+        pass
+
+    async def capture_gate(frame, _direction):
+        pushed.append(frame)
+
+    monkeypatch.setattr(context_processor, "push_frame", capture_context)
+    monkeypatch.setattr(gate, "push_frame", capture_gate)
+    context = LLMContext(messages=[{"role": "user", "content": "אוקיי, מה הלאה?"}])
+    await context_processor.process_frame(LLMContextFrame(context), FrameDirection.DOWNSTREAM)
+    await gate.process_frame(
+        AggregatedTextFrame(
+            '{"kind":"conversation","intent":"acknowledge"}', AggregationType.SENTENCE
+        ),
+        FrameDirection.DOWNSTREAM,
+    )
+    assert pushed[0].text == PROGRESS_QUESTION["he"]
+    assert pushed[0].metadata["grounding"]["decision"] == "progress_question"
 
 
 def test_receipt_schema_does_not_collapse_pending_into_confirmed():
