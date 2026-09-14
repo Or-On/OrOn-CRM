@@ -176,6 +176,7 @@ async def test_audio_generation_comes_from_original_synthesis_request(monkeypatc
     producer = FrameProcessor()
     producer._register_event_handler("on_tts_request")
     control.track_producer(producer, synthesis=True)
+    assert producer._event_handlers["on_tts_request"].is_sync
     gate = VoiceControlGate(control, audio=True)
     push = AsyncMock()
     monkeypatch.setattr(gate, "push_frame", push)
@@ -184,7 +185,6 @@ async def test_audio_generation_comes_from_original_synthesis_request(monkeypatc
     request.metadata["ownership_generation"] = control.generation
     await producer._call_event_handler("on_before_process_frame", request)
     await producer._call_event_handler("on_tts_request", "old", "not retained")
-    await producer.cleanup()  # Drain asynchronous SDK event callbacks.
     read.return_value = VoiceControlSnapshot(1, "paused")
     await control.refresh()
     read.return_value = VoiceControlSnapshot(2, "ai")
@@ -196,7 +196,6 @@ async def test_audio_generation_comes_from_original_synthesis_request(monkeypatc
     request.metadata["ownership_generation"] = control.generation
     await producer._call_event_handler("on_before_process_frame", request)
     await producer._call_event_handler("on_tts_request", "new", "not retained")
-    await producer.cleanup()
     frame = TTSAudioRawFrame(audio=b"\x00\x00", sample_rate=16000, num_channels=1, context_id="new")
     await producer._call_event_handler("on_before_push_frame", frame)
     await gate.process_frame(frame, FrameDirection.DOWNSTREAM)

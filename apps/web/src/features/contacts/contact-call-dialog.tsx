@@ -42,7 +42,6 @@ export function ContactCallDialog({
       item.validationStatus !== "invalid" &&
       item.validationStatus !== "revoked",
   );
-  // Tenant consent management is absent, but persisted restrictions remain binding.
   const eligible =
     enabled &&
     canCall &&
@@ -104,7 +103,11 @@ export function ContactCallDialog({
           </p>
         </div>
         {!eligible ? (
-          <p className="public-note">{t("tenantPrimary.callUnavailable")}</p>
+          <p className="public-note">
+            {contact.voiceConsent !== "granted"
+              ? t("contacts.callRequiresVoiceConsent")
+              : t("tenantPrimary.callUnavailable")}
+          </p>
         ) : null}
         {error && review === undefined ? (
           <p role="alert" className="form-error">

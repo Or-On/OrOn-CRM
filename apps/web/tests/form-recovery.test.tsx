@@ -97,6 +97,9 @@ describe("form recovery and permission presentation", () => {
     expect(
       within(profileDialog).getByRole("textbox", { name: "Name" }),
     ).toBeTruthy();
+    expect(
+      within(profileDialog).getByRole("combobox", { name: "Voice consent" }),
+    ).toBeTruthy();
     fireEvent.click(
       within(profileDialog).getByRole("button", { name: en.common.close }),
     );
@@ -132,6 +135,38 @@ describe("form recovery and permission presentation", () => {
       2,
     );
     expect(transport.mutate).not.toHaveBeenCalled();
+  });
+
+  it("lets an authorized operator record voice consent for manual calling", async () => {
+    transport.mutate.mockResolvedValue({});
+    render(localized(<ContactDetailPanel contact={contact} activity={[]} />));
+    fireEvent.click(
+      screen.getByRole("button", { name: en.premiumPrimary.profileEdit }),
+    );
+    const profileDialog = screen.getByRole("dialog", {
+      name: en.premiumPrimary.profileEdit,
+    });
+    fireEvent.change(
+      within(profileDialog).getByRole("combobox", { name: "Voice consent" }),
+      { target: { value: "granted" } },
+    );
+    fireEvent.click(
+      within(profileDialog).getByRole("button", {
+        name: en.contacts.saveProfile,
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(transport.mutate).toHaveBeenCalledWith(
+        `/api/crm/contacts/${contact.id}`,
+        {
+          name: contact.name,
+          email: "",
+          company: "",
+          voiceConsent: "granted",
+        },
+        { method: "PATCH" },
+      ),
+    );
   });
 
   it("sends custom numeric and boolean fields as typed values", async () => {

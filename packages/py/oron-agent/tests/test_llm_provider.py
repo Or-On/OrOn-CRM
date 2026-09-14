@@ -69,6 +69,39 @@ def test_compat_provider_receives_voice_latency_controls():
     assert "max_completion_tokens" not in params
 
 
+def test_compat_provider_supplies_a_non_customer_turn_for_an_immediate_opener():
+    """Gemini maps system messages to system_instruction and rejects an empty contents list."""
+    llm = build_llm(
+        LlmProvider.OPENAI_COMPAT,
+        **VERTEX_ARGS,
+        api_key="key",
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+        model="gemini-2.5-flash",
+    )
+    original = [{"role": "system", "content": "Trusted flow objective"}]
+    params = llm.build_chat_completion_params({"messages": original})
+    assert params["messages"][:-1] == original
+    assert params["messages"][-1]["role"] == "user"
+    assert "not customer speech" in params["messages"][-1]["content"]
+    assert original == [{"role": "system", "content": "Trusted flow objective"}]
+
+
+def test_compat_provider_does_not_inject_a_start_event_after_customer_speech():
+    llm = build_llm(
+        LlmProvider.OPENAI_COMPAT,
+        **VERTEX_ARGS,
+        api_key="key",
+        base_url=COHERE,
+        model="command-a-plus-05-2026",
+    )
+    messages = [
+        {"role": "system", "content": "Trusted flow objective"},
+        {"role": "user", "content": "hello"},
+    ]
+    params = llm.build_chat_completion_params({"messages": messages})
+    assert params["messages"] == messages
+
+
 def test_google_gemini_3_cannot_claim_thinking_is_disabled():
     with pytest.raises(ValidationError, match="Gemini 2.5"):
         _settings(

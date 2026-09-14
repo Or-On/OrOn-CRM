@@ -206,6 +206,17 @@ class VoiceController:
         processor.add_event_handler("on_before_push_frame", before_push)
         if synthesis:
             processor.add_event_handler("on_tts_request", requested)
+            # Pipecat registers on_tts_request as a background event. Soniox
+            # can return the first WebSocket audio frame before that task has
+            # recorded the request's ownership, so the fail-closed output gate
+            # correctly—but invisibly—drops the whole utterance. This pinned
+            # SDK seam makes request ownership part of the awaited TTS request
+            # boundary. All handlers are still awaited and no stale generation
+            # is ever relabelled as current.
+            event = processor._event_handlers.get("on_tts_request")  # noqa: SLF001
+            if event is None:
+                raise RuntimeError("TTS processor does not expose on_tts_request")
+            event.is_sync = True
 
     def attach(
         self,

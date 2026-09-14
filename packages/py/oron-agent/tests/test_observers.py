@@ -13,7 +13,14 @@ def test_the_rtvi_observer_is_registered():
     """It carries transcripts and TTFB onto the transport's data channel — drop
     it and the console's live captions go quiet, with nothing failing."""
     src = inspect.getsource(bot.run_bot)
-    assert "RTVIObserver(rtvi" in src
+    assert "RTVIObserver(" in src
+    assert "rtvi," in src
+
+
+def test_rtvi_does_not_require_the_removed_nltk_runtime_dependency():
+    """Final bot output remains observable without Pipecat's raw-token sentence matcher."""
+    src = inspect.getsource(bot.run_bot)
+    assert "bot_llm_enabled=False" in src
 
 
 def test_pipecat_owns_the_tracing_stack():

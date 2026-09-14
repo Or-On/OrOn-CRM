@@ -138,6 +138,7 @@ export function ContactDetailPanel({
           name: data.get("name"),
           email: data.get("email"),
           company: data.get("company"),
+          voiceConsent: data.get("voiceConsent"),
         },
         { method: "PATCH" },
       ),
@@ -361,6 +362,17 @@ export function ContactDetailPanel({
                   label={t("common.company")}
                   name="company"
                 />
+                <Select
+                  defaultValue={contact.voiceConsent}
+                  hint={t("contacts.voiceConsentHint")}
+                  id="detail-voice-consent"
+                  label={t("contacts.voiceConsent")}
+                  name="voiceConsent"
+                >
+                  <option value="unknown">{t("common.unknown")}</option>
+                  <option value="granted">{t("common.granted")}</option>
+                  <option value="revoked">{t("common.revoked")}</option>
+                </Select>
                 <Button disabled={pending || !canEdit} type="submit">
                   {t("contacts.saveProfile")}
                 </Button>

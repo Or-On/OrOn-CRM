@@ -542,7 +542,14 @@ async def run_bot(
         UsageObserver(usage),
         turn_taking_observer,
         quality_observer,
-        RTVIObserver(rtvi, params=RTVIObserverParams(metrics_enabled=True)),
+        # Raw LLM token events use Pipecat's optional NLTK sentence matcher.
+        # NLTK is intentionally removed from the runtime image while its
+        # unpatched security advisory remains open. The final bot-output/TTS,
+        # speaking, transcription and metrics events stay enabled.
+        RTVIObserver(
+            rtvi,
+            params=RTVIObserverParams(metrics_enabled=True, bot_llm_enabled=False),
+        ),
     ]
 
     worker = PipelineWorker(

@@ -722,6 +722,8 @@
     "profile": "Profile",
     "saveProfile": "Save profile",
     "voiceConsent": "Voice consent",
+    "voiceConsentHint": "Grant only after the contact has agreed to receive telephone calls. Revoked consent blocks manual calling.",
+    "callRequiresVoiceConsent": "Manual calling is blocked until voice consent is set to Granted in Edit profile.",
     "call": "Start simulator call",
     "callHint": "Real carrier dialing remains disabled.",
     "voiceFlow": "Published voice flow",

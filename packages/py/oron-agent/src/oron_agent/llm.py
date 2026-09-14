@@ -89,6 +89,28 @@ class _BoundedOpenAILLMService(OpenAILLMService):
             params.pop("max_completion_tokens", None)
         elif isinstance(params.get("max_completion_tokens"), int):
             params.pop("max_tokens", None)
+        messages = params.get("messages")
+        if isinstance(messages, list) and not any(
+            not isinstance(message, dict) or message.get("role") not in {"system", "developer"}
+            for message in messages
+        ):
+            # Google's OpenAI-compatible endpoint rejects a request whose
+            # entire context becomes Gemini's system instruction: its native
+            # `contents` array is then empty. Immediate outbound openers have
+            # exactly that shape before the caller has spoken. Supply a
+            # transport event, explicitly not customer speech, so the model can
+            # execute the trusted flow objective without inventing a user turn.
+            params["messages"] = [
+                *messages,
+                {
+                    "role": "user",
+                    "content": (
+                        "Platform call-start event (not customer speech): the telephone "
+                        "connection is active. Begin according to the trusted flow objective "
+                        "and conversation context."
+                    ),
+                },
+            ]
         params["timeout"] = self._request_timeout_secs
         return params
 
