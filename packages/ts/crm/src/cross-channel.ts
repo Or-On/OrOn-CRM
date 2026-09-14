@@ -786,7 +786,16 @@ export function explicitWhatsAppCallbackIntent(text: string): boolean {
     /^(?:(?:please\s+)?call\s+me(?:\s+now)?(?:\s+please)?|(?:can|could|would|will)\s+you\s+(?:please\s+)?call\s+me(?:\s+now)?(?:\s+please)?|(?:please\s+)?give\s+me\s+a\s+call(?:\s+now)?(?:\s+please)?|i(?:\s+would|['’]d)\s+like\s+(?:you\s+)?to\s+call\s+me(?:\s+now)?(?:\s+please)?|i\s+want\s+(?:you\s+)?to\s+call\s+me(?:\s+now)?(?:\s+please)?|can\s+i\s+(?:get|have)\s+a\s+call(?:\s+now)?(?:\s+please)?)[.!?\s]*$/iu;
   const hebrew =
     /^(?:(?:אפשר\s+)?(?:תתקשרו|תתקשר|תתקשרי|התקשרו|התקשר|התקשרי|תחזרו|תחזור|תחזרי)\s+אליי?(?:\s+עכשיו)?(?:\s+בבקשה)?|אפשר\s+ש(?:תתקשרו|תתקשר|תתקשרי|תחזרו|תחזור|תחזרי)\s+אליי?(?:\s+עכשיו)?(?:\s+בבקשה)?|(?:אשמח|אני\s+(?:אשמח|רוצה))\s+(?:אם\s+)?ש(?:תתקשרו|תתקשר|תתקשרי|תחזרו|תחזור|תחזרי)\s+אליי?(?:\s+עכשיו)?(?:\s+בבקשה)?|(?:(?:את|אתה)\s+)?(?:יכולה|יכול|יכולים|יכולות|תוכלו|תוכל|תוכלי)\s+להתקשר\s+אליי?(?:\s+עכשיו)?(?:\s+בבקשה)?|(?:אפשר\s+)?להתקשר\s+אליי?(?:\s+עכשיו)?|אפשר\s+(?:לקבל\s+)?שיחה\s+טלפונית(?:\s+עכשיו)?)[.!?\s]*$/iu;
-  return english.test(request) || hebrew.test(request);
+  const englishRepresentative =
+    /^(?:(?:(?:i(?:\s+would|['’]d)\s+like|i\s+want)\s+(?:a|an)|can\s+(?:a|an))\s+(?:representative|agent)\s+(?:to\s+)?call\s+me|(?:please\s+)?have\s+(?:a\s+)?(?:representative|agent|someone)\s+call\s+me)(?:\s+now)?(?:[,،]\s*please|\s+please)?[.!?\s]*$/iu;
+  const hebrewRepresentative =
+    /^(?:(?:(?:אני\s+)?(?:רוצה|אשמח)|אפשר)\s+ש(?:נציג|נציגה|מישהו|מישהי)\s+(?:יתקשר|תתקשר|יחזור|תחזור)\s+אליי?)(?:\s+עכשיו)?(?:[,،]\s*בבקשה|\s+בבקשה)?[.!?\s]*$/iu;
+  return (
+    english.test(request) ||
+    hebrew.test(request) ||
+    englishRepresentative.test(request) ||
+    hebrewRepresentative.test(request)
+  );
 }
 
 /**

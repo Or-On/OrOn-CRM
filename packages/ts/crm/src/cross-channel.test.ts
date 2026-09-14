@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   compileCanonicalFlow,
+  explicitWhatsAppCallbackIntent,
   parseCanonicalFlow,
   validateCanonicalFlow,
   type CanonicalFlow,
@@ -115,4 +116,29 @@ describe("canonical cross-channel flow", () => {
       }),
     ).toThrow("unsupported channel");
   });
+});
+
+describe("explicit WhatsApp callback intent", () => {
+  it.each([
+    "אני רוצה שנציג יתקשר אליי",
+    "אשמח שנציגה תחזור אליי בבקשה",
+    "אפשר שמישהו יתקשר אלי עכשיו?",
+    "I want a representative to call me",
+    "I'd like an agent to call me now, please",
+    "Please have someone call me",
+  ])("accepts a direct request for a representative callback: %s", (text) => {
+    expect(explicitWhatsAppCallbackIntent(text)).toBe(true);
+  });
+
+  it.each([
+    "הנציג אמר שהוא יתקשר אליי",
+    "אני רוצה שנציג יתקשר אליי מחר",
+    "I want a representative to call my wife",
+    "Can an agent call me tomorrow?",
+  ])(
+    "rejects reported, third-party, or future callback wording: %s",
+    (text) => {
+      expect(explicitWhatsAppCallbackIntent(text)).toBe(false);
+    },
+  );
 });

@@ -116,6 +116,23 @@ async def test_runtime_domain_separation_ddl_denial_and_audit_immutability(
     assert not messaging_session_privileges["can_update"]
     assert not messaging_session_privileges["can_delete"]
 
+    messaging_audit_privileges = await pg.fetchrow(
+        """
+        SELECT
+          has_table_privilege('platform_messaging', 'audit.records', 'SELECT') AS can_read,
+          has_table_privilege('platform_messaging', 'audit.records', 'INSERT') AS can_insert,
+          has_table_privilege('platform_messaging', 'audit.records', 'UPDATE') AS can_update,
+          has_table_privilege('platform_messaging', 'audit.records', 'DELETE') AS can_delete
+        """
+    )
+    assert messaging_audit_privileges is not None
+    # The worker may de-duplicate and append tenant-scoped handoff receipts,
+    # but immutable audit history cannot be changed or removed by the runtime.
+    assert messaging_audit_privileges["can_read"]
+    assert messaging_audit_privileges["can_insert"]
+    assert not messaging_audit_privileges["can_update"]
+    assert not messaging_audit_privileges["can_delete"]
+
     with pytest.raises(asyncpg.InsufficientPrivilegeError):
         async with pg.transaction():
             await pg.execute("SET LOCAL ROLE platform_web")
