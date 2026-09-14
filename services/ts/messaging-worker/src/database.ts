@@ -373,16 +373,21 @@ async function loadAiWork(
         agent_version_id: string;
         contact_id: string;
         contact_name: string;
+        contact_email: string | null;
         contact_company: string | null;
         lifecycle_status: string;
+        contact_created_at: Date;
+        conversation_created_at: Date;
       }[]
     >`
       SELECT conversation.id AS conversation_id,
              conversation.ai_enabled_by_user_id,
              agent.system_prompt, agent.locale, agent.id AS agent_version_id, conversation.ownership_epoch,
              channel.provider, channel.configuration, contact.id AS contact_id,
-             contact.name AS contact_name, contact.company AS contact_company,
-             contact.lifecycle_status
+             contact.name AS contact_name, contact.email AS contact_email,
+             contact.company AS contact_company, contact.lifecycle_status,
+             contact.created_at AS contact_created_at,
+             conversation.created_at AS conversation_created_at
       FROM messaging.conversations conversation
       JOIN crm.contacts contact ON contact.id=conversation.contact_id
         AND contact.tenant_id=conversation.tenant_id
@@ -486,6 +491,35 @@ async function loadAiWork(
       WHERE contact_id=${row.contact_id}::uuid
       ORDER BY created_at DESC, session_id DESC LIMIT 8
     `;
+    const tickets = await transaction<
+      {
+        id: string;
+        title: string;
+        summary: string;
+        status: string;
+        priority: string;
+        occurred_at: Date;
+      }[]
+    >`
+      SELECT id, title, left(coalesce(description, ''), 1200) AS summary,
+             status, priority, updated_at AS occurred_at
+      FROM crm.tasks
+      WHERE contact_id=${row.contact_id}::uuid
+      ORDER BY updated_at DESC, id DESC LIMIT 8
+    `;
+    const missingProfileFields: ("name" | "email" | "company")[] = [];
+    if (/^\+?[0-9 ()-]{7,}$/u.test(row.contact_name.trim()))
+      missingProfileFields.push("name");
+    if (row.contact_email === null) missingProfileFields.push("email");
+    if (row.contact_company === null) missingProfileFields.push("company");
+    const firstConversation = previousConversations.length === 0;
+    const knownBeforeConversation =
+      row.contact_created_at.getTime() <
+        row.conversation_created_at.getTime() ||
+      !firstConversation ||
+      notes.length > 0 ||
+      tickets.length > 0 ||
+      voiceSessions.length > 0;
     return {
       agentVersionId: row.agent_version_id,
       knowledge,
@@ -497,8 +531,15 @@ async function loadAiWork(
       contactContext: {
         contact: {
           name: row.contact_name,
+          email: row.contact_email,
           company: row.contact_company,
           lifecycleStatus: row.lifecycle_status,
+        },
+        identity: {
+          matchedBy: "verified_whatsapp_identity",
+          knownBeforeConversation,
+          firstConversation,
+          missingProfileFields,
         },
         notes: notes.reverse().map((note) => ({
           text: note.content_text,
@@ -508,6 +549,14 @@ async function loadAiWork(
           summary: item.summary,
           status: item.status,
           occurredAt: item.occurred_at?.toISOString() ?? null,
+        })),
+        tickets: tickets.reverse().map((ticket) => ({
+          id: ticket.id,
+          title: ticket.title,
+          summary: ticket.summary,
+          status: ticket.status,
+          priority: ticket.priority,
+          occurredAt: ticket.occurred_at.toISOString(),
         })),
         voiceSessions: voiceSessions.reverse().map((session) => ({
           sessionId: session.session_id,
@@ -594,6 +643,13 @@ async function createAiHandoff(
         `- ${session.sessionId}: ${session.status}, answered=${String(session.answered)}${session.outcome ? `, outcome=${session.outcome}` : ""}, recording=${session.recordingObjectId ? "available" : "unavailable"}, transcript=${session.transcriptObjectId ? "available" : "unavailable"} at ${session.occurredAt}`,
     )
     .join("\n");
+  const tickets = work.contactContext.tickets
+    .slice(-8)
+    .map(
+      (ticket) =>
+        `- ${ticket.id}: ${ticket.title} (${ticket.status}, ${ticket.priority}) at ${ticket.occurredAt}${ticket.summary ? ` — ${ticket.summary}` : ""}`,
+    )
+    .join("\n");
   const description = [
     `Customer: ${work.contactContext.contact.name}`,
     work.contactContext.contact.company
@@ -608,6 +664,9 @@ async function createAiHandoff(
     "",
     "Previous conversation evidence:",
     previous || "No earlier conversation summary was found.",
+    "",
+    "Prior CRM tickets:",
+    tickets || "No contact-linked ticket was found.",
     "",
     "CRM notes:",
     work.contactContext.notes
@@ -626,9 +685,10 @@ async function createAiHandoff(
     .slice(0, 20_000);
   const ticket = await transaction<{ id: string }[]>`
     INSERT INTO crm.tasks
-      (tenant_id, created_by_user_id, title, description, status, priority)
-    SELECT platform.current_tenant_id(), ${work.authorizedUserId}::uuid,
-           ${`AI handoff · ${issue.slice(0, 180)}`}, ${description}, 'todo',
+      (tenant_id, contact_id, created_by_user_id, title, description, status, priority)
+    SELECT platform.current_tenant_id(), ${work.contactId}::uuid,
+           ${work.authorizedUserId}::uuid, ${`AI handoff · ${issue.slice(0, 180)}`},
+           ${description}, 'todo',
            ${reasonCode === "emergency" || reasonCode === "safety" ? "urgent" : "high"}
     WHERE NOT EXISTS (
       SELECT 1 FROM audit.records
@@ -1098,6 +1158,21 @@ async function loadAutomaticCallWork(
         AND previous.id<>${payload.conversationId}::uuid
       ORDER BY previous.last_message_at DESC NULLS LAST, previous.id DESC LIMIT 3
     `;
+    const tickets = await transaction<
+      {
+        id: string;
+        title: string;
+        status: string;
+        priority: string;
+        summary: string;
+      }[]
+    >`
+      SELECT id, title, status, priority,
+             left(coalesce(description, ''), 500) AS summary
+      FROM crm.tasks
+      WHERE contact_id=${payload.contactId}::uuid
+      ORDER BY updated_at DESC, id DESC LIMIT 5
+    `;
     const evidence = [
       `Tenant CRM contact: ${row.contact_name}.`,
       row.contact_company ? `Company: ${row.contact_company}.` : "",
@@ -1112,6 +1187,12 @@ async function loadAutomaticCallWork(
         .map(
           (item) =>
             `Earlier WhatsApp conversation (${item.status}): ${item.summary}`,
+        ),
+      ...tickets
+        .toReversed()
+        .map(
+          (ticket) =>
+            `Prior CRM ticket ${ticket.id} (${ticket.status}, ${ticket.priority}): ${ticket.title}${ticket.summary ? ` — ${ticket.summary}` : ""}`,
         ),
     ];
     return {
@@ -1256,8 +1337,9 @@ async function processAutomaticCall(
         if (handoff[0] !== undefined) {
           const ticket = await transaction<{ id: string }[]>`
             INSERT INTO crm.tasks
-              (tenant_id, created_by_user_id, title, description, status, priority)
-            SELECT platform.current_tenant_id(), ${payload.actorUserId}::uuid,
+              (tenant_id, contact_id, created_by_user_id, title, description, status, priority)
+            SELECT platform.current_tenant_id(), ${payload.contactId}::uuid,
+                   ${payload.actorUserId}::uuid,
                    'AI callback requires attention', ${callFailureDescription},
                    'todo', 'urgent'
             WHERE NOT EXISTS (

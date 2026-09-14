@@ -1,5 +1,5 @@
 {
-  "alembic_head": "d7a6e25f1c90",
+  "alembic_head": "91bd6f76a3e4",
   "expected_functions": [
     "agents.protect_approved_knowledge",
     "automation.protect_published_flow_version",
@@ -81,6 +81,7 @@
     "ix_sessions_contact_cursor",
     "ix_sessions_tenant_cursor",
     "ix_tasks_tenant_assignee_status",
+    "ix_tasks_tenant_contact_updated",
     "ix_tasks_tenant_status_due",
     "ix_platform_voice_campaigns",
     "uq_contact_identity_normalized",

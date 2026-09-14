@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -123,6 +124,73 @@ async def test_supported_target_successor_downgrade_and_reupgrade(
         )
         assert await connection.fetchval(
             "SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'live')"
+        )
+    finally:
+        await connection.close()
+
+
+async def test_ai_handoff_tasks_are_backfilled_to_their_contact(
+    isolated_postgres_url: str,
+) -> None:
+    await run_alembic(isolated_postgres_url, "upgrade", "e1c47b9a2f60")
+    connection = await asyncpg.connect(isolated_postgres_url)
+    tenant_id = uuid4()
+    contact_id = uuid4()
+    handoff_id = uuid4()
+    task_id = uuid4()
+    try:
+        await connection.execute(
+            "INSERT INTO tenants(id,name,slug,status) VALUES($1,'Fictional backfill',$2,'active')",
+            tenant_id,
+            f"handoff-backfill-{tenant_id}",
+        )
+        await connection.execute(
+            "INSERT INTO crm.contacts(id,tenant_id,name) VALUES($1,$2,'Fictional contact')",
+            contact_id,
+            tenant_id,
+        )
+        await connection.execute(
+            "INSERT INTO automation.handoffs"
+            "(id,tenant_id,contact_id,source_channel,reason_safe,status,idempotency_key) "
+            "VALUES($1,$2,$3,'whatsapp','Fictional unresolved issue','pending',$4)",
+            handoff_id,
+            tenant_id,
+            contact_id,
+            f"fixture-{handoff_id}",
+        )
+        await connection.execute(
+            "INSERT INTO crm.tasks(id,tenant_id,title,status,priority) "
+            "VALUES($1,$2,'Fictional handoff task','todo','high')",
+            task_id,
+            tenant_id,
+        )
+        await connection.execute(
+            "INSERT INTO audit.records"
+            "(tenant_id,actor_service,action,target_type,target_id,metadata) "
+            "VALUES($1,'fixture','conversation.ai_handoff_ticket','handoff',$2,$3::jsonb)",
+            tenant_id,
+            handoff_id,
+            json.dumps({"taskId": str(task_id)}),
+        )
+    finally:
+        await connection.close()
+
+    await run_alembic(isolated_postgres_url, "upgrade", "head")
+    connection = await asyncpg.connect(isolated_postgres_url)
+    try:
+        assert (
+            await connection.fetchval("SELECT contact_id FROM crm.tasks WHERE id=$1", task_id)
+            == contact_id
+        )
+    finally:
+        await connection.close()
+
+    await run_alembic(isolated_postgres_url, "downgrade", "e1c47b9a2f60")
+    connection = await asyncpg.connect(isolated_postgres_url)
+    try:
+        assert not await connection.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM information_schema.columns "
+            "WHERE table_schema='crm' AND table_name='tasks' AND column_name='contact_id')"
         )
     finally:
         await connection.close()

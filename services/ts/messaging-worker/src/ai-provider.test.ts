@@ -105,8 +105,15 @@ describe("OpenAiCompatibleChatProvider", () => {
       contactContext: {
         contact: {
           name: "Fictional Customer",
+          email: null,
           company: "Example Ltd",
           lifecycleStatus: "active",
+        },
+        identity: {
+          matchedBy: "verified_whatsapp_identity",
+          knownBeforeConversation: true,
+          firstConversation: false,
+          missingProfileFields: ["email"],
         },
         notes: [
           {
@@ -119,6 +126,16 @@ describe("OpenAiCompatibleChatProvider", () => {
             summary: "Asked about connectivity.",
             status: "closed",
             occurredAt: "2026-09-02T09:00:00Z",
+          },
+        ],
+        tickets: [
+          {
+            id: "60000000-0000-4000-8000-000000000001",
+            title: "Intermittent router connection",
+            summary: "Customer previously reported packet loss.",
+            status: "in_progress",
+            priority: "high",
+            occurredAt: "2026-09-02T10:00:00Z",
           },
         ],
         voiceSessions: [
@@ -142,13 +159,28 @@ describe("OpenAiCompatibleChatProvider", () => {
     };
     const evidence = JSON.parse(body.messages[1]?.content ?? "null") as {
       kind?: string;
-      contactContext?: { contact?: { name?: string }; notes?: unknown[] };
+      contactContext?: {
+        contact?: { name?: string };
+        notes?: unknown[];
+        tickets?: unknown[];
+        identity?: { matchedBy?: string };
+      };
     };
     expect(evidence.kind).toBe(
       "untrusted_tenant_context_and_approved_fact_data",
     );
     expect(evidence.contactContext?.contact?.name).toBe("Fictional Customer");
     expect(evidence.contactContext?.notes).toHaveLength(1);
+    expect(evidence.contactContext?.tickets).toHaveLength(1);
+    expect(evidence.contactContext?.identity?.matchedBy).toBe(
+      "verified_whatsapp_identity",
+    );
+    expect(body.messages[0]?.content).toContain(
+      "never ask for a phone number merely to search for the customer",
+    );
+    expect(body.messages[0]?.content).toContain(
+      "never ask the customer to classify it as old or new",
+    );
   });
 
   it("keeps injected caller claims and previous assistant statements in labeled data and selects only fact keys", async () => {

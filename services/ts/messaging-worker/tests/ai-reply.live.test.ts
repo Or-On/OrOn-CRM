@@ -189,6 +189,18 @@ describe.skipIf(sourceUrl === undefined)(
       const conversationId = conversation[0]?.id;
       if (conversationId === undefined)
         throw new Error("inbound conversation was not created");
+      const linkedTicketId = randomUUID();
+      await admin`
+        INSERT INTO crm.tasks
+          (id, tenant_id, contact_id, created_by_user_id, title, description,
+           status, priority)
+        SELECT ${linkedTicketId}::uuid, ${tenantId}::uuid, conversation.contact_id,
+               ${userId}::uuid, 'Fictional prior connectivity ticket',
+               'Packet loss was reported on the office router.',
+               'in_progress', 'high'
+        FROM messaging.conversations conversation
+        WHERE conversation.id=${conversationId}::uuid
+      `;
 
       const retainedFlowId = randomUUID();
       await admin`
@@ -485,6 +497,27 @@ describe.skipIf(sourceUrl === undefined)(
       }
 
       expect(aiDecide).toHaveBeenCalledTimes(2);
+      const firstAiRequest = aiDecide.mock.calls[0]?.[0] as
+        | {
+            contactContext?: {
+              tickets?: { id: string; title: string }[];
+              identity?: {
+                matchedBy: string;
+                knownBeforeConversation: boolean;
+              };
+            };
+          }
+        | undefined;
+      expect(firstAiRequest?.contactContext?.tickets).toEqual([
+        expect.objectContaining({
+          id: linkedTicketId,
+          title: "Fictional prior connectivity ticket",
+        }),
+      ]);
+      expect(firstAiRequest?.contactContext?.identity).toMatchObject({
+        matchedBy: "verified_whatsapp_identity",
+        knownBeforeConversation: true,
+      });
       expect(metaSend).toHaveBeenCalledTimes(3);
       expect(automaticCall).toHaveBeenCalledTimes(1);
       const inboundNotifications = await admin<{ count: number }[]>`
@@ -513,6 +546,9 @@ describe.skipIf(sourceUrl === undefined)(
       );
       expect(callRequest?.conversationContext).toContain(
         "Tenant CRM contact: Fictional Customer.",
+      );
+      expect(callRequest?.conversationContext).toContain(
+        `Prior CRM ticket ${linkedTicketId}`,
       );
       const inboundCount = await admin<{ count: number }[]>`
       SELECT count(*)::integer AS count FROM messaging.messages

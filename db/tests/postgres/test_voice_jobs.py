@@ -218,8 +218,22 @@ async def test_voice_claim_is_narrow_and_recovers_expired_final_lease(voice_jobs
             await database.scalar(text("SELECT count(*) FROM ops.jobs WHERE id=:id"), {"id": other})
             == 0
         )
-        assert not await database.scalar(
+        assert await database.scalar(
             text("SELECT has_schema_privilege(current_user, 'messaging', 'USAGE')")
+        )
+        assert await database.scalar(
+            text("SELECT has_table_privilege(current_user, 'messaging.conversations', 'SELECT')")
+        )
+        for privilege in ("INSERT", "UPDATE", "DELETE"):
+            assert not await database.scalar(
+                text(
+                    "SELECT has_table_privilege(current_user, "
+                    "'messaging.conversations', :privilege)"
+                ),
+                {"privilege": privilege},
+            )
+        assert not await database.scalar(
+            text("SELECT has_table_privilege(current_user, 'messaging.messages', 'SELECT')")
         )
         assert not await database.scalar(
             text(

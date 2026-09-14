@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 from typing import Any
+from uuid import uuid4
 
 import asyncpg
 import pytest
@@ -125,6 +126,62 @@ async def test_web_can_validate_retained_voice_flows_without_mutating_them(
     assert not privileges["can_insert"]
     assert not privileges["can_update"]
     assert not privileges["can_delete"]
+
+
+async def test_voice_callback_conversation_lookup_is_read_only(
+    pg: asyncpg.Connection,
+) -> None:
+    assert await pg.fetchval("SELECT has_schema_privilege('platform_voice', 'messaging', 'USAGE')")
+    assert await pg.fetchval(
+        "SELECT has_table_privilege('platform_voice', 'messaging.conversations', 'SELECT')"
+    )
+    for privilege in ("INSERT", "UPDATE", "DELETE"):
+        assert not await pg.fetchval(
+            "SELECT has_table_privilege('platform_voice', 'messaging.conversations', $1)",
+            privilege,
+        )
+    assert not await pg.fetchval(
+        "SELECT has_table_privilege('platform_voice', 'messaging.messages', 'SELECT')"
+    )
+
+
+async def test_support_tasks_are_bound_to_contacts_in_the_same_tenant(
+    pg: asyncpg.Connection,
+) -> None:
+    tenant_id = uuid4()
+    other_tenant_id = uuid4()
+    contact_id = uuid4()
+    task_id = uuid4()
+    await pg.executemany(
+        "INSERT INTO tenants(id,name,slug,status) VALUES($1,$2,$3,'active')",
+        [
+            (tenant_id, "Fictional support tenant", f"support-{tenant_id}"),
+            (other_tenant_id, "Fictional other tenant", f"support-{other_tenant_id}"),
+        ],
+    )
+    await pg.execute(
+        "INSERT INTO crm.contacts(id,tenant_id,name) VALUES($1,$2,'Fictional contact')",
+        contact_id,
+        tenant_id,
+    )
+    await pg.execute(
+        "INSERT INTO crm.tasks(id,tenant_id,contact_id,title) VALUES($1,$2,$3,'Linked case')",
+        task_id,
+        tenant_id,
+        contact_id,
+    )
+    with pytest.raises(asyncpg.ForeignKeyViolationError):
+        async with pg.transaction():
+            await pg.execute(
+                "INSERT INTO crm.tasks(tenant_id,contact_id,title) "
+                "VALUES($1,$2,'Cross-tenant case')",
+                other_tenant_id,
+                contact_id,
+            )
+    await pg.execute("DELETE FROM crm.contacts WHERE id=$1", contact_id)
+    linked = await pg.fetchrow("SELECT tenant_id,contact_id FROM crm.tasks WHERE id=$1", task_id)
+    assert linked is not None
+    assert dict(linked) == {"tenant_id": tenant_id, "contact_id": None}
 
 
 async def test_tenant_work_tables_have_least_privilege_runtime_grants(
