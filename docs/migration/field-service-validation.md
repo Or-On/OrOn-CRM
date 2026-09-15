@@ -24,7 +24,7 @@ The following commands completed successfully from the repository root:
 | `pnpm lint`                                                  | Passed; Next.js route types generated and ESLint reported no warnings or errors.                       |
 | `pnpm typecheck`                                             | Passed across all 11 applicable TypeScript workspaces.                                                 |
 | `pnpm test`                                                  | Passed: 977 tests; 69 explicit environment-gated tests skipped.                                        |
-| `uv run pytest -p no:cacheprovider`                          | Passed: 1,064 tests; 133 explicit environment-gated tests skipped; 5 warnings.                         |
+| `uv run pytest -p no:cacheprovider`                          | Passed: 1,065 tests; 133 explicit environment-gated tests skipped; 5 warnings.                         |
 | `pnpm build`                                                 | Passed; all packages, workers, and the Next.js production application compiled.                        |
 | `pnpm contracts:check`                                       | Passed; generated contracts match the committed contract files.                                        |
 | `uv run python scripts/db_verify.py offline`                 | Passed; one Alembic head (`b72c5f0e4d91`), 68 revisions, schema contract valid, offline SQL generated. |
@@ -39,8 +39,8 @@ private-object validation, WhatsApp worker contracts, and existing application
 regressions. PostgreSQL-dependent tests remain explicitly skipped unless an
 isolated test database is supplied.
 
-The offline migration verification generated 373,206 bytes of SQL with SHA-256
-`68bf55c7b04d740de9e0d7412034dc9ffa14d6f607653e522dd1a50add554a2a`.
+The offline migration verification generated 372,970 bytes of SQL with SHA-256
+`92fe079f03118c8d1cd9a46a4b4f5797003103c4b4f6dbebb939d63f9da00db6`.
 
 ## Environment-gated validation
 

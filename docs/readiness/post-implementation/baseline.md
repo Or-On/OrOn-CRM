@@ -1,7 +1,8 @@
 # Execution baseline
 
-Captured 2026-09-15 in `C:\Users\almo9\Or-On-Integration\OrOn-Platform`.
-No secrets or customer records are included in the identifiers below.
+Captured 2026-09-15 in `C:\Users\almo9\Or-On-Integration\OrOn-Platform` and
+reconciled after the first online CI migration attempt. No secrets or customer
+records are included in the identifiers below.
 
 ## Repository identity
 
@@ -10,17 +11,19 @@ No secrets or customer records are included in the identifiers below.
 | Target remote | `https://github.com/Abssel-AI/OrOn-CRM.git` |
 | Branch | `main` |
 | HEAD | `a7d18bc7bf937154af9d120fede61355a0a09271` |
-| Working tree | 75 unstaged tracked paths, 87 untracked paths, no staged paths |
+| Initial working tree | 75 unstaged tracked paths, 87 untracked paths, no staged paths |
+| First candidate commit | `18009d089210591d402f542e0f10e61c847956ba` |
 | Implementation source files | 1,196 tracked/untracked, non-ignored files; `.env*`, `.artifacts` and this evidence directory excluded |
-| Implementation snapshot SHA-256 | `d4c92c5c1c103dd7bd1d2fe4f3a2fc4d539f4199e9d57afed69a601d716ad29d` |
-| Tracked implementation diff SHA-256 | `fa0fb5588f0f5fd86016cb5fb2a5979643a00671ec892ac809cd40f09f082b47` |
+| Corrected implementation snapshot SHA-256 | `8a7e1116736a79f156943cd7ac64c6f67f78d16c9d169a29bb04331f22a20969` |
+| Initial tracked implementation diff SHA-256 | `fa0fb5588f0f5fd86016cb5fb2a5979643a00671ec892ac809cd40f09f082b47` |
 | Read-only source reference | `https://github.com/Abssel-AI/Brimag.git`, `main`, `08228541cf0ccf7f65eb8517ec9c5346c29f280f` |
 
 The implementation snapshot hashes a sorted manifest of paths and Git blob IDs
-while excluding this self-referential evidence directory. It is a working-tree
-identity, not a Git commit. The tree was deliberately left dirty:
-no reset, clean, commit, push, deployment or shared-environment mutation was
-performed.
+while excluding this self-referential evidence directory. The initial audit
+preserved the dirty tree without deployment. At the user's later direction it
+was committed and pushed; online CI then exposed invalid Python lint comments
+inside rendered SQL. The corrected snapshot includes that fix and a regression
+guard. No reset, clean or shared-database mutation was performed locally.
 
 ## Toolchain and locks
 
@@ -45,7 +48,7 @@ under Node 25 does not replace the required supported-Node CI/release run.
 | Alembic heads | exactly one: `b72c5f0e4d91` |
 | Revision count | 68 total; 22 Or-On revisions |
 | Offline schema contract | PASS |
-| Offline SQL | 373,206 bytes; SHA-256 `68bf55c7b04d740de9e0d7412034dc9ffa14d6f607653e522dd1a50add554a2a` |
+| Offline SQL | 372,970 bytes; SHA-256 `92fe079f03118c8d1cd9a46a4b4f5797003103c4b4f6dbebb939d63f9da00db6` |
 | Local PostgreSQL | unavailable on checked ports; no explicit isolated `TEST_DATABASE_URL` |
 | Online migration/RLS suite | BLOCKED, not passed |
 

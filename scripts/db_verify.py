@@ -127,6 +127,8 @@ def _qualified_pattern(qualified_name: str) -> str:
 def validate_contract(sql: str) -> None:
     manifest = _manifest()
     errors: list[str] = []
+    if re.search(r"(?m)^\s*#", sql):
+        errors.append("Python-style comment found in rendered PostgreSQL SQL")
     for label, pattern in PROHIBITED_SQL.items():
         if pattern.search(sql):
             errors.append(f"prohibited SQL detected: {label}")

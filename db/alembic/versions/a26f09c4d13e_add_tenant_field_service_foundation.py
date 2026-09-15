@@ -95,7 +95,7 @@ def _restore_member_functions(include_technician: bool) -> None:
         invitation_roles += ",'technician'"
 
     op.execute("DROP FUNCTION IF EXISTS platform.current_tenant_team()")
-    op.execute(f"""  # noqa: S608 -- role lists are migration constants
+    op.execute(f"""
         CREATE FUNCTION platform.current_tenant_team()
         RETURNS TABLE(user_id uuid, email text, display_name text, role text)
         LANGUAGE sql STABLE SECURITY DEFINER
@@ -123,7 +123,7 @@ def _restore_member_functions(include_technician: bool) -> None:
     op.execute("REVOKE ALL ON FUNCTION platform.current_tenant_team() FROM PUBLIC")
     op.execute("GRANT EXECUTE ON FUNCTION platform.current_tenant_team() TO platform_web")
 
-    op.execute(f"""  # noqa: S608 -- role lists are migration constants
+    op.execute(f"""
         CREATE OR REPLACE FUNCTION platform.lock_current_authorization(
           p_session_id uuid, p_expected_role text, p_expected_superuser boolean,
           p_rotation_count integer
@@ -168,7 +168,7 @@ def _restore_member_functions(include_technician: bool) -> None:
           platform.lock_current_authorization(uuid,text,boolean,integer) TO platform_web
     """)
 
-    op.execute(f"""  # noqa: S608 -- role lists are migration constants
+    op.execute(f"""
         CREATE OR REPLACE FUNCTION platform.create_current_tenant_invitation(
           p_email citext, p_role text, p_token_hash text,
           p_expires_at timestamptz, p_request_id text
@@ -234,7 +234,7 @@ def _restore_member_functions(include_technician: bool) -> None:
           TO platform_web
     """)
 
-    op.execute(f"""  # noqa: S608 -- role lists are migration constants
+    op.execute(f"""
         CREATE OR REPLACE FUNCTION platform.manage_current_tenant_member(
           p_target_user uuid, p_role text, p_remove boolean, p_request_id text
         ) RETURNS void

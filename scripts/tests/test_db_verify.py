@@ -40,3 +40,8 @@ def test_rendered_postgresql_contract_passes_static_security_checks() -> None:
 def test_contract_guard_rejects_dangerous_target_sql(dangerous_sql: str) -> None:
     with pytest.raises(VerificationError, match="prohibited SQL"):
         validate_contract(render_offline_sql() + dangerous_sql)
+
+
+def test_contract_guard_rejects_python_comments_in_rendered_sql() -> None:
+    with pytest.raises(VerificationError, match="Python-style comment"):
+        validate_contract(render_offline_sql() + "\n# noqa: invalid PostgreSQL\n")

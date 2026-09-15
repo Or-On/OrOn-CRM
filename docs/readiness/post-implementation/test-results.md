@@ -15,7 +15,7 @@ reported, not counted as passes.
 | `pnpm typecheck` | PASS — all 11 applicable TypeScript workspaces |
 | `uv run pyrefly check <scripts/dev.py PYTHON_TYPE_PATHS>` | PASS — 0 errors, 33 suppressions, 12 unshown warnings |
 | `pnpm test` | PASS — **977 passed, 69 skipped** across package, worker and web Vitest suites |
-| `uv run pytest -p no:cacheprovider` | PASS — **1,064 passed, 133 skipped, 5 warnings** in 39.21 s |
+| `uv run pytest -p no:cacheprovider` | PASS — **1,065 passed, 133 skipped, 5 warnings** in 32.45 s |
 | `pnpm build` | PASS — all packages/workers and Next.js 16.3.3 production application; static page-data generation completed for 75 build units |
 | `pnpm contracts:check` | PASS — generated OpenAPI/client/contracts match current tracked contract state |
 | `uv run python scripts/db_verify.py offline` | PASS — one head, 68 revisions, schema contract and deterministic offline SQL |
@@ -25,7 +25,7 @@ reported, not counted as passes.
 | `wsl bash -n scripts/deploy-dev.sh scripts/backup-dev.sh` | PASS — shell syntax |
 | `pnpm --filter @or-on/web test -- private-objects customer-document-permissions field-service-attachment-download` | PASS — 11 focused upload/authorization/header regressions |
 | `pnpm --filter @or-on/web test -- oauth-disconnect-route oauth-disconnect tenant-product-workspaces` | PASS — 19 focused OAuth lifecycle/UI tests |
-| `uv run pytest -p no:cacheprovider scripts/tests/test_deployment_release.py scripts/tests/test_db_verify.py` | PASS — 18 focused release/database-contract tests |
+| `uv run pytest -p no:cacheprovider scripts/tests/test_deployment_release.py scripts/tests/test_db_verify.py` | PASS — 19 focused release/database-contract tests |
 
 Vitest passed-test total is the sum of runner results: API client 4, config 13,
 contracts 2, auth 48, CRM 104, observability 1, platform integration 1, UI 37,
@@ -56,6 +56,9 @@ worker 30 and web 1.
 - Final lint reconciliation caught an await-free async mock in the OAuth
   disconnect route test. The mock was made synchronous, its focused test
   passed, and the full lint and 977-test TypeScript suite were rerun.
+- The first online CI migration attempt exposed four inline Python lint comments
+  rendered as PostgreSQL statements. The comments were removed and the offline
+  validator now rejects any line that begins with a Python-style `#` comment.
 - The first focused lint after adding strict UTF-8 validation caught one missing
   error `cause`; it was fixed and the full lint/type/build/test gates were rerun.
 - A first production build during implementation exposed a client import through
@@ -77,8 +80,8 @@ worker 30 and web 1.
 
 - base `0001`, one head `b72c5f0e4d91`;
 - 68 revisions total, 22 Or-On revisions;
-- 373,206-byte PostgreSQL upgrade SQL;
-- SHA-256 `68bf55c7b04d740de9e0d7412034dc9ffa14d6f607653e522dd1a50add554a2a`.
+- 372,970-byte PostgreSQL upgrade SQL;
+- SHA-256 `92fe079f03118c8d1cd9a46a4b4f5797003103c4b4f6dbebb939d63f9da00db6`.
 
 Offline generation validates graph/contract/static SQL safety. It does not prove
 the upgrade, downgrade, grants, functions, triggers or RLS on PostgreSQL.

@@ -7,12 +7,12 @@ snapshot in [Baseline](baseline.md), not a Git commit or deployed release.
 
 | Boundary | Verdict | Basis |
 | --- | --- | --- |
-| Local implementation | **CONDITIONAL PASS** | Formatting, lint, TS/Python type checks, 2,041 passed automated tests, production build, contract generation, offline migration contract, dependency checks and focused release/security regressions passed. Conditions: supported Node rerun and online DB/device/provider evidence remain. |
+| Local implementation | **CONDITIONAL PASS** | Formatting, lint, TS/Python type checks, 2,042 passed automated tests, production build, contract generation, offline migration contract, dependency checks and focused release/security regressions passed. Conditions: supported Node rerun and online DB/device/provider evidence remain. |
 | Deployed DEV | **BLOCKED** | Public reachability was observed, but exact source/image/schema identity and authenticated ordinary-role journeys were not available. This working tree was not pushed/deployed. |
 | Real-provider workflows | **BLOCKED** | No authorized run manifest; no real Meta delivery, two-way call, OAuth/OCR, calendar write or Stripe test transaction was performed. Simulator results remain labeled local. |
 | Production readiness | **NOT READY** | Online PostgreSQL/RLS/restore, exact-release E2E, provider/device acceptance, off-host DR, supported runtime evidence and production HA/observability decisions are incomplete. |
 
-`2,041` is 977 passing TypeScript/React tests plus 1,064 passing Python
+`2,042` is 977 passing TypeScript/React tests plus 1,065 passing Python
 tests. The 202 explicitly skipped tests are not included.
 
 ## Release-blocking checklist
