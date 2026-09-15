@@ -120,8 +120,12 @@ def test_ci_preserves_deploy_exit_status_and_binds_archive_checksum() -> None:
 
 def test_release_images_carry_and_enforce_source_revision() -> None:
     workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    deploy = DEPLOY.read_text(encoding="utf-8")
     assert workflow.count('--build-arg ORON_SOURCE_REVISION="$GITHUB_SHA"') == 5
-    assert "org.opencontainers.image.revision" in DEPLOY.read_text(encoding="utf-8")
+    assert "org.opencontainers.image.revision" in deploy
+    pull = "compose --profile release --profile workers --profile voice pull"
+    assert pull in deploy
+    assert deploy.index(pull) < deploy.index('revision="$(docker image inspect')
     for dockerfile in (
         ROOT / "apps" / "web" / "Dockerfile",
         ROOT / "services" / "py" / "control-api" / "Dockerfile",

@@ -225,7 +225,12 @@ if [[ -n ${previous_release} ]]; then
   done
 fi
 compose config --quiet
-compose pull
+# Pull every image that can participate in this release before inspecting its
+# immutable digest or stopping the currently running application. Services in
+# the release, workers, and voice profiles are otherwise omitted by the default
+# `compose pull`, which can leave the one-shot migrator unavailable on a clean
+# deployment host.
+compose --profile release --profile workers --profile voice pull
 for image in "${release_images[@]}"; do
   revision="$(docker image inspect "${image}" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')"
   if [[ ${revision} != "${COMMIT_SHA}" ]]; then
