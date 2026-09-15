@@ -18,6 +18,7 @@ import {
   Wrench,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useLocale } from "next-intl";
 import { useState, type SyntheticEvent } from "react";
 
@@ -39,6 +40,7 @@ export function FieldServiceSettings({
 }) {
   const locale = useLocale();
   const he = locale.startsWith("he");
+  const router = useRouter();
   const [feature, setFeature] = useState(initialState);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string>();
@@ -92,9 +94,16 @@ export function FieldServiceSettings({
         { method: "PATCH" },
       );
       setFeature(payload.feature);
+      router.refresh();
       setCritical(false);
       setMessage(
-        he ? "הגדרות שירות השטח נשמרו." : "Field-service settings saved.",
+        payload.feature.effective
+          ? he
+            ? "שירות השטח פעיל וזמין כעת בתפריט התפעול."
+            : "Field service is active and now available in Operations."
+          : he
+            ? "הגדרות שירות השטח נשמרו."
+            : "Field-service settings saved.",
       );
     } catch (error) {
       setCritical(true);
@@ -328,6 +337,14 @@ export function FieldServiceSettings({
                   ? "טרם שונה"
                   : "Not changed yet"}
             </p>
+            {feature.effective ? (
+              <Link
+                className="or-button or-button--secondary or-button--medium"
+                href="/field-service"
+              >
+                {he ? "פתיחת שירות השטח" : "Open field service"}
+              </Link>
+            ) : null}
             <Button disabled={pending} type="submit">
               {pending
                 ? he
