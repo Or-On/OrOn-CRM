@@ -19,6 +19,39 @@ const databaseUrl = process.env.MESSAGING_WORKER_TEST_DATABASE_URL;
 const tenantId = "10000000-0000-4000-8000-000000000001";
 const userId = "20000000-0000-4000-8000-000000000001";
 
+async function createWhatsAppContactFixture(
+  transaction: postgres.TransactionSql,
+  label: string,
+) {
+  const suffix = randomUUID();
+  const phone = `+1202${String(
+    BigInt(`0x${suffix.replaceAll("-", "").slice(0, 9)}`) % 10_000_000n,
+  ).padStart(7, "0")}`;
+  const contacts = await transaction<{ id: string }[]>`
+    INSERT INTO crm.contacts(
+      tenant_id, created_by_user_id, name, whatsapp_consent
+    ) VALUES(
+      ${tenantId}::uuid, ${userId}::uuid, ${label}, 'granted'
+    ) RETURNING id
+  `;
+  const contactId = contacts[0]?.id;
+  if (contactId === undefined)
+    throw new Error("WhatsApp contact fixture failed");
+  const identities = await transaction<{ id: string }[]>`
+    INSERT INTO crm.contact_channel_identities(
+      tenant_id, contact_id, channel, normalized_value, display_value,
+      validation_status, is_primary
+    ) VALUES(
+      ${tenantId}::uuid, ${contactId}::uuid, 'whatsapp', ${phone}, ${phone},
+      'valid', true
+    ) RETURNING id
+  `;
+  const identityId = identities[0]?.id;
+  if (identityId === undefined)
+    throw new Error("WhatsApp identity fixture failed");
+  return { contactId, identityId };
+}
+
 describe.skipIf(databaseUrl === undefined)("durable messaging worker", () => {
   it("claims and completes simulator broadcast recipients idempotently", async () => {
     if (databaseUrl === undefined)
@@ -31,6 +64,18 @@ describe.skipIf(databaseUrl === undefined)("durable messaging worker", () => {
           SELECT set_config('app.current_tenant', ${tenantId}, true),
                  set_config('app.current_user', ${userId}, true),
                  set_config('app.current_role', 'owner', true)
+        `;
+        await createWhatsAppContactFixture(
+          transaction,
+          "Fictional durable worker recipient",
+        );
+        await transaction`
+          INSERT INTO messaging.channels(
+            tenant_id, kind, provider, provider_account_id, status
+          ) VALUES(
+            ${tenantId}::uuid, 'whatsapp', 'simulator',
+            ${`worker-simulator-${randomUUID()}`}, 'active'
+          )
         `;
         const id = await createSimulatorBroadcast(
           transaction,
@@ -105,20 +150,12 @@ describe.skipIf(databaseUrl === undefined)("durable messaging worker", () => {
         await transaction`
           SELECT set_config('app.current_tenant', ${tenantId}, true),
                  set_config('app.current_user', ${userId}, true),
-                 set_config('app.current_role', 'service', true)
+                 set_config('app.current_role', 'owner', true)
         `;
-        const contacts = await transaction<
-          { id: string; identity_id: string }[]
-        >`
-          SELECT contact.id, identity.id AS identity_id
-          FROM crm.contacts contact
-          JOIN crm.contact_channel_identities identity ON identity.contact_id = contact.id
-          WHERE identity.channel = 'whatsapp' AND identity.normalized_value IS NOT NULL
-          ORDER BY contact.created_at LIMIT 1
-        `;
-        const contact = contacts[0];
-        if (contact === undefined)
-          throw new Error("seeded WhatsApp contact required");
+        const contact = await createWhatsAppContactFixture(
+          transaction,
+          "Fictional mocked Meta recipient",
+        );
         const channels = await transaction<{ id: string }[]>`
           INSERT INTO messaging.channels
             (tenant_id, kind, provider, provider_account_id, display_address, status, configuration)
@@ -133,7 +170,7 @@ describe.skipIf(databaseUrl === undefined)("durable messaging worker", () => {
           throw new Error("Meta channel fixture failed");
         const conversations = await transaction<{ id: string }[]>`
           INSERT INTO messaging.conversations (tenant_id, channel_id, contact_id, status, customer_service_window_expires_at)
-          VALUES (platform.current_tenant_id(), ${channelId}::uuid, ${contact.id}::uuid, 'open',CURRENT_TIMESTAMP+INTERVAL '1 hour')
+          VALUES (platform.current_tenant_id(), ${channelId}::uuid, ${contact.contactId}::uuid, 'open',CURRENT_TIMESTAMP+INTERVAL '1 hour')
           ON CONFLICT (tenant_id, channel_id, contact_id) DO UPDATE SET status = 'open',
             customer_service_window_expires_at=EXCLUDED.customer_service_window_expires_at
           RETURNING id
@@ -156,7 +193,7 @@ describe.skipIf(databaseUrl === undefined)("durable messaging worker", () => {
             (tenant_id, conversation_id, message_id, channel_id, recipient_identity_id,
              requested_by_user_id, provider, message_kind, explicitly_confirmed, idempotency_key)
           VALUES (platform.current_tenant_id(), ${conversation}::uuid, ${message}::uuid,
-                  ${channelId}::uuid, ${contact.identity_id}::uuid, ${userId}::uuid,
+                  ${channelId}::uuid, ${contact.identityId}::uuid, ${userId}::uuid,
                   'meta', 'text', true, ${`worker-meta-${fixtureId}`}) RETURNING id
         `;
         const request = requests[0]?.id;
