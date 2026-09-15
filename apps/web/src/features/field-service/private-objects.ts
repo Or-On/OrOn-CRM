@@ -2,6 +2,7 @@ import "server-only";
 
 import {
   commitPrivateObject,
+  deletePrivateObject as deleteSharedPrivateObject,
   discardPrivateObject,
   privateObjectStorageOptionsFromEnvironment,
   readPrivateObject as readSharedPrivateObject,
@@ -12,6 +13,13 @@ import {
 
 export type { PrivateObjectContentType, StagedPrivateObject };
 export { commitPrivateObject, discardPrivateObject };
+
+export function deletePrivateObject(storageKey: string) {
+  return deleteSharedPrivateObject(
+    storageKey,
+    privateObjectStorageOptionsFromEnvironment(process.env),
+  );
+}
 
 export function stagePrivateObject(
   input: Parameters<typeof stageSharedPrivateObject>[0],

@@ -27,6 +27,18 @@ async function isolated(
   try {
     await expect(
       sql.begin(async (transaction) => {
+        await transaction`
+          INSERT INTO platform.tenant_feature_entitlements(
+            tenant_id,feature_key,available,granted_by_user_id,granted_at
+          ) VALUES(
+            ${tenantId}::uuid,'field_service',true,${userId}::uuid,CURRENT_TIMESTAMP
+          ) ON CONFLICT (tenant_id,feature_key) DO UPDATE SET available=true
+        `;
+        await transaction`
+          INSERT INTO service.tenant_configuration(tenant_id,enabled)
+          VALUES(${tenantId}::uuid,true)
+          ON CONFLICT (tenant_id) DO UPDATE SET enabled=true
+        `;
         await transaction`SET LOCAL ROLE platform_web`;
         await transaction`
           SELECT set_config('app.current_tenant', ${tenantId}, true),
@@ -79,7 +91,10 @@ async function fixture(transaction: postgres.TransactionSql) {
             'contact', 'text', 'Fictional deletion content', 'received')
     RETURNING id
   `;
-  return { contactId, conversationId, messageId: messages[0]?.id };
+  const messageId = messages[0]?.id;
+  if (messageId === undefined)
+    throw new Error("conversation deletion message could not be created");
+  return { contactId, conversationId, messageId };
 }
 
 describe.skipIf(databaseUrl === undefined)(
@@ -101,9 +116,37 @@ describe.skipIf(databaseUrl === undefined)(
         const handoffId = handoffs[0]?.id;
         if (handoffId === undefined)
           throw new Error("retained handoff fixture could not be created");
+        const storageKey = `fictional/${randomUUID()}.png`;
+        const objects = await transaction<{ id: string }[]>`
+          INSERT INTO objects.object_metadata(
+            tenant_id,created_by_user_id,owner_type,owner_id,category,
+            content_type,byte_size,checksum,storage_backend,storage_key,status
+          ) VALUES(
+            platform.current_tenant_id(),${userId}::uuid,'message',
+            ${record.messageId}::uuid,'whatsapp_customer_image','image/png',1,
+            'fictional-checksum','local',${storageKey},
+            'available'
+          ) RETURNING id
+        `;
+        const objectId = objects[0]?.id;
+        if (objectId === undefined)
+          throw new Error("message media object fixture could not be created");
+        await transaction`
+          UPDATE messaging.messages SET object_id=${objectId}::uuid
+          WHERE id=${record.messageId}::uuid
+        `;
         expect(
           await deleteConversation(transaction, record.conversationId, userId),
-        ).toBe("deleted");
+        ).toEqual({
+          status: "deleted",
+          privateObjects: [
+            {
+              id: objectId,
+              storageBackend: "local",
+              storageKey,
+            },
+          ],
+        });
         expect(
           await transaction`
             SELECT id FROM messaging.messages
@@ -129,6 +172,14 @@ describe.skipIf(databaseUrl === undefined)(
           FROM automation.handoffs WHERE id = ${handoffId}::uuid
         `;
         expect(retained).toEqual([{ tenantId, conversationId: null }]);
+        const tombstone = await transaction<
+          { status: string; deleted_at: Date | null }[]
+        >`
+          SELECT status,deleted_at FROM objects.object_metadata
+          WHERE id=${objectId}::uuid
+        `;
+        expect(tombstone[0]?.status).toBe("deleted");
+        expect(tombstone[0]?.deleted_at).toBeInstanceOf(Date);
       });
     });
 
@@ -146,11 +197,44 @@ describe.skipIf(databaseUrl === undefined)(
         `;
         expect(
           await deleteConversation(transaction, record.conversationId, userId),
-        ).toBe("active_work");
+        ).toEqual({ status: "active_work" });
         expect(
           await transaction`
             SELECT id FROM messaging.conversations
             WHERE id = ${record.conversationId}::uuid
+          `,
+        ).toHaveLength(1);
+      });
+    });
+
+    it("returns a clear conflict instead of deleting retained technician evidence", async () => {
+      await isolated(async (transaction) => {
+        const record = await fixture(transaction);
+        const cases = await transaction<{ id: string }[]>`
+          INSERT INTO service.cases(
+            tenant_id,reference,customer_contact_id,conversation_id,title,
+            fault_description,created_by_user_id
+          ) VALUES(
+            platform.current_tenant_id(),${`FS-${randomUUID()}`},
+            ${record.contactId}::uuid,${record.conversationId}::uuid,
+            'Fictional retained case','Synthetic retained evidence',
+            ${userId}::uuid
+          ) RETURNING id
+        `;
+        expect(cases).toHaveLength(1);
+
+        expect(
+          await deleteConversation(transaction, record.conversationId, userId),
+        ).toEqual({ status: "retained_evidence" });
+        expect(
+          await transaction`
+            SELECT id FROM messaging.conversations
+            WHERE id=${record.conversationId}::uuid
+          `,
+        ).toHaveLength(1);
+        expect(
+          await transaction`
+            SELECT id FROM messaging.messages WHERE id=${record.messageId}::uuid
           `,
         ).toHaveLength(1);
       });

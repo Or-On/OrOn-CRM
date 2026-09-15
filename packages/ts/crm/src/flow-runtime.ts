@@ -1,5 +1,6 @@
 import type postgres from "postgres";
 import {
+  compileCanonicalFlow,
   parseCanonicalFlow,
   publishCanonicalFlow,
   queueWhatsAppTriggeredCall,
@@ -43,6 +44,95 @@ export async function validateRetainedReferences(
       if (!agents[0]?.available)
         throw new TypeError("pinned voice agent version is unavailable");
     }
+}
+
+export interface SavedCanonicalFlowDraft {
+  readonly version: number;
+  readonly versionId: string;
+}
+
+/**
+ * Persists an editor save as a new immutable draft row. The definition lock
+ * serializes version allocation while RLS and the explicit tenant predicate
+ * keep the operation tenant-local. Existing drafts and published versions are
+ * never updated in place.
+ */
+export async function saveCanonicalFlowDraft(
+  sql: postgres.TransactionSql,
+  actorUserId: string,
+  definitionId: string,
+  candidate: unknown,
+): Promise<SavedCanonicalFlowDraft | null> {
+  if (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/iu.test(definitionId))
+    throw new TypeError("invalid flow identifier");
+
+  const flow = parseCanonicalFlow(candidate);
+  for (const channel of flow.channels) executablePath(flow, channel);
+  const compiled = compileCanonicalFlow(flow);
+
+  const definitions = await sql<{ id: string }[]>`
+    SELECT id FROM automation.flow_definitions
+    WHERE tenant_id=platform.current_tenant_id()
+      AND id=${definitionId}::uuid AND archived_at IS NULL
+    FOR UPDATE
+  `;
+  if (definitions[0] === undefined) return null;
+
+  const latestVersions = await sql<
+    {
+      agent_profile_version_id: string | null;
+      version: number;
+    }[]
+  >`
+    SELECT version, agent_profile_version_id
+    FROM automation.flow_versions
+    WHERE tenant_id=platform.current_tenant_id()
+      AND flow_definition_id=${definitionId}::uuid
+    ORDER BY version DESC LIMIT 1
+  `;
+  const latest = latestVersions[0];
+  if (latest?.agent_profile_version_id === null || latest === undefined)
+    throw new TypeError("only canonical flows can be edited");
+
+  const version = latest.version + 1;
+  const inserted = await sql<{ id: string }[]>`
+    INSERT INTO automation.flow_versions
+      (tenant_id, flow_definition_id, version, schema_version, definition,
+       validation_status, validation_errors, agent_profile_version_id,
+       compiled_adapters, created_by_user_id)
+    VALUES (platform.current_tenant_id(), ${definitionId}::uuid, ${version}, '1.0',
+            ${sql.json(JSON.parse(JSON.stringify(flow)) as postgres.JSONValue)},
+            'valid', NULL, ${latest.agent_profile_version_id}::uuid,
+            ${sql.json(JSON.parse(JSON.stringify(compiled)) as postgres.JSONValue)},
+            ${actorUserId}::uuid)
+    RETURNING id
+  `;
+  const versionId = inserted[0]?.id;
+  if (versionId === undefined) throw new Error("flow version insert failed");
+
+  // This timestamp is definition metadata used to order the flow library.
+  // Runtime channel capabilities remain the last published version's contract
+  // and are updated only by publishCanonicalFlow.
+  await sql`
+    UPDATE automation.flow_definitions
+    SET updated_at=CURRENT_TIMESTAMP
+    WHERE tenant_id=platform.current_tenant_id()
+      AND id=${definitionId}::uuid
+  `;
+
+  await sql`
+    INSERT INTO audit.records
+      (tenant_id, actor_user_id, action, target_type, target_id, metadata)
+    VALUES (platform.current_tenant_id(), ${actorUserId}::uuid,
+            'flow.draft_saved', 'flow_definition', ${definitionId}::uuid,
+            ${sql.json({
+              basedOnVersion: latest.version,
+              channels: [...flow.channels],
+              version,
+              versionId,
+            })})
+  `;
+  return { version, versionId };
 }
 
 export async function publishExecutableFlow(

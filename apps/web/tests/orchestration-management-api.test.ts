@@ -8,6 +8,7 @@ const state = vi.hoisted(() => ({
   permission: vi.fn(),
   renameAgent: vi.fn(),
   renameFlow: vi.fn(),
+  saveFlow: vi.fn(),
 }));
 
 vi.mock("@or-on/crm", () => ({
@@ -15,6 +16,7 @@ vi.mock("@or-on/crm", () => ({
   archiveAutomation: state.archiveFlow,
   renameAgentProfile: state.renameAgent,
   renameAutomation: state.renameFlow,
+  saveCanonicalFlowDraft: state.saveFlow,
   setDefaultWhatsAppAgent: state.defaultAgent,
 }));
 vi.mock("../src/features/auth", () => ({
@@ -55,6 +57,7 @@ describe("agent and flow management APIs", () => {
     state.defaultAgent.mockResolvedValue(true);
     state.archiveAgent.mockResolvedValue("archived");
     state.renameFlow.mockResolvedValue(true);
+    state.saveFlow.mockResolvedValue({ version: 2, versionId: "version-2" });
     state.archiveFlow.mockResolvedValue(true);
   });
 
@@ -129,5 +132,52 @@ describe("agent and flow management APIs", () => {
       "user-1",
       "definition-1",
     );
+  });
+
+  it("saves a canonical edit as a new draft behind mutation and flow-management guards", async () => {
+    const flow = {
+      schemaVersion: "1.0",
+      channels: ["whatsapp"],
+      nodes: [
+        { id: "start", type: "start" },
+        { id: "end", type: "end" },
+      ],
+      edges: [{ id: "next", source: "start", target: "end" }],
+    };
+    const response = await patchFlow(
+      new Request("http://localhost/api/orchestration/flows/definition-1", {
+        method: "PATCH",
+        body: JSON.stringify({ flow }),
+      }),
+      context,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      version: 2,
+      versionId: "version-2",
+    });
+    expect(state.guard).toHaveBeenCalledTimes(1);
+    expect(state.permission).toHaveBeenCalledWith("flows:manage");
+    expect(state.saveFlow).toHaveBeenCalledWith(
+      {},
+      "user-1",
+      "definition-1",
+      flow,
+    );
+  });
+
+  it("rejects a malformed flow edit before entering the tenant transaction", async () => {
+    const response = await patchFlow(
+      new Request("http://localhost/api/orchestration/flows/definition-1", {
+        method: "PATCH",
+        body: JSON.stringify({ flow: "not-an-object" }),
+      }),
+      context,
+    );
+    expect(response.status).toBe(400);
+    expect(state.saveFlow).not.toHaveBeenCalled();
+    expect(state.permission).not.toHaveBeenCalled();
   });
 });

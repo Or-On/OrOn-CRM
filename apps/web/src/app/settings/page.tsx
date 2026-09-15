@@ -18,11 +18,35 @@ import {
   UnauthenticatedError,
   withCurrentTenant,
 } from "../../features/auth";
-import { ManagementPanel } from "../../features/management";
+import { ManagementPanel, type SettingsTab } from "../../features/management";
 import { fieldServiceRuntimeReadiness } from "../../features/field-service-server";
 
-export default async function SettingsPage() {
+const SETTINGS_TABS = new Set<SettingsTab>([
+  "account",
+  "appearance",
+  "security",
+  "workspace",
+  "team",
+  "notifications",
+  "access",
+  "integrations",
+]);
+
+export default async function SettingsPage({
+  searchParams,
+}: {
+  readonly searchParams: Promise<{
+    readonly tab?: string | readonly string[] | undefined;
+  }>;
+}) {
   try {
+    const requestedTab = (await searchParams).tab;
+    const tabValue =
+      typeof requestedTab === "string" ? requestedTab : requestedTab?.[0];
+    const requestedInitialTab =
+      typeof tabValue === "string" && SETTINGS_TABS.has(tabValue as SettingsTab)
+        ? (tabValue as SettingsTab)
+        : "account";
     const data = await withCurrentTenant(
       "platform:read",
       async (sql, session) => {
@@ -60,10 +84,18 @@ export default async function SettingsPage() {
         };
       },
     );
+    const initialTab =
+      (requestedInitialTab === "team" && !data.canManageMembers) ||
+      ((["workspace", "access", "integrations"] as const).some(
+        (tab) => requestedInitialTab === tab,
+      ) &&
+        !data.canManageTenant)
+        ? "account"
+        : requestedInitialTab;
     return (
       <main className="page page--wide page--settings page--workspace-premium">
         <ProductHeading page="settings" premium />
-        <ManagementPanel {...data} />
+        <ManagementPanel {...data} initialTab={initialTab} />
       </main>
     );
   } catch (error) {

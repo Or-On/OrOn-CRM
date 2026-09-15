@@ -287,7 +287,7 @@ export async function stagePrivateObject(
     readonly tenantId: string;
     readonly caseId: string;
     readonly category: string;
-    readonly scope?: "field-service" | "customer-files";
+    readonly scope?: "field-service" | "customer-files" | "messaging";
     readonly declaredContentType: string;
     readonly bytes: Uint8Array;
   },
@@ -344,6 +344,28 @@ export async function discardPrivateObject(
 ): Promise<void> {
   await rm(staged.stagedPath, { force: true });
   await rm(staged.finalPath, { force: true });
+}
+
+/**
+ * Remove one committed private object after its database metadata has been
+ * tombstoned. Callers must commit the metadata transaction before invoking
+ * this function so a database rollback can never leave a live record without
+ * its file.
+ */
+export async function deletePrivateObject(
+  storageKey: string,
+  options: PrivateObjectStorageOptions = {},
+): Promise<void> {
+  requireLocalBackend(options);
+  if (
+    storageKey.includes("\\") ||
+    storageKey.startsWith("/") ||
+    extname(storageKey) === ""
+  )
+    throw new TypeError("Private object key is invalid");
+  const root = storageRoot(options);
+  const path = confined(root, resolve(root, ...storageKey.split("/")));
+  await rm(path, { force: true });
 }
 
 export async function readPrivateObject(

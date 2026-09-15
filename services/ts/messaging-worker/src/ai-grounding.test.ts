@@ -62,6 +62,22 @@ describe("WhatsApp deterministic grounding (typed fixtures, no provider evaluati
   });
 
   it.each([
+    ["en", "שעות הפעילות הן מתשע עד חמש."],
+    ["he", "Support hours are nine to five."],
+  ] as const)(
+    "fails closed when an approved fact does not match the active %s locale",
+    (locale, value) => {
+      const result = groundAiReply(selection, [{ ...fact, value }], locale);
+
+      expect(result.evidence).toEqual({
+        kind: "conversation",
+        code: "knowledge_unavailable",
+      });
+      expect(result.text).not.toBe(value);
+    },
+  );
+
+  it.each([
     "missing",
     "expired",
     "revoked",
@@ -120,6 +136,24 @@ describe("WhatsApp deterministic grounding (typed fixtures, no provider evaluati
       expect(
         groundAiReply(selection, [{ ...fact, value }], "he").evidence.kind,
       ).toBe("conversation");
+    },
+  );
+
+  it.each([
+    [
+      "What model is the device?",
+      "Thanks. What model is the device? Could you send a photo?",
+    ],
+    ["מה מופיע כרגע על המסך?", "תודה. מה מופיע כרגע על המסך? אפשר לצרף צילום."],
+  ])(
+    "rejects a shorter reply that repeats a complete recent question: %s",
+    (candidate, previous) => {
+      expect(
+        safeConversationalReply(candidate, {
+          locale: /\p{Script=Hebrew}/u.test(candidate) ? "he" : "en",
+          recentAssistantMessages: [previous],
+        }),
+      ).toBe(false);
     },
   );
 
@@ -437,8 +471,54 @@ describe("WhatsApp deterministic grounding (typed fixtures, no provider evaluati
     ],
     ["en", "המסך מציג ERR-502 ומבקש לנסות שוב", "he"],
     ["he", "Please email me at person@example.com", "en"],
+    ["en", "לא עובד Samsung Smart TV", "he"],
+    ["en", "המסך של Samsung Smart TV לא עובד", "he"],
+    ["he", "Samsung Smart TV is broken", "en"],
+    ["he", "Please Help", "en"],
+    ["he", "Can You Help?", "en"],
+    ["he", "Need Help Now", "en"],
+    ["he", "PLEASE HELP", "en"],
+    ["he", "CAN YOU HELP", "en"],
+    ["he", "ERROR", "en"],
+    ["he", "NOT WORKING", "en"],
   ] as const)(
     "uses only the latest message for locale selection: %s / %s",
+    (configured, text, expected) => {
+      expect(latestMessageLocale(configured, text)).toBe(expected);
+    },
+  );
+
+  it.each([
+    ["he", "1234", ["Can you send the serial number?"], "en"],
+    ["en", "...", ["אפשר לציין מה מופיע על המסך?"], "he"],
+    ["he", "ERR-502", ["I can help with that issue."], "en"],
+    [
+      "en",
+      "https://support.example.com/ticket/1234",
+      ["אפשר לצרף צילום של התקלה?"],
+      "he",
+    ],
+    ["he", "x", ["What changed before the issue appeared?"], "en"],
+    ["en", "ש", ["מה מופיע כרגע על המסך?"], "he"],
+    ["he", "1234", ["...", "Could you repeat the error code?"], "en"],
+  ] as const)(
+    "retains the latest unambiguous inbound language: %s / %s",
+    (configured, text, recentInboundTexts, expected) => {
+      expect(latestMessageLocale(configured, text, recentInboundTexts)).toBe(
+        expected,
+      );
+    },
+  );
+
+  it.each([
+    ["he", "1234", "he"],
+    ["en", "...", "en"],
+    ["he", "HDMI", "he"],
+    ["en", "x", "en"],
+    ["he", "a", "he"],
+    ["he", "I", "he"],
+  ] as const)(
+    "uses the configured locale when no inbound turn establishes language: %s / %s",
     (configured, text, expected) => {
       expect(latestMessageLocale(configured, text)).toBe(expected);
     },

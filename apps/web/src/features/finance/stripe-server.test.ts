@@ -2,6 +2,7 @@ import { createHmac } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createStripeCustomer,
+  createStripeCheckout,
   createStripePaymentSourceCheckout,
   retrieveStripeCardFromSetupIntent,
   verifyStripeSignature,
@@ -97,7 +98,7 @@ describe("Stripe payment sources", () => {
       currency: "USD",
       customerId: "cus_fictional",
       tenantId: "tenant-1",
-      siteUrl: "https://app.example.invalid/",
+      siteUrl: "https://app.example.invalid",
       requestKey: "request-123",
       setupRequestId: "request-id",
     });
@@ -108,6 +109,52 @@ describe("Stripe payment sources", () => {
     expect(body.get("mode")).toBe("setup");
     expect(body.get("customer")).toBe("cus_fictional");
     expect(body.get("metadata[purpose]")).toBe("payment_source");
+    expect(body.get("success_url")).toBe(
+      "https://app.example.invalid/finance?payment_source=success&session_id={CHECKOUT_SESSION_ID}",
+    );
+    expect(body.get("cancel_url")).toBe(
+      "https://app.example.invalid/finance?payment_source=cancelled",
+    );
+  });
+
+  it("builds valid finance return URLs for top-ups with a trailing slash", async () => {
+    let captured: RequestInit | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((_url: string, init?: RequestInit) => {
+        captured = init;
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              id: "cs_topup",
+              url: "https://checkout.stripe.test/topup",
+            }),
+            { status: 200 },
+          ),
+        );
+      }),
+    );
+
+    await createStripeCheckout({
+      secretKey: "sk_test_fictional",
+      amountMinor: 5_000,
+      currency: "USD",
+      tenantId: "tenant-1",
+      topupId: "topup-1",
+      siteUrl: "https://app.example.invalid/",
+      customerId: "cus_fictional",
+    });
+
+    const body = captured?.body;
+    expect(body).toBeInstanceOf(URLSearchParams);
+    if (!(body instanceof URLSearchParams))
+      throw new Error("Missing form body");
+    expect(body.get("success_url")).toBe(
+      "https://app.example.invalid/finance?topup=success",
+    );
+    expect(body.get("cancel_url")).toBe(
+      "https://app.example.invalid/finance?topup=cancelled",
+    );
   });
 
   it("projects only safe card metadata from the completed SetupIntent", async () => {

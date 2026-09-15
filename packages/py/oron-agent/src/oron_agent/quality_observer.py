@@ -45,11 +45,20 @@ class _Turn:
         values: dict[str, float | None] = {}
         for name, (start, end) in _DURATION_STAGES.items():
             start_ns, end_ns = self.timestamps.get(start), self.timestamps.get(end)
-            values[name] = (
-                round((end_ns - start_ns) / 1_000_000, 3)
-                if start_ns is not None and end_ns is not None and end_ns >= start_ns
-                else None
-            )
+            if start_ns is None or end_ns is None:
+                values[name] = None
+                continue
+            # Soniox may finalize the accepted utterance a few milliseconds
+            # before Pipecat emits its VAD stop marker. That means the accepted
+            # text was already ready when speech ended, not that the stage was
+            # unobserved. Keep other out-of-order stages unknown because those
+            # would indicate a broken correlation rather than zero latency.
+            if name == "speech_end_to_accepted_ms":
+                values[name] = round(max(0, end_ns - start_ns) / 1_000_000, 3)
+            else:
+                values[name] = (
+                    round((end_ns - start_ns) / 1_000_000, 3) if end_ns >= start_ns else None
+                )
         return values
 
 
@@ -160,7 +169,11 @@ class VoiceQualityObserver(BaseObserver):
             turn.timestamps.setdefault("transport_speaking_signal", stamp)
         elif isinstance(frame, BotStoppedSpeakingFrame) and data.source is self._transport:
             turn.transport_stopped = True
-        elif isinstance(frame, InterruptionFrame):
+        elif isinstance(frame, InterruptionFrame) and not turn.transport_stopped:
+            # Pipecat also broadcasts an InterruptionFrame when the caller
+            # starts a normal next turn. Once transport has reported that the
+            # preceding bot turn stopped, that frame is not a barge-in and must
+            # not make a completed response look partial in quality evidence.
             turn.interrupted = True
 
     def snapshot(self) -> dict[str, Any]:

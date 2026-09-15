@@ -15,6 +15,7 @@ import {
   PanelLeftOpen,
   PhoneCall,
   RefreshCw,
+  Search,
   UserRound,
   UsersRound,
   Workflow,
@@ -23,6 +24,8 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   AgentProfileSummary,
+  ConversationCursor,
+  ConversationPage,
   ConversationSummary,
   Message,
   MessageCursor,
@@ -51,6 +54,10 @@ import { useInboxPanelFocus } from "./use-inbox-panel-focus";
 
 type ConversationFilter =
   "all" | "mine" | "unassigned" | "unread" | "open" | "waiting" | "closed";
+
+function isArray(value: unknown): boolean {
+  return Array.isArray(value);
+}
 
 function matchesFilter(
   conversation: ConversationSummary,
@@ -124,6 +131,7 @@ export function InboxWorkspace({
   conversations,
   initialMessages,
   initialConversationId,
+  initialConversationNextCursor = null,
   initialNextCursor = null,
   quickReplies,
   realWhatsAppEnabled,
@@ -139,6 +147,7 @@ export function InboxWorkspace({
   readonly conversations: readonly ConversationSummary[];
   readonly initialMessages: readonly Message[];
   readonly initialConversationId?: string | undefined;
+  readonly initialConversationNextCursor?: ConversationCursor | null;
   readonly initialNextCursor?: MessageCursor | null;
   readonly quickReplies: readonly QuickReply[];
   readonly realWhatsAppEnabled: boolean;
@@ -158,6 +167,10 @@ export function InboxWorkspace({
   const timeZone = useTimeZone() ?? "UTC";
   const initialId = initialConversationId ?? conversations[0]?.id;
   const [items, setItems] = useState(conversations);
+  const [conversationNextCursor, setConversationNextCursor] =
+    useState<ConversationCursor | null>(initialConversationNextCursor);
+  const [loadingMoreConversations, setLoadingMoreConversations] =
+    useState(false);
   const [selectedId, setSelectedId] = useState(initialId);
   const [mobileThread, setMobileThread] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
@@ -169,6 +182,7 @@ export function InboxWorkspace({
     Readonly<Record<string, boolean>>
   >({});
   const [query, setQuery] = useState(initialSearch);
+  const [searchInput, setSearchInput] = useState(initialSearch);
   const [filter, setFilter] = useState<ConversationFilter>(initialFilter);
   const [channelFilter, setChannelFilter] = useState<"all" | "whatsapp">("all");
   const [drafts, setDrafts] = useState<Readonly<Record<string, ReplyDraft>>>(
@@ -180,6 +194,7 @@ export function InboxWorkspace({
   const selected = items.find((item) => item.id === selectedId);
   const alive = useRef(true);
   const refreshRevision = useRef(0);
+  const loadedAdditionalConversationPages = useRef(false);
   const channelToggleRef = useRef<HTMLButtonElement>(null);
   const channelSidebarRef = useRef<HTMLElement>(null);
   const contactPanelRef = useRef<HTMLElement>(null);
@@ -213,8 +228,13 @@ export function InboxWorkspace({
   // that were already unread when the page rendered.
   useEffect(() => {
     setItems(conversations);
-  }, [conversations]);
-  useEffect(() => setQuery(initialSearch), [initialSearch]);
+    setConversationNextCursor(initialConversationNextCursor);
+    loadedAdditionalConversationPages.current = false;
+  }, [conversations, initialConversationNextCursor]);
+  useEffect(() => {
+    setQuery(initialSearch);
+    setSearchInput(initialSearch);
+  }, [initialSearch]);
   useEffect(() => setFilter(initialFilter), [initialFilter]);
   useEffect(() => {
     if (selected === undefined || selected.unreadCount === 0) return;
@@ -260,6 +280,11 @@ export function InboxWorkspace({
     setFilter(next);
     setChannelFilter("all");
     replaceInboxParam("filter", next === "all" ? undefined : next);
+    void refreshItems(selectedId, { filter: next, channelFilter: "all" }).catch(
+      () => {
+        if (alive.current) setListError(t("inbox.refreshFailed"));
+      },
+    );
   }
 
   function selectConversation(id: string) {
@@ -268,14 +293,30 @@ export function InboxWorkspace({
   }
 
   const refreshItems = useCallback(
-    async (ensureId?: string) => {
+    async (
+      ensureId?: string,
+      override: {
+        readonly filter?: ConversationFilter;
+        readonly channelFilter?: "all" | "whatsapp";
+        readonly query?: string;
+        readonly preserveLoaded?: boolean;
+      } = {},
+    ) => {
       const revision = ++refreshRevision.current;
-      const result = await crmRead<{ conversations: ConversationSummary[] }>(
-        "/api/messaging/conversations",
+      const parameters = new URLSearchParams();
+      const requestedFilter = override.filter ?? filter;
+      const requestedChannel = override.channelFilter ?? channelFilter;
+      const requestedQuery = override.query ?? query;
+      if (requestedQuery.trim()) parameters.set("q", requestedQuery.trim());
+      if (requestedFilter !== "all") parameters.set("filter", requestedFilter);
+      if (requestedChannel !== "all")
+        parameters.set("channel", requestedChannel);
+      const result = await crmRead<ConversationPage>(
+        `/api/messaging/conversations${parameters.size ? `?${parameters}` : ""}`,
       );
-      if (!Array.isArray(result.conversations))
+      if (!isArray(result.conversations))
         throw new Error(t("inbox.listInvalid"));
-      let next = result.conversations;
+      let next = [...result.conversations];
       if (ensureId && !next.some((item) => item.id === ensureId)) {
         const specific = await crmRead<{
           conversations: ConversationSummary[];
@@ -283,20 +324,79 @@ export function InboxWorkspace({
         next = [...specific.conversations, ...next];
       }
       if (alive.current && revision === refreshRevision.current) {
-        setItems(next);
+        if (
+          override.preserveLoaded === true &&
+          loadedAdditionalConversationPages.current
+        ) {
+          setItems((current) => [
+            ...next,
+            ...current.filter(
+              (item) => !next.some((refreshed) => refreshed.id === item.id),
+            ),
+          ]);
+        } else {
+          setItems(next);
+          setConversationNextCursor(result.nextCursor ?? null);
+          loadedAdditionalConversationPages.current = false;
+        }
         setListError(undefined);
       }
       return next;
     },
-    [t],
+    [channelFilter, filter, query, t],
   );
+
+  async function loadMoreConversations() {
+    const before = conversationNextCursor;
+    if (before === null || loadingMoreConversations) return;
+    const revision = refreshRevision.current;
+    setLoadingMoreConversations(true);
+    setListError(undefined);
+    const parameters = new URLSearchParams();
+    if (query.trim()) parameters.set("q", query.trim());
+    if (filter !== "all") parameters.set("filter", filter);
+    if (channelFilter !== "all") parameters.set("channel", channelFilter);
+    if (before.lastMessageAt !== null)
+      parameters.set("before", before.lastMessageAt);
+    parameters.set("beforeId", before.id);
+    try {
+      const result = await crmRead<ConversationPage>(
+        `/api/messaging/conversations?${parameters}`,
+      );
+      if (!isArray(result.conversations))
+        throw new Error(t("inbox.listInvalid"));
+      if (!alive.current || revision !== refreshRevision.current) return;
+      setItems((current) => [
+        ...current,
+        ...result.conversations.filter(
+          (item) => !current.some((existing) => existing.id === item.id),
+        ),
+      ]);
+      setConversationNextCursor(result.nextCursor ?? null);
+      loadedAdditionalConversationPages.current = true;
+    } catch {
+      if (alive.current) setListError(t("inbox.refreshFailed"));
+    } finally {
+      if (alive.current) setLoadingMoreConversations(false);
+    }
+  }
+
+  function applySearch(value: string) {
+    const next = value.trim().slice(0, 120);
+    setSearchInput(next);
+    setQuery(next);
+    replaceInboxParam("search", next || undefined);
+    void refreshItems(selectedId, { query: next }).catch(() => {
+      if (alive.current) setListError(t("inbox.refreshFailed"));
+    });
+  }
 
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
       try {
-        await refreshItems(selectedId);
+        await refreshItems(selectedId, { preserveLoaded: true });
       } catch {
         // Background refresh remains quiet; manual refresh reports errors.
       } finally {
@@ -614,9 +714,16 @@ export function InboxWorkspace({
             <button
               aria-pressed={channelFilter === "whatsapp"}
               onClick={() => {
-                selectFilter("all");
+                setFilter("all");
                 setChannelFilter("whatsapp");
+                replaceInboxParam("filter", undefined);
                 setChannelsOpen(false);
+                void refreshItems(selectedId, {
+                  filter: "all",
+                  channelFilter: "whatsapp",
+                }).catch(() => {
+                  if (alive.current) setListError(t("inbox.refreshFailed"));
+                });
               }}
               type="button"
             >
@@ -756,6 +863,37 @@ export function InboxWorkspace({
             </Popover>
           </div>
         </div>
+        <form
+          className="inbox-search"
+          onSubmit={(event) => {
+            event.preventDefault();
+            applySearch(searchInput);
+          }}
+          role="search"
+        >
+          <Search aria-hidden="true" size={15} />
+          <input
+            aria-label={t("inbox.search")}
+            maxLength={120}
+            onChange={(event) => setSearchInput(event.currentTarget.value)}
+            placeholder={t("inbox.searchHint")}
+            type="search"
+            value={searchInput}
+          />
+          {searchInput ? (
+            <button
+              aria-label={t("inbox.clearSearch")}
+              className="inbox-search__clear"
+              onClick={() => applySearch("")}
+              type="button"
+            >
+              <X aria-hidden="true" size={14} />
+            </button>
+          ) : null}
+          <button className="sr-only" type="submit">
+            {t("inbox.search")}
+          </button>
+        </form>
         <div
           aria-label={
             t.has("inbox.filters.label")
@@ -841,6 +979,17 @@ export function InboxWorkspace({
         </nav>
         <div className="inbox-list__footer">
           <small>{t("inbox.loaded", { count: items.length })}</small>
+          {conversationNextCursor ? (
+            <button
+              disabled={loadingMoreConversations}
+              onClick={() => void loadMoreConversations()}
+              type="button"
+            >
+              {loadingMoreConversations
+                ? t("inbox.loadingMore")
+                : t("inbox.loadMore")}
+            </button>
+          ) : null}
         </div>
       </Surface>
       <Surface

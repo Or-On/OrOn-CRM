@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
   assertMutation: vi.fn(),
+  deletePrivateObject: vi.fn(),
   deleteConversation: vi.fn(),
   permission: vi.fn(),
 }));
@@ -31,6 +32,9 @@ vi.mock("../src/features/crm-route", () => ({
       { status: 400 },
     ),
 }));
+vi.mock("../src/features/private-objects", () => ({
+  deletePrivateObject: state.deletePrivateObject,
+}));
 
 import { DELETE } from "../src/app/api/messaging/conversations/[id]/route";
 
@@ -42,7 +46,11 @@ const context = {
 describe("conversation deletion API", () => {
   beforeEach(() => {
     state.assertMutation.mockReset().mockResolvedValue(undefined);
-    state.deleteConversation.mockReset().mockResolvedValue("deleted");
+    state.deletePrivateObject.mockReset().mockResolvedValue(undefined);
+    state.deleteConversation.mockReset().mockResolvedValue({
+      status: "deleted",
+      privateObjects: [],
+    });
     state.permission.mockClear();
   });
 
@@ -58,7 +66,10 @@ describe("conversation deletion API", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ ok: true });
+    expect(await response.json()).toEqual({
+      ok: true,
+      storageCleanupPending: 0,
+    });
     expect(state.assertMutation).toHaveBeenCalledOnce();
     expect(state.permission).toHaveBeenCalledWith("messaging:operate");
     expect(state.deleteConversation).toHaveBeenCalledWith(
@@ -71,8 +82,9 @@ describe("conversation deletion API", () => {
   it.each([
     ["not_found", 404],
     ["active_work", 409],
+    ["retained_evidence", 409],
   ] as const)("maps %s without hiding the result", async (result, status) => {
-    state.deleteConversation.mockResolvedValue(result);
+    state.deleteConversation.mockResolvedValue({ status: result });
     const response = await DELETE(
       new Request(
         `http://localhost/api/messaging/conversations/${conversationId}`,
@@ -86,6 +98,69 @@ describe("conversation deletion API", () => {
     expect((await response.json()) as { error: string }).toHaveProperty(
       "error",
     );
+  });
+
+  it("removes committed local files after the tenant transaction and reports deferred cleanup", async () => {
+    state.deleteConversation.mockResolvedValue({
+      status: "deleted",
+      privateObjects: [
+        {
+          id: "40000000-0000-4000-8000-000000000001",
+          storageBackend: "local",
+          storageKey: "tenant/messaging/conversation/media/file.jpg",
+        },
+        {
+          id: "40000000-0000-4000-8000-000000000002",
+          storageBackend: "gcs",
+          storageKey: "tenant/messaging/conversation/media/file.pdf",
+        },
+      ],
+    });
+
+    const response = await DELETE(
+      new Request(
+        `http://localhost/api/messaging/conversations/${conversationId}`,
+        { method: "DELETE" },
+      ),
+      context,
+    );
+
+    expect(response.status).toBe(200);
+    expect(state.deletePrivateObject).toHaveBeenCalledWith(
+      "tenant/messaging/conversation/media/file.jpg",
+    );
+    expect(await response.json()).toEqual({
+      ok: true,
+      storageCleanupPending: 1,
+    });
+  });
+
+  it("keeps a successful deletion successful when physical cleanup is deferred", async () => {
+    state.deleteConversation.mockResolvedValue({
+      status: "deleted",
+      privateObjects: [
+        {
+          id: "40000000-0000-4000-8000-000000000001",
+          storageBackend: "local",
+          storageKey: "tenant/messaging/conversation/media/file.jpg",
+        },
+      ],
+    });
+    state.deletePrivateObject.mockRejectedValue(new Error("disk unavailable"));
+
+    const response = await DELETE(
+      new Request(
+        `http://localhost/api/messaging/conversations/${conversationId}`,
+        { method: "DELETE" },
+      ),
+      context,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      ok: true,
+      storageCleanupPending: 1,
+    });
   });
 
   it("does not reach PostgreSQL when mutation authentication fails", async () => {

@@ -5,4 +5,9 @@ export { qualityCopy } from "./quality-copy";
 export { AgentAudioPreview } from "./agent-audio-preview";
 export { AgentProviderEvaluation } from "./agent-provider-evaluation";
 export { buildFlowElements } from "./flow-canvas";
+export {
+  CanonicalFlowEditor,
+  canonicalFlowFromEditorDraft,
+  flowEditorDraftFromDefinition,
+} from "./canonical-flow-editor";
 export { orchestrationLocation } from "./location";

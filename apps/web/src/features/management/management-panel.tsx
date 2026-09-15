@@ -51,7 +51,7 @@ import { crmMutation } from "../crm";
 import { IdentityImage, IdentityImageEditor } from "../identity";
 import { FieldServiceSettings } from "../field-service";
 
-type SettingsTab =
+export type SettingsTab =
   | "account"
   | "appearance"
   | "security"
@@ -83,6 +83,7 @@ export function ManagementPanel({
   canManageOwners = false,
   fieldServiceFeature,
   fieldServiceRuntimeReadiness,
+  initialTab = "account",
 }: {
   readonly account: AccountSummary;
   readonly members: readonly TeamMember[];
@@ -104,6 +105,7 @@ export function ManagementPanel({
         readonly storageBackend: string;
       }
     | undefined;
+  readonly initialTab?: SettingsTab;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -111,7 +113,8 @@ export function ManagementPanel({
   const router = useRouter();
   const canReadCrm = useCapability("crm:read");
   const canReadVoice = useCapability("voice:read");
-  const [activeTab, setActiveTab] = useState<SettingsTab>("account");
+  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
+  useEffect(() => setActiveTab(initialTab), [initialTab]);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string>();
   const [messageScope, setMessageScope] = useState<FeedbackScope>("account");

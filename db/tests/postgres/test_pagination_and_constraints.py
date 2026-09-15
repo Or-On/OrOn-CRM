@@ -42,6 +42,35 @@ async def _conversation(pg: asyncpg.Connection, tenant_id: UUID) -> UUID:
     return conversation_id
 
 
+async def _inbound_media(pg: asyncpg.Connection, tenant_id: UUID) -> tuple[UUID, UUID]:
+    conversation_id = await _conversation(pg, tenant_id)
+    message_id = uuid4()
+    object_id = await pg.fetchval(
+        "INSERT INTO objects.object_metadata "
+        "(tenant_id, owner_type, owner_id, category, content_type, byte_size, checksum, "
+        "storage_backend, storage_key, status) "
+        "VALUES ($1, 'message', $2, 'whatsapp_customer_image', 'image/jpeg', 4, "
+        "'fixture-checksum', 'local', $3, 'available') RETURNING id",
+        tenant_id,
+        message_id,
+        f"messaging/{tenant_id}/{message_id}",
+    )
+    await pg.execute(
+        "INSERT INTO messaging.messages "
+        "(id, tenant_id, conversation_id, direction, sender_type, content_type, "
+        "provider, provider_message_id, status, structured_content, object_id) "
+        "VALUES ($1, $2, $3, 'inbound', 'contact', 'image', 'meta', $4, 'received', "
+        '\'{"retrievalStatus":"available","fileName":"fixture.jpg"}\'::jsonb, $5)',
+        message_id,
+        tenant_id,
+        conversation_id,
+        f"media-{message_id}",
+        object_id,
+    )
+    assert object_id is not None
+    return message_id, object_id
+
+
 async def test_message_and_audit_keyset_pagination_is_stable(pg: asyncpg.Connection) -> None:
     tenant_id = await _tenant(pg, "Cursor tenant")
     conversation_id = await _conversation(pg, tenant_id)
@@ -169,4 +198,88 @@ async def test_constraint_and_delete_action_families_execute(pg: asyncpg.Connect
     assert not await pg.fetchval(
         "SELECT EXISTS (SELECT 1 FROM messaging.messages WHERE conversation_id = $1)",
         conversation_id,
+    )
+
+
+@pytest.mark.rls
+async def test_inbound_media_function_is_current_tenant_and_role_scoped(
+    pg: asyncpg.Connection,
+) -> None:
+    tenant = await _tenant(pg, "Inbox media tenant")
+    other_tenant = await _tenant(pg, "Other inbox media tenant")
+    message_id, object_id = await _inbound_media(pg, tenant)
+    other_message_id, _ = await _inbound_media(pg, other_tenant)
+    actor = uuid4()
+    await pg.execute(
+        "INSERT INTO users (id, email) VALUES ($1, $2)", actor, f"{actor}@example.test"
+    )
+    await pg.execute(
+        "INSERT INTO memberships (user_id, tenant_id, role) VALUES ($1, $2, 'viewer')",
+        actor,
+        tenant,
+    )
+    function = "messaging.current_tenant_message_media(uuid)"
+    definition = await pg.fetchrow(
+        "SELECT prosecdef, proconfig FROM pg_proc WHERE oid = $1::regprocedure", function
+    )
+    assert definition is not None and definition["prosecdef"]
+    assert definition["proconfig"] == ["search_path=pg_catalog"]
+    assert not await pg.fetchval(
+        "SELECT EXISTS (SELECT 1 FROM pg_proc function, "
+        "LATERAL aclexplode(function.proacl) acl "
+        "WHERE function.oid = $1::regprocedure AND acl.grantee = 0)",
+        function,
+    )
+    assert await pg.fetchval(
+        "SELECT has_function_privilege('platform_web', $1, 'EXECUTE')", function
+    )
+
+    await pg.execute("SET LOCAL ROLE platform_web")
+    await pg.execute(
+        "SELECT set_config('app.current_tenant',$1,true), "
+        "set_config('app.current_user',$2,true), set_config('app.current_role','viewer',true)",
+        str(tenant),
+        str(actor),
+    )
+    visible = await pg.fetch(
+        "SELECT id, message_id, content_type, storage_key "
+        "FROM messaging.current_tenant_message_media($1)",
+        message_id,
+    )
+    assert len(visible) == 1
+    assert visible[0]["message_id"] == message_id
+    assert visible[0]["content_type"] == "image/jpeg"
+    assert not await pg.fetch(
+        "SELECT * FROM messaging.current_tenant_message_media($1)", other_message_id
+    )
+
+    await pg.execute("SELECT set_config('app.current_role','agent',true)")
+    assert not await pg.fetch(
+        "SELECT * FROM messaging.current_tenant_message_media($1)", message_id
+    )
+    await pg.execute("RESET ROLE")
+    await pg.execute(
+        "UPDATE memberships SET role='technician' WHERE user_id=$1 AND tenant_id=$2",
+        actor,
+        tenant,
+    )
+    await pg.execute("SET LOCAL ROLE platform_web")
+    await pg.execute("SELECT set_config('app.current_role','technician',true)")
+    assert not await pg.fetch(
+        "SELECT * FROM messaging.current_tenant_message_media($1)", message_id
+    )
+
+    await pg.execute("RESET ROLE")
+    await pg.execute(
+        "UPDATE memberships SET role='viewer' WHERE user_id=$1 AND tenant_id=$2",
+        actor,
+        tenant,
+    )
+    await pg.execute(
+        "UPDATE objects.object_metadata SET status='quarantined' WHERE id=$1", object_id
+    )
+    await pg.execute("SET LOCAL ROLE platform_web")
+    await pg.execute("SELECT set_config('app.current_role','viewer',true)")
+    assert not await pg.fetch(
+        "SELECT * FROM messaging.current_tenant_message_media($1)", message_id
     )

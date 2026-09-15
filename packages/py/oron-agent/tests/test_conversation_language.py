@@ -30,8 +30,19 @@ from pipecat.utils.text.base_text_aggregator import AggregationType
         ),
         ("המסך מציג ERR-502 ומבקש לנסות שוב", None, ConversationLanguage.HEBREW),
         ("Please email person@example.com", None, ConversationLanguage.ENGLISH),
+        ("לא עובד Samsung Smart TV", None, ConversationLanguage.HEBREW),
+        ("לא עובד Samsung Smart TV", Language.EN, ConversationLanguage.HEBREW),
+        ("Please Help", None, ConversationLanguage.ENGLISH),
+        ("Can You Help?", None, ConversationLanguage.ENGLISH),
+        ("Need Help Now", None, ConversationLanguage.ENGLISH),
+        ("HELP", None, ConversationLanguage.ENGLISH),
+        ("PLEASE HELP", None, ConversationLanguage.ENGLISH),
+        ("ERROR", None, ConversationLanguage.ENGLISH),
+        ("NOT WORKING", None, ConversationLanguage.ENGLISH),
         ("WhatsApp לא עובד", Language.HE, ConversationLanguage.HEBREW),
         ("OK", Language.EN, ConversationLanguage.ENGLISH),
+        ("x", Language.EN, None),
+        ("א", Language.HE, None),
         ("1234", None, None),
     ],
 )
@@ -46,6 +57,8 @@ def test_language_detection_uses_script_then_provider(text, provider, expected):
         ("אפשר לעזור לי?", "en-US", ConversationLanguage.HEBREW),
         ("1234", "he-IL", ConversationLanguage.HEBREW),
         ("...", "en-US", ConversationLanguage.ENGLISH),
+        ("x", "he-IL", ConversationLanguage.HEBREW),
+        ("א", "en-US", ConversationLanguage.ENGLISH),
     ],
 )
 def test_turn_language_uses_authored_fallback_only_for_ambiguous_text(text, fallback, expected):

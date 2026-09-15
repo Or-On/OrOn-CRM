@@ -6,7 +6,12 @@ import { normalizeE164 } from "./phone.js";
 import { messageDeliveryFailure } from "./whatsapp-diagnostics.js";
 import type {
   ConversationSummary,
+  ConversationCursor,
+  ConversationFilter,
+  ConversationPage,
   Message,
+  MessageLocation,
+  MessageMedia,
   SimulatedInboundInput,
   SimulatedOutboundInput,
   QuickReply,
@@ -38,6 +43,7 @@ interface ConversationRow {
   whatsapp_consent: string;
   whatsapp_opted_out_at: Date | null;
   customer_service_window_expires_at: Date | null;
+  cursor_last_message_at: string | null;
 }
 
 interface MessageRow {
@@ -53,9 +59,22 @@ interface MessageRow {
   reactions: unknown;
   delivery_events: unknown;
   structured_content: unknown;
+  media_object_content_type: string | null;
   cursor_created_at: string;
   outbound_error_code: unknown;
   outbound_diagnostic: unknown;
+}
+
+export interface MessageMediaObjectMetadata {
+  readonly id: string;
+  readonly messageId: string;
+  readonly contentType: string;
+  readonly byteSize: number;
+  readonly checksum: string;
+  readonly storageBackend: "local" | "gcs";
+  readonly storageKey: string;
+  readonly status: "pending" | "available" | "quarantined" | "deleted";
+  readonly fileName: string | null;
 }
 
 /** Project only the submitted template fields, never arbitrary provider payloads. */
@@ -104,6 +123,71 @@ function deliveryEvents(value: unknown): Message["deliveryEvents"] {
       ? [{ status: record.status, occurredAt: record.occurredAt }]
       : [];
   });
+}
+
+function structuredRecord(value: unknown): Readonly<Record<string, unknown>> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Readonly<Record<string, unknown>>)
+    : {};
+}
+
+function boundedStructuredText(value: unknown, maximum: number): string | null {
+  return typeof value === "string" && value.length <= maximum ? value : null;
+}
+
+/** Project only presentation-safe media fields, never provider ids or hashes. */
+export function messageMedia(
+  contentType: string,
+  structured: unknown,
+  mediaObjectContentType: string | null = null,
+): MessageMedia | null {
+  if (contentType !== "image" && contentType !== "document") return null;
+  const record = structuredRecord(structured);
+  const storedStatus = record.retrievalStatus;
+  const status: MessageMedia["status"] =
+    mediaObjectContentType !== null
+      ? "available"
+      : storedStatus === "pending" ||
+          storedStatus === "processing" ||
+          storedStatus === "failed"
+        ? storedStatus
+        : "unavailable";
+  return {
+    kind: contentType,
+    status,
+    mimeType:
+      mediaObjectContentType ?? boundedStructuredText(record.mimeType, 255),
+    fileName: boundedStructuredText(record.fileName, 255),
+    caption: boundedStructuredText(record.caption, 4_096),
+  };
+}
+
+/** Project validated coordinates and human labels without retaining raw payloads. */
+export function messageLocation(
+  contentType: string,
+  structured: unknown,
+): MessageLocation | null {
+  if (contentType !== "location") return null;
+  const record = structuredRecord(structured);
+  const latitude = record.latitude;
+  const longitude = record.longitude;
+  if (
+    typeof latitude !== "number" ||
+    !Number.isFinite(latitude) ||
+    latitude < -90 ||
+    latitude > 90 ||
+    typeof longitude !== "number" ||
+    !Number.isFinite(longitude) ||
+    longitude < -180 ||
+    longitude > 180
+  )
+    return null;
+  return {
+    latitude,
+    longitude,
+    name: boundedStructuredText(record.name, 1_000),
+    address: boundedStructuredText(record.address, 1_000),
+  };
 }
 
 function mapConversation(row: ConversationRow): ConversationSummary {
@@ -157,7 +241,148 @@ function mapMessage(row: MessageRow): Message {
           )
         : null,
     template: templateSummary(row.structured_content),
+    media: messageMedia(
+      row.content_type,
+      row.structured_content,
+      row.media_object_content_type,
+    ),
+    location: messageLocation(row.content_type, row.structured_content),
     historyCursor: { id: row.id, createdAt: row.cursor_created_at },
+  };
+}
+
+export function parseConversationCursor(
+  lastMessageAt: string | null,
+  id: string | null,
+): ConversationCursor | undefined {
+  if (lastMessageAt === null && id === null) return undefined;
+  if (
+    id === null ||
+    !/^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/iu.test(id) ||
+    (lastMessageAt !== null &&
+      (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3,6}Z$/u.test(
+        lastMessageAt,
+      ) ||
+        !Number.isFinite(Date.parse(lastMessageAt))))
+  )
+    throw new TypeError("Invalid conversation cursor");
+  return { lastMessageAt, id };
+}
+
+export async function listConversationPage(
+  sql: postgres.TransactionSql,
+  options: {
+    readonly conversationId?: string;
+    readonly query?: string;
+    readonly filter?: ConversationFilter;
+    readonly currentUserId?: string;
+    readonly channelKind?: "whatsapp";
+    readonly before?: ConversationCursor;
+    readonly limit?: number;
+  } = {},
+): Promise<ConversationPage> {
+  const limit = options.limit ?? 100;
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100)
+    throw new TypeError("Conversation page size must be 1–100");
+  const query = options.query?.trim() ?? "";
+  if (query.length > 120)
+    throw new TypeError("Conversation search is too long");
+  const filter = options.filter ?? "all";
+  if (
+    ![
+      "all",
+      "mine",
+      "unassigned",
+      "unread",
+      "open",
+      "waiting",
+      "closed",
+    ].includes(filter)
+  )
+    throw new TypeError("Invalid conversation filter");
+  if (filter === "mine" && options.currentUserId === undefined)
+    throw new TypeError("Current user is required for the Mine filter");
+  const before =
+    options.before === undefined
+      ? undefined
+      : parseConversationCursor(
+          options.before.lastMessageAt,
+          options.before.id,
+        );
+  const rows = await sql.unsafe<ConversationRow[]>(
+    `SELECT c.id, c.contact_id, contact.name AS contact_name, c.status,
+            c.unread_count, c.last_message_at, c.last_message_preview,
+            c.assigned_user_id, c.ownership_mode,
+            c.ai_agent_profile_version_id, c.ai_enabled_at,
+            c.handoff_reason_safe, channel.kind AS channel_kind, channel.provider,
+            channel.display_address AS sender_address, channel.provider_account_id,
+            recipient.normalized_value AS recipient_address,
+            contact.whatsapp_consent, contact.whatsapp_opted_out_at,
+            c.customer_service_window_expires_at,
+            CASE WHEN c.last_message_at IS NULL THEN NULL ELSE
+              to_char(c.last_message_at AT TIME ZONE 'UTC',
+                'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
+            END AS cursor_last_message_at
+       FROM messaging.conversations c
+       JOIN crm.contacts contact
+         ON contact.id = c.contact_id AND contact.tenant_id = c.tenant_id
+       JOIN messaging.channels channel
+         ON channel.id = c.channel_id AND channel.tenant_id = c.tenant_id
+       LEFT JOIN LATERAL (
+         SELECT identity.normalized_value
+           FROM crm.contact_channel_identities identity
+          WHERE identity.contact_id = c.contact_id
+            AND identity.tenant_id = c.tenant_id
+            AND identity.channel = 'whatsapp'
+            AND identity.validation_status = 'valid'
+            AND identity.normalized_value IS NOT NULL
+          ORDER BY identity.is_primary DESC, identity.created_at, identity.id
+          LIMIT 1
+       ) recipient ON true
+      WHERE c.tenant_id = platform.current_tenant_id()
+        AND ($1::uuid IS NULL OR c.id = $1::uuid)
+        AND ($2 = '' OR position(lower($2) in lower(concat_ws(' ',
+          contact.name, recipient.normalized_value, channel.display_address,
+          channel.provider, c.last_message_preview))) > 0)
+        AND ($3 = 'all'
+          OR ($3 = 'mine' AND c.assigned_user_id = $4::uuid)
+          OR ($3 = 'unassigned' AND c.assigned_user_id IS NULL)
+          OR ($3 = 'unread' AND c.unread_count > 0)
+          OR ($3 = 'open' AND c.status = 'open')
+          OR ($3 = 'waiting' AND c.status = 'pending')
+          OR ($3 = 'closed' AND c.status IN ('closed', 'resolved')))
+        AND ($5::text IS NULL OR channel.kind = $5)
+        AND ($7::uuid IS NULL OR
+          ($6::timestamptz IS NULL AND c.last_message_at IS NULL AND c.id < $7::uuid)
+          OR ($6::timestamptz IS NOT NULL AND (
+            c.last_message_at < $6::timestamptz
+            OR (c.last_message_at = $6::timestamptz AND c.id < $7::uuid)
+            OR c.last_message_at IS NULL)))
+      ORDER BY c.last_message_at DESC NULLS LAST, c.id DESC
+      LIMIT $8`,
+    [
+      options.conversationId ?? null,
+      query,
+      filter,
+      options.currentUserId ?? null,
+      options.channelKind ?? null,
+      before?.lastMessageAt ?? null,
+      before?.id ?? null,
+      limit + 1,
+    ],
+  );
+  const hasMore = rows.length > limit;
+  const selected = hasMore ? rows.slice(0, limit) : rows;
+  const last = selected.at(-1);
+  return {
+    conversations: selected.map(mapConversation),
+    nextCursor:
+      hasMore && last !== undefined
+        ? {
+            lastMessageAt: last.cursor_last_message_at,
+            id: last.id,
+          }
+        : null,
   };
 }
 
@@ -165,31 +390,12 @@ export async function listConversations(
   sql: postgres.TransactionSql,
   conversationId?: string,
 ): Promise<readonly ConversationSummary[]> {
-  const rows = await sql<ConversationRow[]>`
-    SELECT c.id, c.contact_id, contact.name AS contact_name, c.status,
-           c.unread_count, c.last_message_at, c.last_message_preview,
-           c.assigned_user_id, c.ownership_mode,
-           c.ai_agent_profile_version_id, c.ai_enabled_at,
-           c.handoff_reason_safe, channel.kind AS channel_kind, channel.provider,
-           channel.display_address AS sender_address, channel.provider_account_id,
-           recipient.normalized_value AS recipient_address,
-           contact.whatsapp_consent, contact.whatsapp_opted_out_at,
-           c.customer_service_window_expires_at
-    FROM messaging.conversations c
-    JOIN crm.contacts contact ON contact.id = c.contact_id
-    JOIN messaging.channels channel ON channel.id = c.channel_id
-    LEFT JOIN LATERAL (
-      SELECT normalized_value FROM crm.contact_channel_identities
-      WHERE contact_id = c.contact_id AND tenant_id = c.tenant_id
-        AND channel = 'whatsapp' AND validation_status = 'valid'
-        AND normalized_value IS NOT NULL
-      ORDER BY is_primary DESC, created_at, id LIMIT 1
-    ) recipient ON true
-    WHERE (${conversationId ?? null}::uuid IS NULL OR c.id = ${conversationId ?? null}::uuid)
-    ORDER BY c.last_message_at DESC NULLS LAST, c.id DESC
-    LIMIT 100
-  `;
-  return rows.map(mapConversation);
+  return (
+    await listConversationPage(sql, {
+      ...(conversationId === undefined ? {} : { conversationId }),
+      limit: 100,
+    })
+  ).conversations;
 }
 
 export async function listMessages(
@@ -202,7 +408,11 @@ export async function listMessages(
 export async function listMessagePage(
   sql: postgres.TransactionSql,
   conversationId: string,
-  options: { readonly before?: MessageCursor; readonly limit?: number } = {},
+  options: {
+    readonly before?: MessageCursor;
+    readonly includeMedia?: boolean;
+    readonly limit?: number;
+  } = {},
 ): Promise<MessagePage> {
   const limit = options.limit ?? 50;
   if (!Number.isInteger(limit) || limit < 1 || limit > 250)
@@ -217,6 +427,7 @@ export async function listMessagePage(
     SELECT message.id, message.conversation_id, message.direction,
            message.sender_type, message.content_type, message.content_text,
            message.status, message.provider_message_id, message.created_at, message.structured_content,
+           NULL::text AS media_object_content_type,
            outbound.last_error_code AS outbound_error_code,
            message.provider_payload -> 'whatsappSendDiagnostic' AS outbound_diagnostic,
            to_char(message.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_created_at,
@@ -238,12 +449,74 @@ export async function listMessagePage(
     ORDER BY message.created_at DESC, message.id DESC
     LIMIT ${limit + 1}
   `;
-  const messages = rows.slice(0, limit).reverse().map(mapMessage);
+  const availableMedia =
+    options.includeMedia === true && rows.length > 0
+      ? await sql<{ message_id: string; content_type: string }[]>`
+          SELECT media.message_id, media.content_type
+          FROM unnest(${rows.map((row) => row.id)}::uuid[]) requested(message_id)
+          CROSS JOIN LATERAL
+            messaging.current_tenant_message_media(requested.message_id) media
+        `
+      : [];
+  const mediaByMessage = new Map(
+    availableMedia.map((media) => [media.message_id, media.content_type]),
+  );
+  const messages = rows
+    .slice(0, limit)
+    .reverse()
+    .map((row) =>
+      mapMessage({
+        ...row,
+        media_object_content_type: mediaByMessage.get(row.id) ?? null,
+      }),
+    );
   return {
     messages,
     nextCursor:
       rows.length > limit ? (messages[0]?.historyCursor ?? null) : null,
   };
+}
+
+/**
+ * Resolve a private object only through its tenant-visible inbound message.
+ * The database function intentionally bridges the Inbox authorization model
+ * without weakening Field Service's narrower technician object policy.
+ */
+export async function getMessageMediaObjectMetadata(
+  sql: postgres.TransactionSql,
+  messageId: string,
+): Promise<MessageMediaObjectMetadata | undefined> {
+  const rows = await sql<
+    {
+      id: string;
+      message_id: string;
+      content_type: string;
+      byte_size: string;
+      checksum: string;
+      storage_backend: "local" | "gcs";
+      storage_key: string;
+      status: MessageMediaObjectMetadata["status"];
+      file_name: string | null;
+    }[]
+  >`
+    SELECT id, message_id, content_type, byte_size, checksum,
+           storage_backend, storage_key, status, file_name
+    FROM messaging.current_tenant_message_media(${messageId}::uuid)
+  `;
+  const row = rows[0];
+  return row === undefined
+    ? undefined
+    : {
+        id: row.id,
+        messageId: row.message_id,
+        contentType: row.content_type,
+        byteSize: Number(row.byte_size),
+        checksum: row.checksum,
+        storageBackend: row.storage_backend,
+        storageKey: row.storage_key,
+        status: row.status,
+        fileName: row.file_name,
+      };
 }
 
 async function simulatorChannelId(
@@ -393,14 +666,17 @@ export async function ingestWhatsAppInbound(
       occurredAt.getTime() > Date.now() + 300_000)
   )
     throw new TypeError("invalid inbound provider timestamp");
-  const channelRows = await sql<{ id: string }[]>`
-    SELECT id FROM messaging.channels
+  const channelRows = await sql<
+    { id: string; mirror_inbound_media: boolean }[]
+  >`
+    SELECT id, mirror_inbound_media FROM messaging.channels
     WHERE provider = 'meta' AND provider_account_id = ${input.providerAccountId}
       AND status = 'active'
     LIMIT 1
   `;
-  const channelId = channelRows[0]?.id;
-  if (channelId === undefined)
+  const channel = channelRows[0];
+  const channelId = channel?.id;
+  if (channelId === undefined || channel === undefined)
     throw new Error("WhatsApp provider account is unavailable");
 
   const identityRows = await sql<{ id: string; contact_id: string }[]>`
@@ -472,7 +748,9 @@ export async function ingestWhatsAppInbound(
           sha256: input.media?.sha256,
           fileName: input.media?.fileName,
           caption: input.media?.caption,
-          retrievalStatus: "pending",
+          retrievalStatus: channel.mirror_inbound_media
+            ? "pending"
+            : "unavailable",
         }
       : contentType === "location"
         ? {
@@ -804,8 +1082,20 @@ export async function setConversationStatus(
   return rows.length === 1;
 }
 
+export interface ConversationPrivateObjectCleanup {
+  readonly id: string;
+  readonly storageBackend: "local" | "gcs";
+  readonly storageKey: string;
+}
+
 export type ConversationDeletionResult =
-  "deleted" | "not_found" | "active_work";
+  | {
+      readonly status: "deleted";
+      readonly privateObjects: readonly ConversationPrivateObjectCleanup[];
+    }
+  | { readonly status: "not_found" }
+  | { readonly status: "active_work" }
+  | { readonly status: "retained_evidence" };
 
 /**
  * Permanently remove one tenant-visible conversation and its dependent
@@ -814,6 +1104,10 @@ export type ConversationDeletionResult =
  * The row lock serializes this operation with other conversation mutations.
  * Active durable work is never cancelled implicitly: an operator must wait for
  * delivery/AI processing to reach a terminal state before deleting the thread.
+ * A conversation that became part of a technician case is retained because its
+ * original messages and media are case evidence, not disposable Inbox state.
+ * Unshared message-owned objects are tombstoned in the same transaction; the
+ * caller may remove their physical files only after this transaction commits.
  */
 export async function deleteConversation(
   sql: postgres.TransactionSql,
@@ -825,7 +1119,25 @@ export async function deleteConversation(
     WHERE id = ${conversationId}::uuid
     FOR UPDATE
   `;
-  if (conversations[0] === undefined) return "not_found";
+  if (conversations[0] === undefined) return { status: "not_found" };
+
+  // Prevent a worker from attaching new durable case evidence between the
+  // retention check and the cascading conversation delete. The object lock
+  // also makes the attachment validator observe the committed tombstone if a
+  // late projection was already waiting on this deletion.
+  await sql`
+    SELECT message.id FROM messaging.messages message
+    WHERE message.conversation_id = ${conversationId}::uuid
+    FOR UPDATE OF message
+  `;
+  await sql`
+    SELECT object.id
+    FROM messaging.messages message
+    JOIN objects.object_metadata object
+      ON object.id = message.object_id AND object.tenant_id = message.tenant_id
+    WHERE message.conversation_id = ${conversationId}::uuid
+    FOR UPDATE OF object
+  `;
 
   const work = await sql<{ active: boolean }[]>`
     SELECT (
@@ -850,27 +1162,135 @@ export async function deleteConversation(
                   AND request.conversation_id = ${conversationId}::uuid
               )
             )
+            OR (
+              job.reference_type = 'message'
+              AND EXISTS (
+                SELECT 1 FROM messaging.messages message
+                WHERE message.id = job.reference_id
+                  AND message.conversation_id = ${conversationId}::uuid
+              )
+            )
           )
       )
     ) AS active
   `;
-  if (work[0]?.active === true) return "active_work";
+  if (work[0]?.active === true) return { status: "active_work" };
+
+  const evidence = await sql<{ retained: boolean }[]>`
+    SELECT (
+      EXISTS (
+        SELECT 1 FROM service.intake_drafts intake
+        WHERE intake.conversation_id = ${conversationId}::uuid
+      ) OR EXISTS (
+        SELECT 1 FROM service.cases service_case
+        WHERE service_case.conversation_id = ${conversationId}::uuid
+      ) OR EXISTS (
+        SELECT 1 FROM service.case_conversations link
+        WHERE link.conversation_id = ${conversationId}::uuid
+      ) OR EXISTS (
+        SELECT 1
+        FROM service.intake_messages intake_message
+        JOIN messaging.messages message
+          ON message.id = intake_message.message_id
+         AND message.tenant_id = intake_message.tenant_id
+        WHERE message.conversation_id = ${conversationId}::uuid
+      ) OR EXISTS (
+        SELECT 1
+        FROM service.report_attachments attachment
+        JOIN messaging.messages message
+          ON message.tenant_id = attachment.tenant_id
+         AND (
+           message.id = attachment.message_id
+           OR message.object_id = attachment.object_id
+         )
+        WHERE message.conversation_id = ${conversationId}::uuid
+      )
+    ) AS retained
+  `;
+  if (evidence[0]?.retained === true) return { status: "retained_evidence" };
+
+  const privateObjects = await sql<
+    {
+      id: string;
+      storage_backend: "local" | "gcs";
+      storage_key: string;
+    }[]
+  >`
+    UPDATE objects.object_metadata object
+    SET status = 'deleted', deleted_at = CURRENT_TIMESTAMP,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE object.tenant_id = platform.current_tenant_id()
+      AND object.owner_type = 'message'
+      AND object.deleted_at IS NULL
+      AND EXISTS (
+        SELECT 1 FROM messaging.messages message
+        WHERE message.conversation_id = ${conversationId}::uuid
+          AND message.id = object.owner_id
+          AND message.object_id = object.id
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM messaging.messages other_message
+        WHERE other_message.object_id = object.id
+          AND other_message.conversation_id <> ${conversationId}::uuid
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM crm.customer_documents document
+        WHERE document.object_id = object.id AND document.deleted_at IS NULL
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM service.report_attachments attachment
+        WHERE attachment.object_id = object.id
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM service.visits visit
+        WHERE visit.arrival_signature_object_id = object.id
+           OR visit.departure_signature_object_id = object.id
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM service.export_records export_record
+        WHERE export_record.object_id = object.id
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM agents.knowledge_documents document
+        WHERE document.object_id = object.id
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM public.sessions session
+        WHERE session.recording_object_id = object.id
+           OR session.transcript_object_id = object.id
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM live.voice_profiles profile
+        WHERE profile.object_id = object.id
+      )
+    RETURNING object.id, object.storage_backend, object.storage_key
+  `;
 
   const deleted = await sql<{ id: string }[]>`
     DELETE FROM messaging.conversations
     WHERE id = ${conversationId}::uuid
     RETURNING id
   `;
-  if (deleted[0] === undefined) return "not_found";
+  if (deleted[0] === undefined) return { status: "not_found" };
 
   await sql`
     INSERT INTO audit.records
       (tenant_id, actor_user_id, action, target_type, target_id, metadata)
     VALUES (platform.current_tenant_id(), ${actorUserId}::uuid,
             'conversation.deleted', 'conversation', ${conversationId}::uuid,
-            ${sql.json({ retainedContact: true })})
+            ${sql.json({
+              retainedContact: true,
+              tombstonedPrivateObjectCount: privateObjects.length,
+            })})
   `;
-  return "deleted";
+  return {
+    status: "deleted",
+    privateObjects: privateObjects.map((object) => ({
+      id: object.id,
+      storageBackend: object.storage_backend,
+      storageKey: object.storage_key,
+    })),
+  };
 }
 
 export async function assignConversation(

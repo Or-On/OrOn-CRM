@@ -14,6 +14,7 @@ import { GitBranch, Headphones, Pencil, Plus, Trash2 } from "lucide-react";
 import type {
   AgentProfileSummary,
   AutomationRunSummary,
+  CanonicalFlow,
   TenantOperationalInsights,
   AutomationSummary,
   ContactActivity,
@@ -41,6 +42,7 @@ import {
 import { crmMutation } from "../crm";
 import { AutomationRunHistory } from "../operations";
 import { AgentRegister } from "./agent-register";
+import { CanonicalFlowEditor } from "./canonical-flow-editor";
 import { FlowCanvas } from "./flow-canvas";
 import { orchestrationLocation } from "./location";
 
@@ -148,7 +150,7 @@ export function OrchestrationPanel({
     }
   }
 
-  async function run(operation: () => Promise<unknown>) {
+  async function run(operation: () => Promise<unknown>): Promise<boolean> {
     setPending(true);
     setError(undefined);
     try {
@@ -238,6 +240,28 @@ export function OrchestrationPanel({
     if (saved) {
       form.reset();
       setCreation(null);
+    }
+  }
+
+  async function saveFlowDefinition(
+    definitionId: string,
+    flow: CanonicalFlow,
+  ): Promise<number | undefined> {
+    setPending(true);
+    setError(undefined);
+    try {
+      const saved = await crmMutation<{ readonly version: number }>(
+        `/api/orchestration/flows/${definitionId}`,
+        { flow },
+        { method: "PATCH" },
+      );
+      router.refresh();
+      return saved.version;
+    } catch (caught) {
+      setError(errorMessage(caught, t, "orchestration.failed"));
+      return undefined;
+    } finally {
+      setPending(false);
     }
   }
 
@@ -668,6 +692,21 @@ export function OrchestrationPanel({
                     return key === undefined ? type : t(key);
                   }}
                 />
+
+                {canEdit && selectedFlow.executionKind === "canonical" ? (
+                  <CanonicalFlowEditor
+                    key={`${selectedFlow.id}:${String(selectedFlow.version)}`}
+                    definition={selectedFlow.definition}
+                    disabled={pending}
+                    flowId={selectedFlow.id}
+                    labelForType={(type) => {
+                      const key = nodeTypeTranslationKeys[type];
+                      return key === undefined ? type : t(key);
+                    }}
+                    onSave={(flow) => saveFlowDefinition(selectedFlow.id, flow)}
+                    version={selectedFlow.version}
+                  />
+                ) : null}
 
                 <details className="tenant-history-disclosure">
                   <summary>{t("tenantOperations.runHistory")}</summary>

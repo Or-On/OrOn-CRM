@@ -15,6 +15,7 @@ import {
   assertCrmMutation,
   crmErrorResponse,
 } from "../../../../../features/crm-route";
+import { deletePrivateObject } from "../../../../../features/private-objects";
 
 const statuses = new Set<ConversationSummary["status"]>([
   "open",
@@ -101,9 +102,9 @@ export async function DELETE(
       "messaging:operate",
       (sql, session) => deleteConversation(sql, id, session.userId),
     );
-    if (result === "not_found")
+    if (result.status === "not_found")
       return NextResponse.json({ error: "Not found" }, { status: 404 });
-    if (result === "active_work")
+    if (result.status === "active_work")
       return NextResponse.json(
         {
           error:
@@ -111,7 +112,34 @@ export async function DELETE(
         },
         { status: 409 },
       );
-    return NextResponse.json({ ok: true });
+    if (result.status === "retained_evidence")
+      return NextResponse.json(
+        {
+          error:
+            "This conversation is retained as technician case evidence and cannot be deleted from the Inbox.",
+        },
+        { status: 409 },
+      );
+
+    const localObjects = result.privateObjects.filter(
+      (object) => object.storageBackend === "local",
+    );
+    let storageCleanupPending =
+      result.privateObjects.length - localObjects.length;
+    for (let offset = 0; offset < localObjects.length; offset += 8) {
+      const settled = await Promise.allSettled(
+        localObjects
+          .slice(offset, offset + 8)
+          .map((object) => deletePrivateObject(object.storageKey)),
+      );
+      // The committed metadata tombstone keeps a failed object inaccessible
+      // and eligible for a later storage-retention sweep. Never turn a
+      // committed conversation deletion into a misleading request failure.
+      storageCleanupPending += settled.filter(
+        (outcome) => outcome.status === "rejected",
+      ).length;
+    }
+    return NextResponse.json({ ok: true, storageCleanupPending });
   } catch (error) {
     return crmErrorResponse(error);
   }

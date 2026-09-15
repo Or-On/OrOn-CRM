@@ -15,7 +15,7 @@ import {
   setCurrentUserAvatar,
   updateTenantSettings,
 } from "./management.js";
-import { createTask } from "./tasks.js";
+import { createTask, listTasks } from "./tasks.js";
 import {
   createTenantWithDefaults,
   deleteTenantForAdministrator,
@@ -127,6 +127,39 @@ describe("tenant finance repository", () => {
 });
 
 describe("tenant task repository", () => {
+  it("preserves the tenant-scoped customer link for generated follow-up tasks", async () => {
+    const fixture = transaction([
+      [
+        {
+          id: recordId,
+          created_by_user_id: actorId,
+          assignee_user_id: memberId,
+          contact_id: "40000000-0000-4000-8000-000000000001",
+          contact_name: "Fictional Customer",
+          title: "Follow up on support request",
+          description: null,
+          status: "todo",
+          priority: "high",
+          due_at: new Date("2026-09-16T07:00:00.000Z"),
+          completed_at: null,
+          created_at: new Date("2026-09-15T08:00:00.000Z"),
+          updated_at: new Date("2026-09-15T08:00:00.000Z"),
+        },
+      ],
+    ]);
+
+    const tasks = await listTasks(fixture.sql);
+
+    expect(tasks[0]).toMatchObject({
+      contactId: "40000000-0000-4000-8000-000000000001",
+      contactName: "Fictional Customer",
+    });
+    expect(fixture.statements[0]).toContain("LEFT JOIN crm.contacts");
+    expect(fixture.statements[0]).toContain(
+      "contact.tenant_id=platform.current_tenant_id()",
+    );
+  });
+
   it("guards task assignment with current-tenant membership in the write query", async () => {
     const fixture = transaction([[]]);
     await expect(

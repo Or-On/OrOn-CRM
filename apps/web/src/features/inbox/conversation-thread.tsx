@@ -9,6 +9,10 @@ import {
   ArrowLeft,
   ArrowUp,
   CircleAlert,
+  Download,
+  FileText,
+  Image as ImageIcon,
+  MapPin,
   MessageCircle,
   MessageSquareText,
   MoreHorizontal,
@@ -75,6 +79,112 @@ function messageTime(value: string, locale: string, timeZone: string): string {
     minute: "2-digit",
     timeZone,
   }).format(new Date(value));
+}
+
+function messageMediaUrl(messageId: string): string {
+  return `/api/messaging/messages/${encodeURIComponent(messageId)}/media`;
+}
+
+function locationMapUrl(latitude: number, longitude: number): string {
+  const coordinates = `${String(latitude)}/${String(longitude)}`;
+  return `https://www.openstreetmap.org/?mlat=${encodeURIComponent(String(latitude))}&mlon=${encodeURIComponent(String(longitude))}#map=16/${coordinates}`;
+}
+
+function InboundMessageContent({ message }: { readonly message: Message }) {
+  const t = useTranslations();
+  const media = message.media;
+  if (media !== null && media !== undefined) {
+    const url = messageMediaUrl(message.id);
+    const available = media.status === "available";
+    const label =
+      media.fileName ??
+      (media.kind === "image"
+        ? t("inbox.media.image")
+        : t("inbox.media.document"));
+    return (
+      <div className={`message-media message-media--${media.kind}`}>
+        {media.kind === "image" ? (
+          available ? (
+            <a
+              aria-label={t("inbox.media.viewImage")}
+              className="message-media__image-link"
+              href={url}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {/* Authenticated private media cannot use the public image optimizer. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                alt={media.caption ?? t("inbox.media.image")}
+                loading="lazy"
+                src={url}
+              />
+            </a>
+          ) : (
+            <span className="message-media__placeholder" aria-hidden="true">
+              <ImageIcon size={28} />
+            </span>
+          )
+        ) : (
+          <FileText aria-hidden="true" size={24} />
+        )}
+        <span className="message-media__details">
+          <strong dir="auto">{label}</strong>
+          {media.caption ? <span dir="auto">{media.caption}</span> : null}
+          {available ? (
+            <a
+              className="message-media__action"
+              download={media.kind === "document" ? label : undefined}
+              href={url}
+              target={media.kind === "image" ? "_blank" : undefined}
+              rel={media.kind === "image" ? "noreferrer" : undefined}
+            >
+              <Download aria-hidden="true" size={14} />
+              {media.kind === "image"
+                ? t("inbox.media.open")
+                : t("inbox.media.download")}
+            </a>
+          ) : (
+            <small role="status">
+              {t(`inbox.media.status.${media.status}`)}
+            </small>
+          )}
+        </span>
+      </div>
+    );
+  }
+  const location = message.location;
+  if (location !== null && location !== undefined) {
+    return (
+      <div className="message-location">
+        <MapPin aria-hidden="true" size={22} />
+        <span>
+          <strong dir="auto">
+            {location.name ?? t("inbox.location.shared")}
+          </strong>
+          {location.address ? <span dir="auto">{location.address}</span> : null}
+          <small dir="ltr">
+            {location.latitude.toFixed(6)}, {location.longitude.toFixed(6)}
+          </small>
+          <a
+            href={locationMapUrl(location.latitude, location.longitude)}
+            rel="noreferrer"
+            target="_blank"
+          >
+            {t("inbox.location.openMap")}
+          </a>
+        </span>
+      </div>
+    );
+  }
+  return (
+    <p dir="auto">
+      {message.contentText ??
+        t("tenantPrimary.unsupportedContent", {
+          type: message.contentType,
+        })}
+    </p>
+  );
 }
 
 export function ConversationThread({
@@ -672,12 +782,7 @@ export function ConversationThread({
                             <small>{t("inbox.templateHint")}</small>
                           </div>
                         ) : (
-                          <p dir="auto">
-                            {message.contentText ??
-                              t("tenantPrimary.unsupportedContent", {
-                                type: message.contentType,
-                              })}
-                          </p>
+                          <InboundMessageContent message={message} />
                         )}
                         {message.status === "failed" ||
                         message.deliveryFailure ? (

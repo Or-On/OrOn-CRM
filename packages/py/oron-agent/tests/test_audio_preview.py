@@ -68,7 +68,7 @@ async def test_installed_pipeline_applies_pronunciation_and_returns_bounded_wav(
     )
     assert fixture.received == ["חיבור אייץ די אם איי"]
     assert fixture.stopped and options["voice"] == "Harper" and options["speed"] == 1.1
-    assert options["language"] == Language.HE
+    assert options["language"] == Language.HE_IL
     assert options["first_clause"] is False
     with wave.open(io.BytesIO(result.audio)) as wav:
         assert (wav.getframerate(), wav.getnchannels(), wav.getnframes()) == (24000, 1, 240)
@@ -80,8 +80,8 @@ async def test_installed_pipeline_applies_pronunciation_and_returns_bounded_wav(
 @pytest.mark.parametrize(
     ("text", "configured_language", "expected_language"),
     [
-        ("Could you explain the problem?", "he", Language.EN),
-        ("אפשר להסביר מה הבעיה?", "en", Language.HE),
+        ("Could you explain the problem?", "he", Language.EN_US),
+        ("אפשר להסביר מה הבעיה?", "en", Language.HE_IL),
     ],
 )
 async def test_preview_uses_current_text_language_without_changing_voice(

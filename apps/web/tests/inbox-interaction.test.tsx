@@ -718,6 +718,166 @@ describe("Inbox interaction safety (no provider network)", () => {
     expect(screen.queryByRole("button", { name: /Fictional Beta/ })).toBeNull();
   });
 
+  it("searches on the server and discovers conversations past the first page", async () => {
+    const cursor = {
+      lastMessageAt: "2026-09-15T10:00:00.123456Z",
+      id: "30000000-0000-4000-8000-000000000001",
+    };
+    const later: ConversationSummary = {
+      ...alpha,
+      id: "later",
+      contactId: "contact-later",
+      contactName: "Fictional Later Page",
+    };
+    const searched: ConversationSummary = {
+      ...alpha,
+      id: "searched",
+      contactId: "contact-searched",
+      contactName: "Needle Customer",
+    };
+    transport.read.mockImplementation((url: string) => {
+      if (url.includes("/messages"))
+        return Promise.resolve({ messages: messagesA, nextCursor: null });
+      if (url.includes("q=Needle"))
+        return Promise.resolve({ conversations: [searched], nextCursor: null });
+      if (url.includes("beforeId="))
+        return Promise.resolve({ conversations: [later], nextCursor: null });
+      return Promise.resolve({ conversations, nextCursor: cursor });
+    });
+    render(
+      localized(
+        <InboxWorkspace
+          conversations={conversations}
+          initialConversationNextCursor={cursor}
+          initialMessages={messagesA}
+          quickReplies={[]}
+          teamMembers={[]}
+          realWhatsAppEnabled={false}
+          canOperate
+        />,
+      ),
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Load more conversations" }),
+    );
+    expect(
+      await screen.findByRole("button", { name: /Fictional Later Page/ }),
+    ).toBeTruthy();
+    expect(
+      transport.read.mock.calls.some(
+        ([url]) =>
+          typeof url === "string" &&
+          url.includes(`before=${encodeURIComponent(cursor.lastMessageAt)}`) &&
+          url.includes(`beforeId=${cursor.id}`),
+      ),
+    ).toBe(true);
+
+    const search = screen.getByRole("searchbox", {
+      name: "Search conversations",
+    });
+    fireEvent.change(search, { target: { value: "Needle" } });
+    const searchForm = search.closest("form");
+    if (searchForm === null) throw new Error("search form unavailable");
+    fireEvent.submit(searchForm);
+    expect(
+      await screen.findByRole("button", { name: /Needle Customer/ }),
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: /Fictional Later Page/ }),
+    ).toBeNull();
+    expect(
+      transport.read.mock.calls.some(
+        ([url]) => typeof url === "string" && url.includes("q=Needle"),
+      ),
+    ).toBe(true);
+  });
+
+  it("renders authorized inbound image, document, and location affordances", () => {
+    const inbound: Message[] = [
+      {
+        ...message("alpha", ""),
+        id: "media-image",
+        contentType: "image",
+        contentText: null,
+        media: {
+          kind: "image",
+          status: "available",
+          mimeType: "image/png",
+          fileName: "door.png",
+          caption: "Front door",
+        },
+      },
+      {
+        ...message("alpha", ""),
+        id: "media-document",
+        contentType: "document",
+        contentText: null,
+        media: {
+          kind: "document",
+          status: "available",
+          mimeType: "application/pdf",
+          fileName: "invoice.pdf",
+          caption: null,
+        },
+      },
+      {
+        ...message("alpha", ""),
+        id: "media-pending",
+        contentType: "document",
+        contentText: null,
+        media: {
+          kind: "document",
+          status: "pending",
+          mimeType: "application/pdf",
+          fileName: null,
+          caption: null,
+        },
+      },
+      {
+        ...message("alpha", ""),
+        id: "shared-location",
+        contentType: "location",
+        contentText: null,
+        location: {
+          latitude: 32.0853,
+          longitude: 34.7818,
+          name: "Fictional location",
+          address: "Example street",
+        },
+      },
+    ];
+    render(
+      localized(
+        <InboxWorkspace
+          conversations={[alpha]}
+          initialMessages={inbound}
+          quickReplies={[]}
+          teamMembers={[]}
+          realWhatsAppEnabled={false}
+          canOperate
+        />,
+      ),
+    );
+
+    expect(
+      screen.getByRole("img", { name: "Front door" }).getAttribute("src"),
+    ).toBe("/api/messaging/messages/media-image/media");
+    const document = screen.getByRole("link", { name: "Download document" });
+    expect(document.getAttribute("href")).toBe(
+      "/api/messaging/messages/media-document/media",
+    );
+    expect(document.getAttribute("download")).toBe("invoice.pdf");
+    expect(
+      screen.getByText("Attachment is waiting for secure retrieval"),
+    ).toBeTruthy();
+    const map = screen.getByRole("link", { name: "Open in OpenStreetMap" });
+    expect(map.getAttribute("href")).toContain(
+      "openstreetmap.org/?mlat=32.0853&mlon=34.7818",
+    );
+    expect(screen.getByText("Example street")).toBeTruthy();
+  });
+
   it("keeps the Mine filter unavailable without a current operator identity", () => {
     mount();
     expect(

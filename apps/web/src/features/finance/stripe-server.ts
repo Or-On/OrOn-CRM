@@ -15,6 +15,12 @@ async function stripePayload(
   }
 }
 
+function financeReturnUrl(siteUrl: string, query: string): string {
+  const url = new URL("/finance", siteUrl);
+  url.search = query;
+  return url.toString();
+}
+
 export async function createStripeCustomer(input: {
   readonly secretKey: string;
   readonly tenantId: string;
@@ -59,8 +65,11 @@ export async function createStripePaymentSourceCheckout(input: {
       mode: "setup",
       currency: input.currency.toLowerCase(),
       customer: input.customerId,
-      success_url: `${input.siteUrl}finance?payment_source=success&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${input.siteUrl}finance?payment_source=cancelled`,
+      success_url: financeReturnUrl(
+        input.siteUrl,
+        "payment_source=success&session_id={CHECKOUT_SESSION_ID}",
+      ),
+      cancel_url: financeReturnUrl(input.siteUrl, "payment_source=cancelled"),
       "metadata[purpose]": "payment_source",
       "metadata[tenant_id]": input.tenantId,
       "metadata[setup_request_id]": input.setupRequestId,
@@ -92,8 +101,8 @@ export async function createStripeCheckout(input: {
     body: new URLSearchParams({
       mode: "payment",
       customer: input.customerId,
-      success_url: `${input.siteUrl}finance?topup=success`,
-      cancel_url: `${input.siteUrl}finance?topup=cancelled`,
+      success_url: financeReturnUrl(input.siteUrl, "topup=success"),
+      cancel_url: financeReturnUrl(input.siteUrl, "topup=cancelled"),
       "line_items[0][price_data][currency]": input.currency.toLowerCase(),
       "line_items[0][price_data][unit_amount]": String(input.amountMinor),
       "line_items[0][price_data][product_data][name]": "Campaign funds",

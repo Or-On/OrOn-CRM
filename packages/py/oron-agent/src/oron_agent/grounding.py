@@ -21,6 +21,8 @@ from typing import Any
 from pipecat.frames.frames import AggregatedTextFrame, Frame, InterruptionFrame, LLMContextFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
+from oron_agent.conversation_language import resolve_conversation_language
+
 
 class Provenance(StrEnum):
     APPROVED_KNOWLEDGE = "approved_tenant_knowledge"
@@ -333,6 +335,11 @@ def safe_diagnostic_question(text: object, language: str) -> str | None:
     if _UNSAFE_DIAGNOSTIC_QUESTION.search(question) or re.search(r"\d{5,}", question):
         return None
     locale = "he" if language.startswith("he") else "en"
+    # A couple of characters in a model or product name do not make the whole
+    # question locale-correct. Use the same dominance rules as the live turn
+    # router before allowing model-authored text to reach TTS.
+    if resolve_conversation_language(question, locale).value != locale:
+        return None
     if locale == "he" and len(re.findall(r"[\u05d0-\u05ea]", question)) < 2:
         return None
     if locale == "en" and len(re.findall(r"[A-Za-z]", question)) < 2:
@@ -598,6 +605,8 @@ def render_reply(
         selector = {key: val for key, val in value.items() if key != "kind"}
         for fact in facts:
             if selector == fact.selector() and type(value["version"]) is int:
+                if resolve_conversation_language(fact.value, locale).value != locale:
+                    return fallback_reply()
                 return GroundedReply(fact.value, "approved_fact", fact.selector())
     return fallback_reply()
 

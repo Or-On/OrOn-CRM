@@ -180,13 +180,21 @@ function repeatsRecentAssistant(
       if (candidate === previous) return true;
       const comparablePrevious = normalizedComparableReply(message);
       // Reject verbatim recycling of a complete recent turn even when the
-      // model adds a short acknowledgement or another sentence around it.
+      // model adds a short acknowledgement or another sentence around it, or
+      // drops the surrounding acknowledgement and repeats only the question.
       // Very short phrases are intentionally excluded because words such as
       // "thanks" can occur naturally in a later, otherwise distinct reply.
-      return (
+      const previousIsSubstantial =
         comparablePrevious.length >= 18 &&
-        comparablePrevious.split(" ").length >= 4 &&
-        comparableCandidate.includes(comparablePrevious)
+        comparablePrevious.split(" ").length >= 4;
+      const candidateIsSubstantial =
+        comparableCandidate.length >= 18 &&
+        comparableCandidate.split(" ").length >= 4;
+      return (
+        (previousIsSubstantial &&
+          comparableCandidate.includes(comparablePrevious)) ||
+        (candidateIsSubstantial &&
+          comparablePrevious.includes(comparableCandidate))
       );
     });
 }
@@ -308,11 +316,46 @@ export function safeConversationalReply(
   );
 }
 
-/** Choose the response language from the current message, never an old turn. */
-export function latestMessageLocale(
-  configuredLocale: string,
-  latestText: string,
-): "he" | "en" {
+const englishLanguageSignals = new Set([
+  "a",
+  "an",
+  "are",
+  "broken",
+  "can",
+  "could",
+  "did",
+  "do",
+  "does",
+  "error",
+  "help",
+  "hello",
+  "how",
+  "i",
+  "is",
+  "issue",
+  "my",
+  "need",
+  "no",
+  "not",
+  "please",
+  "problem",
+  "thank",
+  "thanks",
+  "the",
+  "this",
+  "what",
+  "when",
+  "where",
+  "which",
+  "who",
+  "why",
+  "working",
+  "would",
+  "yes",
+  "you",
+]);
+
+function detectedMessageLocale(latestText: string): "he" | "en" | undefined {
   // Links, email addresses and machine identifiers are evidence, not a
   // reliable language signal. In particular, a Hebrew customer pasting a
   // long support URL must not receive an English reply because the hostname
@@ -321,10 +364,88 @@ export function latestMessageLocale(
     .replace(/https?:\/\/\S+/giu, " ")
     .replace(/\b[^\s@]+@[^\s@]+\.[^\s@]+\b/giu, " ")
     .replace(/\b(?=\S*[\p{L}\p{N}])(?=\S*\d)[\p{L}\p{N}._/-]+\b/giu, " ");
-  const hebrewWords = naturalText.match(/\p{Script=Hebrew}+/gu)?.length ?? 0;
-  const latinWords = naturalText.match(/\p{Script=Latin}+/gu)?.length ?? 0;
-  if (hebrewWords > latinWords) return "he";
-  if (latinWords > hebrewWords) return "en";
+  const words =
+    naturalText.match(/\p{Script=Hebrew}+|\p{Script=Latin}+/gu) ?? [];
+  const containsHebrew = words.some((word) => /\p{Script=Hebrew}/u.test(word));
+  const rawLatinLetters = words.reduce(
+    (count, word) => count + (word.match(/\p{Script=Latin}/gu)?.length ?? 0),
+    0,
+  );
+  // Uppercase is presentation, not proof of a machine identifier. Preserve
+  // clear natural English requests such as "PLEASE HELP" while still treating
+  // an isolated product acronym such as "HDMI" as language-neutral.
+  if (
+    !containsHebrew &&
+    rawLatinLetters >= 2 &&
+    words.some((word) => englishLanguageSignals.has(word.toLowerCase()))
+  )
+    return "en";
+  const technicalIndexes = new Set<number>();
+  for (let index = 0; index < words.length;) {
+    if (!/^[A-Z][\p{Script=Latin}\p{N}]*$/u.test(words[index] ?? "")) {
+      index += 1;
+      continue;
+    }
+    let end = index + 1;
+    while (
+      end < words.length &&
+      /^[A-Z][\p{Script=Latin}\p{N}]*$/u.test(words[end] ?? "")
+    )
+      end += 1;
+    if (end - index >= 2)
+      for (let item = index; item < end; item += 1) technicalIndexes.add(item);
+    index = end;
+  }
+  const wordsWithoutTechnicalNames = words.filter(
+    (word, index) =>
+      !technicalIndexes.has(index) &&
+      !/^(?:[A-Z]{2,}[A-Z0-9]*|[A-Za-z]*\d+[A-Za-z0-9]*)$/u.test(word),
+  );
+  // Do not erase an ordinary short Title Case English utterance such as
+  // "Please Help". A technical-name exclusion is useful only when at least
+  // two natural-language words remain to establish the surrounding grammar.
+  const languageWords =
+    wordsWithoutTechnicalNames.length >= 2
+      ? wordsWithoutTechnicalNames
+      : words.filter(
+          (word) =>
+            !/^(?:[A-Z]{2,}[A-Z0-9]*|[A-Za-z]*\d+[A-Za-z0-9]*)$/u.test(word),
+        );
+  const hebrewWords = languageWords.filter((word) =>
+    /\p{Script=Hebrew}/u.test(word),
+  ).length;
+  const latinWords = languageWords.length - hebrewWords;
+  const hebrewLetters = languageWords.reduce(
+    (count, word) => count + (word.match(/\p{Script=Hebrew}/gu)?.length ?? 0),
+    0,
+  );
+  const latinLetters = languageWords.reduce(
+    (count, word) => count + (word.match(/\p{Script=Latin}/gu)?.length ?? 0),
+    0,
+  );
+  if (hebrewWords > latinWords && hebrewLetters >= 2) return "he";
+  if (latinWords > hebrewWords && latinLetters >= 2) return "en";
+  return undefined;
+}
+
+/**
+ * Choose the response language from the current inbound message. If that turn
+ * contains only a number, URL, machine identifier, punctuation or one-letter
+ * noise, retain the most recent unambiguous inbound language before falling
+ * back to the agent's authored locale. Prior assistant output never decides a
+ * customer's language. `recentInboundTexts` must be newest first.
+ */
+export function latestMessageLocale(
+  configuredLocale: string,
+  latestText: string,
+  recentInboundTexts: readonly string[] = [],
+): "he" | "en" {
+  const detected = detectedMessageLocale(latestText);
+  if (detected !== undefined) return detected;
+  for (const previousText of recentInboundTexts.slice(0, 50)) {
+    const previous = detectedMessageLocale(previousText);
+    if (previous !== undefined) return previous;
+  }
   return configuredLocale.toLowerCase().startsWith("he") ? "he" : "en";
 }
 
@@ -344,6 +465,7 @@ export function groundAiReply(
     if (
       fact !== undefined &&
       safeKnowledgeStatement(fact.value) &&
+      matchesRequestedLocale(fact.value, locale) &&
       !facts.some(
         (item) => item.factKey === fact.factKey && item.value !== fact.value,
       )

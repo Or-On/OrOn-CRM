@@ -1,5 +1,6 @@
 export {
   commitPrivateObject,
+  deletePrivateObject,
   discardPrivateObject,
   readPrivateObject,
   stagePrivateObject,

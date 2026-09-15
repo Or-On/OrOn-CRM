@@ -23,11 +23,14 @@ import {
   Trash2,
 } from "lucide-react";
 import { useLocale } from "next-intl";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, type SyntheticEvent } from "react";
 
 import { useCapability } from "../access";
 import { crmMutation } from "../crm";
+import { tenantDateFormatter } from "../../i18n/tenant-date-time";
+import { taskDueAtInput, taskDueAtInstant } from "./task-time";
 import styles from "./tasks-workspace.module.css";
 
 const COPY = {
@@ -49,6 +52,9 @@ const COPY = {
     priority: "Priority",
     due: "Due",
     assignee: "Assignee",
+    customer: "Customer",
+    openCustomer: "Open customer",
+    noCustomer: "Not linked",
     updated: "Updated",
     unassigned: "Unassigned",
     formerMember: "Former member",
@@ -108,6 +114,9 @@ const COPY = {
     priority: "עדיפות",
     due: "יעד",
     assignee: "אחראי/ת",
+    customer: "לקוח/ה",
+    openCustomer: "פתיחת כרטיס לקוח",
+    noCustomer: "ללא קישור",
     updated: "עודכן",
     unassigned: "ללא הקצאה",
     formerMember: "חבר/ת צוות לשעבר",
@@ -168,14 +177,6 @@ const EMPTY_DRAFT: Draft = {
   assigneeUserId: "",
 };
 
-function localDateTime(value: string | null): string {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const shifted = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
-  return shifted.toISOString().slice(0, 16);
-}
-
 function statusClass(status: TaskStatus) {
   return [
     styles.status ?? "",
@@ -196,9 +197,11 @@ function priorityClass(priority: TaskPriority) {
 export function TasksWorkspace({
   initialTasks,
   members,
+  tenantTimeZone,
 }: {
   readonly initialTasks: readonly TenantTask[];
   readonly members: readonly TeamMember[];
+  readonly tenantTimeZone: string;
 }) {
   const locale = useLocale();
   const t = COPY[locale.startsWith("he") ? "he" : "en"];
@@ -244,9 +247,10 @@ export function TasksWorkspace({
           : t.cancelled;
   const priorityLabel = (value: TaskPriority) => t[value];
   const formatDate = (value: string) =>
-    new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(
-      new Date(value),
-    );
+    tenantDateFormatter(locale, tenantTimeZone, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(new Date(value));
   const isOverdue = (task: TenantTask) =>
     task.dueAt !== null &&
     task.status !== "completed" &&
@@ -267,7 +271,7 @@ export function TasksWorkspace({
       description: task.description ?? "",
       status: task.status === "cancelled" ? "todo" : task.status,
       priority: task.priority,
-      dueAt: localDateTime(task.dueAt),
+      dueAt: taskDueAtInput(task.dueAt, tenantTimeZone),
       assigneeUserId: task.assigneeUserId ?? "",
     });
     setError(undefined);
@@ -287,7 +291,9 @@ export function TasksWorkspace({
           status: draft.status,
           priority: draft.priority,
           assigneeUserId: draft.assigneeUserId || null,
-          dueAt: draft.dueAt ? new Date(draft.dueAt).toISOString() : null,
+          dueAt: draft.dueAt
+            ? taskDueAtInstant(draft.dueAt, tenantTimeZone)
+            : null,
         },
         { method: editing ? "PATCH" : "POST" },
       );
@@ -505,6 +511,7 @@ export function TasksWorkspace({
                     <th scope="col">{t.status}</th>
                     <th scope="col">{t.priority}</th>
                     <th scope="col">{t.due}</th>
+                    <th scope="col">{t.customer}</th>
                     <th scope="col">{t.assignee}</th>
                     <th scope="col">{t.updated}</th>
                     <th scope="col">
@@ -540,6 +547,18 @@ export function TasksWorkspace({
                           t.noDue
                         )}
                       </td>
+                      <td>
+                        {task.contactId ? (
+                          <Link
+                            className={styles.customerLink}
+                            href={`/contacts/${task.contactId}`}
+                          >
+                            {task.contactName ?? t.openCustomer}
+                          </Link>
+                        ) : (
+                          t.noCustomer
+                        )}
+                      </td>
                       <td>{memberLabel(task.assigneeUserId)}</td>
                       <td>
                         <time dateTime={task.updatedAt}>
@@ -570,6 +589,14 @@ export function TasksWorkspace({
                   <p className={styles.taskMeta}>
                     <bdi>{task.description ?? "—"}</bdi>
                   </p>
+                  {task.contactId ? (
+                    <Link
+                      className={styles.customerLink}
+                      href={`/contacts/${task.contactId}`}
+                    >
+                      {task.contactName ?? t.openCustomer}
+                    </Link>
+                  ) : null}
                   <div className={styles.mobileFooter}>
                     <span
                       className={
@@ -718,7 +745,7 @@ export function TasksWorkspace({
             <div className={styles.full}>
               <Input
                 id="task-due"
-                label={t.dueDate}
+                label={`${t.dueDate} · ${tenantTimeZone}`}
                 onChange={(event) =>
                   setDraft((current) => ({
                     ...current,

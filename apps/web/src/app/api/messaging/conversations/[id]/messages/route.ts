@@ -28,7 +28,13 @@ export async function GET(
       parameters.get("beforeId"),
     );
     const page = await withCurrentTenant("crm:read", (sql) =>
-      listMessagePage(sql, id, before === undefined ? {} : { before }),
+      listMessagePage(
+        sql,
+        id,
+        before === undefined
+          ? { includeMedia: true }
+          : { before, includeMedia: true },
+      ),
     );
     return NextResponse.json(page);
   } catch (error) {

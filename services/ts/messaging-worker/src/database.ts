@@ -162,7 +162,7 @@ async function processInbound(
                 (tenant_id, queue, job_type, reference_type, reference_id, payload,
                  idempotency_key, max_attempts, priority)
               SELECT platform.current_tenant_id(), 'messaging',
-                     'field_service.whatsapp_media.retrieve', 'message',
+                     'whatsapp.media.retrieve', 'message',
                      ${result.messageId}::uuid,
                      ${transaction.json({
                        conversationId: result.conversationId,
@@ -172,16 +172,39 @@ async function processInbound(
                        expectedMimeType: envelope.media.mimeType,
                        expectedSha256: envelope.media.sha256,
                      })},
-                     ${`field-service:media:${result.messageId}`}, 4, 30
-              FROM platform.tenant_feature_entitlements entitlement
-              JOIN service.tenant_configuration configuration
-                ON configuration.tenant_id=entitlement.tenant_id
-              WHERE entitlement.tenant_id=platform.current_tenant_id()
-                AND entitlement.feature_key='field_service'
-                AND entitlement.available AND configuration.enabled
-                AND configuration.whatsapp_intake_enabled
-                AND ${realWhatsAppEnabled}
+                     ${`whatsapp:media:${result.messageId}`}, 4, 30
+              FROM messaging.messages message
+              JOIN messaging.conversations conversation
+                ON conversation.id=message.conversation_id
+               AND conversation.tenant_id=message.tenant_id
+              JOIN messaging.channels channel
+                ON channel.id=conversation.channel_id
+               AND channel.tenant_id=conversation.tenant_id
+              WHERE message.id=${result.messageId}::uuid
+                AND message.direction='inbound' AND message.provider='meta'
+                AND channel.provider='meta' AND channel.status='active'
+                AND channel.mirror_inbound_media
               ON CONFLICT DO NOTHING
+            `;
+          if (envelope.media !== undefined)
+            await transaction`
+              UPDATE messaging.messages message SET
+                structured_content=jsonb_set(
+                  coalesce(message.structured_content, '{}'::jsonb) - 'retrievalError',
+                  '{retrievalStatus}', '"unavailable"'::jsonb, true),
+                updated_at=CURRENT_TIMESTAMP
+              WHERE message.id=${result.messageId}::uuid
+                AND message.object_id IS NULL
+                AND (
+                  NOT ${realWhatsAppEnabled}
+                  OR NOT EXISTS (
+                    SELECT 1 FROM ops.jobs job
+                    WHERE job.tenant_id=message.tenant_id
+                      AND job.queue='messaging'
+                      AND job.idempotency_key=${`whatsapp:media:${result.messageId}`}
+                      AND job.status IN ('queued','running','retry','succeeded')
+                  )
+                )
             `;
           await transaction`
             INSERT INTO ops.jobs
@@ -272,11 +295,12 @@ async function cancelJobForDisabledFeature(
   transaction: postgres.TransactionSql,
   jobId: string,
   workerId: string,
+  reason = "field_service_disabled",
 ): Promise<void> {
   await transaction`
     UPDATE ops.jobs SET status='cancelled', completed_at=CURRENT_TIMESTAMP,
       locked_at=NULL, locked_by=NULL,
-      last_error_safe='field_service_disabled', updated_at=CURRENT_TIMESTAMP
+      last_error_safe=${reason}, updated_at=CURRENT_TIMESTAMP
     WHERE id=${jobId}::uuid AND status='running' AND locked_by=${workerId}
   `;
 }
@@ -474,20 +498,22 @@ async function processFieldServiceIntake(
   }
 }
 
-interface FieldServiceWhatsAppMediaWork {
+interface WhatsAppMediaWork {
   readonly conversationId: string;
   readonly messageId: string;
   readonly mediaId: string;
   readonly contentType: "image" | "document";
   readonly expectedMimeType?: string;
   readonly expectedSha256?: string;
+  readonly existingObjectId?: string;
 }
 
-async function loadFieldServiceWhatsAppMediaWork(
+async function loadWhatsAppMediaWork(
   sql: Sql,
   workerId: string,
   job: JobRow,
-): Promise<FieldServiceWhatsAppMediaWork | undefined> {
+  realWhatsAppEnabled: boolean,
+): Promise<WhatsAppMediaWork | undefined> {
   const payload = record(job.payload);
   const conversationId = payload.conversationId;
   const messageId = payload.messageId;
@@ -502,13 +528,25 @@ async function loadFieldServiceWhatsAppMediaWork(
     mediaId.length > 500 ||
     (contentType !== "image" && contentType !== "document")
   )
-    throw new TypeError("invalid field-service media job payload");
+    throw new TypeError("invalid WhatsApp media job payload");
   return sql.begin(async (transaction) => {
     await setTenantContext(transaction, job.tenant_id);
     await requireOwnedJob(transaction, workerId, job.id);
-    const feature = await getFieldServiceFeatureState(transaction);
-    if (!feature.effective || !feature.whatsAppIntakeEnabled) {
-      await cancelJobForDisabledFeature(transaction, job.id, workerId);
+    if (!realWhatsAppEnabled) {
+      await cancelJobForDisabledFeature(
+        transaction,
+        job.id,
+        workerId,
+        "whatsapp_provider_disabled",
+      );
+      await transaction`
+        UPDATE messaging.messages SET
+          structured_content=jsonb_set(
+            coalesce(structured_content, '{}'::jsonb) - 'retrievalError',
+            '{retrievalStatus}', '"unavailable"'::jsonb, true),
+          updated_at=CURRENT_TIMESTAMP
+        WHERE id=${messageId}::uuid AND object_id IS NULL
+      `;
       return undefined;
     }
     const rows = await transaction<
@@ -537,14 +575,17 @@ async function loadFieldServiceWhatsAppMediaWork(
         AND message.conversation_id=${conversationId}::uuid
         AND message.direction='inbound' AND message.provider='meta'
         AND message.content_type=${contentType} AND channel.provider='meta'
+        AND channel.status='active' AND channel.mirror_inbound_media
       FOR UPDATE OF message
     `;
     const row = rows[0];
-    if (row?.provider_media_id !== mediaId)
-      throw new TypeError("field-service media source is unavailable");
+    if (row === undefined)
+      throw new WhatsAppProviderError("media_eligibility_changed", false);
+    if (row.provider_media_id !== mediaId)
+      throw new TypeError("WhatsApp media source is unavailable");
     if (row.object_id !== null) {
       if (row.object_status !== "available")
-        throw new TypeError("field-service media object is unavailable");
+        throw new TypeError("WhatsApp media object is unavailable");
       await transaction`
         UPDATE messaging.messages SET
           structured_content=jsonb_set(
@@ -553,8 +594,13 @@ async function loadFieldServiceWhatsAppMediaWork(
           updated_at=CURRENT_TIMESTAMP
         WHERE id=${messageId}::uuid
       `;
-      await finishJob(transaction, job.id, workerId);
-      return undefined;
+      return {
+        conversationId,
+        messageId,
+        mediaId,
+        contentType,
+        existingObjectId: row.object_id,
+      };
     }
     await transaction`
       UPDATE messaging.messages SET
@@ -579,18 +625,72 @@ async function loadFieldServiceWhatsAppMediaWork(
   });
 }
 
-async function revalidateFieldServiceMediaAttempt(
+async function linkWhatsAppMediaToFieldService(
   sql: Sql,
   workerId: string,
   job: JobRow,
-  work: FieldServiceWhatsAppMediaWork,
+  work: WhatsAppMediaWork,
+  objectId: string,
 ): Promise<void> {
   await sql.begin(async (transaction) => {
     await setTenantContext(transaction, job.tenant_id);
     await requireOwnedJob(transaction, workerId, job.id);
-    const feature = await getFieldServiceFeatureState(transaction);
-    if (!feature.effective || !feature.whatsAppIntakeEnabled)
-      throw new WhatsAppProviderError("field_service_disabled", false);
+    if (!(await whatsappMediaFieldServiceProjectionEnabled(transaction)))
+      return;
+    await transaction`
+      INSERT INTO service.report_attachments(
+        tenant_id, case_id, message_id, object_id, category, source,
+        processing_status, created_by_user_id
+      )
+      SELECT platform.current_tenant_id(), service_case.id, ${work.messageId}::uuid,
+             ${objectId}::uuid,
+             ${work.contentType === "image" ? "customer_photo" : "document"},
+             'customer', 'available', NULL
+      FROM service.intake_messages intake_message
+      JOIN service.intake_drafts intake
+        ON intake.id=intake_message.intake_draft_id
+       AND intake.tenant_id=intake_message.tenant_id
+      JOIN service.cases service_case
+        ON service_case.intake_draft_id=intake.id
+       AND service_case.tenant_id=intake.tenant_id
+      WHERE intake_message.message_id=${work.messageId}::uuid
+      ON CONFLICT (tenant_id, object_id, case_id) DO NOTHING
+    `;
+  });
+}
+
+/** Re-read optional-module state immediately before its derived side effect. */
+export async function whatsappMediaFieldServiceProjectionEnabled(
+  sql: postgres.TransactionSql,
+): Promise<boolean> {
+  const feature = await getFieldServiceFeatureState(sql);
+  return feature.effective && feature.whatsAppIntakeEnabled;
+}
+
+async function finishWhatsAppMediaJob(
+  sql: Sql,
+  workerId: string,
+  job: JobRow,
+): Promise<void> {
+  await sql.begin(async (transaction) => {
+    await setTenantContext(transaction, job.tenant_id);
+    await requireOwnedJob(transaction, workerId, job.id);
+    await finishJob(transaction, job.id, workerId);
+  });
+}
+
+async function revalidateWhatsAppMediaAttempt(
+  sql: Sql,
+  workerId: string,
+  job: JobRow,
+  work: WhatsAppMediaWork,
+  realWhatsAppEnabled: boolean,
+): Promise<void> {
+  await sql.begin(async (transaction) => {
+    await setTenantContext(transaction, job.tenant_id);
+    await requireOwnedJob(transaction, workerId, job.id);
+    if (!realWhatsAppEnabled)
+      throw new WhatsAppProviderError("provider_disabled", false);
     const rows = await transaction<{ id: string }[]>`
       SELECT message.id FROM messaging.messages message
       JOIN messaging.conversations conversation
@@ -601,14 +701,15 @@ async function revalidateFieldServiceMediaAttempt(
       WHERE message.id=${work.messageId}::uuid
         AND message.conversation_id=${work.conversationId}::uuid
         AND message.object_id IS NULL AND message.provider='meta'
-        AND channel.provider='meta'
+        AND channel.provider='meta' AND channel.status='active'
+        AND channel.mirror_inbound_media
     `;
     if (rows[0] === undefined)
       throw new WhatsAppProviderError("media_eligibility_changed", false);
   });
 }
 
-async function processFieldServiceWhatsAppMedia(
+async function processWhatsAppMedia(
   sql: Sql,
   workerId: string,
   job: JobRow,
@@ -617,9 +718,27 @@ async function processFieldServiceWhatsAppMedia(
 ): Promise<void> {
   let staged: StagedPrivateObject | undefined;
   let committed = false;
+  let persisted = false;
   try {
-    const work = await loadFieldServiceWhatsAppMediaWork(sql, workerId, job);
+    const realWhatsAppEnabled = automation.realWhatsAppEnabled === true;
+    const work = await loadWhatsAppMediaWork(
+      sql,
+      workerId,
+      job,
+      realWhatsAppEnabled,
+    );
     if (work === undefined) return;
+    if (work.existingObjectId !== undefined) {
+      await linkWhatsAppMediaToFieldService(
+        sql,
+        workerId,
+        job,
+        work,
+        work.existingObjectId,
+      );
+      await finishWhatsAppMediaJob(sql, workerId, job);
+      return;
+    }
     const metaProvider = providers.meta;
     if (metaProvider.downloadMedia === undefined)
       throw new WhatsAppProviderError("media_provider_unavailable", false);
@@ -632,29 +751,63 @@ async function processFieldServiceWhatsAppMedia(
         ? {}
         : { expectedSha256: work.expectedSha256 }),
       beforeAttempt: () =>
-        revalidateFieldServiceMediaAttempt(sql, workerId, job, work),
+        revalidateWhatsAppMediaAttempt(
+          sql,
+          workerId,
+          job,
+          work,
+          realWhatsAppEnabled,
+        ),
     });
     staged = await stagePrivateObject(
       {
         tenantId: job.tenant_id,
         caseId: work.conversationId,
         category: "whatsapp_media",
+        scope: "messaging",
         declaredContentType: media.contentType,
         bytes: media.bytes,
       },
       automation.privateObjectStorage,
     );
     if (staged.checksum !== media.sha256)
-      throw new TypeError("field-service media checksum changed");
+      throw new TypeError("WhatsApp media checksum changed");
     await commitPrivateObject(staged);
     committed = true;
-    const accepted = await sql.begin(async (transaction) => {
+    const objectId = await sql.begin(async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
       await requireOwnedJob(transaction, workerId, job.id);
-      const feature = await getFieldServiceFeatureState(transaction);
-      if (!feature.effective || !feature.whatsAppIntakeEnabled) {
-        await cancelJobForDisabledFeature(transaction, job.id, workerId);
-        return false;
+      const eligible = await transaction<{ id: string }[]>`
+        SELECT message.id FROM messaging.messages message
+        JOIN messaging.conversations conversation
+          ON conversation.id=message.conversation_id
+         AND conversation.tenant_id=message.tenant_id
+        JOIN messaging.channels channel
+          ON channel.id=conversation.channel_id
+         AND channel.tenant_id=message.tenant_id
+        WHERE message.id=${work.messageId}::uuid
+          AND message.conversation_id=${work.conversationId}::uuid
+          AND message.object_id IS NULL AND message.provider='meta'
+          AND channel.provider='meta' AND channel.status='active'
+          AND channel.mirror_inbound_media
+        FOR UPDATE OF message
+      `;
+      if (!realWhatsAppEnabled || eligible[0] === undefined) {
+        await cancelJobForDisabledFeature(
+          transaction,
+          job.id,
+          workerId,
+          "whatsapp_media_disabled",
+        );
+        await transaction`
+          UPDATE messaging.messages SET
+            structured_content=jsonb_set(
+              coalesce(structured_content, '{}'::jsonb) - 'retrievalError',
+              '{retrievalStatus}', '"unavailable"'::jsonb, true),
+            updated_at=CURRENT_TIMESTAMP
+          WHERE id=${work.messageId}::uuid AND object_id IS NULL
+        `;
+        return null;
       }
       const objects = await transaction<{ id: string }[]>`
         INSERT INTO objects.object_metadata(
@@ -671,7 +824,7 @@ async function processFieldServiceWhatsAppMedia(
       `;
       const objectId = objects[0]?.id;
       if (objectId === undefined)
-        throw new Error("field-service media object creation failed");
+        throw new Error("WhatsApp media object creation failed");
       const updated = await transaction<{ id: string }[]>`
         UPDATE messaging.messages SET object_id=${objectId}::uuid,
           structured_content=jsonb_set(
@@ -682,34 +835,18 @@ async function processFieldServiceWhatsAppMedia(
         RETURNING id
       `;
       if (updated[0] === undefined)
-        throw new TypeError(
-          "field-service media message changed during retrieval",
-        );
-      await transaction`
-        INSERT INTO service.report_attachments(
-          tenant_id, case_id, message_id, object_id, category, source,
-          processing_status, created_by_user_id
-        )
-        SELECT platform.current_tenant_id(), service_case.id, ${work.messageId}::uuid,
-               ${objectId}::uuid,
-               ${work.contentType === "image" ? "customer_photo" : "document"},
-               'customer', 'available', NULL
-        FROM service.intake_messages intake_message
-        JOIN service.intake_drafts intake
-          ON intake.id=intake_message.intake_draft_id
-         AND intake.tenant_id=intake_message.tenant_id
-        JOIN service.cases service_case
-          ON service_case.intake_draft_id=intake.id
-         AND service_case.tenant_id=intake.tenant_id
-        WHERE intake_message.message_id=${work.messageId}::uuid
-        ON CONFLICT (tenant_id, object_id, case_id) DO NOTHING
-      `;
-      await finishJob(transaction, job.id, workerId);
-      return true;
+        throw new TypeError("WhatsApp media message changed during retrieval");
+      return objectId;
     });
-    if (!accepted) await discardPrivateObject(staged);
+    if (objectId === null) {
+      await discardPrivateObject(staged);
+      return;
+    }
+    persisted = true;
+    await linkWhatsAppMediaToFieldService(sql, workerId, job, work, objectId);
+    await finishWhatsAppMediaJob(sql, workerId, job);
   } catch (error) {
-    if (staged !== undefined)
+    if (staged !== undefined && !persisted)
       await discardPrivateObject(staged).catch(() => undefined);
     if (
       error instanceof WhatsAppProviderError &&
@@ -722,8 +859,8 @@ async function processFieldServiceWhatsAppMedia(
         : error instanceof TypeError
           ? error.message
           : committed
-            ? "field_service_media_persistence_failed"
-            : "field_service_media_retrieval_failed";
+            ? "whatsapp_media_persistence_failed"
+            : "whatsapp_media_retrieval_failed";
     await sql.begin(async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
       const owned = await transaction<{ id: string }[]>`
@@ -731,14 +868,24 @@ async function processFieldServiceWhatsAppMedia(
           AND status='running' AND locked_by=${workerId} FOR UPDATE
       `;
       if (owned[0] === undefined) return;
-      if (reason === "field_service_disabled") {
-        await cancelJobForDisabledFeature(transaction, job.id, workerId);
+      if (
+        reason === "provider_disabled" ||
+        reason === "media_eligibility_changed"
+      ) {
+        await cancelJobForDisabledFeature(
+          transaction,
+          job.id,
+          workerId,
+          reason === "provider_disabled"
+            ? "whatsapp_provider_disabled"
+            : "whatsapp_media_disabled",
+        );
         if (job.reference_id !== null)
           await transaction`
             UPDATE messaging.messages SET
               structured_content=jsonb_set(
                 coalesce(structured_content, '{}'::jsonb) - 'retrievalError',
-                '{retrievalStatus}', '"cancelled"'::jsonb, true),
+                '{retrievalStatus}', '"unavailable"'::jsonb, true),
               updated_at=CURRENT_TIMESTAMP
             WHERE id=${job.reference_id}::uuid AND object_id IS NULL
           `;
@@ -1329,16 +1476,11 @@ async function processJob(
   automation: MessagingAutomationOptions,
 ): Promise<void> {
   if (
-    job.job_type === "field_service.whatsapp_media.retrieve" &&
+    (job.job_type === "whatsapp.media.retrieve" ||
+      job.job_type === "field_service.whatsapp_media.retrieve") &&
     job.reference_id !== null
   ) {
-    await processFieldServiceWhatsAppMedia(
-      sql,
-      workerId,
-      job,
-      providers,
-      automation,
-    );
+    await processWhatsAppMedia(sql, workerId, job, providers, automation);
     return;
   }
   if (
@@ -1687,6 +1829,12 @@ async function loadAiWork(
     const responseLocale = latestMessageLocale(
       row.locale,
       triggerMessage.content_text,
+      history
+        .filter(
+          (message) =>
+            message.direction === "inbound" && message.id !== triggerMessageId,
+        )
+        .map((message) => message.content_text),
     );
     const orderedHistory = history.toReversed();
     const notes = await transaction<

@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 
-import { archiveAutomation, renameAutomation } from "@or-on/crm";
+import {
+  archiveAutomation,
+  renameAutomation,
+  saveCanonicalFlowDraft,
+} from "@or-on/crm";
 
 import { jsonObject, withCurrentTenant } from "../../../../../features/auth";
 import {
@@ -15,9 +19,23 @@ export async function PATCH(
   try {
     await assertCrmMutation(request);
     const body = await jsonObject(request);
+    const { id } = await context.params;
+    if (Object.hasOwn(body, "flow")) {
+      if (
+        body.flow === null ||
+        typeof body.flow !== "object" ||
+        Array.isArray(body.flow)
+      )
+        throw new TypeError("flow definition is required");
+      const saved = await withCurrentTenant("flows:manage", (sql, session) =>
+        saveCanonicalFlowDraft(sql, session.userId, id, body.flow),
+      );
+      return saved === null
+        ? NextResponse.json({ error: "Not found" }, { status: 404 })
+        : NextResponse.json({ ok: true, ...saved });
+    }
     if (typeof body.name !== "string")
       throw new TypeError("flow name is required");
-    const { id } = await context.params;
     const updated = await withCurrentTenant("flows:manage", (sql, session) =>
       renameAutomation(sql, session.userId, id, body.name as string),
     );

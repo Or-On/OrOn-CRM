@@ -1,5 +1,5 @@
 {
-  "alembic_head": "9b7e4c2d1a60",
+  "alembic_head": "4c8d2a7e9f10",
   "expected_functions": [
     "agents.protect_approved_knowledge",
     "automation.protect_published_flow_version",
@@ -7,6 +7,7 @@
     "billing.expected_stripe_setup",
     "billing.record_stripe_payment_source",
     "messaging.adjust_broadcast_counts",
+    "messaging.current_tenant_message_media",
     "messaging.protect_outbound_recipient_binding",
     "ops.accept_whatsapp_inbound",
     "ops.claim_inbound_events",
@@ -81,6 +82,7 @@
     "ix_billing_ledger_tenant_created",
     "ix_billing_topups_tenant_created",
     "ix_conversations_ai_ownership",
+    "ix_conversations_tenant_cursor",
     "ix_contacts_tenant_activity",
     "ix_contacts_voice_campaign_eligibility",
     "ix_conversations_inbox",

@@ -128,7 +128,7 @@ def test_provider_advances_support_instead_of_acknowledging(case: Case):
         },
         *case.history,
         {"role": "user", "content": case.latest_caller_text},
-        {"role": "system", "content": grounding_instruction([], "he")},
+        {"role": "system", "content": grounding_instruction([], case.language)},
     ]
     request = {
         "model": model,

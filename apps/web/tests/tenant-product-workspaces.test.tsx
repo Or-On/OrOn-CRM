@@ -151,6 +151,8 @@ function task(id: string, overrides: Partial<TenantTask> = {}): TenantTask {
     id,
     createdByUserId: "operator-owner",
     assigneeUserId: "operator-agent",
+    contactId: null,
+    contactName: null,
     title: `Task ${id}`,
     description: `Description ${id}`,
     status: "todo",
@@ -401,6 +403,8 @@ describe("Tasks workspace", () => {
         title: "Resolve provider outage",
         priority: "urgent",
         status: "in_progress",
+        contactId: "40000000-0000-4000-8000-000000000001",
+        contactName: "Fictional Customer",
       }),
       task("routine", {
         title: "Review weekly notes",
@@ -415,7 +419,11 @@ describe("Tasks workspace", () => {
     transport.mutate.mockResolvedValueOnce({ task: created });
     render(
       localized(
-        <TasksWorkspace initialTasks={initialTasks} members={members} />,
+        <TasksWorkspace
+          initialTasks={initialTasks}
+          members={members}
+          tenantTimeZone="Asia/Jerusalem"
+        />,
       ),
     );
 
@@ -425,6 +433,11 @@ describe("Tasks workspace", () => {
     expect(
       screen.getAllByText("Resolve provider outage").length,
     ).toBeGreaterThan(0);
+    expect(
+      screen
+        .getAllByRole("link", { name: "Fictional Customer" })[0]
+        ?.getAttribute("href"),
+    ).toBe("/contacts/40000000-0000-4000-8000-000000000001");
     expect(screen.queryByText("Review weekly notes")).toBeNull();
     fireEvent.change(screen.getByRole("combobox", { name: "Priority" }), {
       target: { value: "low" },
@@ -444,6 +457,10 @@ describe("Tasks workspace", () => {
     fireEvent.change(within(dialog).getByLabelText("Assign to"), {
       target: { value: "operator-agent" },
     });
+    fireEvent.change(
+      within(dialog).getByLabelText("Due date · Asia/Jerusalem"),
+      { target: { value: "2026-09-16T10:30" } },
+    );
     fireEvent.click(
       within(dialog).getByRole("button", { name: "Create task" }),
     );
@@ -455,6 +472,7 @@ describe("Tasks workspace", () => {
         title: "Call enterprise customer",
         priority: "high",
         assigneeUserId: "operator-agent",
+        dueAt: "2026-09-16T07:30:00.000Z",
       }),
       { method: "POST" },
     );
@@ -955,7 +973,14 @@ describe("Hebrew tenant product labels", () => {
         />,
         "כספים",
       ],
-      [<TasksWorkspace initialTasks={[]} members={[]} />, "משימות"],
+      [
+        <TasksWorkspace
+          initialTasks={[]}
+          members={[]}
+          tenantTimeZone="Asia/Jerusalem"
+        />,
+        "משימות",
+      ],
       [
         <UsersWorkspace
           canManageOwners={false}

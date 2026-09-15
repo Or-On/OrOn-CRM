@@ -239,6 +239,7 @@ async def run_bot(
     # client above is built from credentials no override may touch.
     st = settings_for_call(st, spec.voice, overrides)
     profile = language_profile(spec.language)
+    conversation_language = ConversationLanguageState(spec.language)
 
     stt = OwnershipSonioxSTTService(
         api_key=st.soniox_api_key.get_secret_value(),
@@ -405,7 +406,11 @@ async def run_bot(
         google_credentials_path=st.google_application_credentials,
     )
     tts.add_text_transformer(
-        make_speech_transformer(quality_config, lambda: caller_gender.tts_value)
+        make_speech_transformer(
+            quality_config,
+            lambda: caller_gender.tts_value,
+            get_language=lambda: conversation_language.current.value,
+        )
     )
     tts.add_text_transformer(
         make_hebrew_niqqud_transformer(
@@ -444,7 +449,6 @@ async def run_bot(
         session_id=str(ctx.session_id),
         persona_gender=spec.persona_gender,
     )
-    conversation_language = ConversationLanguageState(spec.language)
     caller_language_context = CallerLanguageContextProcessor(conversation_language)
     response_language = ResponseLanguageTTSProcessor(conversation_language)
     tool_call_guard = HallucinatedToolCallGuard()

@@ -35,11 +35,10 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.services.tts_service import TextAggregationMode, TTSService
-from pipecat.transcriptions.language import Language
 from pipecat.utils.asyncio.task_manager import TaskManager
 
 from oron_agent.config import Settings
-from oron_agent.conversation_language import resolve_conversation_language
+from oron_agent.conversation_language import resolve_conversation_language, tts_language
 from oron_agent.tts import TtsProvider, build_tts
 from oron_agent.voice_quality import VoiceQualityConfig, make_speech_transformer
 
@@ -236,7 +235,7 @@ class RealPreviewProvider:
         )
         tts = self._tts_factory(
             settings.tts_provider,
-            language=Language.HE if language == "he" else Language.EN,
+            language=tts_language(resolve_conversation_language(text, language)),
             voice=voice,
             text_filters=[],
             text_aggregation_mode=TextAggregationMode.SENTENCE,

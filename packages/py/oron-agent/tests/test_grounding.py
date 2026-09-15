@@ -549,6 +549,8 @@ def test_one_safe_diagnostic_question_can_continue_investigation(language, quest
         ("en", "Which light is on? What color is it?"),
         ("he", "Which light is blinking?"),
         ("en", "איזו נורה מהבהבת?"),
+        ("en", "האם ה-TV עובד?"),
+        ("he", "Could you describe מה?"),
     ],
 )
 def test_sensitive_leading_unsafe_multi_question_and_wrong_language_are_rejected(
@@ -559,6 +561,21 @@ def test_sensitive_leading_unsafe_multi_question_and_wrong_language_are_rejected
         json.dumps({"kind": "question", "text": question}, ensure_ascii=False), [], language
     )
     assert reply.decision == "unverified"
+
+
+@pytest.mark.parametrize(
+    ("language", "fact_value"),
+    [
+        ("en", "שעות הפעילות הן מתשע עד חמש."),
+        ("he", "Support hours are nine to five."),
+    ],
+)
+def test_approved_fact_in_wrong_language_fails_closed(language, fact_value):
+    facts = eligible_facts([record(fact_value)], TENANT)
+    reply = render_reply(selection(), facts, language)
+
+    assert reply.decision == "unverified"
+    assert reply.text == CONVERSATION[language]["unverified"]
 
 
 @pytest.mark.asyncio

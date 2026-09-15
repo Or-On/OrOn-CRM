@@ -12,11 +12,15 @@ import {
 import {
   archiveAgentProfile,
   createAgentProfileDraft,
+  createCanonicalFlowDraft,
   listAgentProfiles,
   publishAgentProfile,
+  publishCanonicalFlow,
   renameAgentProfile,
   setDefaultWhatsAppAgent,
+  type CanonicalFlow,
 } from "./cross-channel.js";
+import { saveCanonicalFlowDraft } from "./flow-runtime.js";
 
 const databaseUrl = process.env.CRM_TEST_DATABASE_URL;
 
@@ -68,7 +72,7 @@ describe.skipIf(databaseUrl === undefined)(
             const agentId = await createAgentProfileDraft(sql, userId, {
               name: "Fictional WhatsApp agent",
               systemPrompt: "Help fictional customers safely.",
-              channels: ["whatsapp"],
+              channels: ["voice", "whatsapp"],
             });
             expect(await publishAgentProfile(sql, userId, agentId)).toBe(true);
             expect(await setDefaultWhatsAppAgent(sql, userId, agentId)).toBe(
@@ -98,6 +102,105 @@ describe.skipIf(databaseUrl === undefined)(
             ]);
             expect(await archiveAutomation(sql, userId, flowId)).toBe(true);
             expect(await listAutomations(sql)).toEqual([]);
+
+            const [agentVersion] = await sql<{ id: string }[]>`
+              SELECT id FROM agents.agent_profile_versions
+              WHERE agent_profile_id=${agentId}::uuid
+            `;
+            if (agentVersion === undefined)
+              throw new Error("agent version was not created");
+            const canonicalFlow: CanonicalFlow = {
+              schemaVersion: "1.0",
+              channels: ["whatsapp"],
+              nodes: [
+                { id: "start", type: "start" },
+                {
+                  id: "message",
+                  type: "message.send",
+                  configuration: { text: "Fictional customer follow-up" },
+                },
+                { id: "end", type: "end" },
+              ],
+              edges: [
+                { id: "start-message", source: "start", target: "message" },
+                { id: "message-end", source: "message", target: "end" },
+              ],
+            };
+            const canonicalFlowId = await createCanonicalFlowDraft(
+              sql,
+              userId,
+              "Fictional editable flow",
+              agentVersion.id,
+              canonicalFlow,
+            );
+            expect(
+              await publishCanonicalFlow(sql, userId, canonicalFlowId),
+            ).toBe(true);
+            const savedDraft = await saveCanonicalFlowDraft(
+              sql,
+              userId,
+              canonicalFlowId,
+              {
+                schemaVersion: "1.0",
+                channels: ["voice", "whatsapp"],
+                nodes: [
+                  { id: "start", label: "Edited follow-up", type: "start" },
+                  { id: "end", type: "end" },
+                ],
+                edges: [{ id: "start-end", source: "start", target: "end" }],
+              },
+            );
+            expect(savedDraft?.version).toBe(2);
+            expect(savedDraft?.versionId).toMatch(
+              /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/iu,
+            );
+            const canonicalVersions = await sql<
+              {
+                label: string | null;
+                published_at: Date | null;
+                version: number;
+              }[]
+            >`
+              SELECT version, published_at, definition->'nodes'->1->>'label' AS label
+              FROM automation.flow_versions
+              WHERE flow_definition_id=${canonicalFlowId}::uuid
+              ORDER BY version
+            `;
+            expect(canonicalVersions).toHaveLength(2);
+            expect(canonicalVersions[0]).toMatchObject({
+              label: null,
+              version: 1,
+            });
+            expect(canonicalVersions[0]?.published_at).toBeInstanceOf(Date);
+            expect(canonicalVersions[1]).toEqual({
+              label: "Edited follow-up",
+              published_at: null,
+              version: 2,
+            });
+            expect(
+              await sql<{ channel_capabilities: string[] }[]>`
+                SELECT channel_capabilities
+                FROM automation.flow_definitions
+                WHERE id=${canonicalFlowId}::uuid
+              `,
+            ).toEqual([{ channel_capabilities: ["whatsapp"] }]);
+            expect(
+              await publishCanonicalFlow(sql, userId, canonicalFlowId),
+            ).toBe(true);
+            expect(
+              await sql<{ channel_capabilities: string[] }[]>`
+                SELECT channel_capabilities
+                FROM automation.flow_definitions
+                WHERE id=${canonicalFlowId}::uuid
+              `,
+            ).toEqual([{ channel_capabilities: ["voice", "whatsapp"] }]);
+            expect(
+              await sql<{ count: number }[]>`
+                SELECT count(*)::integer AS count FROM audit.records
+                WHERE action='flow.draft_saved'
+                  AND target_id=${canonicalFlowId}::uuid
+              `,
+            ).toEqual([{ count: 1 }]);
 
             expect(await archiveAgentProfile(sql, userId, agentId)).toBe(
               "archived",

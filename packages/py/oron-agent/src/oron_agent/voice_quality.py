@@ -103,6 +103,8 @@ def build_soniox_context(config: VoiceQualityConfig) -> SonioxContextObject | No
 def make_speech_transformer(
     config: VoiceQualityConfig,
     get_caller_address: Callable[[], str | None],
+    *,
+    get_language: Callable[[], str] | None = None,
 ) -> Callable[[str, object], Awaitable[str]]:
     """Return a speech-only transform for TTSService.add_text_transformer.
 
@@ -114,10 +116,12 @@ def make_speech_transformer(
 
     async def transform(text: str, _aggregation_type: object) -> str:
         authored = text
+        requested_language = get_language() if get_language is not None else config.language
+        language = requested_language if requested_language in {"he", "en"} else config.language
         entries = {
             entry.original: entry.spoken
             for entry in config.pronunciationDictionary
-            if entry.language == config.language
+            if entry.language == language
             and (not entry.context or entry.context.casefold() in authored.casefold())
         }
         if entries:
@@ -127,6 +131,6 @@ def make_speech_transformer(
                 + r")(?![\w\u0591-\u05c7])"
             )
             text = pattern.sub(lambda match: entries[match.group()], text)
-        return await normalizer.filter(text) if config.language == "he" else text
+        return await normalizer.filter(text) if language == "he" else text
 
     return transform

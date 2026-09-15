@@ -21,6 +21,7 @@ const flowNodeTypes: readonly FlowNodeType[] = [
 export interface CanonicalFlowNode {
   readonly id: string;
   readonly type: FlowNodeType;
+  readonly label?: string;
   readonly configuration?: Readonly<Record<string, JsonValue>>;
 }
 
@@ -70,6 +71,14 @@ export function parseCanonicalFlow(value: unknown): CanonicalFlow {
     )
       throw new TypeError("flow node id/type is invalid");
     const configuration = candidate.configuration;
+    const label = candidate.label;
+    if (
+      label !== undefined &&
+      (typeof label !== "string" ||
+        label.trim().length === 0 ||
+        label.trim().length > 120)
+    )
+      throw new TypeError("flow node label must contain 1–120 characters");
     if (
       configuration !== undefined &&
       (configuration === null ||
@@ -93,6 +102,7 @@ export function parseCanonicalFlow(value: unknown): CanonicalFlow {
     return {
       id: candidate.id,
       type: candidate.type as FlowNodeType,
+      ...(label === undefined ? {} : { label: label.trim() }),
       ...(configuration === undefined
         ? {}
         : { configuration: JSON.parse(encoded) as Record<string, JsonValue> }),
@@ -104,8 +114,11 @@ export function parseCanonicalFlow(value: unknown): CanonicalFlow {
     const candidate = edge as Readonly<Record<string, unknown>>;
     if (
       typeof candidate.id !== "string" ||
+      !/^[\w-]{1,64}$/u.test(candidate.id) ||
       typeof candidate.source !== "string" ||
-      typeof candidate.target !== "string"
+      !/^[\w-]{1,64}$/u.test(candidate.source) ||
+      typeof candidate.target !== "string" ||
+      !/^[\w-]{1,64}$/u.test(candidate.target)
     )
       throw new TypeError("flow edge id/source/target is invalid");
     return {
@@ -173,6 +186,8 @@ export function validateCanonicalFlow(flow: CanonicalFlow): FlowValidation {
   const errors: string[] = [];
   const channels = sortedUniqueChannels(flow.channels);
   if (channels.length === 0) errors.push("at least one channel is required");
+  if (channels.length !== flow.channels.length)
+    errors.push("flow channels must not be duplicated");
   if (channels.some((channel) => !supportedChannels.includes(channel)))
     errors.push("flow contains an unsupported channel");
 
@@ -192,7 +207,10 @@ export function validateCanonicalFlow(flow: CanonicalFlow): FlowValidation {
     errors.push("flow must contain exactly one start node");
   if (!flow.nodes.some((node) => node.type === "end"))
     errors.push("flow must contain at least one end node");
+  const edgeIds = new Set<string>();
   for (const edge of flow.edges) {
+    if (edgeIds.has(edge.id)) errors.push(`duplicate edge ID: ${edge.id}`);
+    edgeIds.add(edge.id);
     if (!ids.has(edge.source) || !ids.has(edge.target))
       errors.push(`edge ${edge.id} references a missing node`);
     if (edge.source === edge.target)
@@ -579,8 +597,7 @@ export async function publishCanonicalFlow(
   definitionId: string,
 ): Promise<boolean> {
   const rows = await sql<{ id: string }[]>`
-    UPDATE automation.flow_versions SET published_at = CURRENT_TIMESTAMP
-    WHERE id = (
+    WITH candidate AS (
       SELECT flow.id FROM automation.flow_versions flow
       JOIN automation.flow_definitions definition
         ON definition.id=flow.flow_definition_id
@@ -593,9 +610,29 @@ export async function publishCanonicalFlow(
         AND flow.published_at IS NULL AND flow.validation_status = 'valid'
         AND agent.published_at IS NOT NULL
         AND agent.validation_status = 'valid'
-        AND agent.channel_capabilities @> definition.channel_capabilities
+        AND agent.channel_capabilities @> ARRAY(
+          SELECT jsonb_array_elements_text(flow.definition -> 'channels')
+        )
       ORDER BY flow.version DESC LIMIT 1
-    ) RETURNING id
+      FOR UPDATE OF flow
+    ), published AS (
+      UPDATE automation.flow_versions flow
+      SET published_at = CURRENT_TIMESTAMP
+      FROM candidate
+      WHERE flow.id = candidate.id
+      RETURNING flow.id, flow.flow_definition_id, flow.definition
+    ), updated_definition AS (
+      UPDATE automation.flow_definitions definition
+      SET channel_capabilities = ARRAY(
+            SELECT jsonb_array_elements_text(published.definition -> 'channels')
+          ),
+          updated_at = CURRENT_TIMESTAMP
+      FROM published
+      WHERE definition.id = published.flow_definition_id
+        AND definition.tenant_id = platform.current_tenant_id()
+      RETURNING published.id
+    )
+    SELECT id FROM updated_definition
   `;
   if (rows.length === 1)
     await auditAction(

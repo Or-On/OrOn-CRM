@@ -1,14 +1,17 @@
+import { randomUUID } from "node:crypto";
+
 import postgres from "postgres";
 import { describe, expect, it } from "vitest";
 import { overviewMetrics } from "./analytics.js";
 import { createAutomationDraft, listAutomations } from "./automations.js";
 import {
   ingestSimulatedInbound,
+  listConversationPage,
   listConversations,
   listMessagePage,
   listMessages,
 } from "./messaging.js";
-import type { MessageCursor } from "./types.js";
+import type { ConversationCursor, MessageCursor } from "./types.js";
 
 const databaseUrl = process.env.UI_TEST_DATABASE_URL;
 const tenant = "10000000-0000-4000-8000-000000000001";
@@ -109,6 +112,63 @@ describe.skipIf(databaseUrl === undefined)(
             expect((await overviewMetrics(transaction)).contacts).toBe(
               baseline.contacts + 1,
             );
+            const paginationPrefix = `Fictional Inbox Pagination ${randomUUID()}`;
+            await transaction`
+              INSERT INTO crm.contacts
+                (tenant_id, created_by_user_id, name)
+              SELECT ${tenant}::uuid, ${user}::uuid,
+                     ${paginationPrefix} || ' ' || lpad(sequence::text, 4, '0')
+              FROM generate_series(1, 105) AS sequence
+            `;
+            await transaction`
+              INSERT INTO messaging.conversations
+                (tenant_id, channel_id, contact_id, status, unread_count,
+                 last_message_at, last_message_preview)
+              SELECT ${tenant}::uuid, source.channel_id, contact.id, 'open',
+                     CASE WHEN right(contact.name, 1) = '0' THEN 1 ELSE 0 END,
+                     '2026-02-01T00:00:00Z'::timestamptz
+                       + right(contact.name, 4)::integer * interval '1 microsecond',
+                     'Pagination fixture'
+              FROM crm.contacts contact
+              CROSS JOIN (
+                SELECT channel_id FROM messaging.conversations
+                WHERE id = ${created.conversationId}::uuid
+              ) source
+              WHERE contact.name LIKE ${`${paginationPrefix}%`}
+            `;
+            const paginatedConversationIds: string[] = [];
+            let conversationCursor: ConversationCursor | undefined;
+            do {
+              const page = await listConversationPage(transaction, {
+                query: paginationPrefix,
+                limit: 37,
+                ...(conversationCursor === undefined
+                  ? {}
+                  : { before: conversationCursor }),
+              });
+              paginatedConversationIds.push(
+                ...page.conversations.map((conversation) => conversation.id),
+              );
+              conversationCursor = page.nextCursor ?? undefined;
+            } while (conversationCursor !== undefined);
+            expect(paginatedConversationIds).toHaveLength(105);
+            expect(new Set(paginatedConversationIds).size).toBe(105);
+            expect(
+              (
+                await listConversationPage(transaction, {
+                  query: `${paginationPrefix} 0105`,
+                })
+              ).conversations,
+            ).toHaveLength(1);
+            expect(
+              (
+                await listConversationPage(transaction, {
+                  query: paginationPrefix,
+                  filter: "unread",
+                  currentUserId: user,
+                })
+              ).conversations,
+            ).toHaveLength(10);
             await transaction`SELECT set_config('app.current_tenant', ${otherTenant}, true)`;
             expect(
               (await listMessagePage(transaction, created.conversationId))
@@ -116,6 +176,13 @@ describe.skipIf(databaseUrl === undefined)(
             ).toEqual([]);
             expect(
               await listConversations(transaction, created.conversationId),
+            ).toEqual([]);
+            expect(
+              (
+                await listConversationPage(transaction, {
+                  query: paginationPrefix,
+                })
+              ).conversations,
             ).toEqual([]);
             await transaction`SELECT set_config('app.current_tenant', '', true)`;
             expect(

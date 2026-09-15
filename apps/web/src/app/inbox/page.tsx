@@ -3,7 +3,7 @@ import { AccessDenied } from "../../i18n/access-denied";
 import { redirect } from "next/navigation";
 
 import {
-  listConversations,
+  listConversationPage,
   listMessagePage,
   listQuickReplies,
   listTeamMembers,
@@ -50,13 +50,23 @@ export default async function InboxPage({
         ? requested
         : undefined;
     const data = await withCurrentTenant("crm:read", async (sql, session) => {
-      let conversations = await listConversations(sql);
+      const conversationPage = await listConversationPage(sql, {
+        query: initialSearch,
+        filter: initialFilter,
+        currentUserId: session.userId,
+      });
+      let conversations = conversationPage.conversations;
       if (
         requestedId &&
         !conversations.some((conversation) => conversation.id === requestedId)
       )
         conversations = [
-          ...(await listConversations(sql, requestedId)),
+          ...(
+            await listConversationPage(sql, {
+              conversationId: requestedId,
+              currentUserId: session.userId,
+            })
+          ).conversations,
           ...conversations,
         ];
       const first =
@@ -65,7 +75,7 @@ export default async function InboxPage({
       const page =
         first === undefined
           ? { messages: [], nextCursor: null }
-          : await listMessagePage(sql, first.id);
+          : await listMessagePage(sql, first.id, { includeMedia: true });
       const [quickReplies, teamMembers, agentProfiles] = await Promise.all([
         listQuickReplies(sql),
         listTeamMembers(sql),
@@ -73,6 +83,7 @@ export default async function InboxPage({
       ]);
       return {
         conversations,
+        conversationNextCursor: conversationPage.nextCursor,
         ...page,
         selectedId: first?.id,
         quickReplies,
@@ -94,6 +105,7 @@ export default async function InboxPage({
       <main className="page page--inbox">
         <InboxWorkspace
           conversations={data.conversations}
+          initialConversationNextCursor={data.conversationNextCursor}
           initialMessages={data.messages}
           initialConversationId={data.selectedId}
           initialNextCursor={data.nextCursor}

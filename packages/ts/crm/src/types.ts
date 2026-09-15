@@ -111,6 +111,35 @@ export interface ConversationSummary {
   readonly customerServiceWindowExpiresAt: string | null;
 }
 
+export type ConversationFilter =
+  "all" | "mine" | "unassigned" | "unread" | "open" | "waiting" | "closed";
+
+export interface ConversationCursor {
+  readonly lastMessageAt: string | null;
+  readonly id: string;
+}
+
+export interface ConversationPage {
+  readonly conversations: readonly ConversationSummary[];
+  readonly nextCursor: ConversationCursor | null;
+}
+
+export interface MessageMedia {
+  readonly kind: "image" | "document";
+  readonly status:
+    "pending" | "processing" | "available" | "failed" | "unavailable";
+  readonly mimeType: string | null;
+  readonly fileName: string | null;
+  readonly caption: string | null;
+}
+
+export interface MessageLocation {
+  readonly latitude: number;
+  readonly longitude: number;
+  readonly name: string | null;
+  readonly address: string | null;
+}
+
 export interface Message {
   readonly id: string;
   readonly conversationId: string;
@@ -125,6 +154,9 @@ export interface Message {
   readonly deliveryEvents: readonly MessageDeliveryEvent[];
   readonly deliveryFailure?: MessageDeliveryFailure | null;
   readonly template?: TemplateSummary | null;
+  /** Sanitized customer-media metadata. Provider identifiers never leave CRM. */
+  readonly media?: MessageMedia | null;
+  readonly location?: MessageLocation | null;
   readonly historyCursor?: MessageCursor;
 }
 
@@ -360,6 +392,8 @@ export interface Task {
   readonly id: string;
   readonly createdByUserId: string | null;
   readonly assigneeUserId: string | null;
+  readonly contactId: string | null;
+  readonly contactName: string | null;
   readonly title: string;
   readonly description: string | null;
   readonly status: TaskStatus;

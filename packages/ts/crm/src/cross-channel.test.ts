@@ -69,6 +69,30 @@ describe("canonical cross-channel flow", () => {
       }),
     ).toThrow("configuration");
   });
+  it("normalizes and preserves accessible node labels", () => {
+    const flow = parseCanonicalFlow({
+      ...crossChannelFlow,
+      nodes: crossChannelFlow.nodes.map((node) =>
+        node.id === "message"
+          ? { ...node, label: "  Send a customer follow-up  " }
+          : node,
+      ),
+    });
+    expect(flow.nodes.find((node) => node.id === "message")?.label).toBe(
+      "Send a customer follow-up",
+    );
+    expect(
+      compileCanonicalFlow(flow).whatsapp?.nodes.find(
+        (node) => node.id === "message",
+      )?.label,
+    ).toBe("Send a customer follow-up");
+    expect(() =>
+      parseCanonicalFlow({
+        ...crossChannelFlow,
+        nodes: [{ id: "start", type: "start", label: " " }],
+      }),
+    ).toThrow("label");
+  });
   it("compiles deterministically into retained voice and messaging adapters", () => {
     const first = compileCanonicalFlow(crossChannelFlow);
     const second = compileCanonicalFlow({
@@ -104,6 +128,25 @@ describe("canonical cross-channel flow", () => {
     );
     expect(result.errors).toContain("flow must contain at least one end node");
     expect(result.errors).toContain("edge broken references a missing node");
+  });
+
+  it("rejects duplicate channel and connection identifiers", () => {
+    const result = validateCanonicalFlow({
+      ...crossChannelFlow,
+      channels: ["whatsapp", "whatsapp"],
+      edges: [
+        { id: "duplicate", source: "start", target: "update" },
+        { id: "duplicate", source: "update", target: "message" },
+      ],
+    });
+    expect(result.errors).toContain("flow channels must not be duplicated");
+    expect(result.errors).toContain("duplicate edge ID: duplicate");
+    expect(() =>
+      parseCanonicalFlow({
+        ...crossChannelFlow,
+        edges: [{ id: "not valid", source: "start", target: "end" }],
+      }),
+    ).toThrow("edge id/source/target");
   });
 
   it("rejects untrusted payloads before compilation", () => {

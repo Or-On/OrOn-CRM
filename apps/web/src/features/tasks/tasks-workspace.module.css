@@ -212,6 +212,19 @@
   font-weight: 590;
 }
 
+.customerLink {
+  color: var(--or-text);
+  font-weight: 570;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--or-text) 30%, transparent);
+  text-underline-offset: 0.18em;
+}
+
+.customerLink:hover {
+  color: var(--or-accent);
+  text-decoration-color: currentcolor;
+}
+
 .rowActions {
   justify-content: flex-end;
   gap: 0.2rem;

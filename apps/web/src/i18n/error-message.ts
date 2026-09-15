@@ -21,6 +21,8 @@ const knownErrors: Readonly<Record<string, string>> = {
   "conversation has no valid WhatsApp recipient": "errors.phone",
   "This conversation still has queued or in-progress work. Wait for it to finish before deleting.":
     "inbox.deleteInProgress",
+  "This conversation is retained as technician case evidence and cannot be deleted from the Inbox.":
+    "inbox.deleteRetainedEvidence",
   "recipient must be strict E.164": "errors.phone",
   "text must contain 1-4096 characters": "errors.length",
   "invalid template name": "errors.templateName",

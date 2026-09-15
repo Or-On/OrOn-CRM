@@ -7,6 +7,7 @@ vi.mock("server-only", () => ({}));
 
 import {
   commitPrivateObject,
+  deletePrivateObject,
   readPrivateObject,
   stagePrivateObject,
 } from "./private-objects";
@@ -112,5 +113,29 @@ describe("field-service private object storage", () => {
     await expect(
       readPrivateObject("../outside.txt", { byteSize: 1, checksum: "x" }),
     ).rejects.toThrow(/escaped|invalid/u);
+  });
+
+  it("removes only a committed object inside the configured private root", async () => {
+    const staged = await stagePrivateObject({
+      tenantId: "tenant",
+      caseId: "conversation",
+      category: "whatsapp_media",
+      scope: "messaging",
+      declaredContentType: "image/png",
+      bytes: png,
+    });
+    await commitPrivateObject(staged);
+
+    await deletePrivateObject(staged.storageKey);
+
+    await expect(
+      readPrivateObject(staged.storageKey, {
+        byteSize: staged.byteSize,
+        checksum: staged.checksum,
+      }),
+    ).rejects.toThrow();
+    await expect(deletePrivateObject("../outside.jpg")).rejects.toThrow(
+      /escaped|invalid/u,
+    );
   });
 });

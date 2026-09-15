@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
-import { listTasks, listTeamMembers } from "@or-on/crm";
+import { getTenantSettings, listTasks, listTeamMembers } from "@or-on/crm";
 
 import { AccessDenied } from "../../i18n/access-denied";
 import {
@@ -14,15 +14,20 @@ import { TasksWorkspace } from "../../features/tasks";
 export default async function TasksPage() {
   try {
     const data = await withCurrentTenant("crm:read", async (sql) => {
-      const [tasks, members] = await Promise.all([
+      const [tasks, members, settings] = await Promise.all([
         listTasks(sql, { limit: 500 }),
         listTeamMembers(sql),
+        getTenantSettings(sql),
       ]);
-      return { tasks, members };
+      return { tasks, members, settings };
     });
     return (
       <main className="page page--wide">
-        <TasksWorkspace initialTasks={data.tasks} members={data.members} />
+        <TasksWorkspace
+          initialTasks={data.tasks}
+          members={data.members}
+          tenantTimeZone={data.settings.timezone}
+        />
       </main>
     );
   } catch (error) {

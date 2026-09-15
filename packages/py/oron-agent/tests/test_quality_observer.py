@@ -5,6 +5,7 @@ from oron_agent.quality_observer import VoiceQualityObserver
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
     InterruptionFrame,
     LLMContextFrame,
     LLMTextFrame,
@@ -82,3 +83,48 @@ async def test_missing_stages_are_unknown_and_retention_is_bounded():
     assert result["total_turns"] == 5
     assert result["summary_ms"]["model_first_token_ms"] == {"samples": 0, "p50": None, "p95": None}
     assert all(not turn["exact_playback_confirmed"] for turn in result["turns"])
+
+
+@pytest.mark.asyncio
+async def test_completed_speech_is_not_mislabeled_when_the_next_turn_starts():
+    llm, tts, transport, middle = [FrameProcessor() for _ in range(4)]
+    observer = VoiceQualityObserver(llm=llm, tts=tts, transport_output=transport)
+
+    async def push(frame, ms, source=middle, destination=middle):
+        await observer.on_push_frame(
+            FramePushed(source, destination, frame, FrameDirection.DOWNSTREAM, int(ms * 1_000_000))
+        )
+
+    await push(LLMContextFrame(LLMContext()), 100, destination=llm)
+    await push(BotStartedSpeakingFrame(), 200, source=transport)
+    await push(BotStoppedSpeakingFrame(), 300, source=transport)
+    await push(InterruptionFrame(), 400)
+
+    turn = observer.finalize()["turns"][0]
+    assert turn["interrupted"] is False
+    assert turn["playback"] == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_recognition_ready_before_vad_stop_is_observed_as_zero_wait():
+    llm, tts, transport, middle = [FrameProcessor() for _ in range(4)]
+    observer = VoiceQualityObserver(llm=llm, tts=tts, transport_output=transport)
+
+    async def push(frame, ms, source=middle, destination=middle):
+        await observer.on_push_frame(
+            FramePushed(source, destination, frame, FrameDirection.DOWNSTREAM, int(ms * 1_000_000))
+        )
+
+    accepted = TranscriptionFrame("fixture", "caller", "", finalized=True)
+    accepted.metadata["recognition_state"] = "accepted"
+    await push(accepted, 95)
+    await push(UserStoppedSpeakingFrame(), 100)
+    await push(LLMContextFrame(LLMContext()), 110, destination=llm)
+
+    result = observer.finalize()
+    assert result["turns"][0]["durations_ms"]["speech_end_to_accepted_ms"] == 0
+    assert result["summary_ms"]["speech_end_to_accepted_ms"] == {
+        "samples": 1,
+        "p50": 0,
+        "p95": 0,
+    }

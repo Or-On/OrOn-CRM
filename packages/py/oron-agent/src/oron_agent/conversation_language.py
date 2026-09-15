@@ -24,6 +24,9 @@ _MACHINE_IDENTIFIER = re.compile(
     r"[A-Za-z\u05d0-\u05ea0-9._/-]+(?!\w)",
     re.IGNORECASE,
 )
+_LANGUAGE_WORD = re.compile(r"[\u05d0-\u05ea]+|[A-Za-z]+")
+_TITLE_CASE_LATIN = re.compile(r"[A-Z][A-Za-z0-9]*")
+_LATIN_ACRONYM = re.compile(r"[A-Z]{2,}[A-Z0-9]*")
 
 
 class ConversationLanguage(StrEnum):
@@ -58,19 +61,52 @@ def detect_conversation_language(
         " ",
         _EMAIL.sub(" ", _URL.sub(" ", text)),
     )
-    hebrew = len(_HEBREW_LETTER.findall(natural_text))
-    latin = len(_LATIN_LETTER.findall(natural_text))
+    words = _LANGUAGE_WORD.findall(natural_text)
+    technical_indexes: set[int] = set()
+    index = 0
+    while index < len(words):
+        if not _TITLE_CASE_LATIN.fullmatch(words[index]):
+            index += 1
+            continue
+        end = index + 1
+        while end < len(words) and _TITLE_CASE_LATIN.fullmatch(words[end]):
+            end += 1
+        if end - index >= 2:
+            technical_indexes.update(range(index, end))
+        index = end
+    words_without_technical_names = [
+        word
+        for word_index, word in enumerate(words)
+        if word_index not in technical_indexes and not _LATIN_ACRONYM.fullmatch(word)
+    ]
+    words_without_acronyms = [word for word in words if not _LATIN_ACRONYM.fullmatch(word)]
+    # A multi-word Title Case sequence is treated as a probable product/person
+    # name only when some surrounding language remains. This preserves ordinary
+    # short utterances such as "Please Help". Likewise, restore all-uppercase
+    # words when they are the only signal so urgent messages such as "HELP" and
+    # "NOT WORKING" are still recognized as English.
+    language_words = words_without_technical_names or words_without_acronyms or words
+    meaningful_letters = sum(
+        len(_HEBREW_LETTER.findall(word)) + len(_LATIN_LETTER.findall(word))
+        for word in language_words
+    )
+    # A single isolated letter is usually noise, an initial, or a partial STT
+    # token. It must not flip an established bilingual conversation.
+    if meaningful_letters < 2:
+        return None
+    hebrew = sum(bool(_HEBREW_LETTER.search(word)) for word in language_words)
+    latin = sum(bool(_LATIN_LETTER.search(word)) for word in language_words)
     provider = _language_from_provider(provider_language)
     # Product and person names often use the other script and can be longer
     # than the surrounding utterance. Soniox's turn-level identification is the
     # better tie-breaker when both scripts are genuinely present.
-    if hebrew and latin and provider is not None:
+    if hebrew == latin and hebrew > 0 and provider is not None:
         return provider
-    if hebrew >= 2 and hebrew > latin:
+    if hebrew > latin:
         return ConversationLanguage.HEBREW
-    if latin >= 2 and latin > hebrew:
+    if latin > hebrew:
         return ConversationLanguage.ENGLISH
-    return provider
+    return None
 
 
 def resolve_conversation_language(

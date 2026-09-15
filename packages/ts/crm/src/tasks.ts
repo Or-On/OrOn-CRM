@@ -6,6 +6,8 @@ interface TaskRow {
   id: string;
   created_by_user_id: string | null;
   assignee_user_id: string | null;
+  contact_id: string | null;
+  contact_name: string | null;
   title: string;
   description: string | null;
   status: TaskStatus;
@@ -98,6 +100,8 @@ function mapTask(row: TaskRow): Task {
     id: row.id,
     createdByUserId: row.created_by_user_id,
     assigneeUserId: row.assignee_user_id,
+    contactId: row.contact_id,
+    contactName: row.contact_name,
     title: row.title,
     description: row.description,
     status: row.status,
@@ -130,15 +134,20 @@ export async function listTasks(
   const assigneeUserId = optionalMemberId(options.assigneeUserId);
   const limit = Math.min(Math.max(Math.trunc(options.limit ?? 100), 1), 500);
   const rows = await sql<TaskRow[]>`
-    SELECT id, created_by_user_id, assignee_user_id, title, description,
-      status, priority, due_at, completed_at, created_at, updated_at
-    FROM crm.tasks
-    WHERE (${query}::text = '' OR title ILIKE '%' || ${query} || '%'
-           OR coalesce(description, '') ILIKE '%' || ${query} || '%')
-      AND (${status}::text IS NULL OR status = ${status})
-      AND (${taskPriority}::text IS NULL OR priority = ${taskPriority})
-      AND (${assigneeUserId}::uuid IS NULL OR assignee_user_id = ${assigneeUserId}::uuid)
-    ORDER BY due_at ASC NULLS LAST, updated_at DESC, id DESC
+    SELECT task.id, task.created_by_user_id, task.assignee_user_id,
+      task.contact_id, contact.name AS contact_name, task.title,
+      task.description, task.status, task.priority, task.due_at,
+      task.completed_at, task.created_at, task.updated_at
+    FROM crm.tasks task
+    LEFT JOIN crm.contacts contact
+      ON contact.id=task.contact_id AND contact.tenant_id=platform.current_tenant_id()
+    WHERE (${query}::text = '' OR task.title ILIKE '%' || ${query} || '%'
+           OR coalesce(task.description, '') ILIKE '%' || ${query} || '%'
+           OR coalesce(contact.name, '') ILIKE '%' || ${query} || '%')
+      AND (${status}::text IS NULL OR task.status = ${status})
+      AND (${taskPriority}::text IS NULL OR task.priority = ${taskPriority})
+      AND (${assigneeUserId}::uuid IS NULL OR task.assignee_user_id = ${assigneeUserId}::uuid)
+    ORDER BY task.due_at ASC NULLS LAST, task.updated_at DESC, task.id DESC
     LIMIT ${limit}
   `;
   return rows.map(mapTask);
@@ -162,7 +171,7 @@ export async function createTask(
   const assigneeUserId = optionalMemberId(input.assigneeUserId);
   const dueAt = optionalInstant(input.dueAt, "dueAt");
   const rows = await sql<TaskRow[]>`
-    INSERT INTO crm.tasks(
+    INSERT INTO crm.tasks AS task(
       tenant_id, created_by_user_id, assignee_user_id, title, description,
       status, priority, due_at, completed_at
     )
@@ -174,8 +183,11 @@ export async function createTask(
       SELECT 1 FROM platform.current_tenant_team() member
       WHERE member.user_id = ${assigneeUserId}::uuid
     )
-    RETURNING id, created_by_user_id, assignee_user_id, title, description,
-      status, priority, due_at, completed_at, created_at, updated_at
+    RETURNING id, created_by_user_id, assignee_user_id, contact_id,
+      (SELECT contact.name FROM crm.contacts contact
+       WHERE contact.id=task.contact_id
+         AND contact.tenant_id=platform.current_tenant_id()) AS contact_name,
+      title, description, status, priority, due_at, completed_at, created_at, updated_at
   `;
   const row = rows[0];
   if (row === undefined)
@@ -215,7 +227,7 @@ export async function updateTask(
   const dueAt =
     input.dueAt === undefined ? null : optionalInstant(input.dueAt, "dueAt");
   const rows = await sql<TaskRow[]>`
-    UPDATE crm.tasks
+    UPDATE crm.tasks AS task
     SET title = CASE WHEN ${input.title !== undefined} THEN ${title} ELSE title END,
         description = CASE WHEN ${input.description !== undefined}
           THEN ${description} ELSE description END,
@@ -233,7 +245,7 @@ export async function updateTask(
           ELSE completed_at
         END,
         updated_at = CURRENT_TIMESTAMP
-    WHERE id = ${taskId}::uuid AND status <> 'cancelled'
+    WHERE task.id = ${taskId}::uuid AND task.status <> 'cancelled'
       AND (
         ${input.assigneeUserId === undefined} OR ${assigneeUserId}::uuid IS NULL
         OR EXISTS (
@@ -241,8 +253,11 @@ export async function updateTask(
           WHERE member.user_id = ${assigneeUserId}::uuid
         )
       )
-    RETURNING id, created_by_user_id, assignee_user_id, title, description,
-      status, priority, due_at, completed_at, created_at, updated_at
+    RETURNING id, created_by_user_id, assignee_user_id, contact_id,
+      (SELECT contact.name FROM crm.contacts contact
+       WHERE contact.id=task.contact_id
+         AND contact.tenant_id=platform.current_tenant_id()) AS contact_name,
+      title, description, status, priority, due_at, completed_at, created_at, updated_at
   `;
   return rows[0] === undefined ? undefined : mapTask(rows[0]);
 }
@@ -252,11 +267,14 @@ export async function cancelTask(
   taskId: string,
 ): Promise<Task | undefined> {
   const rows = await sql<TaskRow[]>`
-    UPDATE crm.tasks
+    UPDATE crm.tasks AS task
     SET status = 'cancelled', completed_at = NULL, updated_at = CURRENT_TIMESTAMP
-    WHERE id = ${taskId}::uuid AND status <> 'cancelled'
-    RETURNING id, created_by_user_id, assignee_user_id, title, description,
-      status, priority, due_at, completed_at, created_at, updated_at
+    WHERE task.id = ${taskId}::uuid AND task.status <> 'cancelled'
+    RETURNING id, created_by_user_id, assignee_user_id, contact_id,
+      (SELECT contact.name FROM crm.contacts contact
+       WHERE contact.id=task.contact_id
+         AND contact.tenant_id=platform.current_tenant_id()) AS contact_name,
+      title, description, status, priority, due_at, completed_at, created_at, updated_at
   `;
   return rows[0] === undefined ? undefined : mapTask(rows[0]);
 }

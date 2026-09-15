@@ -76,6 +76,27 @@ async def test_english_configuration_does_not_expand_numbers_into_hebrew():
     assert await transform("The amount is 150.05", None) == "The amount is 150.05"
 
 
+@pytest.mark.asyncio
+async def test_dynamic_turn_language_scopes_pronunciation_and_preserves_caller_address():
+    current_language = "en"
+    quality = VoiceQualityConfig(
+        language="en",
+        pronunciationDictionary=[
+            PronunciationEntry(original="sample", spoken="example", language="en"),
+            PronunciationEntry(original="OrOn", spoken="אוֹר אוֹן", language="he"),
+        ],
+    )
+    transform = make_speech_transformer(
+        quality,
+        lambda: "male",
+        get_language=lambda: current_language,
+    )
+
+    assert await transform("sample", None) == "example"
+    current_language = "he"
+    assert await transform("את יכולה לבדוק OrOn?", None) == "אתה יכול לבדוק אוֹר אוֹן?"
+
+
 def test_duplicate_pronunciations_fail_closed():
     entry = PronunciationEntry(original="אלי", spoken="אֵלִי", language="he")
     with pytest.raises(ValidationError):

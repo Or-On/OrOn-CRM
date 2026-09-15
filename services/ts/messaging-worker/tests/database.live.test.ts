@@ -1,4 +1,7 @@
-import { createHmac, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import postgres from "postgres";
 import { describe, expect, it, vi } from "vitest";
@@ -13,6 +16,7 @@ import { createMessagingStore } from "../src/database.js";
 import {
   MetaWhatsAppProvider,
   SimulatorWhatsAppProvider,
+  type WhatsAppMediaDownloadRequest,
   type WhatsAppSendRequest,
 } from "../src/providers.js";
 
@@ -290,6 +294,178 @@ describe.skipIf(databaseUrl === undefined)("durable messaging worker", () => {
           await transaction`DELETE FROM messaging.conversations WHERE id = ${conversationId}::uuid`;
       });
       await admin.end({ timeout: 2 });
+    }
+  });
+
+  it("retrieves inbound media without a Field Service tenant configuration", async () => {
+    if (databaseUrl === undefined)
+      throw new Error("MESSAGING_WORKER_TEST_DATABASE_URL is required");
+    const admin = postgres(databaseUrl, { max: 1, prepare: false });
+    const localRoot = await mkdtemp(join(tmpdir(), "oron-inbox-media-"));
+    const fixture = randomUUID().replaceAll("-", "");
+    const mediaTenantId = randomUUID();
+    const phoneNumberId = `9${BigInt(`0x${fixture.slice(0, 14)}`)
+      .toString()
+      .slice(0, 14)}`;
+    const sender = `+1202${String(
+      BigInt(`0x${fixture.slice(14, 23)}`) % 10_000_000n,
+    ).padStart(7, "0")}`;
+    const providerMessageId = `wamid.mock-media-${fixture}`;
+    const providerMediaId = `media-${fixture}`;
+    const secret = `fixture-secret-${fixture}`;
+    const bytes = Buffer.from("%PDF-1.4\nFictional inbox media\n%%EOF");
+    try {
+      await admin`
+        INSERT INTO tenants(id, name, slug)
+        VALUES (${mediaTenantId}::uuid, 'Fictional media tenant', ${`media-${fixture}`})
+      `;
+      await admin`
+        INSERT INTO messaging.channels(
+          tenant_id, kind, provider, provider_account_id, display_address,
+          status, mirror_inbound_media, configuration
+        ) VALUES (
+          ${mediaTenantId}::uuid, 'whatsapp', 'meta', ${phoneNumberId},
+          'Mock media account', 'active', true,
+          ${admin.json({
+            phoneNumberId,
+            wabaId: `8${fixture.slice(0, 14)}`,
+            graphApiVersion: "v26.0",
+          })}
+        )
+      `;
+      expect(
+        await admin<{ count: number }[]>`
+          SELECT count(*)::integer AS count
+          FROM service.tenant_configuration
+          WHERE tenant_id=${mediaTenantId}::uuid
+        `,
+      ).toEqual([{ count: 0 }]);
+      const rawBody = Buffer.from(
+        JSON.stringify({
+          entry: [
+            {
+              id: `8${fixture.slice(0, 14)}`,
+              changes: [
+                {
+                  value: {
+                    metadata: { phone_number_id: phoneNumberId },
+                    contacts: [
+                      {
+                        wa_id: sender.slice(1),
+                        profile: { name: "Media sender" },
+                      },
+                    ],
+                    messages: [
+                      {
+                        from: sender.slice(1),
+                        id: providerMessageId,
+                        timestamp: "1788364800",
+                        type: "document",
+                        document: {
+                          id: providerMediaId,
+                          mime_type: "application/pdf",
+                          filename: "invoice.pdf",
+                        },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        }),
+      );
+      const signature = `sha256=${createHmac("sha256", secret).update(rawBody).digest("hex")}`;
+      await acceptWhatsAppWebhook(databaseUrl, rawBody, signature, secret);
+      const downloadMedia = vi.fn(
+        async (request: WhatsAppMediaDownloadRequest) => {
+          await request.beforeAttempt?.();
+          return {
+            bytes,
+            contentType: "application/pdf" as const,
+            sha256: createHash("sha256").update(bytes).digest("hex"),
+          };
+        },
+      );
+      const store = createMessagingStore(
+        databaseUrl,
+        `media-worker-${fixture}`,
+        {
+          simulator: new SimulatorWhatsAppProvider(),
+          meta: {
+            name: "meta",
+            send: vi.fn(() =>
+              Promise.reject(
+                new Error("media test must not send provider messages"),
+              ),
+            ),
+            downloadMedia,
+          },
+        },
+        undefined,
+        {
+          realWhatsAppEnabled: true,
+          privateObjectStorage: { localRoot },
+        },
+      );
+      try {
+        for (let turn = 0; turn < 20; turn += 1) {
+          await store.processAvailable();
+          const status = await admin<{ status: string }[]>`
+            SELECT job.status FROM ops.jobs job
+            JOIN messaging.messages message ON message.id=job.reference_id
+            WHERE message.provider_message_id=${providerMessageId}
+              AND job.job_type='whatsapp.media.retrieve'
+          `;
+          if (status[0]?.status === "succeeded") break;
+        }
+      } finally {
+        await store.close();
+      }
+      expect(downloadMedia).toHaveBeenCalledOnce();
+      const stored = await admin<
+        {
+          retrieval_status: string | null;
+          owner_type: string;
+          owner_id: string;
+          object_status: string;
+          content_type: string;
+        }[]
+      >`
+        SELECT message.structured_content->>'retrievalStatus' AS retrieval_status,
+               object.owner_type, object.owner_id,
+               object.status AS object_status, object.content_type
+        FROM messaging.messages message
+        JOIN objects.object_metadata object ON object.id=message.object_id
+        WHERE message.provider_message_id=${providerMessageId}
+      `;
+      expect(stored[0]).toMatchObject({
+        retrieval_status: "available",
+        owner_type: "message",
+        object_status: "available",
+        content_type: "application/pdf",
+      });
+      expect(stored[0]?.owner_id).toBeDefined();
+      expect(
+        await admin<{ count: number }[]>`
+          SELECT count(*)::integer AS count
+          FROM service.report_attachments attachment
+          JOIN messaging.messages message ON message.id=attachment.message_id
+          WHERE message.provider_message_id=${providerMessageId}
+        `,
+      ).toEqual([{ count: 0 }]);
+    } finally {
+      await admin.begin(async (transaction) => {
+        await transaction`
+          UPDATE messaging.messages SET object_id=NULL
+          WHERE tenant_id=${mediaTenantId}::uuid
+        `;
+        await transaction`
+          DELETE FROM tenants WHERE id=${mediaTenantId}::uuid
+        `;
+      });
+      await admin.end({ timeout: 2 });
+      await rm(localRoot, { recursive: true, force: true });
     }
   });
 });

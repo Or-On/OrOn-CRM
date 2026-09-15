@@ -131,7 +131,9 @@ describe("settings read scope", () => {
   });
 
   it("loads only personal account and notifications for a restricted role", async () => {
-    const markup = renderToStaticMarkup(await SettingsPage());
+    const markup = renderToStaticMarkup(
+      await SettingsPage({ searchParams: Promise.resolve({}) }),
+    );
 
     expect(state.notifications).toHaveBeenCalledTimes(1);
     expect(state.members).not.toHaveBeenCalled();
@@ -147,6 +149,37 @@ describe("settings read scope", () => {
     expect(markup).not.toContain("Real delivery enabled");
   });
 
+  it("opens a valid route-backed tab and ignores an unknown tab", async () => {
+    const notificationsMarkup = renderToStaticMarkup(
+      await SettingsPage({
+        searchParams: Promise.resolve({ tab: "notifications" }),
+      }),
+    );
+    const unknownMarkup = renderToStaticMarkup(
+      await SettingsPage({
+        searchParams: Promise.resolve({ tab: "not-a-settings-tab" }),
+      }),
+    );
+    const unauthorizedMarkup = renderToStaticMarkup(
+      await SettingsPage({
+        searchParams: Promise.resolve({ tab: "integrations" }),
+      }),
+    );
+
+    expect(notificationsMarkup).toContain(
+      'id="settings-notifications-panel" role="tabpanel"',
+    );
+    expect(notificationsMarkup).not.toContain(
+      'hidden="" id="settings-notifications-panel"',
+    );
+    expect(unknownMarkup).not.toContain(
+      'hidden="" id="settings-account-panel"',
+    );
+    expect(unauthorizedMarkup).not.toContain(
+      'hidden="" id="settings-account-panel"',
+    );
+  });
+
   it.each([
     ["tenant administrator", "admin", false],
     ["platform super administrator", "viewer", true],
@@ -155,7 +188,9 @@ describe("settings read scope", () => {
     async (_label, role, superuser) => {
       state.role = role;
       state.superuser = superuser;
-      const markup = renderToStaticMarkup(await SettingsPage());
+      const markup = renderToStaticMarkup(
+        await SettingsPage({ searchParams: Promise.resolve({}) }),
+      );
 
       expect(state.notifications).toHaveBeenCalledTimes(1);
       expect(state.members).toHaveBeenCalledTimes(1);
