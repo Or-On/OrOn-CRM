@@ -3,7 +3,15 @@ import { AccessDenied } from "../../../i18n/access-denied";
 import { ProductHeading } from "../../../i18n/product-heading";
 import { notFound, redirect } from "next/navigation";
 
-import { getContactDetail, listContactActivity } from "@or-on/crm";
+import { isAuthorized } from "@or-on/auth";
+import {
+  getContactDetail,
+  getCustomerDossier,
+  getFieldServiceFeatureState,
+  listContactActivity,
+  listCustomerClassifications,
+  listCustomerServiceCases,
+} from "@or-on/crm";
 
 import {
   ForbiddenError,
@@ -35,20 +43,66 @@ export default async function ContactDetailPage({
 }) {
   try {
     const { id } = await params;
-    const [{ activity, contact }, flows] = await Promise.all([
-      withCurrentTenant("crm:read", async (sql) => ({
-        contact: await getContactDetail(sql, id),
-        activity: await listContactActivity(sql, id),
-      })),
+    const [customer, flows] = await Promise.all([
+      withCurrentTenant("crm:read", async (sql, session) => {
+        const [contact, activity, dossier, classifications, fieldService] =
+          await Promise.all([
+            getContactDetail(sql, id),
+            listContactActivity(sql, id),
+            getCustomerDossier(sql, id),
+            listCustomerClassifications(sql),
+            getFieldServiceFeatureState(sql),
+          ]);
+        const principal = {
+          role: session.tenant.role,
+          isSuperuser: session.isSuperuser,
+        };
+        const canReadSensitive = isAuthorized(
+          principal,
+          "customer-sensitive:read",
+        );
+        return {
+          contact,
+          activity,
+          dossier:
+            dossier === undefined || canReadSensitive
+              ? dossier
+              : {
+                  ...dossier,
+                  documents: dossier.documents.filter(
+                    (document) => document.category !== "identity",
+                  ),
+                },
+          classifications,
+          fieldServiceEnabled: fieldService.effective,
+          serviceCases: fieldService.effective
+            ? await listCustomerServiceCases(sql, id)
+            : [],
+          canReadSensitive,
+          canWriteSensitive: isAuthorized(
+            principal,
+            "customer-sensitive:write",
+          ),
+          canManageClassifications: isAuthorized(principal, "tenant:manage"),
+        };
+      }),
       optionalVoiceFlows(),
     ]);
-    if (contact === undefined) notFound();
+    if (customer.contact === undefined || customer.dossier === undefined)
+      notFound();
     return (
       <main className="page page--wide page--workspace-premium">
         <ProductHeading page="contact" premium />
         <ContactDetailPanel
-          activity={activity}
-          contact={contact}
+          activity={customer.activity}
+          contact={customer.contact}
+          customerDossier={customer.dossier}
+          classifications={customer.classifications}
+          serviceCases={customer.serviceCases}
+          fieldServiceEnabled={customer.fieldServiceEnabled}
+          canReadSensitive={customer.canReadSensitive}
+          canWriteSensitive={customer.canWriteSensitive}
+          canManageClassifications={customer.canManageClassifications}
           realVoiceEnabled={
             process.env.ENABLE_REAL_TELEPHONY?.toLowerCase() === "true" &&
             process.env.ENABLE_REAL_VOICE_PROVIDERS?.toLowerCase() === "true"

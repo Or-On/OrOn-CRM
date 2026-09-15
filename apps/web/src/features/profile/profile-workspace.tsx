@@ -37,7 +37,7 @@ export interface ProfileWorkspaceProps {
   };
   readonly tenant: {
     readonly tenantName: string;
-    readonly role: "owner" | "admin" | "agent" | "viewer";
+    readonly role: "owner" | "admin" | "agent" | "technician" | "viewer";
   };
   readonly membershipCount: number;
 }
@@ -99,7 +99,13 @@ const copy = {
     theme: "Color theme",
     themeHint: "Use light, dark, or your system preference.",
     failed: "The change could not be saved. Please try again.",
-    roles: { owner: "Owner", admin: "Admin", agent: "Agent", viewer: "Viewer" },
+    roles: {
+      owner: "Owner",
+      admin: "Admin",
+      agent: "Agent",
+      technician: "Technician",
+      viewer: "Viewer",
+    },
   },
   he: {
     breadcrumb: "סביבת עבודה / אנשים / הפרופיל שלי",
@@ -154,7 +160,13 @@ const copy = {
     theme: "ערכת צבעים",
     themeHint: "בחרו מצב בהיר, כהה או התאמה למערכת.",
     failed: "לא ניתן היה לשמור את השינוי. נסו שוב.",
-    roles: { owner: "בעלים", admin: "מנהל", agent: "נציג", viewer: "צופה" },
+    roles: {
+      owner: "בעלים",
+      admin: "מנהל",
+      agent: "נציג",
+      technician: "טכנאי",
+      viewer: "צופה",
+    },
   },
 } as const;
 

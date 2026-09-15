@@ -15,7 +15,7 @@ import { useMemo, useState } from "react";
 
 import styles from "./roles-workspace.module.css";
 
-type RoleName = "owner" | "admin" | "agent" | "viewer";
+type RoleName = "owner" | "admin" | "agent" | "technician" | "viewer";
 type RoleView = "roles" | "matrix";
 
 export interface RoleRecord {
@@ -64,6 +64,8 @@ const copy = {
       admin:
         "Workspace administration and operations without ownership-only authority.",
       agent: "Daily customer operations, messaging, voice, CRM, and pipelines.",
+      technician:
+        "Assigned field-service work, visit attendance, evidence, and reports.",
       viewer:
         "Read-only visibility into the platform, CRM, and voice activity.",
     },
@@ -71,12 +73,14 @@ const copy = {
       owner: "Full control",
       admin: "Administration",
       agent: "Operations",
+      technician: "Field operations",
       viewer: "Read only",
     },
     roleLabels: {
       owner: "Owner",
       admin: "Admin",
       agent: "Agent",
+      technician: "Technician",
       viewer: "Viewer",
     },
   },
@@ -117,18 +121,21 @@ const copy = {
       owner: "בעלות מלאה על סביבת העבודה, ניהול חברים וכל יכולות המוצר.",
       admin: "ניהול סביבת העבודה והתפעול ללא סמכויות השמורות לבעלים.",
       agent: "תפעול לקוחות יומיומי, הודעות, קול, CRM וצינורות מכירה.",
+      technician: "משימות שירות שהוקצו, נוכחות בביקור, תיעוד ודוחות.",
       viewer: "צפייה בלבד בפלטפורמה, ב-CRM ובפעילות הקולית.",
     },
     levels: {
       owner: "שליטה מלאה",
       admin: "ניהול",
       agent: "תפעול",
+      technician: "שירות שטח",
       viewer: "קריאה בלבד",
     },
     roleLabels: {
       owner: "בעלים",
       admin: "מנהל",
       agent: "נציג",
+      technician: "טכנאי",
       viewer: "צופה",
     },
   },
@@ -136,7 +143,7 @@ const copy = {
 
 function accessGroup(role: RoleName): "broad" | "operational" | "readOnly" {
   if (role === "owner" || role === "admin") return "broad";
-  return role === "agent" ? "operational" : "readOnly";
+  return role === "agent" || role === "technician" ? "operational" : "readOnly";
 }
 
 export function RolesWorkspace({

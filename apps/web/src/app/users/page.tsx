@@ -13,13 +13,15 @@ import { UsersWorkspace } from "../../features/users";
 
 export const metadata: Metadata = { title: "Users" };
 
-type UserRoleFilter = "owner" | "admin" | "agent" | "viewer" | "all";
+type UserRoleFilter =
+  "owner" | "admin" | "agent" | "technician" | "viewer" | "all";
 
 function roleFilter(value: string | string[] | undefined): UserRoleFilter {
   const candidate = Array.isArray(value) ? value[0] : value;
   return candidate === "owner" ||
     candidate === "admin" ||
     candidate === "agent" ||
+    candidate === "technician" ||
     candidate === "viewer"
     ? candidate
     : "all";

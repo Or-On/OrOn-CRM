@@ -14,6 +14,22 @@ import {
   queueWhatsAppOutbound,
   assignDefaultWhatsAppAi,
   createInboundConversationNotifications,
+  captureWhatsAppServiceIntakeMessage,
+  confirmWhatsAppServiceIntake,
+  findOpenWhatsAppServiceIntake,
+  getFieldServiceFeatureState,
+  handoffWhatsAppServiceIntake,
+  missingIntakeFields,
+  commitPrivateObject,
+  discardPrivateObject,
+  protectNationalIdWithKeys,
+  readPrivateObject,
+  sanitizeIntakeProposal,
+  stagePrivateObject,
+  updateWhatsAppServiceIntake,
+  type ProtectedFieldKeys,
+  type PrivateObjectStorageOptions,
+  type StagedPrivateObject,
   type MessageDeliveryFailure,
 } from "@or-on/crm";
 
@@ -40,6 +56,10 @@ import {
   type EligibleKnowledgeFact,
   type GroundedReply,
 } from "./ai-grounding.js";
+import {
+  FieldServiceAiProviderError,
+  type FieldServiceAiProvider,
+} from "./field-service-provider.js";
 
 interface InboundEventRow {
   id: string;
@@ -79,6 +99,9 @@ export interface MessagingAutomationOptions {
   readonly automaticCallProvider?: AutomaticCallProvider;
   readonly automaticCallsEnabled?: boolean;
   readonly realWhatsAppEnabled?: boolean;
+  readonly fieldServiceProvider?: FieldServiceAiProvider;
+  readonly protectedFieldKeys?: ProtectedFieldKeys;
+  readonly privateObjectStorage?: PrivateObjectStorageOptions;
 }
 
 const safeEscalationReasons: Readonly<
@@ -108,6 +131,7 @@ async function processInbound(
   event: InboundEventRow,
   aiEnabled: boolean,
   realWhatsAppEnabled: boolean,
+  fieldServiceAiAvailable: boolean,
 ): Promise<void> {
   try {
     await sql.begin(async (transaction) => {
@@ -122,13 +146,62 @@ async function processInbound(
         if (envelope === undefined)
           throw new TypeError("invalid inbound envelope");
         const result = await ingestWhatsAppInbound(transaction, envelope);
-        if (result.inserted) {
+        if (result.inserted && result.messageId !== undefined) {
           await createInboundConversationNotifications(
             transaction,
             result.conversationId,
           );
           if (aiEnabled && realWhatsAppEnabled)
             await assignDefaultWhatsAppAi(transaction, result.conversationId);
+          if (envelope.media !== undefined)
+            await transaction`
+              INSERT INTO ops.jobs
+                (tenant_id, queue, job_type, reference_type, reference_id, payload,
+                 idempotency_key, max_attempts, priority)
+              SELECT platform.current_tenant_id(), 'messaging',
+                     'field_service.whatsapp_media.retrieve', 'message',
+                     ${result.messageId}::uuid,
+                     ${transaction.json({
+                       conversationId: result.conversationId,
+                       messageId: result.messageId,
+                       mediaId: envelope.media.id,
+                       contentType: envelope.contentType,
+                       expectedMimeType: envelope.media.mimeType,
+                       expectedSha256: envelope.media.sha256,
+                     })},
+                     ${`field-service:media:${result.messageId}`}, 4, 30
+              FROM platform.tenant_feature_entitlements entitlement
+              JOIN service.tenant_configuration configuration
+                ON configuration.tenant_id=entitlement.tenant_id
+              WHERE entitlement.tenant_id=platform.current_tenant_id()
+                AND entitlement.feature_key='field_service'
+                AND entitlement.available AND configuration.enabled
+                AND configuration.whatsapp_intake_enabled
+                AND ${realWhatsAppEnabled}
+              ON CONFLICT DO NOTHING
+            `;
+          await transaction`
+            INSERT INTO ops.jobs
+              (tenant_id, queue, job_type, reference_type, reference_id, payload,
+               idempotency_key, max_attempts, priority)
+            SELECT platform.current_tenant_id(), 'messaging',
+                   'field_service.intake.extract', 'message',
+                   ${result.messageId}::uuid,
+                   jsonb_build_object(
+                     'conversationId', ${result.conversationId}::uuid,
+                     'contactId', ${result.contactId}::uuid,
+                     'triggerMessageId', ${result.messageId}::uuid),
+                   ${`field-service:intake:${result.messageId}`}, 4, 20
+            FROM platform.tenant_feature_entitlements entitlement
+            JOIN service.tenant_configuration configuration
+              ON configuration.tenant_id=entitlement.tenant_id
+            WHERE entitlement.tenant_id=platform.current_tenant_id()
+              AND entitlement.feature_key='field_service'
+              AND entitlement.available AND configuration.enabled
+              AND configuration.whatsapp_intake_enabled
+              AND ${fieldServiceAiAvailable}
+            ON CONFLICT DO NOTHING
+          `;
           await transaction`
             INSERT INTO ops.jobs
               (tenant_id, queue, job_type, reference_type, reference_id, payload,
@@ -136,10 +209,7 @@ async function processInbound(
             SELECT platform.current_tenant_id(), 'messaging', 'whatsapp.ai.reply',
                    'conversation', ${result.conversationId}::uuid,
                    jsonb_build_object('conversationId', ${result.conversationId}::uuid,
-                     'triggerMessageId', (SELECT id FROM messaging.messages
-                       WHERE conversation_id=${result.conversationId}::uuid
-                         AND provider_message_id=${envelope.providerMessageId}
-                         AND direction='inbound' LIMIT 1)),
+                     'triggerMessageId', ${result.messageId}::uuid),
                    ${`whatsapp-ai:${event.id}`}, 3
             WHERE ${aiEnabled} AND EXISTS (
               SELECT 1 FROM messaging.conversations conversation
@@ -166,6 +236,1085 @@ async function processInbound(
   }
 }
 
+interface FieldServiceIntakeWork {
+  readonly conversationId: string;
+  readonly contactId: string;
+  readonly triggerMessageId: string;
+  readonly occurredAt: string;
+  readonly locale: string;
+  readonly existing: Awaited<ReturnType<typeof findOpenWhatsAppServiceIntake>>;
+  readonly messages: readonly {
+    readonly direction: "inbound" | "outbound";
+    readonly contentType: string;
+    readonly text: string | null;
+    readonly structuredContent: unknown;
+    readonly occurredAt: string;
+  }[];
+}
+
+async function finishJob(
+  transaction: postgres.TransactionSql,
+  jobId: string,
+  workerId: string,
+): Promise<void> {
+  await transaction`
+    UPDATE ops.jobs SET status='succeeded', completed_at=CURRENT_TIMESTAMP,
+      locked_at=NULL, locked_by=NULL, last_error_safe=NULL,
+      updated_at=CURRENT_TIMESTAMP
+    WHERE id=${jobId}::uuid AND status='running' AND locked_by=${workerId}
+  `;
+}
+
+async function cancelJobForDisabledFeature(
+  transaction: postgres.TransactionSql,
+  jobId: string,
+  workerId: string,
+): Promise<void> {
+  await transaction`
+    UPDATE ops.jobs SET status='cancelled', completed_at=CURRENT_TIMESTAMP,
+      locked_at=NULL, locked_by=NULL,
+      last_error_safe='field_service_disabled', updated_at=CURRENT_TIMESTAMP
+    WHERE id=${jobId}::uuid AND status='running' AND locked_by=${workerId}
+  `;
+}
+
+async function loadFieldServiceIntakeWork(
+  sql: Sql,
+  workerId: string,
+  job: JobRow,
+): Promise<FieldServiceIntakeWork | undefined> {
+  const payload = record(job.payload);
+  const conversationId = payload.conversationId;
+  const contactId = payload.contactId;
+  const triggerMessageId = payload.triggerMessageId;
+  if (
+    !uuid(conversationId) ||
+    !uuid(contactId) ||
+    !uuid(triggerMessageId) ||
+    triggerMessageId !== job.reference_id
+  )
+    throw new TypeError("invalid field-service intake job payload");
+  return sql.begin(async (transaction) => {
+    await setTenantContext(transaction, job.tenant_id);
+    await requireOwnedJob(transaction, workerId, job.id);
+    const feature = await getFieldServiceFeatureState(transaction);
+    if (!feature.effective || !feature.whatsAppIntakeEnabled) {
+      await cancelJobForDisabledFeature(transaction, job.id, workerId);
+      return undefined;
+    }
+    const context = await transaction<
+      { locale: string; occurred_at: Date; contact_id: string }[]
+    >`
+      SELECT coalesce(settings.locale, 'en') AS locale,
+             message.created_at AS occurred_at,
+             conversation.contact_id
+      FROM messaging.messages message
+      JOIN messaging.conversations conversation
+        ON conversation.id=message.conversation_id
+       AND conversation.tenant_id=message.tenant_id
+      LEFT JOIN crm.tenant_settings settings
+        ON settings.tenant_id=message.tenant_id
+      WHERE message.id=${triggerMessageId}::uuid
+        AND message.conversation_id=${conversationId}::uuid
+        AND conversation.contact_id=${contactId}::uuid
+        AND message.direction='inbound'
+    `;
+    const bound = context[0];
+    if (bound === undefined)
+      throw new TypeError("field-service intake trigger is unavailable");
+    const history = await transaction<
+      {
+        direction: "inbound" | "outbound";
+        content_type: string;
+        content_text: string | null;
+        structured_content: unknown;
+        created_at: Date;
+      }[]
+    >`
+      SELECT direction, content_type, content_text, structured_content, created_at
+      FROM messaging.messages
+      WHERE conversation_id=${conversationId}::uuid
+        AND direction IN ('inbound','outbound')
+      ORDER BY created_at DESC, id DESC LIMIT 50
+    `;
+    return {
+      conversationId,
+      contactId: bound.contact_id,
+      triggerMessageId,
+      occurredAt: bound.occurred_at.toISOString(),
+      locale: bound.locale,
+      existing: await findOpenWhatsAppServiceIntake(
+        transaction,
+        conversationId,
+      ),
+      messages: history.toReversed().map((message) => ({
+        direction: message.direction,
+        contentType: message.content_type,
+        text: message.content_text,
+        structuredContent: message.structured_content,
+        occurredAt: message.created_at.toISOString(),
+      })),
+    };
+  });
+}
+
+async function processFieldServiceIntake(
+  sql: Sql,
+  workerId: string,
+  job: JobRow,
+  automation: MessagingAutomationOptions,
+): Promise<void> {
+  try {
+    const work = await loadFieldServiceIntakeWork(sql, workerId, job);
+    if (work === undefined) return;
+    const provider = automation.fieldServiceProvider;
+    if (provider === undefined)
+      throw new TypeError("field_service_ai_unavailable");
+    const extraction = await provider.extractIntake({
+      locale: work.locale,
+      existingFields: work.existing?.fields ?? {},
+      intakeAlreadyOpen: work.existing !== undefined,
+      messages: work.messages,
+    });
+    await sql.begin(async (transaction) => {
+      await setTenantContext(transaction, job.tenant_id);
+      await requireOwnedJob(transaction, workerId, job.id);
+      const feature = await getFieldServiceFeatureState(transaction);
+      if (!feature.effective || !feature.whatsAppIntakeEnabled) {
+        await cancelJobForDisabledFeature(transaction, job.id, workerId);
+        return;
+      }
+      const current = await findOpenWhatsAppServiceIntake(
+        transaction,
+        work.conversationId,
+      );
+      if (!extraction.serviceIntent && current === undefined) {
+        await finishJob(transaction, job.id, workerId);
+        return;
+      }
+      const intake = await captureWhatsAppServiceIntakeMessage(transaction, {
+        conversationId: work.conversationId,
+        reportingContactId: work.contactId,
+        messageId: work.triggerMessageId,
+        occurredAt: work.occurredAt,
+      });
+      const { nationalId, ...safeFields } = extraction.fields;
+      let protectedNationalId;
+      let protectedFieldUnavailable = false;
+      if (nationalId !== undefined) {
+        if (automation.protectedFieldKeys === undefined) {
+          protectedFieldUnavailable = true;
+        } else {
+          protectedNationalId = protectNationalIdWithKeys(
+            job.tenant_id,
+            nationalId,
+            automation.protectedFieldKeys,
+          );
+        }
+      }
+      const updated = await updateWhatsAppServiceIntake(
+        transaction,
+        intake.id,
+        safeFields,
+        protectedNationalId,
+      );
+      if (protectedFieldUnavailable)
+        await handoffWhatsAppServiceIntake(transaction, updated.id);
+      const createdCase =
+        !protectedFieldUnavailable &&
+        extraction.confirmed &&
+        updated.missingFields.length === 0
+          ? await confirmWhatsAppServiceIntake(transaction, updated.id)
+          : undefined;
+      await transaction`
+        INSERT INTO audit.records(
+          tenant_id, action, target_type, target_id, metadata
+        ) VALUES (
+          platform.current_tenant_id(), 'field_service.intake.extracted',
+          'intake_draft', ${updated.id}::uuid,
+          ${transaction.json({
+            jobId: job.id,
+            triggerMessageId: work.triggerMessageId,
+            provider: provider.providerName,
+            model: provider.modelName,
+            confidence: extraction.confidence,
+            confirmedByCustomer: extraction.confirmed,
+            missingFields: updated.missingFields,
+            protectedFieldUnavailable,
+            caseId: createdCase?.id ?? null,
+          })}
+        )
+      `;
+      await finishJob(transaction, job.id, workerId);
+    });
+  } catch (error) {
+    const reason =
+      error instanceof FieldServiceAiProviderError
+        ? error.code
+        : error instanceof TypeError
+          ? error.message
+          : "field_service_intake_failed";
+    const permanent =
+      error instanceof TypeError ||
+      (error instanceof FieldServiceAiProviderError && !error.retryable);
+    await sql.begin(async (transaction) => {
+      await setTenantContext(transaction, job.tenant_id);
+      if (permanent)
+        await transaction`
+          UPDATE ops.jobs SET max_attempts=attempts
+          WHERE id=${job.id}::uuid AND status='running' AND locked_by=${workerId}
+        `;
+      await transaction`
+        SELECT ops.fail_job(${job.id}::uuid, ${workerId}, ${reason}, 10)
+      `;
+    });
+  }
+}
+
+interface FieldServiceWhatsAppMediaWork {
+  readonly conversationId: string;
+  readonly messageId: string;
+  readonly mediaId: string;
+  readonly contentType: "image" | "document";
+  readonly expectedMimeType?: string;
+  readonly expectedSha256?: string;
+}
+
+async function loadFieldServiceWhatsAppMediaWork(
+  sql: Sql,
+  workerId: string,
+  job: JobRow,
+): Promise<FieldServiceWhatsAppMediaWork | undefined> {
+  const payload = record(job.payload);
+  const conversationId = payload.conversationId;
+  const messageId = payload.messageId;
+  const mediaId = payload.mediaId;
+  const contentType = payload.contentType;
+  if (
+    !uuid(conversationId) ||
+    !uuid(messageId) ||
+    messageId !== job.reference_id ||
+    typeof mediaId !== "string" ||
+    mediaId.length < 1 ||
+    mediaId.length > 500 ||
+    (contentType !== "image" && contentType !== "document")
+  )
+    throw new TypeError("invalid field-service media job payload");
+  return sql.begin(async (transaction) => {
+    await setTenantContext(transaction, job.tenant_id);
+    await requireOwnedJob(transaction, workerId, job.id);
+    const feature = await getFieldServiceFeatureState(transaction);
+    if (!feature.effective || !feature.whatsAppIntakeEnabled) {
+      await cancelJobForDisabledFeature(transaction, job.id, workerId);
+      return undefined;
+    }
+    const rows = await transaction<
+      {
+        id: string;
+        object_id: string | null;
+        object_status: string | null;
+        provider_media_id: string | null;
+        expected_mime_type: string | null;
+        expected_sha256: string | null;
+      }[]
+    >`
+      SELECT message.id, message.object_id, object.status AS object_status,
+             message.structured_content->>'providerMediaId' AS provider_media_id,
+             message.structured_content->>'mimeType' AS expected_mime_type,
+             message.structured_content->>'sha256' AS expected_sha256
+      FROM messaging.messages message
+      JOIN messaging.conversations conversation
+        ON conversation.id=message.conversation_id
+       AND conversation.tenant_id=message.tenant_id
+      JOIN messaging.channels channel
+        ON channel.id=conversation.channel_id AND channel.tenant_id=message.tenant_id
+      LEFT JOIN objects.object_metadata object
+        ON object.id=message.object_id AND object.tenant_id=message.tenant_id
+      WHERE message.id=${messageId}::uuid
+        AND message.conversation_id=${conversationId}::uuid
+        AND message.direction='inbound' AND message.provider='meta'
+        AND message.content_type=${contentType} AND channel.provider='meta'
+      FOR UPDATE OF message
+    `;
+    const row = rows[0];
+    if (row?.provider_media_id !== mediaId)
+      throw new TypeError("field-service media source is unavailable");
+    if (row.object_id !== null) {
+      if (row.object_status !== "available")
+        throw new TypeError("field-service media object is unavailable");
+      await transaction`
+        UPDATE messaging.messages SET
+          structured_content=jsonb_set(
+            coalesce(structured_content, '{}'::jsonb) - 'retrievalError',
+            '{retrievalStatus}', '"available"'::jsonb, true),
+          updated_at=CURRENT_TIMESTAMP
+        WHERE id=${messageId}::uuid
+      `;
+      await finishJob(transaction, job.id, workerId);
+      return undefined;
+    }
+    await transaction`
+      UPDATE messaging.messages SET
+        structured_content=jsonb_set(
+          coalesce(structured_content, '{}'::jsonb) - 'retrievalError',
+          '{retrievalStatus}', '"processing"'::jsonb, true),
+        updated_at=CURRENT_TIMESTAMP
+      WHERE id=${messageId}::uuid
+    `;
+    return {
+      conversationId,
+      messageId,
+      mediaId,
+      contentType,
+      ...(row.expected_mime_type === null
+        ? {}
+        : { expectedMimeType: row.expected_mime_type }),
+      ...(row.expected_sha256 === null
+        ? {}
+        : { expectedSha256: row.expected_sha256 }),
+    };
+  });
+}
+
+async function revalidateFieldServiceMediaAttempt(
+  sql: Sql,
+  workerId: string,
+  job: JobRow,
+  work: FieldServiceWhatsAppMediaWork,
+): Promise<void> {
+  await sql.begin(async (transaction) => {
+    await setTenantContext(transaction, job.tenant_id);
+    await requireOwnedJob(transaction, workerId, job.id);
+    const feature = await getFieldServiceFeatureState(transaction);
+    if (!feature.effective || !feature.whatsAppIntakeEnabled)
+      throw new WhatsAppProviderError("field_service_disabled", false);
+    const rows = await transaction<{ id: string }[]>`
+      SELECT message.id FROM messaging.messages message
+      JOIN messaging.conversations conversation
+        ON conversation.id=message.conversation_id
+       AND conversation.tenant_id=message.tenant_id
+      JOIN messaging.channels channel
+        ON channel.id=conversation.channel_id AND channel.tenant_id=message.tenant_id
+      WHERE message.id=${work.messageId}::uuid
+        AND message.conversation_id=${work.conversationId}::uuid
+        AND message.object_id IS NULL AND message.provider='meta'
+        AND channel.provider='meta'
+    `;
+    if (rows[0] === undefined)
+      throw new WhatsAppProviderError("media_eligibility_changed", false);
+  });
+}
+
+async function processFieldServiceWhatsAppMedia(
+  sql: Sql,
+  workerId: string,
+  job: JobRow,
+  providers: Readonly<Record<"simulator" | "meta", WhatsAppProvider>>,
+  automation: MessagingAutomationOptions,
+): Promise<void> {
+  let staged: StagedPrivateObject | undefined;
+  let committed = false;
+  try {
+    const work = await loadFieldServiceWhatsAppMediaWork(sql, workerId, job);
+    if (work === undefined) return;
+    const metaProvider = providers.meta;
+    if (metaProvider.downloadMedia === undefined)
+      throw new WhatsAppProviderError("media_provider_unavailable", false);
+    const media = await metaProvider.downloadMedia({
+      mediaId: work.mediaId,
+      ...(work.expectedMimeType === undefined
+        ? {}
+        : { expectedMimeType: work.expectedMimeType }),
+      ...(work.expectedSha256 === undefined
+        ? {}
+        : { expectedSha256: work.expectedSha256 }),
+      beforeAttempt: () =>
+        revalidateFieldServiceMediaAttempt(sql, workerId, job, work),
+    });
+    staged = await stagePrivateObject(
+      {
+        tenantId: job.tenant_id,
+        caseId: work.conversationId,
+        category: "whatsapp_media",
+        declaredContentType: media.contentType,
+        bytes: media.bytes,
+      },
+      automation.privateObjectStorage,
+    );
+    if (staged.checksum !== media.sha256)
+      throw new TypeError("field-service media checksum changed");
+    await commitPrivateObject(staged);
+    committed = true;
+    const accepted = await sql.begin(async (transaction) => {
+      await setTenantContext(transaction, job.tenant_id);
+      await requireOwnedJob(transaction, workerId, job.id);
+      const feature = await getFieldServiceFeatureState(transaction);
+      if (!feature.effective || !feature.whatsAppIntakeEnabled) {
+        await cancelJobForDisabledFeature(transaction, job.id, workerId);
+        return false;
+      }
+      const objects = await transaction<{ id: string }[]>`
+        INSERT INTO objects.object_metadata(
+          tenant_id, created_by_user_id, owner_type, owner_id, category,
+          content_type, byte_size, checksum, storage_backend, storage_key, status
+        ) VALUES (
+          platform.current_tenant_id(), NULL, 'message', ${work.messageId}::uuid,
+          ${work.contentType === "image" ? "whatsapp_customer_image" : "whatsapp_customer_document"},
+          ${staged?.contentType ?? media.contentType},
+          ${staged?.byteSize ?? media.bytes.byteLength},
+          ${staged?.checksum ?? media.sha256}, 'local',
+          ${staged?.storageKey ?? ""}, 'available'
+        ) RETURNING id
+      `;
+      const objectId = objects[0]?.id;
+      if (objectId === undefined)
+        throw new Error("field-service media object creation failed");
+      const updated = await transaction<{ id: string }[]>`
+        UPDATE messaging.messages SET object_id=${objectId}::uuid,
+          structured_content=jsonb_set(
+            coalesce(structured_content, '{}'::jsonb) - 'retrievalError',
+            '{retrievalStatus}', '"available"'::jsonb, true),
+          updated_at=CURRENT_TIMESTAMP
+        WHERE id=${work.messageId}::uuid AND object_id IS NULL
+        RETURNING id
+      `;
+      if (updated[0] === undefined)
+        throw new TypeError(
+          "field-service media message changed during retrieval",
+        );
+      await transaction`
+        INSERT INTO service.report_attachments(
+          tenant_id, case_id, message_id, object_id, category, source,
+          processing_status, created_by_user_id
+        )
+        SELECT platform.current_tenant_id(), service_case.id, ${work.messageId}::uuid,
+               ${objectId}::uuid,
+               ${work.contentType === "image" ? "customer_photo" : "document"},
+               'customer', 'available', NULL
+        FROM service.intake_messages intake_message
+        JOIN service.intake_drafts intake
+          ON intake.id=intake_message.intake_draft_id
+         AND intake.tenant_id=intake_message.tenant_id
+        JOIN service.cases service_case
+          ON service_case.intake_draft_id=intake.id
+         AND service_case.tenant_id=intake.tenant_id
+        WHERE intake_message.message_id=${work.messageId}::uuid
+        ON CONFLICT (tenant_id, object_id, case_id) DO NOTHING
+      `;
+      await finishJob(transaction, job.id, workerId);
+      return true;
+    });
+    if (!accepted) await discardPrivateObject(staged);
+  } catch (error) {
+    if (staged !== undefined)
+      await discardPrivateObject(staged).catch(() => undefined);
+    if (
+      error instanceof WhatsAppProviderError &&
+      error.code === "stale_worker_claim"
+    )
+      return;
+    const reason =
+      error instanceof WhatsAppProviderError
+        ? error.code
+        : error instanceof TypeError
+          ? error.message
+          : committed
+            ? "field_service_media_persistence_failed"
+            : "field_service_media_retrieval_failed";
+    await sql.begin(async (transaction) => {
+      await setTenantContext(transaction, job.tenant_id);
+      const owned = await transaction<{ id: string }[]>`
+        SELECT id FROM ops.jobs WHERE id=${job.id}::uuid
+          AND status='running' AND locked_by=${workerId} FOR UPDATE
+      `;
+      if (owned[0] === undefined) return;
+      if (reason === "field_service_disabled") {
+        await cancelJobForDisabledFeature(transaction, job.id, workerId);
+        if (job.reference_id !== null)
+          await transaction`
+            UPDATE messaging.messages SET
+              structured_content=jsonb_set(
+                coalesce(structured_content, '{}'::jsonb) - 'retrievalError',
+                '{retrievalStatus}', '"cancelled"'::jsonb, true),
+              updated_at=CURRENT_TIMESTAMP
+            WHERE id=${job.reference_id}::uuid AND object_id IS NULL
+          `;
+        return;
+      }
+      const retryable =
+        error instanceof WhatsAppProviderError && error.retryable;
+      if (!retryable)
+        await transaction`
+          UPDATE ops.jobs SET max_attempts=attempts
+          WHERE id=${job.id}::uuid AND status='running' AND locked_by=${workerId}
+        `;
+      const failed = await transaction<{ status: string }[]>`
+        SELECT (ops.fail_job(${job.id}::uuid, ${workerId}, ${reason}, 15)).status
+      `;
+      if (job.reference_id !== null) {
+        const finalFailure = failed[0]?.status === "dead";
+        await transaction`
+          UPDATE messaging.messages SET
+            structured_content=jsonb_set(
+              jsonb_set(coalesce(structured_content, '{}'::jsonb),
+                '{retrievalStatus}',
+                ${finalFailure ? '"failed"' : '"pending"'}::jsonb, true),
+              '{retrievalError}',
+              ${finalFailure ? JSON.stringify(reason) : "null"}::jsonb, true),
+            updated_at=CURRENT_TIMESTAMP
+          WHERE id=${job.reference_id}::uuid AND object_id IS NULL
+        `;
+      }
+    });
+  }
+}
+
+interface FieldServiceOcrWork {
+  readonly ocrResultId: string;
+  readonly attachmentId: string;
+  readonly objectId: string;
+  readonly contentType: "image/jpeg" | "image/png" | "image/webp";
+  readonly byteSize: number;
+  readonly checksum: string;
+  readonly storageKey: string;
+}
+
+interface FieldServiceSummaryWork {
+  readonly summaryId: string;
+  readonly caseId: string;
+  readonly sourceKind: "whatsapp" | "call";
+  readonly sourceReferenceId: string;
+  readonly locale: string;
+  readonly checksum: string;
+  readonly evidence?: string;
+  readonly transcript?: {
+    readonly storageKey: string;
+    readonly byteSize: number;
+  };
+}
+
+function redactSummaryEvidence(value: string): string {
+  return value
+    .replace(
+      /(?<![0-9])(?:[0-9][ -]?){7,10}(?![0-9])/gu,
+      "[sensitive-id-redacted]",
+    )
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+async function whatsappSummarySource(
+  transaction: postgres.TransactionSql,
+  caseId: string,
+  conversationId: string,
+): Promise<
+  { readonly checksum: string; readonly evidence: string } | undefined
+> {
+  const messages = await transaction<
+    {
+      id: string;
+      direction: "inbound" | "outbound";
+      sender_type: string;
+      content_type: string;
+      content_text: string | null;
+      created_at: Date;
+    }[]
+  >`
+    SELECT message.id, message.direction, message.sender_type,
+           message.content_type, message.content_text, message.created_at
+    FROM service.case_conversations link
+    JOIN messaging.messages message
+      ON message.tenant_id=link.tenant_id
+     AND message.conversation_id=link.conversation_id
+    WHERE link.case_id=${caseId}::uuid
+      AND link.conversation_id=${conversationId}::uuid
+    ORDER BY message.created_at, message.id
+  `;
+  if (messages.length === 0) return undefined;
+  const checksum = factDigest(
+    JSON.stringify(
+      messages.map((message) => [
+        message.id,
+        message.direction,
+        message.sender_type,
+        message.content_type,
+        message.content_text,
+        message.created_at.toISOString(),
+      ]),
+    ),
+  );
+  const bounded = messages.slice(-250);
+  const lines = bounded.map((message) => {
+    const content =
+      message.content_text === null
+        ? `[${message.content_type} attachment retained]`
+        : redactSummaryEvidence(message.content_text).slice(0, 2_000);
+    return `${message.created_at.toISOString()} · ${message.direction === "inbound" ? "Customer/reporting contact" : "CRM/AI agent"}: ${content}`;
+  });
+  return {
+    checksum,
+    evidence: [
+      ...(messages.length > bounded.length
+        ? [
+            `[${String(messages.length - bounded.length)} earlier messages omitted from the AI input; they remain retained in the dossier]`,
+          ]
+        : []),
+      ...lines,
+    ]
+      .join("\n")
+      .slice(-80_000),
+  };
+}
+
+async function loadFieldServiceSummaryWork(
+  sql: Sql,
+  workerId: string,
+  job: JobRow,
+): Promise<FieldServiceSummaryWork | undefined> {
+  const payload = record(job.payload);
+  const summaryId = payload.summaryId;
+  const caseId = payload.caseId;
+  const sourceKind = payload.sourceKind;
+  const sourceReferenceId = payload.sourceReferenceId;
+  if (
+    !uuid(summaryId) ||
+    !uuid(caseId) ||
+    !uuid(sourceReferenceId) ||
+    summaryId !== job.reference_id ||
+    (sourceKind !== "whatsapp" && sourceKind !== "call")
+  )
+    throw new TypeError("invalid field-service summary job payload");
+  return sql.begin(async (transaction) => {
+    await setTenantContext(transaction, job.tenant_id);
+    await requireOwnedJob(transaction, workerId, job.id);
+    const feature = await getFieldServiceFeatureState(transaction);
+    if (!feature.effective) {
+      await transaction`
+        UPDATE service.case_summaries SET status='failed',
+          error_safe='field_service_disabled', completed_at=CURRENT_TIMESTAMP
+        WHERE id=${summaryId}::uuid AND status IN ('pending','processing')
+      `;
+      await cancelJobForDisabledFeature(transaction, job.id, workerId);
+      return undefined;
+    }
+    await transaction`
+      SELECT pg_advisory_xact_lock(hashtextextended(
+        platform.current_tenant_id()::text || ':case-summary:' || ${summaryId}, 0
+      ))
+    `;
+    const summary = await transaction<
+      { status: string; source_kind: string; source_reference_id: string }[]
+    >`
+      SELECT status, source_kind, source_reference_id
+      FROM service.case_summaries
+      WHERE id=${summaryId}::uuid AND case_id=${caseId}::uuid
+        AND source_kind=${sourceKind}
+        AND source_reference_id=${sourceReferenceId}::uuid
+      FOR UPDATE
+    `;
+    if (summary[0] === undefined)
+      throw new TypeError("field-service summary source is unavailable");
+    if (summary[0].status === "completed") {
+      await finishJob(transaction, job.id, workerId);
+      return undefined;
+    }
+    const locale = await transaction<{ locale: string }[]>`
+      SELECT coalesce(settings.locale, 'en') AS locale
+      FROM public.tenants tenant
+      LEFT JOIN crm.tenant_settings settings ON settings.tenant_id=tenant.id
+      WHERE tenant.id=platform.current_tenant_id()
+    `;
+    if (sourceKind === "whatsapp") {
+      const source = await whatsappSummarySource(
+        transaction,
+        caseId,
+        sourceReferenceId,
+      );
+      if (source === undefined) {
+        await transaction`
+          UPDATE service.case_summaries SET status='unavailable',
+            error_safe='whatsapp_history_unavailable', completed_at=CURRENT_TIMESTAMP
+          WHERE id=${summaryId}::uuid
+        `;
+        await finishJob(transaction, job.id, workerId);
+        return undefined;
+      }
+      await transaction`
+        UPDATE service.case_summaries SET status='processing',
+          source_checksum=${source.checksum}, error_safe=NULL, completed_at=NULL
+        WHERE id=${summaryId}::uuid
+      `;
+      return {
+        summaryId,
+        caseId,
+        sourceKind,
+        sourceReferenceId,
+        locale: locale[0]?.locale ?? "en",
+        checksum: source.checksum,
+        evidence: source.evidence,
+      };
+    }
+    const transcript = await transaction<
+      {
+        checksum: string;
+        storage_backend: string;
+        storage_key: string;
+        byte_size: string;
+        status: string;
+      }[]
+    >`
+      SELECT object.checksum, object.storage_backend, object.storage_key,
+             object.byte_size, object.status
+      FROM service.case_calls link
+      JOIN public.sessions session
+        ON session.tenant_id=link.tenant_id AND session.session_id=link.session_id
+      JOIN objects.object_metadata object
+        ON object.tenant_id=session.tenant_id AND object.id=session.transcript_object_id
+      WHERE link.case_id=${caseId}::uuid AND link.session_id=${sourceReferenceId}::uuid
+        AND object.deleted_at IS NULL
+    `;
+    const source = transcript[0];
+    if (source?.status !== "available" || source.storage_backend !== "local") {
+      await transaction`
+        UPDATE service.case_summaries SET status='unavailable',
+          error_safe='call_transcript_unavailable', completed_at=CURRENT_TIMESTAMP
+        WHERE id=${summaryId}::uuid
+      `;
+      await finishJob(transaction, job.id, workerId);
+      return undefined;
+    }
+    await transaction`
+      UPDATE service.case_summaries SET status='processing',
+        source_checksum=${source.checksum}, error_safe=NULL, completed_at=NULL
+      WHERE id=${summaryId}::uuid
+    `;
+    return {
+      summaryId,
+      caseId,
+      sourceKind,
+      sourceReferenceId,
+      locale: locale[0]?.locale ?? "en",
+      checksum: source.checksum,
+      transcript: {
+        storageKey: source.storage_key,
+        byteSize: Number(source.byte_size),
+      },
+    };
+  });
+}
+
+async function processFieldServiceSummary(
+  sql: Sql,
+  workerId: string,
+  job: JobRow,
+  automation: MessagingAutomationOptions,
+): Promise<void> {
+  try {
+    const work = await loadFieldServiceSummaryWork(sql, workerId, job);
+    if (work === undefined) return;
+    const provider = automation.fieldServiceProvider;
+    if (provider === undefined)
+      throw new TypeError("field_service_summary_provider_unavailable");
+    const evidence =
+      work.evidence ??
+      redactSummaryEvidence(
+        Buffer.from(
+          await readPrivateObject(
+            work.transcript?.storageKey ?? "",
+            {
+              byteSize: work.transcript?.byteSize ?? 0,
+              checksum: work.checksum,
+            },
+            automation.privateObjectStorage,
+          ),
+        )
+          .toString("utf8")
+          .slice(0, 80_000),
+      );
+    const mayCallProvider = await sql.begin(async (transaction) => {
+      await setTenantContext(transaction, job.tenant_id);
+      await requireOwnedJob(transaction, workerId, job.id);
+      const feature = await getFieldServiceFeatureState(transaction);
+      if (!feature.effective) {
+        await transaction`
+          UPDATE service.case_summaries SET status='failed',
+            error_safe='field_service_disabled', completed_at=CURRENT_TIMESTAMP
+          WHERE id=${work.summaryId}::uuid AND status='processing'
+        `;
+        await cancelJobForDisabledFeature(transaction, job.id, workerId);
+        return false;
+      }
+      return true;
+    });
+    if (!mayCallProvider) return;
+    const summary = await provider.summarizeEvidence({
+      sourceKind: work.sourceKind,
+      locale: work.locale,
+      evidence,
+    });
+    await sql.begin(async (transaction) => {
+      await setTenantContext(transaction, job.tenant_id);
+      await requireOwnedJob(transaction, workerId, job.id);
+      const feature = await getFieldServiceFeatureState(transaction);
+      if (!feature.effective) {
+        await transaction`
+          UPDATE service.case_summaries SET status='failed',
+            error_safe='field_service_disabled', completed_at=CURRENT_TIMESTAMP
+          WHERE id=${work.summaryId}::uuid AND status='processing'
+        `;
+        await cancelJobForDisabledFeature(transaction, job.id, workerId);
+        return;
+      }
+      const unchanged =
+        work.sourceKind === "whatsapp"
+          ? await whatsappSummarySource(
+              transaction,
+              work.caseId,
+              work.sourceReferenceId,
+            )
+          : { checksum: work.checksum, evidence: "" };
+      if (unchanged?.checksum !== work.checksum) {
+        await transaction`
+          UPDATE service.case_summaries SET status='pending', summary=NULL,
+            source_checksum=${unchanged?.checksum ?? null}, provider=NULL,
+            model=NULL, error_safe=NULL, completed_at=NULL
+          WHERE id=${work.summaryId}::uuid AND status='processing'
+        `;
+        await finishJob(transaction, job.id, workerId);
+        return;
+      }
+      const completed = await transaction<{ id: string }[]>`
+        UPDATE service.case_summaries SET status='completed', summary=${summary},
+          provider=${provider.providerName}, model=${provider.modelName},
+          error_safe=NULL, completed_at=CURRENT_TIMESTAMP
+        WHERE id=${work.summaryId}::uuid AND status='processing'
+          AND source_checksum=${work.checksum}
+        RETURNING id
+      `;
+      if (completed[0] === undefined)
+        throw new TypeError("field-service summary changed during processing");
+      await finishJob(transaction, job.id, workerId);
+    });
+  } catch (error) {
+    const reason =
+      error instanceof FieldServiceAiProviderError
+        ? error.code
+        : error instanceof TypeError
+          ? error.message
+          : "field_service_summary_failed";
+    const permanent =
+      error instanceof TypeError ||
+      (error instanceof FieldServiceAiProviderError && !error.retryable);
+    await sql.begin(async (transaction) => {
+      await setTenantContext(transaction, job.tenant_id);
+      if (permanent)
+        await transaction`
+          UPDATE ops.jobs SET max_attempts=attempts
+          WHERE id=${job.id}::uuid AND status='running' AND locked_by=${workerId}
+        `;
+      const failed = await transaction<{ status: string }[]>`
+        SELECT (ops.fail_job(${job.id}::uuid, ${workerId}, ${reason}, 15)).status
+      `;
+      if (job.reference_id !== null)
+        await transaction`
+          UPDATE service.case_summaries SET
+            status=${failed[0]?.status === "dead" ? "failed" : "pending"},
+            error_safe=${reason},
+            completed_at=CASE WHEN ${failed[0]?.status === "dead"}
+              THEN CURRENT_TIMESTAMP ELSE NULL END
+          WHERE id=${job.reference_id}::uuid
+            AND status IN ('pending','processing')
+        `;
+    });
+  }
+}
+
+async function cancelFieldServiceOcr(
+  transaction: postgres.TransactionSql,
+  job: JobRow,
+  workerId: string,
+): Promise<void> {
+  if (job.reference_id !== null)
+    await transaction`
+      UPDATE service.ocr_results SET status='failed',
+        error_safe='field_service_disabled', completed_at=CURRENT_TIMESTAMP
+      WHERE id=${job.reference_id}::uuid AND status IN ('pending','processing')
+    `;
+  await cancelJobForDisabledFeature(transaction, job.id, workerId);
+}
+
+async function loadFieldServiceOcrWork(
+  sql: Sql,
+  workerId: string,
+  job: JobRow,
+): Promise<FieldServiceOcrWork | undefined> {
+  const payload = record(job.payload);
+  const ocrResultId = payload.ocrResultId;
+  const attachmentId = payload.attachmentId;
+  if (
+    !uuid(ocrResultId) ||
+    !uuid(attachmentId) ||
+    ocrResultId !== job.reference_id
+  )
+    throw new TypeError("invalid field-service OCR job payload");
+  return sql.begin(async (transaction) => {
+    await setTenantContext(transaction, job.tenant_id);
+    await requireOwnedJob(transaction, workerId, job.id);
+    const feature = await getFieldServiceFeatureState(transaction);
+    if (!feature.effective || !feature.ocrEnabled) {
+      await cancelFieldServiceOcr(transaction, job, workerId);
+      return undefined;
+    }
+    const rows = await transaction<
+      {
+        attachment_id: string;
+        object_id: string;
+        content_type: string;
+        byte_size: string;
+        checksum: string;
+        storage_backend: string;
+        storage_key: string;
+        object_status: string;
+        category: string;
+      }[]
+    >`
+      SELECT result.attachment_id, attachment.object_id, object.content_type,
+             object.byte_size, object.checksum, object.storage_backend,
+             object.storage_key, object.status AS object_status,
+             attachment.category
+      FROM service.ocr_results result
+      JOIN service.report_attachments attachment
+        ON attachment.id=result.attachment_id
+       AND attachment.tenant_id=result.tenant_id
+      JOIN objects.object_metadata object
+        ON object.id=attachment.object_id AND object.tenant_id=attachment.tenant_id
+      WHERE result.id=${ocrResultId}::uuid
+        AND result.attachment_id=${attachmentId}::uuid
+        AND result.status IN ('pending','processing')
+      FOR UPDATE OF result
+    `;
+    const row = rows[0];
+    if (row === undefined)
+      throw new TypeError("field-service OCR source is unavailable");
+    if (
+      row.category !== "product_label" ||
+      row.object_status !== "available" ||
+      row.storage_backend !== "local" ||
+      !["image/jpeg", "image/png", "image/webp"].includes(row.content_type)
+    )
+      throw new TypeError("field-service OCR source is unsupported");
+    await transaction`
+      UPDATE service.ocr_results SET status='processing', error_safe=NULL
+      WHERE id=${ocrResultId}::uuid
+    `;
+    return {
+      ocrResultId,
+      attachmentId: row.attachment_id,
+      objectId: row.object_id,
+      contentType: row.content_type as FieldServiceOcrWork["contentType"],
+      byteSize: Number(row.byte_size),
+      checksum: row.checksum,
+      storageKey: row.storage_key,
+    };
+  });
+}
+
+async function processFieldServiceOcr(
+  sql: Sql,
+  workerId: string,
+  job: JobRow,
+  automation: MessagingAutomationOptions,
+): Promise<void> {
+  try {
+    const work = await loadFieldServiceOcrWork(sql, workerId, job);
+    if (work === undefined) return;
+    const provider = automation.fieldServiceProvider;
+    if (provider === undefined)
+      throw new TypeError("field_service_ocr_provider_unavailable");
+    const bytes = await readPrivateObject(
+      work.storageKey,
+      { byteSize: work.byteSize, checksum: work.checksum },
+      automation.privateObjectStorage,
+    );
+    const mayCallProvider = await sql.begin(async (transaction) => {
+      await setTenantContext(transaction, job.tenant_id);
+      await requireOwnedJob(transaction, workerId, job.id);
+      const feature = await getFieldServiceFeatureState(transaction);
+      if (!feature.effective || !feature.ocrEnabled) {
+        await cancelFieldServiceOcr(transaction, job, workerId);
+        return false;
+      }
+      return true;
+    });
+    if (!mayCallProvider) return;
+    const extraction = await provider.extractProductLabel({
+      bytes,
+      contentType: work.contentType,
+    });
+    await sql.begin(async (transaction) => {
+      await setTenantContext(transaction, job.tenant_id);
+      await requireOwnedJob(transaction, workerId, job.id);
+      const feature = await getFieldServiceFeatureState(transaction);
+      if (!feature.effective || !feature.ocrEnabled) {
+        await cancelFieldServiceOcr(transaction, job, workerId);
+        return;
+      }
+      const updated = await transaction<{ id: string }[]>`
+        UPDATE service.ocr_results SET
+          status='review_required', proposed_fields=${transaction.json(extraction.fields)},
+          confidence=${extraction.confidence}, provider=${provider.providerName},
+          model=${provider.modelName}, error_safe=NULL,
+          provenance=${transaction.json({
+            schemaVersion: "1.0",
+            sourceObjectId: work.objectId,
+            sourceChecksum: work.checksum,
+            fieldConfidence: extraction.fieldConfidence,
+            humanReviewRequired: true,
+          })},
+          completed_at=CURRENT_TIMESTAMP
+        WHERE id=${work.ocrResultId}::uuid AND status='processing'
+        RETURNING id
+      `;
+      if (updated[0] === undefined)
+        throw new TypeError(
+          "field-service OCR result changed during processing",
+        );
+      await finishJob(transaction, job.id, workerId);
+    });
+  } catch (error) {
+    const reason =
+      error instanceof FieldServiceAiProviderError
+        ? error.code
+        : error instanceof TypeError
+          ? error.message
+          : "field_service_ocr_failed";
+    const permanent =
+      error instanceof TypeError ||
+      (error instanceof FieldServiceAiProviderError && !error.retryable);
+    await sql.begin(async (transaction) => {
+      await setTenantContext(transaction, job.tenant_id);
+      if (permanent)
+        await transaction`
+          UPDATE ops.jobs SET max_attempts=attempts
+          WHERE id=${job.id}::uuid AND status='running' AND locked_by=${workerId}
+        `;
+      const failed = await transaction<{ status: string }[]>`
+        SELECT (ops.fail_job(${job.id}::uuid, ${workerId}, ${reason}, 15)).status
+      `;
+      if (job.reference_id !== null)
+        await transaction`
+          UPDATE service.ocr_results SET
+            status=${failed[0]?.status === "dead" ? "failed" : "pending"},
+            error_safe=${reason},
+            completed_at=CASE WHEN ${failed[0]?.status === "dead"}
+              THEN CURRENT_TIMESTAMP ELSE NULL END
+          WHERE id=${job.reference_id}::uuid
+            AND status IN ('pending','processing')
+        `;
+    });
+  }
+}
+
 async function processJob(
   sql: Sql,
   workerId: string,
@@ -176,6 +1325,34 @@ async function processJob(
     | undefined,
   automation: MessagingAutomationOptions,
 ): Promise<void> {
+  if (
+    job.job_type === "field_service.whatsapp_media.retrieve" &&
+    job.reference_id !== null
+  ) {
+    await processFieldServiceWhatsAppMedia(
+      sql,
+      workerId,
+      job,
+      providers,
+      automation,
+    );
+    return;
+  }
+  if (
+    job.job_type === "field_service.intake.extract" &&
+    job.reference_id !== null
+  ) {
+    await processFieldServiceIntake(sql, workerId, job, automation);
+    return;
+  }
+  if (job.job_type === "field_service.ocr" && job.reference_id !== null) {
+    await processFieldServiceOcr(sql, workerId, job, automation);
+    return;
+  }
+  if (job.job_type === "field_service.summary" && job.reference_id !== null) {
+    await processFieldServiceSummary(sql, workerId, job, automation);
+    return;
+  }
   if (job.job_type === "whatsapp.outbound.send" && job.reference_id !== null) {
     await processWhatsAppOutbound(
       sql,
@@ -287,6 +1464,9 @@ interface AiWork {
   readonly locale: string;
   readonly provider: "simulator" | "meta";
   readonly systemPrompt: string;
+  readonly serviceIntake?: NonNullable<
+    Parameters<WhatsAppAiProvider["decide"]>[0]["serviceIntake"]
+  >;
   readonly contactContext: NonNullable<
     Parameters<WhatsAppAiProvider["decide"]>[0]["contactContext"]
   >;
@@ -507,6 +1687,55 @@ async function loadAiWork(
       WHERE contact_id=${row.contact_id}::uuid
       ORDER BY updated_at DESC, id DESC LIMIT 8
     `;
+    const intakes = await transaction<
+      {
+        status: NonNullable<AiWork["serviceIntake"]>["status"];
+        collected_fields: unknown;
+        national_id_hint: string | null;
+        required_field_overrides: unknown;
+        case_reference: string | null;
+        customer_resolution_status: NonNullable<
+          AiWork["serviceIntake"]
+        >["customerResolutionStatus"];
+      }[]
+    >`
+      SELECT intake.status, intake.collected_fields, intake.national_id_hint,
+             intake.customer_resolution_status,
+             intake.required_field_overrides, service_case.reference AS case_reference
+      FROM service.intake_drafts intake
+      LEFT JOIN service.cases service_case
+        ON service_case.intake_draft_id=intake.id
+       AND service_case.tenant_id=intake.tenant_id
+      WHERE intake.conversation_id=${row.conversation_id}::uuid
+      ORDER BY intake.updated_at DESC, intake.id DESC LIMIT 1
+    `;
+    const intake = intakes[0];
+    const intakeFields = sanitizeIntakeProposal(intake?.collected_fields);
+    const overridden = Object.entries(record(intake?.required_field_overrides))
+      .filter(([, value]) => value === true)
+      .map(([key]) => key);
+    const serviceIntake =
+      intake === undefined
+        ? undefined
+        : {
+            status: intake.status,
+            fields: intakeFields,
+            nationalIdMasked:
+              intake.national_id_hint === null
+                ? null
+                : `••••${intake.national_id_hint}`,
+            missingFields: missingIntakeFields(
+              {
+                ...intakeFields,
+                ...(intake.national_id_hint === null
+                  ? {}
+                  : { nationalId: "provided" }),
+              },
+              overridden as Parameters<typeof missingIntakeFields>[1],
+            ),
+            caseReference: intake.case_reference,
+            customerResolutionStatus: intake.customer_resolution_status,
+          };
     const missingProfileFields: ("name" | "email" | "company")[] = [];
     if (/^\+?[0-9 ()-]{7,}$/u.test(row.contact_name.trim()))
       missingProfileFields.push("name");
@@ -528,6 +1757,7 @@ async function loadAiWork(
       authorizedUserId: row.ai_enabled_by_user_id,
       contactId: row.contact_id,
       systemPrompt: row.system_prompt,
+      ...(serviceIntake === undefined ? {} : { serviceIntake }),
       contactContext: {
         contact: {
           name: row.contact_name,
@@ -754,14 +1984,24 @@ async function processWhatsAppAiReply(
     // Explicit callback consent is a deterministic action and must not wait on
     // or depend on an LLM classification. The voice agent receives the bounded
     // conversation history when the durable callback job is dispatched.
-    const decision: WhatsAppAiDecision = explicitCallRequested
-      ? {
-          action: "request_call",
-          reasonCode: "call_requested",
-          text: "",
-        }
-      : await (automation.aiProvider?.decide(work) ??
-          Promise.reject(new TypeError("WhatsApp AI is disabled")));
+    const identityConflict =
+      work.serviceIntake?.customerResolutionStatus === "conflict";
+    const intakeRequiresHuman = work.serviceIntake?.status === "handed_off";
+    const decision: WhatsAppAiDecision =
+      identityConflict || intakeRequiresHuman
+        ? {
+            action: "handoff",
+            reasonCode: "insufficient_context",
+            text: "",
+          }
+        : explicitCallRequested
+          ? {
+              action: "request_call",
+              reasonCode: "call_requested",
+              text: "",
+            }
+          : await (automation.aiProvider?.decide(work) ??
+              Promise.reject(new TypeError("WhatsApp AI is disabled")));
     await sql.begin(async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
       await requireOwnedJob(transaction, workerId, job.id);
@@ -1232,6 +2472,41 @@ async function processAutomaticCall(
     await sql.begin(async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
       await requireOwnedJob(transaction, workerId, job.id);
+      // A voice session is linked only when the trusted source conversation
+      // resolves to one active service case. Ambiguous conversations remain
+      // unlinked for an authorized operator to resolve; phone-number matching
+      // is deliberately never used here.
+      const linkedCase = await transaction<{ case_id: string }[]>`
+        WITH candidates AS (
+          SELECT link.case_id
+          FROM service.case_conversations link
+          JOIN service.cases service_case
+            ON service_case.id=link.case_id
+           AND service_case.tenant_id=link.tenant_id
+          JOIN platform.tenant_feature_entitlements entitlement
+            ON entitlement.tenant_id=link.tenant_id
+           AND entitlement.feature_key='field_service'
+           AND entitlement.available
+          JOIN service.tenant_configuration configuration
+            ON configuration.tenant_id=link.tenant_id
+           AND configuration.enabled
+          WHERE link.conversation_id=${work.conversationId}::uuid
+            AND service_case.status NOT IN ('closed', 'cancelled')
+        ), unambiguous AS (
+          SELECT min(case_id::text)::uuid AS case_id
+          FROM candidates
+          HAVING count(*)=1
+        )
+        INSERT INTO service.case_calls(
+          tenant_id, case_id, session_id, relationship, linked_by_user_id
+        )
+        SELECT platform.current_tenant_id(), unambiguous.case_id,
+               ${result.sessionId}::uuid, 'diagnostic',
+               ${work.actorUserId}::uuid
+        FROM unambiguous
+        ON CONFLICT (tenant_id, case_id, session_id) DO NOTHING
+        RETURNING case_id
+      `;
       await transaction`
         UPDATE ops.jobs SET status='succeeded', completed_at=CURRENT_TIMESTAMP,
           locked_at=NULL, locked_by=NULL, last_error_safe=NULL,
@@ -1248,8 +2523,25 @@ async function processAutomaticCall(
                   created: result.created,
                   jobId: job.id,
                   sessionId: result.sessionId,
+                  caseId: linkedCase[0]?.case_id,
                 })})
       `;
+      if (linkedCase[0] !== undefined)
+        await transaction`
+          INSERT INTO audit.records(
+            tenant_id, actor_user_id, action, target_type, target_id, metadata
+          ) VALUES (
+            platform.current_tenant_id(), ${work.actorUserId}::uuid,
+            'field_service.call.linked', 'service_case',
+            ${linkedCase[0].case_id}::uuid,
+            ${transaction.json({
+              conversationId: work.conversationId,
+              sessionId: result.sessionId,
+              relationship: "diagnostic",
+              automatic: true,
+            })}
+          )
+        `;
     });
   } catch (error) {
     const reason =
@@ -1831,6 +3123,7 @@ export function createMessagingStore(
           event,
           automation.aiProvider !== undefined,
           automation.realWhatsAppEnabled === true,
+          automation.fieldServiceProvider !== undefined,
         );
 
       const jobs = await sql<JobRow[]>`
@@ -1846,7 +3139,20 @@ export function createMessagingStore(
           reportFailure,
           automation,
         );
-      return events.length + jobs.length;
+      const fieldServiceJobs = await sql<JobRow[]>`
+        SELECT id, tenant_id, job_type, reference_id, payload
+        FROM ops.claim_jobs_all_tenants(${workerId}, 'field_service', 1, 60)
+      `;
+      for (const job of fieldServiceJobs)
+        await processJob(
+          sql,
+          workerId,
+          job,
+          providers,
+          reportFailure,
+          automation,
+        );
+      return events.length + jobs.length + fieldServiceJobs.length;
     },
   };
 }

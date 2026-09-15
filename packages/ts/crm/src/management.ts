@@ -8,6 +8,8 @@ import type {
   StoredIdentityImage,
 } from "./types.js";
 
+type TenantAccentToken = Exclude<TenantSettings["accentToken"], undefined>;
+
 interface StoredIdentityImageRow {
   readonly data: Uint8Array;
   readonly content_type: StoredIdentityImage["contentType"];
@@ -214,9 +216,18 @@ export async function getTenantSettings(
       default_currency: string;
       locale: string;
       timezone: string;
+      business_name: string | null;
+      business_email: string | null;
+      business_phone: string | null;
+      business_address: string | null;
+      accent_token: TenantAccentToken;
+      report_header: string | null;
+      report_footer: string | null;
     }[]
   >`
-    SELECT display_name, default_currency, locale, timezone
+    SELECT display_name, default_currency, locale, timezone,
+           business_name, business_email, business_phone, business_address,
+           accent_token, report_header, report_footer
     FROM crm.tenant_settings
   `;
   const row = rows[0];
@@ -226,6 +237,13 @@ export async function getTenantSettings(
       defaultCurrency: "USD",
       locale: "en",
       timezone: "UTC",
+      businessName: null,
+      businessEmail: null,
+      businessPhone: null,
+      businessAddress: null,
+      accentToken: null,
+      reportHeader: null,
+      reportFooter: null,
     };
   }
   return {
@@ -233,7 +251,24 @@ export async function getTenantSettings(
     defaultCurrency: row.default_currency,
     locale: row.locale,
     timezone: row.timezone,
+    businessName: row.business_name,
+    businessEmail: row.business_email,
+    businessPhone: row.business_phone,
+    businessAddress: row.business_address,
+    accentToken: row.accent_token,
+    reportHeader: row.report_header,
+    reportFooter: row.report_footer,
   };
+}
+
+function tenantSettingText(
+  value: string | null | undefined,
+  maximum: number,
+): string | null {
+  const normalized = value?.trim() ?? "";
+  if (normalized.length > maximum)
+    throw new TypeError("workspace branding value is too long");
+  return normalized === "" ? null : normalized;
 }
 
 export async function updateTenantSettings(
@@ -246,6 +281,25 @@ export async function updateTenantSettings(
   const locale = input.locale.trim();
   const timezone = input.timezone.trim();
   const displayName = input.displayName?.trim();
+  const businessName = tenantSettingText(input.businessName, 160);
+  const businessEmail = tenantSettingText(input.businessEmail, 320);
+  const businessPhone = tenantSettingText(input.businessPhone, 40);
+  const businessAddress = tenantSettingText(input.businessAddress, 500);
+  const reportHeader = tenantSettingText(input.reportHeader, 500);
+  const reportFooter = tenantSettingText(input.reportFooter, 1_000);
+  const accentToken = input.accentToken ?? null;
+  if (
+    accentToken !== null &&
+    !["blue", "cyan", "emerald", "violet", "amber", "rose"].includes(
+      accentToken,
+    )
+  )
+    throw new TypeError("unsupported workspace accent");
+  if (
+    businessEmail !== null &&
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(businessEmail)
+  )
+    throw new TypeError("business email must be valid");
   if (!locale || !timezone)
     throw new TypeError("locale and timezone are required");
   if (timezone.length > 100)
@@ -261,18 +315,45 @@ export async function updateTenantSettings(
       default_currency: string;
       locale: string;
       timezone: string;
+      business_name: string | null;
+      business_email: string | null;
+      business_phone: string | null;
+      business_address: string | null;
+      accent_token: TenantAccentToken;
+      report_header: string | null;
+      report_footer: string | null;
     }[]
   >`
     INSERT INTO crm.tenant_settings
-      (tenant_id, display_name, default_currency, locale, timezone)
+      (tenant_id, display_name, default_currency, locale, timezone,
+       business_name, business_email, business_phone, business_address,
+       accent_token, report_header, report_footer)
     VALUES (platform.current_tenant_id(), ${displayName === "" ? null : (displayName ?? null)},
-            ${currency}, ${locale}, ${timezone})
+            ${currency}, ${locale}, ${timezone}, ${businessName}, ${businessEmail},
+            ${businessPhone}, ${businessAddress}, ${accentToken},
+            ${reportHeader}, ${reportFooter})
     ON CONFLICT (tenant_id) DO UPDATE
       SET display_name = EXCLUDED.display_name,
           default_currency = EXCLUDED.default_currency,
           locale = EXCLUDED.locale, timezone = EXCLUDED.timezone,
+          business_name = CASE WHEN ${input.businessName !== undefined}
+            THEN EXCLUDED.business_name ELSE crm.tenant_settings.business_name END,
+          business_email = CASE WHEN ${input.businessEmail !== undefined}
+            THEN EXCLUDED.business_email ELSE crm.tenant_settings.business_email END,
+          business_phone = CASE WHEN ${input.businessPhone !== undefined}
+            THEN EXCLUDED.business_phone ELSE crm.tenant_settings.business_phone END,
+          business_address = CASE WHEN ${input.businessAddress !== undefined}
+            THEN EXCLUDED.business_address ELSE crm.tenant_settings.business_address END,
+          accent_token = CASE WHEN ${input.accentToken !== undefined}
+            THEN EXCLUDED.accent_token ELSE crm.tenant_settings.accent_token END,
+          report_header = CASE WHEN ${input.reportHeader !== undefined}
+            THEN EXCLUDED.report_header ELSE crm.tenant_settings.report_header END,
+          report_footer = CASE WHEN ${input.reportFooter !== undefined}
+            THEN EXCLUDED.report_footer ELSE crm.tenant_settings.report_footer END,
           updated_at = CURRENT_TIMESTAMP
-    RETURNING display_name, default_currency, locale, timezone
+    RETURNING display_name, default_currency, locale, timezone,
+      business_name, business_email, business_phone, business_address,
+      accent_token, report_header, report_footer
   `;
   const row = rows[0];
   if (row === undefined) throw new Error("tenant settings update failed");
@@ -281,6 +362,13 @@ export async function updateTenantSettings(
     defaultCurrency: row.default_currency,
     locale: row.locale,
     timezone: row.timezone,
+    businessName: row.business_name,
+    businessEmail: row.business_email,
+    businessPhone: row.business_phone,
+    businessAddress: row.business_address,
+    accentToken: row.accent_token,
+    reportHeader: row.report_header,
+    reportFooter: row.report_footer,
   };
 }
 

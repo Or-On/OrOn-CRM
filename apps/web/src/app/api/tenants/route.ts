@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { createTenantWithDefaults, listPlatformTenants } from "@or-on/crm";
+import {
+  createTenantWithDefaults,
+  listPlatformTenants,
+  setFieldServiceEntitlement,
+} from "@or-on/crm";
 import {
   ForbiddenError,
   jsonObject,
@@ -27,19 +31,29 @@ export async function POST(request: Request) {
   try {
     await assertCrmMutation(request);
     const body = await jsonObject(request);
-    const id = await withCurrentTenant("platform:read", (sql, session) => {
-      if (!session.isSuperuser) throw new ForbiddenError("Forbidden");
-      return createTenantWithDefaults(sql, {
-        name: typeof body.name === "string" ? body.name : "",
-        slug: typeof body.slug === "string" ? body.slug : "",
-        currency: typeof body.currency === "string" ? body.currency : "USD",
-        locale: body.locale === "he" ? "he" : "en",
-        timezone: typeof body.timezone === "string" ? body.timezone : "UTC",
-        ...(typeof body.ownerEmail === "string" && body.ownerEmail.trim()
-          ? { ownerEmail: body.ownerEmail }
-          : {}),
-      });
-    });
+    const id = await withCurrentTenant(
+      "platform:read",
+      async (sql, session) => {
+        if (!session.isSuperuser) throw new ForbiddenError("Forbidden");
+        const tenantId = await createTenantWithDefaults(sql, {
+          name: typeof body.name === "string" ? body.name : "",
+          slug: typeof body.slug === "string" ? body.slug : "",
+          currency: typeof body.currency === "string" ? body.currency : "USD",
+          locale: body.locale === "he" ? "he" : "en",
+          timezone: typeof body.timezone === "string" ? body.timezone : "UTC",
+          ...(typeof body.ownerEmail === "string" && body.ownerEmail.trim()
+            ? { ownerEmail: body.ownerEmail }
+            : {}),
+        });
+        await setFieldServiceEntitlement(
+          sql,
+          tenantId,
+          body.fieldServiceAvailable === true,
+          request.headers.get("x-request-id") ?? crypto.randomUUID(),
+        );
+        return tenantId;
+      },
+    );
     return NextResponse.json({ id }, { status: 201 });
   } catch (error) {
     return crmErrorResponse(error);

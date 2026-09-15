@@ -649,7 +649,8 @@
     .contact-record__profile,
     .contact-record__activity,
     .contact-record__notes,
-    .contact-record__fields
+    .contact-record__fields,
+    .contact-record__customer-file
   ) {
   border-radius: 0.8rem;
 }
@@ -670,7 +671,8 @@
     .contact-record__profile,
     .contact-record__activity,
     .contact-record__notes,
-    .contact-record__fields
+    .contact-record__fields,
+    .contact-record__customer-file
   ) {
   box-shadow: var(--or-shadow-1);
 }

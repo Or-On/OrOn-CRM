@@ -14,6 +14,9 @@ RUN pnpm install --frozen-lockfile \
 
 FROM node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS runtime
 
+ARG ORON_SOURCE_REVISION=unknown
+LABEL org.opencontainers.image.revision="${ORON_SOURCE_REVISION}"
+
 # Reviewed Debian security update; build tooling is unnecessary in the runtime.
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends libpcre2-8-0=10.42-1+deb12u1 \

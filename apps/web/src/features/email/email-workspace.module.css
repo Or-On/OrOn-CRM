@@ -266,6 +266,43 @@
   color: var(--or-text-muted);
   font-size: 0.75rem;
 }
+.connectedControls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.65rem;
+}
+.disconnectButton {
+  min-block-size: 2rem;
+  padding-inline: 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--or-danger) 35%, var(--or-border));
+  border-radius: 0.4rem;
+  color: var(--or-danger);
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.disconnectButton:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--or-danger) 8%, transparent);
+}
+.disconnectButton:focus-visible {
+  outline: 2px solid var(--or-focus);
+  outline-offset: 2px;
+}
+.disconnectButton:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+.disconnectError {
+  margin: 0;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid color-mix(in srgb, var(--or-danger) 35%, var(--or-border));
+  border-radius: 0.45rem;
+  color: var(--or-danger);
+  background: color-mix(in srgb, var(--or-danger) 6%, transparent);
+  font-size: 0.75rem;
+}
 .channelsCard,
 .guide {
   overflow: hidden;
@@ -494,6 +531,9 @@
   .providerCard > .connectedBadge,
   .providerCard > .blockedBadge {
     grid-column: 1 / -1;
+  }
+  .connectedControls {
+    grid-template-columns: 1fr;
   }
   .channelList article {
     align-items: start;

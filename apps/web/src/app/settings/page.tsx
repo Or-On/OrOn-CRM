@@ -6,6 +6,7 @@ import { hasPermission } from "@or-on/auth";
 
 import {
   getTenantSettings,
+  getFieldServiceFeatureState,
   listApiKeys,
   listTenantInvitations,
   listNotifications,
@@ -18,6 +19,24 @@ import {
   withCurrentTenant,
 } from "../../features/auth";
 import { ManagementPanel } from "../../features/management";
+
+function fieldServiceRuntimeReadiness() {
+  const storageBackend =
+    process.env.ARTIFACTS_BACKEND?.trim().toLowerCase() ?? "local";
+  return {
+    aiProviderConfigured:
+      process.env.ENABLE_WHATSAPP_AI?.toLowerCase() === "true" &&
+      process.env.LLM_PROVIDER === "openai-compat" &&
+      Boolean(process.env.LLM_API_KEY) &&
+      Boolean(process.env.LLM_BASE_URL) &&
+      Boolean(process.env.LLM_MODEL),
+    protectedFieldsConfigured:
+      Boolean(process.env.FIELD_CIPHER_LOCAL_KEY) &&
+      Boolean(process.env.BLIND_INDEX_KEY),
+    privateStorageConfigured: storageBackend === "local",
+    storageBackend,
+  };
+}
 
 export default async function SettingsPage() {
   try {
@@ -36,6 +55,12 @@ export default async function SettingsPage() {
           notifications: await listNotifications(sql, session.userId),
           apiKeys: canManageTenant ? await listApiKeys(sql) : [],
           settings: canManageTenant ? await getTenantSettings(sql) : undefined,
+          fieldServiceFeature: canManageTenant
+            ? await getFieldServiceFeatureState(sql)
+            : undefined,
+          fieldServiceRuntimeReadiness: canManageTenant
+            ? fieldServiceRuntimeReadiness()
+            : undefined,
           canManageMembers,
           canManageTenant,
           canManageOwners:

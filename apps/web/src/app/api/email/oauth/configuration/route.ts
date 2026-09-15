@@ -1,12 +1,18 @@
 import { NextResponse } from "next/server";
 
-import { jsonObject, withCurrentTenant } from "../../../../../features/auth";
+import {
+  jsonObject,
+  requestId,
+  withCurrentTenant,
+  withFreshCurrentTenant,
+} from "../../../../../features/auth";
 import {
   assertCrmMutation,
   crmErrorResponse,
 } from "../../../../../features/crm-route";
 import {
   oauthProvider,
+  disconnectOAuthProvider,
   readOAuthCredential,
   saveOAuthCredential,
 } from "../../../../../features/email";
@@ -56,6 +62,28 @@ export async function POST(request: Request) {
       }),
     );
     return NextResponse.json({ configured: true, provider });
+  } catch (error) {
+    return crmErrorResponse(error);
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    await assertCrmMutation(request);
+    const provider = oauthProvider(
+      new URL(request.url).searchParams.get("provider") ?? "",
+    );
+    const disconnected = await withFreshCurrentTenant(
+      "tenant:manage",
+      (sql, session) =>
+        disconnectOAuthProvider(
+          sql,
+          session.userId,
+          provider,
+          requestId(request),
+        ),
+    );
+    return NextResponse.json({ disconnected: true, provider, ...disconnected });
   } catch (error) {
     return crmErrorResponse(error);
   }

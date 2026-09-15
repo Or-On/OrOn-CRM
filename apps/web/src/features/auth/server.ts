@@ -275,6 +275,7 @@ async function withResolvedTenant<T>(
       tenantId: resolved.session.tenant.tenantId,
       userId: resolved.session.userId,
       role: resolved.session.tenant.role,
+      sessionId: resolved.session.sessionId,
     },
     async (transaction) => {
       if (lockAuthorization) {

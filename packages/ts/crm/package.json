@@ -7,6 +7,10 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./dist/index.js"
+    },
+    "./field-service-domain": {
+      "types": "./src/field-service-domain.ts",
+      "default": "./dist/field-service-domain.js"
     }
   },
   "scripts": {

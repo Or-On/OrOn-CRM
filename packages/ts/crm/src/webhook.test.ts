@@ -3,6 +3,8 @@ import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 
 import {
+  parseStoredWhatsAppEnvelope,
+  parseWhatsAppMessageEnvelopes,
   parseWhatsAppTextEnvelopes,
   parseWhatsAppStatusEnvelopes,
   verifyWhatsAppSignature,
@@ -83,10 +85,76 @@ describe("WhatsApp webhook boundary", () => {
         providerMessageId: "wamid.1",
         from: "+972501234567",
         profileName: "Fictional Sender",
+        contentType: "text",
         text: "Hello",
       },
     ]);
     expect(parseWhatsAppTextEnvelopes({ unexpected: true })).toEqual([]);
+  });
+
+  it("normalizes media and locations while rejecting incomplete provider content", () => {
+    const parsed = parseWhatsAppMessageEnvelopes({
+      entry: [
+        {
+          id: "entry",
+          changes: [
+            {
+              value: {
+                metadata: { phone_number_id: "phone-id" },
+                contacts: [{ profile: { name: "Fictional Sender" } }],
+                messages: [
+                  {
+                    id: "wamid.image",
+                    from: "972501234567",
+                    type: "image",
+                    image: {
+                      id: "media-image",
+                      mime_type: "image/jpeg",
+                      sha256: "synthetic-hash",
+                      caption: "Fault photo",
+                    },
+                  },
+                  {
+                    id: "wamid.location",
+                    from: "972501234567",
+                    type: "location",
+                    location: {
+                      latitude: 32.0853,
+                      longitude: 34.7818,
+                      name: "Synthetic store",
+                      address: "1 Test Street",
+                    },
+                  },
+                  {
+                    id: "wamid.invalid",
+                    from: "972501234567",
+                    type: "image",
+                    image: { caption: "Missing provider media id" },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(parsed).toHaveLength(2);
+    expect(parsed[0]).toMatchObject({
+      contentType: "image",
+      text: "Fault photo",
+      media: { id: "media-image", mimeType: "image/jpeg" },
+    });
+    expect(parsed[1]).toMatchObject({
+      contentType: "location",
+      location: { latitude: 32.0853, longitude: 34.7818 },
+    });
+    expect(parseStoredWhatsAppEnvelope(parsed[0])).toEqual(parsed[0]);
+    expect(
+      parseStoredWhatsAppEnvelope({
+        ...parsed[0],
+        media: { caption: "missing id" },
+      }),
+    ).toBeUndefined();
   });
 
   it("normalizes delivery statuses with stable deduplication identifiers", () => {

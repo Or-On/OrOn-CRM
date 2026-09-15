@@ -118,6 +118,61 @@ export async function readOAuthCredential<T>(
   return open(row.ciphertext, row.nonce) as T;
 }
 
+/**
+ * Revoke this workspace's local ability to use one mailbox provider.
+ *
+ * The provider client configuration is deliberately retained so an authorized
+ * administrator can reconnect without re-entering the application client. All
+ * account tokens are cryptographically tombstoned, channel credential links
+ * are removed, and pending authorization states are invalidated. Upstream
+ * provider grants may remain valid until the customer revokes them at the
+ * provider; this application can no longer read or refresh those grants.
+ */
+export async function disconnectOAuthProvider(
+  sql: postgres.TransactionSql,
+  actorUserId: string,
+  provider: OAuthProvider,
+  requestId: string,
+): Promise<{ readonly channels: number; readonly credentials: number }> {
+  const tokenKind = `email_oauth_token_${provider}`;
+  await sql`
+    SELECT pg_advisory_xact_lock(hashtextextended(
+      platform.current_tenant_id()::text || ':email-oauth-disconnect:' || ${provider}, 0))
+  `;
+  const channels = await sql<{ id: string }[]>`
+    UPDATE messaging.channels SET
+      credential_id=NULL, status='revoked', updated_at=CURRENT_TIMESTAMP
+    WHERE kind='email' AND provider=${provider}
+      AND (status <> 'revoked' OR credential_id IS NOT NULL)
+    RETURNING id
+  `;
+  const credentials = await sql<{ id: string }[]>`
+    UPDATE platform.credential_records SET
+      display_hint='revoked', ciphertext=NULL, nonce=NULL, algorithm=NULL,
+      key_version=NULL, rotated_at=CURRENT_TIMESTAMP
+    WHERE (kind=${tokenKind} OR starts_with(kind, ${`${tokenKind}_`}))
+      AND ciphertext IS NOT NULL
+    RETURNING id
+  `;
+  await sql`
+    DELETE FROM platform.oauth_authorizations WHERE provider=${provider}
+  `;
+  await sql`
+    INSERT INTO audit.records(
+      tenant_id, actor_user_id, action, target_type, request_id, metadata
+    ) VALUES (
+      platform.current_tenant_id(), ${actorUserId}::uuid,
+      'email.oauth.disconnected', 'email_provider', ${requestId},
+      ${sql.json({
+        provider,
+        channelCount: channels.length,
+        credentialCount: credentials.length,
+      })}
+    )
+  `;
+  return { channels: channels.length, credentials: credentials.length };
+}
+
 export function oauthProvider(value: string): OAuthProvider {
   if (value !== "google" && value !== "microsoft")
     throw new TypeError("Unsupported OAuth provider");

@@ -161,7 +161,9 @@ describe("contact index workspace", () => {
 
   it("scopes directory summaries to filtered loaded records and preserves a closed creation draft", () => {
     const view = render(localized(<ContactManager contacts={contacts} />));
-    expect(screen.getByText(/Latest 2 matching contacts/)).toBeTruthy();
+    expect(
+      screen.getByText("2 contacts loaded for the current directory search."),
+    ).toBeTruthy();
     expect(screen.queryByText(/consent/i)).toBeNull();
     fireEvent.change(
       screen.getByRole("searchbox", { name: "Search contacts" }),

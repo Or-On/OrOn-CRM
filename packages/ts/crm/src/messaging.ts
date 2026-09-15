@@ -365,12 +365,26 @@ export async function ingestSimulatedInbound(
 export async function ingestWhatsAppInbound(
   sql: postgres.TransactionSql,
   input: WhatsAppInboundEnvelope,
-): Promise<{ readonly conversationId: string; readonly inserted: boolean }> {
+): Promise<{
+  readonly conversationId: string;
+  readonly contactId: string;
+  readonly messageId?: string;
+  readonly inserted: boolean;
+}> {
   const phone = normalizeE164(input.from);
   if (phone === undefined)
     throw new TypeError("WhatsApp sender must use E.164");
+  const contentType = input.contentType ?? "text";
   const text = input.text.trim();
-  if (text === "") throw new TypeError("message text is required");
+  if (contentType === "text" && text === "")
+    throw new TypeError("message text is required");
+  if (
+    (contentType === "image" || contentType === "document") &&
+    input.media === undefined
+  )
+    throw new TypeError("message media is required");
+  if (contentType === "location" && input.location === undefined)
+    throw new TypeError("message location is required");
   const occurredAt =
     input.occurredAt === undefined ? null : new Date(input.occurredAt);
   if (
@@ -445,22 +459,51 @@ export async function ingestWhatsAppInbound(
   const conversationId = conversationRows[0]?.id;
   if (conversationId === undefined)
     throw new Error("conversation resolution failed");
+  const structuredContent =
+    contentType === "image" || contentType === "document"
+      ? {
+          providerMediaId: input.media?.id,
+          mimeType: input.media?.mimeType,
+          sha256: input.media?.sha256,
+          fileName: input.media?.fileName,
+          caption: input.media?.caption,
+          retrievalStatus: "pending",
+        }
+      : contentType === "location"
+        ? {
+            latitude: input.location?.latitude,
+            longitude: input.location?.longitude,
+            name: input.location?.name,
+            address: input.location?.address,
+          }
+        : null;
+  const preview =
+    text ||
+    (contentType === "image"
+      ? "[Image]"
+      : contentType === "document"
+        ? "[Document]"
+        : "[Location]");
   const messageRows = await sql<{ id: string; created_at: Date }[]>`
     INSERT INTO messaging.messages
       (tenant_id, conversation_id, direction, sender_type, sender_contact_id,
        content_type, content_text, provider, provider_message_id, status,
-       provider_payload)
+       structured_content, provider_payload, created_at)
     VALUES (platform.current_tenant_id(), ${conversationId}::uuid, 'inbound',
-            'contact', ${contactId}::uuid, 'text', ${text}, 'meta',
+            'contact', ${contactId}::uuid, ${contentType},
+            ${text === "" ? null : text}, 'meta',
             ${input.providerMessageId}, 'received',
-            ${sql.json({ providerEventId: input.providerEventId })})
+            ${structuredContent === null ? null : sql.json(structuredContent)},
+            ${sql.json({ providerEventId: input.providerEventId })},
+            COALESCE(${occurredAt}, CURRENT_TIMESTAMP))
     ON CONFLICT (tenant_id, provider, provider_message_id)
       WHERE provider IS NOT NULL AND provider_message_id IS NOT NULL
     DO NOTHING
     RETURNING id, created_at
   `;
   const message = messageRows[0];
-  if (message === undefined) return { conversationId, inserted: false };
+  if (message === undefined)
+    return { conversationId, contactId, inserted: false };
   await sql`
     INSERT INTO messaging.message_delivery_events
       (tenant_id, message_id, provider_event_id, status, occurred_at)
@@ -471,11 +514,21 @@ export async function ingestWhatsAppInbound(
   `;
   await sql`
     UPDATE messaging.conversations
-    SET unread_count = unread_count + 1, last_message_at = ${message.created_at},
-        last_message_preview = ${text}, updated_at = CURRENT_TIMESTAMP
+    SET unread_count = unread_count + 1,
+        last_message_preview = CASE
+          WHEN last_message_at IS NULL OR ${message.created_at} >= last_message_at
+            THEN ${preview}
+          ELSE last_message_preview END,
+        last_message_at = GREATEST(last_message_at, ${message.created_at}),
+        updated_at = CURRENT_TIMESTAMP
     WHERE id = ${conversationId}::uuid
   `;
-  return { conversationId, inserted: true };
+  return {
+    conversationId,
+    contactId,
+    messageId: message.id,
+    inserted: true,
+  };
 }
 
 /**

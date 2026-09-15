@@ -6,6 +6,7 @@ readonly SHARED_DIR="${ORON_ROOT}/shared"
 readonly RELEASES_DIR="${ORON_ROOT}/releases"
 readonly COMMIT_SHA="${1:-}"
 readonly RELEASE_ARCHIVE="${2:-}"
+readonly EXPECTED_ARCHIVE_SHA256="${3:-}"
 readonly LOCK_FILE="/run/lock/oron-dev-deploy.lock"
 
 if [[ ${EUID} -ne 0 ]]; then
@@ -22,6 +23,15 @@ if [[ ! ${COMMIT_SHA} =~ ^[0-9a-f]{40}$ ]]; then
 fi
 if [[ ! -f ${RELEASE_ARCHIVE} ]]; then
   echo "Release archive not found: ${RELEASE_ARCHIVE}" >&2
+  exit 1
+fi
+if [[ ! ${EXPECTED_ARCHIVE_SHA256} =~ ^[0-9a-f]{64}$ ]]; then
+  echo "The third argument must be the expected lowercase SHA-256 of the archive" >&2
+  exit 1
+fi
+actual_archive_sha256="$(sha256sum "${RELEASE_ARCHIVE}" | cut -d' ' -f1)"
+if [[ ${actual_archive_sha256} != "${EXPECTED_ARCHIVE_SHA256}" ]]; then
+  echo "Release archive checksum mismatch" >&2
   exit 1
 fi
 for file in \
@@ -56,33 +66,110 @@ if [[ -L ${CURRENT_LINK} ]]; then
   previous_release="$(readlink -f "${CURRENT_LINK}")"
 fi
 
-python3 - "${RELEASE_ARCHIVE}" <<'PY'
+rm -rf -- "${STAGING_DIR}"
+install -d -m 0750 -o root -g root "${STAGING_DIR}"
+python3 - "${RELEASE_ARCHIVE}" "${STAGING_DIR}" <<'PY'
+import os
+import shutil
 import sys
 import tarfile
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
+
+expected_files = {
+    "images.env",
+    "infra/caddy/Caddyfile.deployment",
+    "infra/compose/deployment.yaml",
+    "infra/deployment/systemd/oron-dev-backup.service",
+    "infra/deployment/systemd/oron-dev-backup.timer",
+    "infra/deployment/systemd/oron-dev.service",
+    "scripts/backup-dev.sh",
+    "scripts/deploy-dev.sh",
+}
+expected_directories = {
+    str(parent)
+    for name in expected_files
+    for parent in PurePosixPath(name).parents
+    if str(parent) != "."
+}
+destination = Path(sys.argv[2]).resolve(strict=True)
+members: dict[str, tarfile.TarInfo] = {}
+total_size = 0
+root_seen = False
 
 with tarfile.open(sys.argv[1], "r:gz") as archive:
     for member in archive.getmembers():
-        path = PurePosixPath(member.name)
-        if path.is_absolute() or ".." in path.parts:
+        normalized = member.name.removeprefix("./").rstrip("/")
+        if normalized in {"", "."} and member.isdir():
+            if root_seen:
+                raise SystemExit("Duplicate release archive root entry")
+            root_seen = True
+            continue
+        path = PurePosixPath(normalized)
+        if (
+            not normalized
+            or "\\" in normalized
+            or path.is_absolute()
+            or ".." in path.parts
+        ):
             raise SystemExit(f"Unsafe release archive entry: {member.name}")
+        if normalized in members:
+            raise SystemExit(f"Duplicate release archive entry: {normalized}")
+        members[normalized] = member
+        if member.isdir():
+            if normalized not in expected_directories:
+                raise SystemExit(f"Unexpected release directory: {normalized}")
+            continue
+        if not member.isreg():
+            raise SystemExit(f"Unsafe release archive entry type: {normalized}")
+        if normalized not in expected_files:
+            raise SystemExit(f"Unexpected release file: {normalized}")
+        if member.mode & 0o022:
+            raise SystemExit(f"Writable release file mode is not allowed: {normalized}")
+        if member.size > 2 * 1024 * 1024:
+            raise SystemExit(f"Release file exceeds the 2 MiB limit: {normalized}")
+        total_size += member.size
+    regular_files = {name for name, member in members.items() if member.isreg()}
+    if regular_files != expected_files:
+        missing = sorted(expected_files - regular_files)
+        extra = sorted(regular_files - expected_files)
+        raise SystemExit(f"Invalid release contents; missing={missing}, extra={extra}")
+    if total_size > 8 * 1024 * 1024:
+        raise SystemExit("Release archive exceeds the 8 MiB uncompressed limit")
+    for name in sorted(expected_files):
+        member = members[name]
+        target = (destination / name).resolve()
+        if destination not in target.parents:
+            raise SystemExit(f"Unsafe extraction target: {name}")
+        target.parent.mkdir(parents=True, exist_ok=True, mode=0o750)
+        source = archive.extractfile(member)
+        if source is None:
+            raise SystemExit(f"Unable to read release file: {name}")
+        with source, target.open("xb") as output:
+            shutil.copyfileobj(source, output)
+        os.chmod(target, 0o750 if name.startswith("scripts/") else 0o640)
 PY
-rm -rf -- "${STAGING_DIR}"
-install -d -m 0750 -o root -g root "${STAGING_DIR}"
-tar -xzf "${RELEASE_ARCHIVE}" -C "${STAGING_DIR}"
 for file in \
   "${STAGING_DIR}/images.env" \
   "${STAGING_DIR}/infra/compose/deployment.yaml" \
   "${STAGING_DIR}/infra/caddy/Caddyfile.deployment"; do
   [[ -f ${file} ]] || { echo "Release payload is missing ${file}" >&2; exit 1; }
 done
-if grep -Ev '^(WEB|CONTROL_API|MESSAGING_WORKER|DISPATCHER|MIGRATOR)_IMAGE=[^[:space:]]+@sha256:[0-9a-f]{64}$' \
-  "${STAGING_DIR}/images.env" | grep -q .; then
-  echo "images.env must contain only the five immutable image digest references" >&2
-  exit 1
-fi
-if [[ $(wc -l <"${STAGING_DIR}/images.env") -ne 5 ]]; then
-  echo "images.env must contain exactly five image references" >&2
+mapfile -t image_lines <"${STAGING_DIR}/images.env"
+declare -A release_images=()
+for line in "${image_lines[@]}"; do
+  if [[ ! ${line} =~ ^(WEB|CONTROL_API|MESSAGING_WORKER|DISPATCHER|MIGRATOR)_IMAGE=([^[:space:]]+)@sha256:([0-9a-f]{64})$ ]]; then
+    echo "images.env contains an invalid immutable image reference" >&2
+    exit 1
+  fi
+  key="${BASH_REMATCH[1]}_IMAGE"
+  if [[ -n ${release_images[${key}]+present} ]]; then
+    echo "images.env contains a duplicate ${key}" >&2
+    exit 1
+  fi
+  release_images["${key}"]="${BASH_REMATCH[2]}@sha256:${BASH_REMATCH[3]}"
+done
+if [[ ${#release_images[@]} -ne 5 ]]; then
+  echo "images.env must contain each of the five image keys exactly once" >&2
   exit 1
 fi
 if [[ -d ${RELEASE_DIR} ]]; then
@@ -110,12 +197,14 @@ compose_previous() {
 }
 
 native_caddy_was_active=false
+previous_optional_services=()
 rollback() {
   exit_code=$?
   trap - ERR
   echo "Deployment of ${COMMIT_SHA} failed; attempting application rollback" >&2
   if [[ -n ${previous_release} && -d ${previous_release} ]]; then
-    compose_previous --profile workers --profile voice up --detach --remove-orphans --wait --wait-timeout 180 || true
+    compose_previous up --detach --remove-orphans --wait --wait-timeout 180 \
+      postgres control-api web caddy "${previous_optional_services[@]}" || true
     ln -sfn "${previous_release}" "${CURRENT_LINK}.rollback"
     mv -Tf "${CURRENT_LINK}.rollback" "${CURRENT_LINK}"
   elif [[ ${native_caddy_was_active} == true ]]; then
@@ -125,18 +214,50 @@ rollback() {
 }
 trap rollback ERR
 
+# shellcheck disable=SC1091
+source "${SHARED_DIR}/deployment.env"
+if [[ -n ${previous_release} ]]; then
+  mapfile -t previous_running_services < <(compose_previous ps --services --filter status=running)
+  for service in "${previous_running_services[@]}"; do
+    if [[ ${service} == messaging-worker || ${service} == dispatcher ]]; then
+      previous_optional_services+=("${service}")
+    fi
+  done
+fi
 compose config --quiet
 compose pull
+for image in "${release_images[@]}"; do
+  revision="$(docker image inspect "${image}" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')"
+  if [[ ${revision} != "${COMMIT_SHA}" ]]; then
+    echo "Image source revision does not match the requested release" >&2
+    exit 1
+  fi
+done
 compose up --detach postgres
 if [[ -n ${previous_release} ]]; then
-  "${ORON_ROOT}/scripts/backup-dev.sh"
+  # Stop request admission first. The messaging worker drains its current effect
+  # under its 90-second grace period; the dispatcher remains up for active calls.
+  compose_previous stop --timeout 120 messaging-worker web caddy
+  active_calls=0
+  for _ in {1..36}; do
+    active_calls="$(compose_previous exec --no-TTY postgres psql \
+      --username platform_migrator --dbname "${DEPLOYMENT_DATABASE_NAME}" \
+      --tuples-only --no-align \
+      --command "SELECT count(*) FROM public.sessions WHERE status='started' AND ended_at IS NULL")"
+    [[ ${active_calls} == 0 ]] && break
+    sleep 5
+  done
+  if [[ ${active_calls} != 0 ]]; then
+    echo "Active voice sessions did not drain; refusing to migrate or disconnect callers" >&2
+    exit 1
+  fi
+  compose_previous stop --timeout 90 dispatcher control-api
+  "${RELEASE_DIR}/scripts/backup-dev.sh"
 fi
 compose --profile release run --rm migrator
 
 # Bootstrap is deliberately gated by the authoritative identity table. The
 # bootstrap program independently rechecks the entire empty-database invariant.
-# shellcheck disable=SC1091
-source "${SHARED_DIR}/deployment.env"
 user_count="$(compose exec --no-TTY postgres psql --username platform_migrator \
   --dbname "${DEPLOYMENT_DATABASE_NAME}" --tuples-only --no-align \
   --command 'SELECT count(*) FROM users')"
@@ -149,6 +270,22 @@ if systemctl is-active --quiet caddy; then
   systemctl stop caddy
 fi
 compose --profile workers --profile voice up --detach --remove-orphans --wait --wait-timeout 240
+
+for service_and_key in \
+  "web WEB_IMAGE" \
+  "control-api CONTROL_API_IMAGE" \
+  "messaging-worker MESSAGING_WORKER_IMAGE" \
+  "dispatcher DISPATCHER_IMAGE"; do
+  read -r service key <<<"${service_and_key}"
+  container_id="$(compose ps --quiet "${service}")"
+  [[ -n ${container_id} ]] || { echo "Expected service is not running: ${service}" >&2; exit 1; }
+  running_image_id="$(docker inspect "${container_id}" --format '{{.Image}}')"
+  expected_image_id="$(docker image inspect "${release_images[${key}]}" --format '{{.Id}}')"
+  if [[ ${running_image_id} != "${expected_image_id}" ]]; then
+    echo "Running ${service} does not use the intended immutable image" >&2
+    exit 1
+  fi
+done
 
 for _ in {1..48}; do
   if curl --fail --silent --show-error --max-time 10 "${PLATFORM_ORIGIN}/login" >/dev/null; then

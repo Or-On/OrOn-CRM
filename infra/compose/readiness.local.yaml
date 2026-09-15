@@ -1,0 +1,8 @@
+# Local-only override for the disposable readiness harness. The base file is
+# the real production-shaped deployment topology; this override only removes
+# public TLS binding and redirects traffic to a loopback-only high port.
+services:
+  caddy:
+    ports: !override ["127.0.0.1:13880:80"]
+    volumes: !override
+      - ../caddy/Caddyfile.readiness:/etc/caddy/Caddyfile:ro

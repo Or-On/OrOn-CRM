@@ -26,6 +26,8 @@ interface ContactRow {
   created_at: Date;
   identities: unknown;
   tags: unknown;
+  classifications: unknown;
+  sort_at: Date;
 }
 
 function safeArray(value: unknown): readonly Record<string, unknown>[] {
@@ -80,6 +82,19 @@ function mapContact(row: ContactRow): ContactSummary {
         ? [{ id: tag.id, name: tag.name, color: tag.color }]
         : [],
     ),
+    classifications: safeArray(row.classifications).flatMap((classification) =>
+      typeof classification.id === "string" &&
+      typeof classification.name === "string" &&
+      typeof classification.color === "string"
+        ? [
+            {
+              id: classification.id,
+              name: classification.name,
+              color: classification.color,
+            },
+          ]
+        : [],
+    ),
   };
 }
 
@@ -87,6 +102,7 @@ const contactProjection = `
   SELECT c.id, c.name, c.email, c.company, c.lifecycle_status, c.voice_consent,
          c.whatsapp_consent, c.whatsapp_opted_out_at,
          c.last_activity_at, c.created_at,
+         COALESCE(c.last_activity_at, c.created_at) AS sort_at,
          COALESCE((SELECT jsonb_agg(jsonb_build_object(
            'id', i.id, 'channel', i.channel,
            'normalized_value', i.normalized_value,
@@ -97,7 +113,15 @@ const contactProjection = `
          COALESCE((SELECT jsonb_agg(jsonb_build_object(
            'id', t.id, 'name', t.name, 'color', t.color) ORDER BY lower(t.name))
            FROM crm.contact_tags ct JOIN crm.tags t ON t.id = ct.tag_id
-           WHERE ct.contact_id = c.id), '[]') AS tags
+           WHERE ct.contact_id = c.id), '[]') AS tags,
+         COALESCE((SELECT jsonb_agg(jsonb_build_object(
+           'id', classification.id, 'name', classification.name,
+           'color', classification.color) ORDER BY lower(classification.name))
+           FROM crm.contact_classifications assignment
+           JOIN crm.customer_classifications classification
+             ON classification.id = assignment.classification_id
+           WHERE assignment.contact_id = c.id AND classification.active), '[]')
+           AS classifications
   FROM crm.contacts c
 `;
 
@@ -105,21 +129,63 @@ export async function listContacts(
   sql: postgres.TransactionSql,
   options: { readonly query?: string; readonly limit?: number } = {},
 ): Promise<readonly ContactSummary[]> {
+  return (await listContactPage(sql, options)).contacts;
+}
+
+export interface ContactCursor {
+  readonly sortAt: string;
+  readonly id: string;
+}
+
+export interface ContactPage {
+  readonly contacts: readonly ContactSummary[];
+  readonly nextCursor: ContactCursor | null;
+}
+
+export async function listContactPage(
+  sql: postgres.TransactionSql,
+  options: {
+    readonly query?: string;
+    readonly limit?: number;
+    readonly cursor?: ContactCursor;
+  } = {},
+): Promise<ContactPage> {
   const query = options.query?.trim() ?? "";
   const limit = Math.min(Math.max(options.limit ?? 50, 1), 100);
+  const cursorDate =
+    options.cursor === undefined ? undefined : new Date(options.cursor.sortAt);
+  if (cursorDate !== undefined && Number.isNaN(cursorDate.valueOf()))
+    throw new TypeError("Contact cursor timestamp is invalid");
   const rows = await sql.unsafe<ContactRow[]>(
     `${contactProjection}
      WHERE c.lifecycle_status <> 'archived'
        AND ($1 = '' OR c.name ILIKE '%' || $1 || '%' OR
             COALESCE(c.email, '') ILIKE '%' || $1 || '%' OR
-            COALESCE(c.company, '') ILIKE '%' || $1 || '%' OR
-            EXISTS (SELECT 1 FROM crm.contact_channel_identities ci
-                    WHERE ci.contact_id = c.id AND ci.normalized_value ILIKE '%' || $1 || '%'))
+             COALESCE(c.company, '') ILIKE '%' || $1 || '%' OR
+             EXISTS (SELECT 1 FROM crm.contact_channel_identities ci
+                     WHERE ci.contact_id = c.id AND ci.normalized_value ILIKE '%' || $1 || '%'))
+       AND ($3::timestamptz IS NULL OR
+         (COALESCE(c.last_activity_at, c.created_at), c.id) <
+         ($3::timestamptz, $4::uuid))
      ORDER BY COALESCE(c.last_activity_at, c.created_at) DESC, c.id DESC
      LIMIT $2`,
-    [query, limit],
+    [
+      query,
+      limit + 1,
+      cursorDate?.toISOString() ?? null,
+      options.cursor?.id ?? null,
+    ],
   );
-  return rows.map(mapContact);
+  const hasMore = rows.length > limit;
+  const selected = hasMore ? rows.slice(0, limit) : rows;
+  const last = selected.at(-1);
+  return {
+    contacts: selected.map(mapContact),
+    nextCursor:
+      hasMore && last !== undefined
+        ? { sortAt: last.sort_at.toISOString(), id: last.id }
+        : null,
+  };
 }
 
 export async function getContact(

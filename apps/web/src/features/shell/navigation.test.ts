@@ -26,6 +26,7 @@ describe("operator navigation", () => {
       "/tasks",
       "/contacts",
       "/pipelines",
+      "/field-service",
       "/operations",
       "/voice",
       "/orchestration",

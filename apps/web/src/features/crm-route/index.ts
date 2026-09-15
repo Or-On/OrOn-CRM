@@ -15,15 +15,29 @@ export function crmErrorResponse(error: unknown): NextResponse {
     return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
   if (error instanceof ForbiddenError)
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  if (error instanceof TypeError)
-    return NextResponse.json({ error: error.message }, { status: 400 });
-  const code =
+  const errorCode =
     error !== null && typeof error === "object" && "code" in error
       ? String(error.code)
       : "";
+  if (
+    errorCode === "TENANT_FEATURE_DISABLED" ||
+    (error instanceof Error && error.name === "TenantFeatureDisabledError")
+  )
+    return NextResponse.json(
+      { error: "Field service is not enabled for this workspace" },
+      { status: 404 },
+    );
+  if (error instanceof TypeError)
+    return NextResponse.json({ error: error.message }, { status: 400 });
+  const code = errorCode;
   if (code === "23505")
     return NextResponse.json(
       { error: "A matching record already exists" },
+      { status: 409 },
+    );
+  if (code === "23P01")
+    return NextResponse.json(
+      { error: "This technician already has a conflicting appointment" },
       { status: 409 },
     );
   if (code === "42501")

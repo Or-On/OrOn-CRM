@@ -7,6 +7,8 @@ export function destinationPermission(href: string): Permission {
   if (href === "/voice" || href === "/flows" || href.startsWith("/voice/"))
     return "voice:read";
   if (href === "/finance") return "tenant:manage";
+  if (href === "/field-service" || href.startsWith("/field-service/"))
+    return "field-service:read";
   if (href === "/users" || href === "/roles") return "members:manage";
   if (
     href === "/profile" ||
@@ -36,7 +38,8 @@ export type NavigationIcon =
   | "roles"
   | "settings"
   | "health"
-  | "tenants";
+  | "tenants"
+  | "fieldService";
 
 export interface NavigationDestination {
   readonly group: NavigationGroup;
@@ -67,6 +70,12 @@ export const navigation = [
     label: "Pipeline",
     group: "Workspace",
     icon: "pipeline",
+  },
+  {
+    href: "/field-service",
+    label: "Field service",
+    group: "Operations",
+    icon: "fieldService",
   },
   {
     href: "/operations",

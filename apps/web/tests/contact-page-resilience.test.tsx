@@ -4,6 +4,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const dependencies = vi.hoisted(() => ({
   contact: vi.fn(),
   activity: vi.fn(),
+  classifications: vi.fn(),
+  dossier: vi.fn(),
+  fieldService: vi.fn(),
   voiceClient: vi.fn(),
   flows: vi.fn(),
   tenant: vi.fn(),
@@ -11,7 +14,10 @@ const dependencies = vi.hoisted(() => ({
 }));
 vi.mock("@or-on/crm", () => ({
   getContactDetail: dependencies.contact,
+  getCustomerDossier: dependencies.dossier,
+  getFieldServiceFeatureState: dependencies.fieldService,
   listContactActivity: dependencies.activity,
+  listCustomerClassifications: dependencies.classifications,
 }));
 vi.mock("../src/features/auth", () => ({
   ForbiddenError: class ForbiddenError extends Error {},
@@ -51,9 +57,29 @@ describe("contact page optional dependency isolation", () => {
     vi.resetAllMocks();
     dependencies.contact.mockResolvedValue({ id: "fictional-contact" });
     dependencies.activity.mockResolvedValue([]);
+    dependencies.classifications.mockResolvedValue([]);
+    dependencies.dossier.mockResolvedValue({
+      address: null,
+      classifications: [],
+      contactId: "fictional-contact",
+      documents: [],
+      locations: [],
+      nationalIdMasked: null,
+      preferredLanguage: null,
+    });
+    dependencies.fieldService.mockResolvedValue({ effective: false });
     dependencies.tenant.mockImplementation(
-      async (_permission: string, work: (sql: unknown) => Promise<unknown>) =>
-        work({}),
+      async (
+        _permission: string,
+        work: (sql: unknown, session: unknown) => Promise<unknown>,
+      ) =>
+        work(
+          {},
+          {
+            isSuperuser: false,
+            tenant: { role: "admin" },
+          },
+        ),
     );
     dependencies.voiceClient.mockResolvedValue({
       listVoiceFlows: dependencies.flows,

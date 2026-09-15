@@ -1,0 +1,724 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from uuid import UUID, uuid4
+
+import asyncpg
+import pytest
+
+pytestmark = [pytest.mark.postgres, pytest.mark.integration, pytest.mark.rls]
+
+
+@dataclass(frozen=True)
+class TenantFixture:
+    tenant_id: UUID
+    user_id: UUID
+    contact_id: UUID
+
+
+async def _tenant(pg: asyncpg.Connection, name: str, *, enabled: bool = False) -> TenantFixture:
+    tenant_id = uuid4()
+    user_id = uuid4()
+    contact_id = uuid4()
+    await pg.execute(
+        "INSERT INTO tenants(id,name,slug) VALUES ($1,$2,$3)",
+        tenant_id,
+        name,
+        f"field-service-{tenant_id}",
+    )
+    await pg.execute(
+        "INSERT INTO users(id,email,status) VALUES ($1,$2,'active')",
+        user_id,
+        f"{user_id}@example.test",
+    )
+    await pg.execute(
+        "INSERT INTO memberships(user_id,tenant_id,role) VALUES ($1,$2,'owner')",
+        user_id,
+        tenant_id,
+    )
+    await pg.execute(
+        "INSERT INTO crm.contacts(id,tenant_id,name) VALUES ($1,$2,$3)",
+        contact_id,
+        tenant_id,
+        f"{name} customer",
+    )
+    if enabled:
+        await pg.execute(
+            "INSERT INTO platform.tenant_feature_entitlements"
+            "(tenant_id,feature_key,available,granted_by_user_id,granted_at) "
+            "VALUES ($1,'field_service',true,$2,CURRENT_TIMESTAMP)",
+            tenant_id,
+            user_id,
+        )
+        await pg.execute(
+            "INSERT INTO service.tenant_configuration(tenant_id,enabled) VALUES ($1,true)",
+            tenant_id,
+        )
+    return TenantFixture(tenant_id, user_id, contact_id)
+
+
+async def _as_web(pg: asyncpg.Connection, fixture: TenantFixture) -> None:
+    await pg.execute("SET LOCAL ROLE platform_web")
+    await pg.execute(
+        "SELECT set_config('app.current_tenant',$1,true),"
+        "set_config('app.current_user',$2,true),"
+        "set_config('app.current_role','owner',true)",
+        str(fixture.tenant_id),
+        str(fixture.user_id),
+    )
+
+
+async def _auth_session(pg: asyncpg.Connection, user_id: UUID, tenant_id: UUID, label: str) -> UUID:
+    now = datetime.now(UTC)
+    return await pg.fetchval(
+        "SELECT platform.auth_create_session($1,$2,$3,$4,43200,$5,$6,NULL,NULL,$7)",
+        user_id,
+        tenant_id,
+        uuid4().bytes + uuid4().bytes,
+        uuid4().bytes + uuid4().bytes,
+        now + timedelta(hours=12),
+        now + timedelta(days=7),
+        label,
+    )
+
+
+async def test_feature_defaults_off_but_customer_files_remain_available(
+    pg: asyncpg.Connection,
+) -> None:
+    first = await _tenant(pg, "Disabled first")
+    second = await _tenant(pg, "Disabled second")
+    await _as_web(pg, first)
+
+    assert not await pg.fetchval("SELECT service.field_service_enabled()")
+    classification_id = await pg.fetchval(
+        "INSERT INTO crm.customer_classifications"
+        "(tenant_id,name,created_by_user_id) VALUES ($1,'Priority',$2) RETURNING id",
+        first.tenant_id,
+        first.user_id,
+    )
+    await pg.execute(
+        "INSERT INTO crm.contact_classifications"
+        "(tenant_id,contact_id,classification_id,assigned_by_user_id) "
+        "VALUES ($1,$2,$3,$4)",
+        first.tenant_id,
+        first.contact_id,
+        classification_id,
+        first.user_id,
+    )
+    await pg.execute(
+        "INSERT INTO crm.customer_profiles(tenant_id,contact_id,address) "
+        "VALUES ($1,$2,'Synthetic address')",
+        first.tenant_id,
+        first.contact_id,
+    )
+    assert await pg.fetchval("SELECT count(*) FROM crm.customer_profiles") == 1
+    with pytest.raises(asyncpg.InsufficientPrivilegeError):
+        async with pg.transaction():
+            await pg.execute(
+                "INSERT INTO service.technicians(tenant_id,full_name) "
+                "VALUES ($1,'Blocked technician')",
+                first.tenant_id,
+            )
+
+    await pg.execute("SELECT set_config('app.current_tenant',$1,true)", str(second.tenant_id))
+    assert await pg.fetchval("SELECT count(*) FROM crm.customer_profiles") == 0
+    assert await pg.fetchval("SELECT count(*) FROM crm.customer_classifications") == 0
+
+
+async def test_platform_admin_can_manage_existing_tenant_entitlement(
+    pg: asyncpg.Connection,
+) -> None:
+    administrator_tenant = await _tenant(pg, "Entitlement administrator")
+    target = await _tenant(pg, "Entitlement target")
+    await _as_web(pg, administrator_tenant)
+    with pytest.raises(asyncpg.InsufficientPrivilegeError):
+        async with pg.transaction():
+            await pg.execute(
+                "SELECT platform.set_tenant_feature_entitlement($1,true,$2)",
+                target.tenant_id,
+                "unauthorized-entitlement-test",
+            )
+    await pg.execute("RESET ROLE")
+    await pg.execute(
+        "UPDATE users SET is_superuser=true WHERE id=$1",
+        administrator_tenant.user_id,
+    )
+    await _as_web(pg, administrator_tenant)
+
+    initial = {
+        row["tenant_id"]: (row["available"], row["enabled"])
+        for row in await pg.fetch(
+            "SELECT * FROM platform.list_tenant_field_service_entitlements_for_administrator()"
+        )
+    }
+    assert initial[administrator_tenant.tenant_id] == (False, False)
+    assert initial[target.tenant_id] == (False, False)
+
+    await pg.execute(
+        "SELECT platform.set_tenant_feature_entitlement($1,true,$2)",
+        target.tenant_id,
+        "grant-field-service-test",
+    )
+    granted = await pg.fetchrow(
+        "SELECT * FROM "
+        "platform.list_tenant_field_service_entitlements_for_administrator() "
+        "WHERE tenant_id=$1",
+        target.tenant_id,
+    )
+    assert granted is not None
+    assert granted["available"] is True
+    assert granted["enabled"] is False
+
+    await pg.execute(
+        "SELECT platform.set_tenant_feature_entitlement($1,false,$2)",
+        target.tenant_id,
+        "revoke-field-service-test",
+    )
+    assert not await pg.fetchval(
+        "SELECT available FROM "
+        "platform.list_tenant_field_service_entitlements_for_administrator() "
+        "WHERE tenant_id=$1",
+        target.tenant_id,
+    )
+    await pg.execute("RESET ROLE")
+    assert (
+        await pg.fetchval(
+            "SELECT count(*) FROM audit.records "
+            "WHERE tenant_id=$1 AND action='tenant.feature.entitlement.updated'",
+            target.tenant_id,
+        )
+        == 2
+    )
+
+
+async def test_scheduling_is_tenant_scoped_and_prevents_conflicts(
+    pg: asyncpg.Connection,
+) -> None:
+    fixture = await _tenant(pg, "Scheduling", enabled=True)
+    other = await _tenant(pg, "Scheduling other", enabled=True)
+    await _as_web(pg, fixture)
+    technician_id = await pg.fetchval(
+        "INSERT INTO service.technicians"
+        "(tenant_id,full_name,employee_identifier,created_by_user_id) "
+        "VALUES ($1,'Synthetic Technician','TECH-01',$2) RETURNING id",
+        fixture.tenant_id,
+        fixture.user_id,
+    )
+    case_id = await pg.fetchval(
+        "INSERT INTO service.cases"
+        "(tenant_id,reference,customer_contact_id,title,fault_description,created_by_user_id) "
+        "VALUES ($1,'FS-TEST-1',$2,'No power','Unit does not start',$3) RETURNING id",
+        fixture.tenant_id,
+        fixture.contact_id,
+        fixture.user_id,
+    )
+    await pg.execute(
+        "INSERT INTO service.appointments"
+        "(tenant_id,case_id,technician_id,starts_at,ends_at,timezone,idempotency_key,"
+        "created_by_user_id) VALUES ($1,$2,$3,'2026-10-01T08:00:00Z',"
+        "'2026-10-01T09:00:00Z','Asia/Jerusalem','first',$4)",
+        fixture.tenant_id,
+        case_id,
+        technician_id,
+        fixture.user_id,
+    )
+    with pytest.raises(asyncpg.ExclusionViolationError):
+        async with pg.transaction():
+            await pg.execute(
+                "INSERT INTO service.appointments"
+                "(tenant_id,case_id,technician_id,starts_at,ends_at,timezone,"
+                "idempotency_key,created_by_user_id) VALUES "
+                "($1,$2,$3,'2026-10-01T08:30:00Z','2026-10-01T09:30:00Z',"
+                "'Asia/Jerusalem','overlap',$4)",
+                fixture.tenant_id,
+                case_id,
+                technician_id,
+                fixture.user_id,
+            )
+    assert await pg.fetchval("SELECT count(*) FROM service.appointments") == 1
+    await pg.execute("SELECT set_config('app.current_tenant',$1,true)", str(other.tenant_id))
+    assert await pg.fetchval("SELECT count(*) FROM service.appointments") == 0
+
+
+async def test_linked_technician_requires_an_active_technician_membership(
+    pg: asyncpg.Connection,
+) -> None:
+    fixture = await _tenant(pg, "Technician link", enabled=True)
+    await _as_web(pg, fixture)
+    with pytest.raises(asyncpg.CheckViolationError):
+        async with pg.transaction():
+            await pg.execute(
+                "INSERT INTO service.technicians"
+                "(tenant_id,linked_user_id,full_name,created_by_user_id) "
+                "VALUES ($1,$2,'Invalid owner link',$2)",
+                fixture.tenant_id,
+                fixture.user_id,
+            )
+
+    await pg.execute("RESET ROLE")
+    technician_user_id = uuid4()
+    await pg.execute(
+        "INSERT INTO users(id,email,status) VALUES ($1,$2,'active')",
+        technician_user_id,
+        f"{technician_user_id}@example.test",
+    )
+    await pg.execute(
+        "INSERT INTO memberships(user_id,tenant_id,role) VALUES ($1,$2,'technician')",
+        technician_user_id,
+        fixture.tenant_id,
+    )
+    technician_id = await pg.fetchval(
+        "INSERT INTO service.technicians"
+        "(tenant_id,linked_user_id,full_name,created_by_user_id) "
+        "VALUES ($1,$2,'Valid technician link',$3) RETURNING id",
+        fixture.tenant_id,
+        technician_user_id,
+        fixture.user_id,
+    )
+    await pg.execute("UPDATE users SET status='disabled' WHERE id=$1", technician_user_id)
+    await pg.execute("UPDATE service.technicians SET active=false WHERE id=$1", technician_id)
+    with pytest.raises(asyncpg.CheckViolationError):
+        async with pg.transaction():
+            await pg.execute(
+                "UPDATE service.technicians SET active=true WHERE id=$1", technician_id
+            )
+
+
+async def test_tenant_isolation_covers_evidence_identities_settings_and_exports(
+    pg: asyncpg.Connection,
+) -> None:
+    first = await _tenant(pg, "Isolation first", enabled=True)
+    second = await _tenant(pg, "Isolation second", enabled=True)
+
+    async def records(fixture: TenantFixture, suffix: str) -> dict[str, UUID]:
+        technician_id = await pg.fetchval(
+            "INSERT INTO service.technicians"
+            "(tenant_id,full_name,employee_identifier,created_by_user_id) "
+            "VALUES ($1,$2,$3,$4) RETURNING id",
+            fixture.tenant_id,
+            f"Synthetic technician {suffix}",
+            f"ISO-{suffix}",
+            fixture.user_id,
+        )
+        case_id = await pg.fetchval(
+            "INSERT INTO service.cases"
+            "(tenant_id,reference,customer_contact_id,title,fault_description,"
+            "created_by_user_id) VALUES ($1,$2,$3,'Synthetic case','Synthetic fault',$4) "
+            "RETURNING id",
+            fixture.tenant_id,
+            f"FS-ISO-{suffix}",
+            fixture.contact_id,
+            fixture.user_id,
+        )
+        visit_id = await pg.fetchval(
+            "INSERT INTO service.visits(tenant_id,case_id,technician_id,visit_number) "
+            "VALUES ($1,$2,$3,1) RETURNING id",
+            fixture.tenant_id,
+            case_id,
+            technician_id,
+        )
+        session_id = await _auth_session(
+            pg, fixture.user_id, fixture.tenant_id, f"field-isolation-{suffix}"
+        )
+        identity_id = await pg.fetchval(
+            "INSERT INTO service.technician_session_identities"
+            "(tenant_id,auth_session_id,visit_id,technician_id,full_name,"
+            "employee_identifier,server_nonce,expires_at) "
+            "VALUES ($1,$2,$3,$4,$5,$6,$7,CURRENT_TIMESTAMP + interval '1 hour') "
+            "RETURNING id",
+            fixture.tenant_id,
+            session_id,
+            visit_id,
+            technician_id,
+            f"Synthetic technician {suffix}",
+            f"ISO-{suffix}",
+            uuid4().hex,
+        )
+        object_id = await pg.fetchval(
+            "INSERT INTO objects.object_metadata"
+            "(tenant_id,owner_type,owner_id,category,content_type,byte_size,checksum,"
+            "storage_backend,storage_key,status) "
+            "VALUES ($1,'service_case',$2,'fault','image/png',9,$3,'local',$4,'available') "
+            "RETURNING id",
+            fixture.tenant_id,
+            case_id,
+            uuid4().hex + uuid4().hex,
+            f"synthetic/{fixture.tenant_id}/{uuid4()}.png",
+        )
+        attachment_id = await pg.fetchval(
+            "INSERT INTO service.report_attachments"
+            "(tenant_id,case_id,visit_id,object_id,category,source) "
+            "VALUES ($1,$2,$3,$4,'fault','technician') RETURNING id",
+            fixture.tenant_id,
+            case_id,
+            visit_id,
+            object_id,
+        )
+        export_id = await pg.fetchval(
+            "INSERT INTO service.export_records"
+            "(tenant_id,case_id,format,branding_snapshot,requested_by_user_id) "
+            "VALUES ($1,$2,'pdf',jsonb_build_object('businessName',$3),$4) "
+            "RETURNING id",
+            fixture.tenant_id,
+            case_id,
+            f"Synthetic business {suffix}",
+            fixture.user_id,
+        )
+        return {
+            "identity": identity_id,
+            "object": object_id,
+            "attachment": attachment_id,
+            "export": export_id,
+        }
+
+    own = await records(first, "ONE")
+    foreign = await records(second, "TWO")
+    await _as_web(pg, first)
+
+    for query, key in (
+        (
+            "SELECT id FROM service.technician_session_identities WHERE id=$1",
+            "identity",
+        ),
+        ("SELECT id FROM objects.object_metadata WHERE id=$1", "object"),
+        ("SELECT id FROM service.report_attachments WHERE id=$1", "attachment"),
+        ("SELECT id FROM service.export_records WHERE id=$1", "export"),
+    ):
+        assert await pg.fetchval(query, own[key]) == own[key]
+        assert await pg.fetchval(query, foreign[key]) is None
+    assert await pg.fetchval("SELECT count(*) FROM service.tenant_configuration") == 1
+    assert await pg.fetchval("SELECT count(*) FROM platform.tenant_feature_entitlements") == 1
+
+
+async def test_intake_case_idempotency_allows_separate_requests(
+    pg: asyncpg.Connection,
+) -> None:
+    fixture = await _tenant(pg, "Intake", enabled=True)
+    channel_id = await pg.fetchval(
+        "INSERT INTO messaging.channels"
+        "(tenant_id,kind,provider,provider_account_id) "
+        "VALUES ($1,'whatsapp','simulator',$2) RETURNING id",
+        fixture.tenant_id,
+        f"field-intake-{fixture.tenant_id}",
+    )
+    conversation_id = await pg.fetchval(
+        "INSERT INTO messaging.conversations(tenant_id,channel_id,contact_id) "
+        "VALUES ($1,$2,$3) RETURNING id",
+        fixture.tenant_id,
+        channel_id,
+        fixture.contact_id,
+    )
+    first_intake = await pg.fetchval(
+        "INSERT INTO service.intake_drafts"
+        "(tenant_id,conversation_id,reporting_contact_id,correlation_key) "
+        "VALUES ($1,$2,$3,'request-one') RETURNING id",
+        fixture.tenant_id,
+        conversation_id,
+        fixture.contact_id,
+    )
+    first_case = await pg.fetchval(
+        "INSERT INTO service.cases"
+        "(tenant_id,reference,customer_contact_id,intake_draft_id,conversation_id,"
+        "title,fault_description,source) "
+        "VALUES ($1,'FS-INTAKE-1',$2,$3,$4,'First','First fault','whatsapp') "
+        "RETURNING id",
+        fixture.tenant_id,
+        fixture.contact_id,
+        first_intake,
+        conversation_id,
+    )
+    with pytest.raises(asyncpg.UniqueViolationError):
+        async with pg.transaction():
+            await pg.execute(
+                "INSERT INTO service.cases"
+                "(tenant_id,reference,customer_contact_id,intake_draft_id,title,"
+                "fault_description,source) VALUES "
+                "($1,'FS-INTAKE-RETRY',$2,$3,'Retry','Retry','whatsapp')",
+                fixture.tenant_id,
+                fixture.contact_id,
+                first_intake,
+            )
+    second_intake = await pg.fetchval(
+        "INSERT INTO service.intake_drafts"
+        "(tenant_id,conversation_id,reporting_contact_id,correlation_key) "
+        "VALUES ($1,$2,$3,'request-two') RETURNING id",
+        fixture.tenant_id,
+        conversation_id,
+        fixture.contact_id,
+    )
+    second_case = await pg.fetchval(
+        "INSERT INTO service.cases"
+        "(tenant_id,reference,customer_contact_id,intake_draft_id,conversation_id,"
+        "title,fault_description,source) "
+        "VALUES ($1,'FS-INTAKE-2',$2,$3,$4,'Second','Second fault','whatsapp') "
+        "RETURNING id",
+        fixture.tenant_id,
+        fixture.contact_id,
+        second_intake,
+        conversation_id,
+    )
+    assert first_case != second_case
+
+
+async def test_disabling_stops_new_summary_jobs_without_breaking_messages(
+    pg: asyncpg.Connection,
+) -> None:
+    fixture = await _tenant(pg, "Disable worker", enabled=True)
+    channel_id = await pg.fetchval(
+        "INSERT INTO messaging.channels"
+        "(tenant_id,kind,provider,provider_account_id) "
+        "VALUES ($1,'whatsapp','simulator',$2) RETURNING id",
+        fixture.tenant_id,
+        f"field-worker-{fixture.tenant_id}",
+    )
+    conversation_id = await pg.fetchval(
+        "INSERT INTO messaging.conversations(tenant_id,channel_id,contact_id) "
+        "VALUES ($1,$2,$3) RETURNING id",
+        fixture.tenant_id,
+        channel_id,
+        fixture.contact_id,
+    )
+    case_id = await pg.fetchval(
+        "INSERT INTO service.cases"
+        "(tenant_id,reference,customer_contact_id,conversation_id,title,fault_description) "
+        "VALUES ($1,'FS-DISABLE-1',$2,$3,'Fault','Synthetic fault') RETURNING id",
+        fixture.tenant_id,
+        fixture.contact_id,
+        conversation_id,
+    )
+    await pg.execute(
+        "INSERT INTO service.case_conversations"
+        "(tenant_id,case_id,conversation_id,relationship) "
+        "VALUES ($1,$2,$3,'intake')",
+        fixture.tenant_id,
+        case_id,
+        conversation_id,
+    )
+    queued_before = await pg.fetchval(
+        "SELECT count(*) FROM ops.jobs WHERE tenant_id=$1 AND job_type='field_service.summary'",
+        fixture.tenant_id,
+    )
+    await pg.execute(
+        "UPDATE service.tenant_configuration SET enabled=false WHERE tenant_id=$1",
+        fixture.tenant_id,
+    )
+    message_id = await pg.fetchval(
+        "INSERT INTO messaging.messages"
+        "(tenant_id,conversation_id,direction,sender_type,content_type,content_text,provider) "
+        "VALUES ($1,$2,'inbound','contact','text','Still retained','simulator') "
+        "RETURNING id",
+        fixture.tenant_id,
+        conversation_id,
+    )
+    assert message_id is not None
+    assert (
+        await pg.fetchval(
+            "SELECT count(*) FROM ops.jobs WHERE tenant_id=$1 AND job_type='field_service.summary'",
+            fixture.tenant_id,
+        )
+        == queued_before
+    )
+
+
+async def test_shared_sessions_cannot_replace_signed_attendance_or_final_reports(
+    pg: asyncpg.Connection,
+) -> None:
+    fixture = await _tenant(pg, "Shared technician", enabled=True)
+    shared_user_id = uuid4()
+    await pg.execute(
+        "INSERT INTO users(id,email,status) VALUES ($1,$2,'active')",
+        shared_user_id,
+        f"{shared_user_id}@example.test",
+    )
+    await pg.execute(
+        "INSERT INTO memberships(user_id,tenant_id,role) VALUES ($1,$2,'technician')",
+        shared_user_id,
+        fixture.tenant_id,
+    )
+    await pg.execute(
+        "UPDATE service.tenant_configuration "
+        "SET shared_technician_login_enabled=true WHERE tenant_id=$1",
+        fixture.tenant_id,
+    )
+    technician_id = await pg.fetchval(
+        "INSERT INTO service.technicians"
+        "(tenant_id,full_name,employee_identifier,created_by_user_id) "
+        "VALUES ($1,'Synthetic Field Technician','FIELD-01',$2) RETURNING id",
+        fixture.tenant_id,
+        fixture.user_id,
+    )
+    case_id = await pg.fetchval(
+        "INSERT INTO service.cases"
+        "(tenant_id,reference,customer_contact_id,title,fault_description,created_by_user_id) "
+        "VALUES ($1,'FS-SIGNED-1',$2,'Synthetic fault','Evidence-only fixture',$3) "
+        "RETURNING id",
+        fixture.tenant_id,
+        fixture.contact_id,
+        fixture.user_id,
+    )
+    visit_id = await pg.fetchval(
+        "INSERT INTO service.visits(tenant_id,case_id,technician_id,visit_number) "
+        "VALUES ($1,$2,$3,1) RETURNING id",
+        fixture.tenant_id,
+        case_id,
+        technician_id,
+    )
+
+    async def evidence(category: str) -> UUID:
+        object_id = await pg.fetchval(
+            "INSERT INTO objects.object_metadata"
+            "(tenant_id,owner_type,owner_id,category,content_type,byte_size,checksum,"
+            "storage_backend,storage_key,status) "
+            "VALUES ($1,'service_case',$2,$3,'image/png',9,$4,'local',$5,'available') "
+            "RETURNING id",
+            fixture.tenant_id,
+            case_id,
+            category,
+            uuid4().hex + uuid4().hex,
+            f"synthetic/{fixture.tenant_id}/{uuid4()}.png",
+        )
+        await pg.execute(
+            "INSERT INTO service.report_attachments"
+            "(tenant_id,case_id,visit_id,object_id,category,source) "
+            "VALUES ($1,$2,$3,$4,$5,'technician')",
+            fixture.tenant_id,
+            case_id,
+            visit_id,
+            object_id,
+            category,
+        )
+        return object_id
+
+    arrival_object = await evidence("arrival_signature")
+    departure_object = await evidence("departure_signature")
+    replacement_object = await evidence("arrival_signature")
+    first_session = await _auth_session(
+        pg, shared_user_id, fixture.tenant_id, "field-service-shared-a"
+    )
+    second_session = await _auth_session(
+        pg, shared_user_id, fixture.tenant_id, "field-service-shared-b"
+    )
+
+    await pg.execute("SET LOCAL ROLE platform_web")
+    await pg.execute(
+        "SELECT set_config('app.current_tenant',$1,true),"
+        "set_config('app.current_user',$2,true),"
+        "set_config('app.current_role','technician',true),"
+        "set_config('app.current_session',$3,true)",
+        str(fixture.tenant_id),
+        str(shared_user_id),
+        str(first_session),
+    )
+    first_identity = await pg.fetchval(
+        "INSERT INTO service.technician_session_identities"
+        "(tenant_id,auth_session_id,visit_id,technician_id,full_name,"
+        "employee_identifier,server_nonce,expires_at) "
+        "VALUES ($1,$2,$3,$4,'Synthetic Field Technician','FIELD-01',$5,"
+        "CURRENT_TIMESTAMP + interval '1 hour') RETURNING id",
+        fixture.tenant_id,
+        first_session,
+        visit_id,
+        technician_id,
+        uuid4().hex,
+    )
+    with pytest.raises(asyncpg.InsufficientPrivilegeError):
+        async with pg.transaction():
+            await pg.execute(
+                "INSERT INTO service.technician_session_identities"
+                "(tenant_id,auth_session_id,visit_id,technician_id,full_name,"
+                "employee_identifier,server_nonce,expires_at) "
+                "VALUES ($1,$2,$3,$4,'Synthetic Field Technician','FIELD-01',$5,"
+                "CURRENT_TIMESTAMP + interval '1 hour')",
+                fixture.tenant_id,
+                second_session,
+                visit_id,
+                technician_id,
+                uuid4().hex,
+            )
+
+    with pytest.raises(asyncpg.CheckViolationError):
+        async with pg.transaction():
+            await pg.execute(
+                "UPDATE service.visits SET departure_at='2026-09-14T10:00:00Z',"
+                "departure_signature_object_id=$1,departure_identity=$2::jsonb "
+                "WHERE id=$3",
+                departure_object,
+                '{"fullName":"Synthetic Field Technician"}',
+                visit_id,
+            )
+    arrival_identity = (
+        '{"identityId":"' + str(first_identity) + '","fullName":"Synthetic Field Technician",'
+        '"verificationState":"self_declared"}'
+    )
+    await pg.execute(
+        "UPDATE service.visits SET arrival_at='2026-09-14T09:00:00Z',"
+        "arrival_signature_object_id=$1,arrival_identity=$2::jsonb,status='arrived' "
+        "WHERE id=$3",
+        arrival_object,
+        arrival_identity,
+        visit_id,
+    )
+    await pg.execute("SELECT set_config('app.current_session',$1,true)", str(second_session))
+    with pytest.raises(asyncpg.ObjectNotInPrerequisiteStateError):
+        async with pg.transaction():
+            await pg.execute(
+                "UPDATE service.visits SET arrival_signature_object_id=$1,"
+                "arrival_identity=$2::jsonb WHERE id=$3",
+                replacement_object,
+                '{"fullName":"Replacement"}',
+                visit_id,
+            )
+    await pg.execute(
+        "UPDATE service.visits SET departure_at='2026-09-14T10:00:00Z',"
+        "departure_signature_object_id=$1,departure_identity=$2::jsonb,status='departed' "
+        "WHERE id=$3",
+        departure_object,
+        arrival_identity,
+        visit_id,
+    )
+    assert (
+        await pg.fetchval(
+            "SELECT extract(epoch FROM departure_at-arrival_at)::int "
+            "FROM service.visits WHERE id=$1",
+            visit_id,
+        )
+        == 3600
+    )
+
+    report_id = await pg.fetchval(
+        "INSERT INTO service.reports(tenant_id,case_id,visit_id) VALUES ($1,$2,$3) RETURNING id",
+        fixture.tenant_id,
+        case_id,
+        visit_id,
+    )
+    revision_id = await pg.fetchval(
+        "INSERT INTO service.report_revisions"
+        "(tenant_id,report_id,version,status,diagnosis,work_performed,part_replaced,"
+        "branding_snapshot,finalized_at,finalized_by_user_id) "
+        "VALUES ($1,$2,1,'finalized','Synthetic diagnosis','Synthetic repair',false,"
+        "$3::jsonb,CURRENT_TIMESTAMP,$4) RETURNING id",
+        fixture.tenant_id,
+        report_id,
+        '{"businessName":"Synthetic Tenant"}',
+        shared_user_id,
+    )
+    with pytest.raises(asyncpg.ObjectNotInPrerequisiteStateError):
+        async with pg.transaction():
+            await pg.execute(
+                "UPDATE service.report_revisions SET diagnosis='Silent mutation' WHERE id=$1",
+                revision_id,
+            )
+    await pg.execute(
+        "UPDATE service.report_revisions SET status='superseded' WHERE id=$1", revision_id
+    )
+    correction_id = await pg.fetchval(
+        "INSERT INTO service.report_revisions"
+        "(tenant_id,report_id,version,status,supersedes_revision_id,created_by_user_id) "
+        "VALUES ($1,$2,2,'draft',$3,$4) RETURNING id",
+        fixture.tenant_id,
+        report_id,
+        revision_id,
+        shared_user_id,
+    )
+    assert correction_id != revision_id

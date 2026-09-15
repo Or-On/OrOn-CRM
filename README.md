@@ -27,6 +27,9 @@ Current product areas include:
   flow visualization.
 - **Voice operations** — call records, transcripts, outcomes, usage, and
   simulator-backed validation.
+- **Field service & technicians** — an optional, default-off tenant capability
+  for service cases, scheduling, attendance, evidence, OCR-assisted review, and
+  branded technician reports.
 - **Administration** — workspace details, team access, invitations, roles,
   account settings, integrations, and API-key metadata.
 
@@ -36,20 +39,20 @@ and dark themes.
 
 ## Availability
 
-| Capability                                           | Current availability                                       |
-| ---------------------------------------------------- | ---------------------------------------------------------- |
-| Unified login and workspace access                   | Available for development                                  |
-| Tenant isolation and role-based access               | Available and PostgreSQL-tested                            |
-| CRM, contacts, inbox, pipelines, and team management | Available for development                                  |
-| WhatsApp simulator                                   | Enabled by default                                         |
-| Meta WhatsApp Cloud API                              | Available only when explicitly configured and confirmed    |
-| Voice and campaign simulator                         | Available for development                                  |
-| LiveKit/SIP control plane                            | Optional, read-only verification available                 |
-| Real carrier calling                                 | Explicitly enabled, consented, and confirmed calls only    |
-| Cross-channel workflow simulation                    | Available for the supported workflow set                   |
-| Visual-agent/Live Lab experience                     | Deliberately deferred to the final integration phase       |
+| Capability                                           | Current availability                                        |
+| ---------------------------------------------------- | ----------------------------------------------------------- |
+| Unified login and workspace access                   | Available for development                                   |
+| Tenant isolation and role-based access               | Available and PostgreSQL-tested                             |
+| CRM, contacts, inbox, pipelines, and team management | Available for development                                   |
+| WhatsApp simulator                                   | Enabled by default                                          |
+| Meta WhatsApp Cloud API                              | Available only when explicitly configured and confirmed     |
+| Voice and campaign simulator                         | Available for development                                   |
+| LiveKit/SIP control plane                            | Optional, read-only verification available                  |
+| Real carrier calling                                 | Explicitly enabled, consented, and confirmed calls only     |
+| Cross-channel workflow simulation                    | Available for the supported workflow set                    |
+| Field service and technician workflows               | Optional per tenant; unavailable and disabled by default    |
+| Visual-agent/Live Lab experience                     | Deliberately deferred to the final integration phase        |
 | Portable single-host deployment                      | OCI/Compose candidate prepared; live deployment not claimed |
-
 
 ## Data and tenancy
 
@@ -160,6 +163,7 @@ configuration and safe testing. Do not paste credentials into source files,
 documentation, screenshots, issue reports, or chat transcripts.
 
 ### Optional WhatsApp AI and tenant integrations
+
 The Inbox operator must
 then explicitly assign a published WhatsApp agent to each conversation.
 Generated messages use the canonical durable outbound queue and all Meta safety
@@ -217,6 +221,9 @@ manually authorized.
 - [WhatsApp Cloud API](docs/runbooks/whatsapp-cloud-api.md)
 - [WhatsApp AI and call requests](docs/runbooks/whatsapp-ai-and-call.md)
 - [Voice control plane](docs/runbooks/voice-control-plane.md)
+- [Field service and technicians](docs/runbooks/field-service.md)
+- [Field-service source mapping](docs/migration/brimag-field-service-map.md)
+- [Field-service validation evidence](docs/migration/field-service-validation.md)
 - [Architecture overview](docs/architecture/overview.md)
 - [Portable deployment](docs/runbooks/deployment.md)
 - [Security threat model](docs/security/threat-model.md)

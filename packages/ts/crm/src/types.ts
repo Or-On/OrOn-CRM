@@ -22,6 +22,14 @@ export interface ContactSummary {
   readonly createdAt: string;
   readonly identities: readonly ContactIdentity[];
   readonly tags: readonly Tag[];
+  /** Tenant-managed customer-file classifications, when that projection is loaded. */
+  readonly classifications?: readonly ContactClassificationSummary[];
+}
+
+export interface ContactClassificationSummary {
+  readonly id: string;
+  readonly name: string;
+  readonly color: string;
 }
 
 export interface Tag {
@@ -145,13 +153,13 @@ export interface TeamMember {
   readonly userId: string;
   readonly email: string;
   readonly displayName: string | null;
-  readonly role: "owner" | "admin" | "agent" | "viewer";
+  readonly role: "owner" | "admin" | "agent" | "technician" | "viewer";
 }
 
 export interface TenantInvitationSummary {
   readonly id: string;
   readonly email: string;
-  readonly role: "admin" | "agent" | "viewer";
+  readonly role: "admin" | "agent" | "technician" | "viewer";
   readonly expiresAt: string;
   readonly createdAt: string;
 }
@@ -161,6 +169,14 @@ export interface TenantSettings {
   readonly defaultCurrency: string;
   readonly locale: string;
   readonly timezone: string;
+  readonly businessName?: string | null;
+  readonly businessEmail?: string | null;
+  readonly businessPhone?: string | null;
+  readonly businessAddress?: string | null;
+  readonly accentToken?:
+    "blue" | "cyan" | "emerald" | "violet" | "amber" | "rose" | null;
+  readonly reportHeader?: string | null;
+  readonly reportFooter?: string | null;
 }
 
 export interface StoredIdentityImage {

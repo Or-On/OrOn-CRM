@@ -9,7 +9,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type SyntheticEvent } from "react";
 
-import type { ContactImportResult, ContactSummary } from "@or-on/crm";
+import type {
+  ContactImportResult,
+  ContactCursor,
+  ContactSummary,
+  CustomerClassification,
+} from "@or-on/crm";
 import {
   Button,
   Dialog,
@@ -20,7 +25,7 @@ import {
   Textarea,
 } from "@or-on/ui";
 
-import { crmMutation } from "../crm";
+import { crmMutation, crmRead } from "../crm";
 import { ContactResults } from "./contact-results";
 
 type ContactPanel = "create" | "import";
@@ -47,6 +52,9 @@ function contactSearchText(contact: ContactSummary): string {
       identity.channel,
     ]),
     ...contact.tags.map((tag) => tag.name),
+    ...(contact.classifications ?? []).map(
+      (classification) => classification.name,
+    ),
   ]
     .filter((value): value is string => value !== null)
     .join(" ")
@@ -54,13 +62,17 @@ function contactSearchText(contact: ContactSummary): string {
 }
 
 export function ContactManager({
-  contacts,
+  contacts: initialContacts,
+  classifications = [],
   query = "",
   initialPanel,
+  nextCursor: initialNextCursor = null,
 }: {
   readonly contacts: readonly ContactSummary[];
+  readonly classifications?: readonly CustomerClassification[];
   readonly query?: string;
   readonly initialPanel?: ContactPanel;
+  readonly nextCursor?: ContactCursor | null;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -68,6 +80,12 @@ export function ContactManager({
   const router = useRouter();
   const [panel, setPanel] = useState<ContactPanel | undefined>(initialPanel);
   const [pending, setPending] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [contacts, setContacts] =
+    useState<readonly ContactSummary[]>(initialContacts);
+  const [nextCursor, setNextCursor] = useState<ContactCursor | null>(
+    initialNextCursor,
+  );
   const [error, setError] = useState<string>();
   const [importResult, setImportResult] = useState<ContactImportResult>();
   const [localQuery, setLocalQuery] = useState(query);
@@ -76,9 +94,43 @@ export function ContactManager({
   const [tag, setTag] = useState("all");
   const [resultPage, setResultPage] = useState(0);
   const [channel, setChannel] = useState<ContactChannel | "all">("all");
+  const [classification, setClassification] = useState("all");
 
   useEffect(() => setLocalQuery(query), [query]);
   useEffect(() => setPanel(initialPanel), [initialPanel]);
+  useEffect(() => {
+    setContacts(initialContacts);
+    setNextCursor(initialNextCursor);
+    setResultPage(0);
+  }, [initialContacts, initialNextCursor]);
+
+  async function loadMoreContacts() {
+    if (nextCursor === null || loadingMore) return;
+    setLoadingMore(true);
+    setError(undefined);
+    try {
+      const parameters = new URLSearchParams({
+        cursorAt: nextCursor.sortAt,
+        cursorId: nextCursor.id,
+        limit: "50",
+      });
+      if (query.trim() !== "") parameters.set("q", query.trim());
+      const page = await crmRead<{
+        readonly contacts: readonly ContactSummary[];
+        readonly nextCursor: ContactCursor | null;
+      }>(`/api/crm/contacts?${parameters.toString()}`);
+      setContacts((current) => {
+        const merged = new Map(current.map((contact) => [contact.id, contact]));
+        for (const contact of page.contacts) merged.set(contact.id, contact);
+        return [...merged.values()];
+      });
+      setNextCursor(page.nextCursor);
+    } catch (reason) {
+      setError(errorMessage(reason, t, "errors.unavailable"));
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   const visibleContacts = useMemo(() => {
     const search = localQuery.trim().toLocaleLowerCase();
@@ -87,6 +139,10 @@ export function ContactManager({
         (search.length === 0 || contactSearchText(contact).includes(search)) &&
         (lifecycle === "all" || contact.lifecycleStatus === lifecycle) &&
         (tag === "all" || contact.tags.some((item) => item.id === tag)) &&
+        (classification === "all" ||
+          (contact.classifications ?? []).some(
+            (item) => item.id === classification,
+          )) &&
         (channel === "all" ||
           contact.identities.some((identity) => identity.channel === channel)),
     );
@@ -98,7 +154,16 @@ export function ContactManager({
         : (sort === "nameAsc" ? 1 : -1) *
             a.name.localeCompare(b.name, locale) || a.id.localeCompare(b.id),
     );
-  }, [channel, contacts, lifecycle, localQuery, locale, sort, tag]);
+  }, [
+    channel,
+    classification,
+    contacts,
+    lifecycle,
+    localQuery,
+    locale,
+    sort,
+    tag,
+  ]);
   const availableTags = [
     ...new Map(
       contacts.flatMap((contact) =>
@@ -326,6 +391,24 @@ export function ContactManager({
               ))}
             </Select>
           ) : null}
+          {classifications.length ? (
+            <Select
+              id="contacts-classification-filter"
+              label={t("contacts.classification")}
+              value={classification}
+              onChange={(event) => {
+                setClassification(event.target.value);
+                setResultPage(0);
+              }}
+            >
+              <option value="all">{t("contacts.allClassifications")}</option>
+              {classifications.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
+              ))}
+            </Select>
+          ) : null}
           <Select
             id="contacts-sort"
             label={t("tenantPrimary.sort")}
@@ -488,7 +571,7 @@ export function ContactManager({
             <ContactResults contacts={pageContacts} />
           )}
         </div>
-        {visibleContacts.length > pageSize ? (
+        {visibleContacts.length > pageSize || nextCursor !== null ? (
           <nav
             className="contacts-pagination"
             aria-label={t("tenantPrimary.page", {
@@ -524,6 +607,16 @@ export function ContactManager({
             >
               {t("tenantPrimary.next")}
             </Button>
+            {nextCursor === null ? null : (
+              <Button
+                busy={loadingMore}
+                disabled={loadingMore}
+                onClick={() => void loadMoreContacts()}
+                variant="secondary"
+              >
+                {t("tenantPrimary.loadMore")}
+              </Button>
+            )}
           </nav>
         ) : null}
       </div>

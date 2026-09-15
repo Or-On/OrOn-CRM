@@ -84,7 +84,13 @@ const copy = {
     failed: "The change could not be completed. Please try again.",
     count: "users",
     tableRegion: "Scrollable workspace users",
-    roles: { owner: "Owner", admin: "Admin", agent: "Agent", viewer: "Viewer" },
+    roles: {
+      owner: "Owner",
+      admin: "Admin",
+      agent: "Agent",
+      technician: "Technician",
+      viewer: "Viewer",
+    },
   },
   he: {
     title: "משתמשים",
@@ -138,7 +144,13 @@ const copy = {
     failed: "לא ניתן היה להשלים את השינוי. נסו שוב.",
     count: "משתמשים",
     tableRegion: "טבלת משתמשי סביבת העבודה הניתנת לגלילה",
-    roles: { owner: "בעלים", admin: "מנהל", agent: "נציג", viewer: "צופה" },
+    roles: {
+      owner: "בעלים",
+      admin: "מנהל",
+      agent: "נציג",
+      technician: "טכנאי",
+      viewer: "צופה",
+    },
   },
 } as const;
 
@@ -459,6 +471,7 @@ export function UsersWorkspace({
                 <option value="owner">{c.roles.owner}</option>
                 <option value="admin">{c.roles.admin}</option>
                 <option value="agent">{c.roles.agent}</option>
+                <option value="technician">{c.roles.technician}</option>
                 <option value="viewer">{c.roles.viewer}</option>
               </select>
             </label>
@@ -549,6 +562,9 @@ export function UsersWorkspace({
                               ) : null}
                               <option value="admin">{c.roles.admin}</option>
                               <option value="agent">{c.roles.agent}</option>
+                              <option value="technician">
+                                {c.roles.technician}
+                              </option>
                               <option value="viewer">{c.roles.viewer}</option>
                             </select>
                           )}
@@ -656,6 +672,7 @@ export function UsersWorkspace({
             >
               <option value="admin">{c.roles.admin}</option>
               <option value="agent">{c.roles.agent}</option>
+              <option value="technician">{c.roles.technician}</option>
               <option value="viewer">{c.roles.viewer}</option>
             </Select>
             <Button busy={pending} type="submit">

@@ -68,6 +68,13 @@ const copy = {
     outlookHint: "Connect a Microsoft 365 or Outlook mailbox.",
     connectGmail: "Connect Gmail",
     connectOutlook: "Connect Outlook",
+    disconnectGmail: "Disconnect Gmail",
+    disconnectOutlook: "Disconnect Outlook",
+    disconnecting: "Disconnecting…",
+    disconnectError:
+      "The mailbox could not be disconnected. Its current state is unchanged.",
+    disconnectHint:
+      "This removes stored mailbox access from this workspace. Revoke the app in the provider account as well if your policy requires immediate upstream revocation.",
     setupGmail: "Set up Gmail securely",
     setupOutlook: "Set up Outlook securely",
     selectedProvider: "Selected provider",
@@ -132,6 +139,12 @@ const copy = {
     outlookHint: "חיבור תיבת Microsoft 365 או Outlook.",
     connectGmail: "חיבור Gmail",
     connectOutlook: "חיבור Outlook",
+    disconnectGmail: "ניתוק Gmail",
+    disconnectOutlook: "ניתוק Outlook",
+    disconnecting: "מתנתק…",
+    disconnectError: "לא הצלחנו לנתק את תיבת הדואר. המצב הנוכחי לא השתנה.",
+    disconnectHint:
+      "הפעולה מסירה את הגישה השמורה לתיבה מסביבת עבודה זו. אם המדיניות מחייבת ביטול מיידי אצל הספק, יש לבטל גם את הרשאת האפליקציה בחשבון הספק.",
     setupGmail: "הגדרה מאובטחת של Gmail",
     setupOutlook: "הגדרה מאובטחת של Outlook",
     selectedProvider: "הספק שנבחר",
@@ -202,6 +215,11 @@ export function EmailWorkspace({
   const [directoryTenant, setDirectoryTenant] = useState("");
   const [credentialPending, setCredentialPending] = useState(false);
   const [credentialError, setCredentialError] = useState<string>();
+  const [disconnectPending, setDisconnectPending] = useState<SetupProvider>();
+  const [disconnectError, setDisconnectError] = useState<string>();
+  const [disconnectedProviders, setDisconnectedProviders] = useState<
+    ReadonlySet<SetupProvider>
+  >(new Set());
   const guideRef = useRef<HTMLElement>(null);
   const formatter = useMemo(
     () =>
@@ -213,16 +231,20 @@ export function EmailWorkspace({
     [locale, timeZone],
   );
   const number = useMemo(() => new Intl.NumberFormat(locale), [locale]);
-  const google = channels.filter(
+  const visibleChannels = channels.filter((channel) => {
+    const kind = providerKind(channel.provider);
+    return kind === "other" || !disconnectedProviders.has(kind);
+  });
+  const google = visibleChannels.filter(
     (channel) => providerKind(channel.provider) === "google",
   );
-  const microsoft = channels.filter(
+  const microsoft = visibleChannels.filter(
     (channel) => providerKind(channel.provider) === "microsoft",
   );
-  const other = channels.filter(
+  const other = visibleChannels.filter(
     (channel) => providerKind(channel.provider) === "other",
   );
-  const activeCount = channels.filter(
+  const activeCount = visibleChannels.filter(
     (channel) => channel.status === "active",
   ).length;
 
@@ -254,6 +276,24 @@ export function EmailWorkspace({
     } catch {
       setCredentialError(c.credentialError);
       setCredentialPending(false);
+    }
+  }
+
+  async function disconnect(provider: SetupProvider) {
+    if (disconnectPending) return;
+    setDisconnectPending(provider);
+    setDisconnectError(undefined);
+    try {
+      await crmMutation(
+        `/api/email/oauth/configuration?provider=${encodeURIComponent(provider)}`,
+        {},
+        { method: "DELETE" },
+      );
+      setDisconnectedProviders((current) => new Set([...current, provider]));
+    } catch {
+      setDisconnectError(c.disconnectError);
+    } finally {
+      setDisconnectPending(undefined);
     }
   }
 
@@ -291,13 +331,28 @@ export function EmailWorkspace({
           {active ? c.connected : c.unavailable}
         </span>
         {active ? (
-          <div className={styles.connectedAccount}>
-            <strong>
-              <bdi>
-                {active.displayAddress ?? active.providerAccountId ?? label}
-              </bdi>
-            </strong>
-            <small>{c.managed}</small>
+          <div className={styles.connectedControls}>
+            <div className={styles.connectedAccount}>
+              <strong>
+                <bdi>
+                  {active.displayAddress ?? active.providerAccountId ?? label}
+                </bdi>
+              </strong>
+              <small>{c.managed}</small>
+            </div>
+            <button
+              className={styles.disconnectButton}
+              disabled={disconnectPending !== undefined}
+              onClick={() => void disconnect(provider)}
+              title={c.disconnectHint}
+              type="button"
+            >
+              {disconnectPending === provider
+                ? c.disconnecting
+                : isGoogle
+                  ? c.disconnectGmail
+                  : c.disconnectOutlook}
+            </button>
           </div>
         ) : (
           <button
@@ -332,7 +387,7 @@ export function EmailWorkspace({
           >
             <Mail aria-hidden="true" size={15} />
             <span>{c.accounts}</span>
-            <small>{number.format(channels.length)}</small>
+            <small>{number.format(visibleChannels.length)}</small>
           </button>
           <button
             aria-pressed={view === "setup"}
@@ -371,7 +426,7 @@ export function EmailWorkspace({
             {activeCount > 0 ? c.connected : c.notConnected}
           </span>
           <small>
-            {number.format(activeCount)}/{number.format(channels.length)}{" "}
+            {number.format(activeCount)}/{number.format(visibleChannels.length)}{" "}
             {c.providerAccounts}
           </small>
         </div>
@@ -406,6 +461,11 @@ export function EmailWorkspace({
               {providerCard("google", google)}
               {providerCard("microsoft", microsoft)}
             </div>
+            {disconnectError ? (
+              <p className={styles.disconnectError} role="alert">
+                {disconnectError}
+              </p>
+            ) : null}
             <section className={styles.channelsCard}>
               <header>
                 <div>
@@ -414,14 +474,14 @@ export function EmailWorkspace({
                 </div>
                 <RefreshCw aria-hidden="true" size={15} />
               </header>
-              {channels.length === 0 ? (
+              {visibleChannels.length === 0 ? (
                 <div className={styles.empty}>
                   <Mail aria-hidden="true" size={23} />
                   <p>{c.noAccounts}</p>
                 </div>
               ) : (
                 <div className={styles.channelList}>
-                  {channels.map((channel) => (
+                  {visibleChannels.map((channel) => (
                     <article key={channel.id}>
                       <span className={styles.mailIcon}>
                         <Mail aria-hidden="true" size={15} />

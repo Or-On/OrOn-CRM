@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Heebo } from "next/font/google";
 import { loadConfig } from "@or-on/config";
-import type { ReactNode } from "react";
+import { cache, type ReactNode } from "react";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getTranslations } from "next-intl/server";
 import { directionForLocale, resolveLocale } from "../i18n/direction";
@@ -17,10 +17,13 @@ import "./auth.css";
 import "./voice-details.css";
 import "./studio-replica.css";
 import "./workspace-premium.css";
+import "./field-service.css";
 
 import { AppShell } from "../features/shell";
 import { AccessProvider } from "../features/access";
 import { currentPublicSession } from "../features/auth";
+import { withCurrentTenant } from "../features/auth";
+import { getFieldServiceFeatureState, getTenantSettings } from "@or-on/crm";
 import { Providers } from "./providers";
 import { product } from "../branding";
 
@@ -44,10 +47,31 @@ const applicationHebrew = Heebo({
   variable: "--application-font-hebrew",
 });
 
+const currentShellContext = cache(async () => {
+  const session = await currentPublicSession();
+  if (session === undefined) return undefined;
+  const presentation = await withCurrentTenant("platform:read", async (sql) => {
+    const settings = await getTenantSettings(sql);
+    const fieldService = session.permissions.includes("field-service:read")
+      ? await getFieldServiceFeatureState(sql)
+      : undefined;
+    return {
+      businessName: settings.businessName ?? session.tenant.tenantName,
+      accentToken: settings.accentToken ?? null,
+      fieldServiceEnabled: fieldService?.effective === true,
+    };
+  });
+  return { session, ...presentation };
+});
+
 export async function generateMetadata(): Promise<Metadata> {
-  const t = await getTranslations("meta");
+  const [t, shellContext] = await Promise.all([
+    getTranslations("meta"),
+    currentShellContext(),
+  ]);
+  const titleBrand = shellContext?.businessName ?? product.name;
   return {
-    title: { default: product.name, template: `%s · ${product.name}` },
+    title: { default: titleBrand, template: `%s · ${titleBrand}` },
     description: t("description"),
     icons: {
       icon: [{ url: product.logoPath, type: "image/webp" }],
@@ -61,7 +85,8 @@ export default async function RootLayout({
 }: {
   readonly children: ReactNode;
 }) {
-  const session = await currentPublicSession();
+  const shellContext = await currentShellContext();
+  const session = shellContext?.session;
   const environment = loadConfig(process.env, { service: "web" }).environment;
   const locale = resolveLocale(await getLocale());
   return (
@@ -78,7 +103,21 @@ export default async function RootLayout({
             <ConnectionStatus />
             <AccessProvider permissions={session?.permissions ?? []}>
               <FormValidation>
-                <AppShell environment={environment} session={session}>
+                <AppShell
+                  environment={environment}
+                  fieldServiceEnabled={
+                    shellContext?.fieldServiceEnabled === true
+                  }
+                  session={session}
+                  {...(shellContext === undefined
+                    ? {}
+                    : {
+                        tenantBranding: {
+                          businessName: shellContext.businessName,
+                          accentToken: shellContext.accentToken,
+                        },
+                      })}
+                >
                   {children}
                 </AppShell>
               </FormValidation>

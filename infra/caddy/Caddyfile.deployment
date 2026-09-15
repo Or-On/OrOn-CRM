@@ -6,7 +6,10 @@
 {$PLATFORM_ORIGIN} {
 	encode zstd gzip
 	request_body {
-		max_size 2MB
+		# Application routes enforce content-aware limits up to 20 MiB for a
+		# customer PDF. Allow bounded multipart framing without rejecting valid
+		# field-service uploads at the edge.
+		max_size 22MB
 	}
 	header {
 		-Server

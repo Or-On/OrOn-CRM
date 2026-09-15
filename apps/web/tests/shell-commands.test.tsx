@@ -132,6 +132,27 @@ describe("route-backed workspace commands", () => {
     expect(theme.setTheme).toHaveBeenCalledWith("light");
   });
 
+  it("applies tenant white-label identity through approved shell tokens", () => {
+    const { container } = render(
+      localized(
+        <AppShell
+          session={session}
+          tenantBranding={{
+            businessName: "Northstar Service",
+            accentToken: "emerald",
+          }}
+        >
+          Workspace
+        </AppShell>,
+      ),
+    );
+
+    expect(screen.getAllByText("Northstar Service").length).toBeGreaterThan(0);
+    expect(
+      container.querySelector(".shell")?.getAttribute("data-tenant-accent"),
+    ).toBe("emerald");
+  });
+
   it("keeps Inbox search synchronized with same-route navigation and reset without remounting drafts", () => {
     navigation.pathname = "/inbox";
     navigation.search = "search=Priority%20client";

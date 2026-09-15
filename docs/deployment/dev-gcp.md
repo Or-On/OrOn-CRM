@@ -161,14 +161,26 @@ release archive, transfers it over IAP, and runs:
 
 ```bash
 sudo /opt/oron-dev/scripts/deploy-dev.sh \
-  <40-character-commit-sha> /tmp/oron-dev-release-<commit-sha>.tar.gz
+  <40-character-commit-sha> \
+  /tmp/oron-dev-release-<commit-sha>.tar.gz \
+  <release-archive-sha256>
 ```
 
-The script validates the archive, acquires `flock`, pulls images before
-touching the running release, starts PostgreSQL, runs Alembic, bootstraps the
-first owner only on an empty identity database, updates services, verifies HTTPS
-and the HTTP redirect, then atomically updates `current`. It never deletes
-`shared/data`.
+The script verifies the supplied archive checksum and accepts only the eight
+expected regular files, with bounded sizes and no duplicate, extra, link or
+traversal entries. It validates five distinct immutable image keys, pulls each
+digest, and verifies the OCI source-revision label against the requested commit
+before touching the running release.
+
+For an upgrade, request admission and the messaging worker stop first. The
+dispatcher remains available while active voice sessions drain for at most
+three minutes; deployment fails instead of disconnecting a remaining caller.
+The prior control API and dispatcher then stop, and the new release's backup
+script captures the database and private objects before Alembic runs. The first
+owner is bootstrapped only when the authoritative `users` table is empty. After
+startup, the script verifies that every running application container uses the
+expected immutable image ID, checks HTTPS and the HTTP redirect, and only then
+atomically updates `current`. It never deletes `shared/data`.
 
 ## Migrations, health, and service control
 
@@ -215,16 +227,44 @@ sudo docker compose \
 
 ## Backups and restore
 
-`oron-dev-backup.timer` creates a custom-format `pg_dump` every night and
-deletes DEV dump files older than seven days. Run one immediately with:
+`oron-dev-backup.timer` creates one mode-`0600` bundle every night. Each bundle
+contains a custom-format PostgreSQL dump, a deterministic archive of all
+private objects and call recordings, the release identifier, the schema head,
+and internal SHA-256 checksums. A separate checksum protects the complete
+compressed bundle. Bundle and sidecar files older than seven days are removed.
+Run one immediately with:
 
 ```bash
 sudo systemctl start oron-dev-backup.service
 sudo ls -lh /opt/oron-dev/backups
 ```
 
-Restore is an explicit maintenance action. Stop application services, retain a
-copy of the current database, then stream the chosen dump into `pg_restore`:
+These backups currently remain on the same VM. That protects release rollback
+and operator mistakes, but it is **not** disaster recovery for VM or disk loss.
+Before treating DEV as recoverable, copy bundles to an independently protected,
+versioned off-host destination with separate credentials and retention, then
+perform a restore drill from that copy.
+
+Restore is an explicit maintenance action. First verify and unpack a selected
+bundle into a new root-owned recovery directory; never overwrite the live
+object directory during a drill:
+
+```bash
+backup=/opt/oron-dev/backups/<selected>.backup.tar.gz
+recovery=/opt/oron-dev/recovery/<unique-drill-id>
+sudo install -d -m 0700 "$recovery"
+cd /opt/oron-dev/backups
+sudo sha256sum --check "$(basename "$backup").sha256"
+sudo tar -xzf "$backup" -C "$recovery"
+cd "$recovery"
+sudo sha256sum --check SHA256SUMS
+sudo install -d -m 0700 "$recovery/objects"
+sudo tar -xf objects.tar -C "$recovery/objects"
+```
+
+Restore the database only into a newly named, isolated database while workers
+remain stopped. The example deliberately does not switch the application to
+the restored database or objects:
 
 ```bash
 sudo systemctl stop oron-dev
@@ -236,18 +276,30 @@ sudo docker compose \
 sudo docker compose \
   --env-file /opt/oron-dev/shared/deployment.env \
   --env-file "$release/images.env" -f "$release/infra/compose/deployment.yaml" \
-  exec -T postgres pg_restore --clean --if-exists --no-owner \
-  -U platform_migrator -d dev_oron_platform \
-  </opt/oron-dev/backups/<selected-dump>
-sudo systemctl start oron-dev
+  exec -T postgres createdb -U platform_migrator <new-restore-database>
+sudo docker compose \
+  --env-file /opt/oron-dev/shared/deployment.env \
+  --env-file "$release/images.env" -f "$release/infra/compose/deployment.yaml" \
+  exec -T postgres pg_restore --no-owner \
+  -U platform_migrator -d <new-restore-database> \
+  <"$recovery/database.dump"
 ```
+
+Verify Alembic head, table counts, RLS and runtime-role isolation, protected-key
+availability, object checksums, and metadata-to-object consistency in the
+isolated destination. Reconcile queued messages, payments, calls and calendar
+work before any separately approved cutover. Restart the current application
+only after the drill is complete and the ordinary deployment configuration is
+still selected.
 
 ## Rollback
 
-Automatic rollback restores the previous images when a post-deploy health
-check fails. A migration is not automatically reversed and the pre-release
-backup is retained. For an operator rollback, select a retained release and
-start it before changing the symlink:
+Automatic rollback restores the previous core services and only the optional
+worker/voice profiles that were running before the attempted deployment. A
+migration is not automatically reversed and the pre-release backup is retained.
+For an operator rollback, first verify that the prior application is compatible
+with the expanded schema, select a retained release, and start it before changing
+the symlink:
 
 ```bash
 previous=/opt/oron-dev/releases/<previous-commit-sha>

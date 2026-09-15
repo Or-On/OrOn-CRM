@@ -2,6 +2,94 @@
 @import "@or-on/ui/styles.css";
 
 @source "../../../../packages/ts/ui/src";
+
+/* Tenant accents only replace approved color tokens; structure and contrast
+   continue to come from the shared design system. */
+:where(.shell, .page--field-service-report)[data-tenant-accent="cyan"] {
+  --or-accent: #67e8f9;
+  --or-accent-hover: #a5f3fc;
+  --or-accent-strong: #a5f3fc;
+  --or-accent-soft: rgb(34 211 238 / 12%);
+  --or-focus: #67e8f9;
+}
+
+:where(.shell, .page--field-service-report)[data-tenant-accent="emerald"] {
+  --or-accent: #6ee7b7;
+  --or-accent-hover: #a7f3d0;
+  --or-accent-strong: #a7f3d0;
+  --or-accent-soft: rgb(16 185 129 / 12%);
+  --or-focus: #6ee7b7;
+}
+
+:where(.shell, .page--field-service-report)[data-tenant-accent="violet"] {
+  --or-accent: #c4b5fd;
+  --or-accent-hover: #ddd6fe;
+  --or-accent-strong: #ddd6fe;
+  --or-accent-soft: rgb(139 92 246 / 12%);
+  --or-focus: #c4b5fd;
+}
+
+:where(.shell, .page--field-service-report)[data-tenant-accent="amber"] {
+  --or-accent: #fcd34d;
+  --or-accent-hover: #fde68a;
+  --or-accent-strong: #fde68a;
+  --or-accent-soft: rgb(245 158 11 / 12%);
+  --or-focus: #fcd34d;
+}
+
+:where(.shell, .page--field-service-report)[data-tenant-accent="rose"] {
+  --or-accent: #fda4af;
+  --or-accent-hover: #fecdd3;
+  --or-accent-strong: #fecdd3;
+  --or-accent-soft: rgb(244 63 94 / 12%);
+  --or-focus: #fda4af;
+}
+
+[data-theme="light"]
+  :where(.shell, .page--field-service-report)[data-tenant-accent="cyan"] {
+  --or-accent: #0e7490;
+  --or-accent-hover: #155e75;
+  --or-accent-strong: #155e75;
+  --or-accent-soft: rgb(8 145 178 / 9%);
+  --or-focus: #0e7490;
+}
+
+[data-theme="light"]
+  :where(.shell, .page--field-service-report)[data-tenant-accent="emerald"] {
+  --or-accent: #047857;
+  --or-accent-hover: #065f46;
+  --or-accent-strong: #065f46;
+  --or-accent-soft: rgb(5 150 105 / 9%);
+  --or-focus: #047857;
+}
+
+[data-theme="light"]
+  :where(.shell, .page--field-service-report)[data-tenant-accent="violet"] {
+  --or-accent: #6d28d9;
+  --or-accent-hover: #5b21b6;
+  --or-accent-strong: #5b21b6;
+  --or-accent-soft: rgb(124 58 237 / 9%);
+  --or-focus: #6d28d9;
+}
+
+[data-theme="light"]
+  :where(.shell, .page--field-service-report)[data-tenant-accent="amber"] {
+  --or-accent: #b45309;
+  --or-accent-hover: #92400e;
+  --or-accent-strong: #92400e;
+  --or-accent-soft: rgb(217 119 6 / 9%);
+  --or-focus: #b45309;
+}
+
+[data-theme="light"]
+  :where(.shell, .page--field-service-report)[data-tenant-accent="rose"] {
+  --or-accent: #be123c;
+  --or-accent-hover: #9f1239;
+  --or-accent-strong: #9f1239;
+  --or-accent-soft: rgb(225 29 72 / 9%);
+  --or-focus: #be123c;
+}
+
 .brand-lockup {
   display: inline-flex;
   align-items: center;
@@ -243,6 +331,29 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.tenant-admin-card__feature-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-block-start: 0.55rem;
+  color: var(--or-text-muted);
+  font-size: 0.68rem;
+  line-height: 1.25;
+}
+.tenant-admin-card__feature-status::before {
+  inline-size: 0.4rem;
+  block-size: 0.4rem;
+  background: var(--or-text-subtle);
+  border-radius: 50%;
+  content: "";
+}
+.tenant-admin-card__feature-status[data-enabled] {
+  color: var(--or-positive);
+}
+.tenant-admin-card__feature-status[data-enabled]::before {
+  background: currentColor;
+  box-shadow: 0 0 0 0.2rem color-mix(in srgb, currentColor 12%, transparent);
+}
 .tenant-admin-grid p {
   margin-block-start: 0.2rem;
   overflow: hidden;
@@ -382,8 +493,32 @@
   gap: 0.8rem;
 }
 .tenant-admin-form > p,
-.tenant-admin-form > button {
+.tenant-admin-form > button,
+.tenant-admin-feature-selection {
   grid-column: 1 / -1;
+}
+.tenant-admin-feature-selection {
+  display: grid;
+  gap: 0.7rem;
+  margin: 0;
+  padding: 1rem;
+  border: 1px solid var(--or-border);
+  border-radius: var(--or-radius-md);
+}
+.tenant-admin-feature-selection legend {
+  padding-inline: 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+.tenant-admin-feature-selection .or-checkbox > span:last-child,
+.tenant-admin-feature-selection .or-checkbox > span:last-child > span {
+  display: grid;
+  gap: 0.2rem;
+}
+.tenant-admin-feature-selection small {
+  color: var(--or-text-muted);
+  font-size: 0.72rem;
+  line-height: 1.45;
 }
 .tenant-admin-form > p {
   margin: 0;
@@ -391,6 +526,46 @@
   font-size: 0.78rem;
 }
 .tenant-admin-form > p[role="alert"] {
+  color: var(--or-danger);
+}
+.tenant-admin-capability-form {
+  display: grid;
+  gap: 1rem;
+}
+.tenant-admin-capability-form > div:first-child {
+  display: flex;
+  align-items: baseline;
+  gap: 0.55rem;
+  padding-block-end: 0.9rem;
+  border-block-end: 1px solid var(--or-divider);
+}
+.tenant-admin-capability-form > div:first-child span,
+.tenant-admin-capability-form > p {
+  color: var(--or-text-muted);
+  font-size: 0.76rem;
+  line-height: 1.55;
+}
+.tenant-admin-capability-form .or-checkbox {
+  align-items: flex-start;
+  padding: 1rem;
+  background: var(--or-surface-inset);
+  border: 1px solid var(--or-border);
+  border-radius: var(--or-radius-md);
+}
+.tenant-admin-capability-form .or-checkbox > span:last-child,
+.tenant-admin-capability-form .or-checkbox > span:last-child > span {
+  display: grid;
+  gap: 0.25rem;
+}
+.tenant-admin-capability-form small {
+  color: var(--or-text-muted);
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+.tenant-admin-capability-form > p {
+  margin: 0;
+}
+.tenant-admin-capability-form > p[role="alert"] {
   color: var(--or-danger);
 }
 

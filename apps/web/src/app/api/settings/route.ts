@@ -21,7 +21,23 @@ export async function PATCH(request: Request) {
       typeof body.locale !== "string" ||
       typeof body.timezone !== "string" ||
       typeof body.tenantName !== "string" ||
-      (body.displayName !== null && typeof body.displayName !== "string")
+      (body.displayName !== null && typeof body.displayName !== "string") ||
+      ![
+        "businessName",
+        "businessEmail",
+        "businessPhone",
+        "businessAddress",
+        "reportHeader",
+        "reportFooter",
+      ].every(
+        (key) =>
+          body[key] === undefined ||
+          body[key] === null ||
+          typeof body[key] === "string",
+      ) ||
+      (body.accentToken !== undefined &&
+        body.accentToken !== null &&
+        typeof body.accentToken !== "string")
     ) {
       throw new TypeError("invalid workspace settings");
     }
@@ -31,6 +47,36 @@ export async function PATCH(request: Request) {
         defaultCurrency: body.defaultCurrency as string,
         locale: body.locale as string,
         timezone: body.timezone as string,
+        ...(body.businessName === undefined
+          ? {}
+          : { businessName: body.businessName as string | null }),
+        ...(body.businessEmail === undefined
+          ? {}
+          : { businessEmail: body.businessEmail as string | null }),
+        ...(body.businessPhone === undefined
+          ? {}
+          : { businessPhone: body.businessPhone as string | null }),
+        ...(body.businessAddress === undefined
+          ? {}
+          : { businessAddress: body.businessAddress as string | null }),
+        ...(body.accentToken === undefined
+          ? {}
+          : {
+              accentToken: body.accentToken as
+                | "blue"
+                | "cyan"
+                | "emerald"
+                | "violet"
+                | "amber"
+                | "rose"
+                | null,
+            }),
+        ...(body.reportHeader === undefined
+          ? {}
+          : { reportHeader: body.reportHeader as string | null }),
+        ...(body.reportFooter === undefined
+          ? {}
+          : { reportFooter: body.reportFooter as string | null }),
       });
       const tenantName = await updateCurrentTenantName(
         sql,

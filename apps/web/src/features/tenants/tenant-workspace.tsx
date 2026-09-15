@@ -5,6 +5,7 @@ import {
   AnimatedNumber,
   Badge,
   Button,
+  Checkbox,
   ConfirmDialog,
   Dialog,
   EmptyState,
@@ -18,6 +19,7 @@ import {
   CircleCheckBig,
   Globe2,
   Plus,
+  Settings2,
   Trash2,
   Users,
   WalletCards,
@@ -45,6 +47,9 @@ export function TenantWorkspace({
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [deletePending, setDeletePending] = useState(false);
   const [deleteError, setDeleteError] = useState<string>();
+  const [featureTarget, setFeatureTarget] = useState<PlatformTenantSummary>();
+  const [featurePending, setFeaturePending] = useState(false);
+  const [featureError, setFeatureError] = useState<string>();
   useEffect(() => setRecords(tenants), [tenants]);
   const activeTenants = records.filter(
     (tenant) => tenant.status === "active",
@@ -61,7 +66,10 @@ export function TenantWorkspace({
     setPending(true);
     setError(undefined);
     try {
-      await crmMutation("/api/tenants", Object.fromEntries(form.entries()));
+      await crmMutation("/api/tenants", {
+        ...Object.fromEntries(form.entries()),
+        fieldServiceAvailable: form.get("fieldServiceAvailable") === "true",
+      });
       setOpen(false);
       router.refresh();
     } catch (reason) {
@@ -100,6 +108,39 @@ export function TenantWorkspace({
       );
     } finally {
       setDeletePending(false);
+    }
+  }
+  async function updateFeatures(event: SyntheticEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (featureTarget === undefined) return;
+    const form = new FormData(event.currentTarget);
+    setFeaturePending(true);
+    setFeatureError(undefined);
+    try {
+      const result = await crmMutation<{ tenant: PlatformTenantSummary }>(
+        `/api/tenants/${featureTarget.id}`,
+        {
+          fieldServiceAvailable: form.get("fieldServiceAvailable") === "true",
+        },
+        { method: "PATCH" },
+      );
+      setRecords((current) =>
+        current.map((tenant) =>
+          tenant.id === result.tenant.id ? result.tenant : tenant,
+        ),
+      );
+      setFeatureTarget(undefined);
+      router.refresh();
+    } catch (reason) {
+      setFeatureError(
+        reason instanceof Error
+          ? reason.message
+          : he
+            ? "לא ניתן היה לעדכן את היכולות"
+            : "Tenant capabilities could not be updated",
+      );
+    } finally {
+      setFeaturePending(false);
     }
   }
   return (
@@ -240,6 +281,22 @@ export function TenantWorkspace({
                   <div>
                     <h3>{tenant.name}</h3>
                     <p>/{tenant.slug}</p>
+                    <span
+                      className="tenant-admin-card__feature-status"
+                      data-enabled={tenant.fieldServiceEnabled || undefined}
+                    >
+                      {tenant.fieldServiceEnabled
+                        ? he
+                          ? "שירות שטח פעיל"
+                          : "Field service active"
+                        : tenant.fieldServiceAvailable
+                          ? he
+                            ? "שירות שטח זמין"
+                            : "Field service available"
+                          : he
+                            ? "שירות שטח לא הוקצה"
+                            : "Field service not assigned"}
+                    </span>
                   </div>
                   <div className="tenant-admin-card__actions">
                     <Badge
@@ -252,6 +309,19 @@ export function TenantWorkspace({
                       }
                       tone={tenant.status === "active" ? "positive" : "neutral"}
                     />
+                    <IconButton
+                      label={
+                        he
+                          ? `ניהול היכולות של ${tenant.name}`
+                          : `Manage capabilities for ${tenant.name}`
+                      }
+                      onClick={() => {
+                        setFeatureTarget(tenant);
+                        setFeatureError(undefined);
+                      }}
+                    >
+                      <Settings2 aria-hidden="true" size={15} />
+                    </IconButton>
                     <IconButton
                       disabled={
                         tenant.id === currentTenantId || records.length <= 1
@@ -365,10 +435,27 @@ export function TenantWorkspace({
             name="timezone"
             required
           />
+          <fieldset className="tenant-admin-feature-selection">
+            <legend>
+              {he ? "יכולות אופציונליות" : "Optional capabilities"}
+            </legend>
+            <Checkbox name="fieldServiceAvailable" value="true">
+              <span>
+                <strong>
+                  {he ? "שירות שטח וטכנאים" : "Field service & technicians"}
+                </strong>
+                <small>
+                  {he
+                    ? "מעניק לדייר אפשרות להפעיל תיקים, תזמון ודוחות. התכונה נשארת כבויה עד שמנהל הדייר מפעיל אותה."
+                    : "Lets this tenant activate cases, scheduling, and reports. The module remains off until a tenant administrator enables it."}
+                </small>
+              </span>
+            </Checkbox>
+          </fieldset>
           <p>
             {he
-              ? "כל המודולים הנוכחיים, ההרשאות, הגדרות הכספים וארנק קמפיינים ייווצרו אוטומטית."
-              : "All current modules, permission roles, finance defaults, and the campaign wallet are included automatically."}
+              ? "יכולות הליבה, ההרשאות, הגדרות הכספים וארנק הקמפיינים נוצרים אוטומטית. יכולות אופציונליות נשארות כבויות כברירת מחדל."
+              : "Core capabilities, permission roles, finance defaults, and the campaign wallet are created automatically. Optional capabilities stay off by default."}
           </p>
           {error ? <p role="alert">{error}</p> : null}
           <Button disabled={pending} type="submit">
@@ -381,6 +468,62 @@ export function TenantWorkspace({
                 : "Create tenant"}
           </Button>
         </form>
+      </Dialog>
+      <Dialog
+        closeLabel={he ? "סגירה" : "Close"}
+        onClose={() => {
+          if (featurePending) return;
+          setFeatureTarget(undefined);
+          setFeatureError(undefined);
+        }}
+        open={featureTarget !== undefined}
+        title={he ? "יכולות סביבת העבודה" : "Workspace capabilities"}
+      >
+        {featureTarget === undefined ? null : (
+          <form
+            className="tenant-admin-capability-form"
+            key={`${featureTarget.id}-${String(featureTarget.fieldServiceAvailable)}`}
+            onSubmit={(event) => void updateFeatures(event)}
+          >
+            <div>
+              <strong>{featureTarget.name}</strong>
+              <span>/{featureTarget.slug}</span>
+            </div>
+            <Checkbox
+              defaultChecked={featureTarget.fieldServiceAvailable}
+              name="fieldServiceAvailable"
+              value="true"
+            >
+              <span>
+                <strong>
+                  {he ? "שירות שטח וטכנאים" : "Field service & technicians"}
+                </strong>
+                <small>
+                  {he
+                    ? "מאפשר למנהלי הסביבה להפעיל תיקים, תזמון, ביקורים ודוחות טכנאים. אינטגרציות ו-AI נשארים בשליטה נפרדת."
+                    : "Allows tenant administrators to activate service cases, scheduling, visits, and technician reports. AI and integrations remain separately controlled."}
+                </small>
+              </span>
+            </Checkbox>
+            <p>
+              {he
+                ? "ביטול ההקצאה משבית פעילות חדשה ושומר את ההיסטוריה לייצוא מורשה. הקצאה מחדש לא מפעילה אוטומטית את המודול או אירועים ישנים."
+                : "Revoking access stops new module activity and preserves history for authorized export. Re-granting access does not reactivate the module or replay old events."}
+            </p>
+            {featureError === undefined ? null : (
+              <p role="alert">{featureError}</p>
+            )}
+            <Button disabled={featurePending} type="submit">
+              {featurePending
+                ? he
+                  ? "שומר…"
+                  : "Saving…"
+                : he
+                  ? "שמירת יכולות"
+                  : "Save capabilities"}
+            </Button>
+          </form>
+        )}
       </Dialog>
       <ConfirmDialog
         busy={deletePending}

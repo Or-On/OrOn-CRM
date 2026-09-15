@@ -9,25 +9,39 @@ export interface PlatformTenantSummary {
   readonly locale: "en" | "he";
   readonly timezone: string;
   readonly memberCount: number;
+  readonly fieldServiceAvailable: boolean;
+  readonly fieldServiceEnabled: boolean;
   readonly createdAt: string;
 }
 
 export async function listPlatformTenants(
   sql: postgres.TransactionSql,
 ): Promise<readonly PlatformTenantSummary[]> {
-  const rows = await sql<
-    {
-      id: string;
-      name: string;
-      slug: string;
-      status: string;
-      default_currency: string;
-      locale: "en" | "he";
-      timezone: string;
-      member_count: string;
-      created_at: Date;
-    }[]
-  >`SELECT * FROM platform.list_tenants_for_administrator()`;
+  const [rows, featureRows] = await Promise.all([
+    sql<
+      {
+        id: string;
+        name: string;
+        slug: string;
+        status: string;
+        default_currency: string;
+        locale: "en" | "he";
+        timezone: string;
+        member_count: string;
+        created_at: Date;
+      }[]
+    >`SELECT * FROM platform.list_tenants_for_administrator()`,
+    sql<
+      {
+        tenant_id: string;
+        available: boolean;
+        enabled: boolean;
+      }[]
+    >`SELECT * FROM platform.list_tenant_field_service_entitlements_for_administrator()`,
+  ]);
+  const featuresByTenant = new Map(
+    featureRows.map((row) => [row.tenant_id, row] as const),
+  );
   return rows.map((row) => ({
     id: row.id,
     name: row.name,
@@ -37,6 +51,8 @@ export async function listPlatformTenants(
     locale: row.locale,
     timezone: row.timezone,
     memberCount: Number(row.member_count),
+    fieldServiceAvailable: featuresByTenant.get(row.id)?.available === true,
+    fieldServiceEnabled: featuresByTenant.get(row.id)?.enabled === true,
     createdAt: row.created_at.toISOString(),
   }));
 }

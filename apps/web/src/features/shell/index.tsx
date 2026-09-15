@@ -41,6 +41,7 @@ import {
   Sun,
   UserCircle,
   Users,
+  Wrench,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -96,6 +97,7 @@ const icons: Record<NavigationIcon, LucideIcon> = {
   settings: Settings,
   health: Activity,
   tenants: Building2,
+  fieldService: Wrench,
 };
 
 const groups: readonly NavigationGroup[] = [
@@ -181,11 +183,19 @@ function InboxSearch() {
 
 export function AppShell({
   children,
+  fieldServiceEnabled = false,
   session,
+  tenantBranding,
 }: {
   readonly children: ReactNode;
   readonly environment?: Environment;
+  readonly fieldServiceEnabled?: boolean;
   readonly session: PublicSession | undefined;
+  readonly tenantBranding?: {
+    readonly businessName: string;
+    readonly accentToken:
+      "blue" | "cyan" | "emerald" | "violet" | "amber" | "rose" | null;
+  };
 }) {
   const locale = useLocale();
   const t = useTranslations();
@@ -253,6 +263,7 @@ export function AppShell({
       .filter(
         (item) =>
           session?.permissions.includes(destinationPermission(item.href)) &&
+          (item.href !== "/field-service" || fieldServiceEnabled) &&
           (item.href !== "/tenants" || session.user.isSuperuser),
       )
       .map((item) => ({
@@ -353,7 +364,7 @@ export function AppShell({
       ...destinationEntries,
       ...contextualEntries,
     ];
-  }, [locale, query, session?.permissions, t]);
+  }, [fieldServiceEnabled, locale, query, session?.permissions, t]);
 
   useEffect(() => setThemeMounted(true), []);
   useEffect(() => {
@@ -481,9 +492,14 @@ export function AppShell({
   if (session === undefined || isPublicAccessRoute)
     return <div className="auth-layout">{children}</div>;
 
+  const workspaceBrandName = session.user.isSuperuser
+    ? product.name
+    : (tenantBranding?.businessName ?? session.tenant.tenantName);
+
   return (
     <div
       className={`shell ${expanded ? "shell--expanded" : ""} ${isInbox ? "shell--inbox" : ""}`}
+      data-tenant-accent={tenantBranding?.accentToken ?? undefined}
     >
       <a className="skip-link" href="#workspace-content">
         {t("shell.skip")}
@@ -500,7 +516,7 @@ export function AppShell({
           href="/"
         >
           <BrandMark size={20} />
-          <span>{product.name}</span>
+          <span>{workspaceBrandName}</span>
         </Link>
         <strong className="mobile-context" dir="auto">
           {currentLabel}
@@ -540,7 +556,7 @@ export function AppShell({
         <div className="rail-brand-row">
           <Link aria-label={t("shell.brandHome")} className="brand" href="/">
             <BrandMark size={20} />
-            <span className="brand__name">{product.name}</span>
+            <span className="brand__name">{workspaceBrandName}</span>
           </Link>
           <IconButton
             className="rail-mobile-close"
@@ -627,6 +643,7 @@ export function AppShell({
                 .filter(
                   (item) =>
                     item.group === group &&
+                    (item.href !== "/field-service" || fieldServiceEnabled) &&
                     (item.href !== "/tenants" || session.user.isSuperuser) &&
                     session.permissions.includes(
                       destinationPermission(item.href),
@@ -808,7 +825,7 @@ export function AppShell({
               <>
                 <Link className="inbox-topbar-brand" href="/">
                   <BrandMark size={17} />
-                  <span>{product.name}</span>
+                  <span>{workspaceBrandName}</span>
                 </Link>
                 <Suspense>
                   <InboxSearch />

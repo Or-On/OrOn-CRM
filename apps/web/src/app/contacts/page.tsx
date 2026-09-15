@@ -3,7 +3,7 @@ import { AccessDenied } from "../../i18n/access-denied";
 import { ProductHeading } from "../../i18n/product-heading";
 import { redirect } from "next/navigation";
 
-import { listContacts } from "@or-on/crm";
+import { listContactPage, listCustomerClassifications } from "@or-on/crm";
 
 import {
   ForbiddenError,
@@ -22,14 +22,26 @@ export default async function ContactsPage({
 }) {
   try {
     const { create, q } = await searchParams;
-    const contacts = await withCurrentTenant("crm:read", (sql) =>
-      listContacts(sql, q === undefined ? {} : { query: q }),
+    const { classifications, contactPage } = await withCurrentTenant(
+      "crm:read",
+      async (sql) => {
+        const [contactPage, classifications] = await Promise.all([
+          listContactPage(sql, {
+            ...(q === undefined ? {} : { query: q }),
+            limit: 50,
+          }),
+          listCustomerClassifications(sql),
+        ]);
+        return { contactPage, classifications };
+      },
     );
     return (
       <main className="page page--wide page--workspace-premium">
         <ProductHeading page="contacts" premium />
         <ContactManager
-          contacts={contacts}
+          contacts={contactPage.contacts}
+          nextCursor={contactPage.nextCursor}
+          classifications={classifications}
           query={q ?? ""}
           {...(create === "1" ? { initialPanel: "create" as const } : {})}
         />

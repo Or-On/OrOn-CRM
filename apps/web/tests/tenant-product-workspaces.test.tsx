@@ -631,7 +631,7 @@ describe("Email workspace", () => {
     expect(screen.getByText("יצירת לקוח OAuth ב-Google Cloud")).toBeTruthy();
   });
 
-  it("renders only persisted provider accounts as connected", () => {
+  it("renders only persisted provider accounts as connected and can disconnect them", async () => {
     const channels: readonly EmailChannel[] = [
       {
         id: "email-channel",
@@ -658,6 +658,17 @@ describe("Email workspace", () => {
       screen.getByRole<HTMLButtonElement>("button", { name: "Connect Outlook" })
         .disabled,
     ).toBe(false);
+    transport.mutate.mockResolvedValueOnce({ disconnected: true });
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect Gmail" }));
+    await waitFor(() =>
+      expect(transport.mutate).toHaveBeenCalledWith(
+        "/api/email/oauth/configuration?provider=google",
+        {},
+        { method: "DELETE" },
+      ),
+    );
+    expect(screen.getByRole("button", { name: "Connect Gmail" })).toBeTruthy();
+    expect(screen.queryByText("support@example.invalid")).toBeNull();
   });
 });
 

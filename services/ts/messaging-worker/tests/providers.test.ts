@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
 
 import {
   MetaWhatsAppProvider,
@@ -176,6 +177,72 @@ describe("WhatsApp providers", () => {
     expect(await simulator.send(request)).toEqual(
       await simulator.send(request),
     );
+  });
+
+  it("downloads allowlisted Meta media with feature rechecks and base64 checksum validation", async () => {
+    const bytes = Uint8Array.from([0xff, 0xd8, 0xff, 0xdb, 0, 1, 2, 3]);
+    const expectedSha256 = createHash("sha256").update(bytes).digest("base64");
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            url: "https://lookaside.fbsbx.com/whatsapp_business/attachments/?mid=123",
+            mime_type: "image/jpeg",
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(bytes, {
+          status: 200,
+          headers: {
+            "content-type": "image/jpeg",
+            "content-length": String(bytes.byteLength),
+          },
+        }),
+      );
+    const beforeAttempt = vi.fn<() => Promise<void>>().mockResolvedValue();
+    await expect(
+      provider(fetcher).downloadMedia({
+        mediaId: "123456789",
+        expectedMimeType: "image/jpeg",
+        expectedSha256,
+        beforeAttempt,
+      }),
+    ).resolves.toMatchObject({
+      bytes,
+      contentType: "image/jpeg",
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+    });
+    expect(beforeAttempt).toHaveBeenCalledTimes(2);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    for (const call of fetcher.mock.calls)
+      expect(call[1]?.headers).toEqual({
+        authorization: "Bearer never-log-token",
+      });
+  });
+
+  it("rejects a provider-controlled media URL outside the Meta allowlist", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ url: "https://evil.invalid/private" }), {
+        status: 200,
+      }),
+    );
+    await expect(
+      provider(fetcher).downloadMedia({ mediaId: "123456789" }),
+    ).rejects.toMatchObject({ code: "media_url_invalid", retryable: false });
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the real-media boundary off when the provider kill switch is off", async () => {
+    const fetcher = vi.fn<typeof fetch>();
+    await expect(
+      provider(fetcher, { enabled: false }).downloadMedia({
+        mediaId: "123456789",
+      }),
+    ).rejects.toMatchObject({ code: "provider_disabled", retryable: false });
+    expect(fetcher).not.toHaveBeenCalled();
   });
 
   it("refuses real delivery when the boundary kill switch is off", async () => {

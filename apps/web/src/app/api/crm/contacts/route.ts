@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { createContact, listContacts } from "@or-on/crm";
+import { createContact, listContactPage } from "@or-on/crm";
 
 import { jsonObject } from "../../../../features/auth";
 import { withCurrentTenant } from "../../../../features/auth";
@@ -9,13 +9,34 @@ import {
   crmErrorResponse,
 } from "../../../../features/crm-route";
 
+const UUID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 export async function GET(request: Request) {
   try {
-    const query = new URL(request.url).searchParams.get("q") ?? undefined;
-    const contacts = await withCurrentTenant("crm:read", (sql) =>
-      listContacts(sql, query === undefined ? {} : { query }),
+    const parameters = new URL(request.url).searchParams;
+    const query = parameters.get("q") ?? undefined;
+    const cursorAt = parameters.get("cursorAt") ?? undefined;
+    const cursorId = parameters.get("cursorId") ?? undefined;
+    if ((cursorAt === undefined) !== (cursorId === undefined))
+      throw new TypeError("Both contact cursor fields are required");
+    if (cursorId !== undefined && !UUID.test(cursorId))
+      throw new TypeError("Contact cursor is invalid");
+    if (cursorAt !== undefined && !Number.isFinite(Date.parse(cursorAt)))
+      throw new TypeError("Contact cursor is invalid");
+    const requestedLimit = Number(parameters.get("limit") ?? "50");
+    if (!Number.isSafeInteger(requestedLimit) || requestedLimit < 1)
+      throw new TypeError("Contact page limit is invalid");
+    const page = await withCurrentTenant("crm:read", (sql) =>
+      listContactPage(sql, {
+        ...(query === undefined ? {} : { query }),
+        limit: requestedLimit,
+        ...(cursorAt === undefined || cursorId === undefined
+          ? {}
+          : { cursor: { sortAt: cursorAt, id: cursorId } }),
+      }),
     );
-    return NextResponse.json({ contacts });
+    return NextResponse.json(page);
   } catch (error) {
     return crmErrorResponse(error);
   }

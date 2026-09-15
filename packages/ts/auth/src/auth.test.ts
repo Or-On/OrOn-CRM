@@ -52,8 +52,15 @@ describe("authorization", () => {
       "crm:write",
       "pipelines:manage",
       "messaging:operate",
+      "field-service:read",
+      "field-service:operate",
     ],
-    viewer: ["platform:read", "voice:read", "crm:read"],
+    technician: [
+      "platform:read",
+      "field-service:read",
+      "field-service:operate",
+    ],
+    viewer: ["platform:read", "voice:read", "crm:read", "field-service:read"],
   } as const;
 
   it.each(canonicalRoles)("enforces the exact %s permission set", (role) => {

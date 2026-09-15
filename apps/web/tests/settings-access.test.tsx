@@ -7,6 +7,7 @@ const state = vi.hoisted(() => ({
   invitations: vi.fn(),
   members: vi.fn(),
   notifications: vi.fn(),
+  fieldService: vi.fn(),
   role: "viewer",
   settings: vi.fn(),
   superuser: false,
@@ -25,6 +26,7 @@ vi.mock("@or-on/auth", () => ({
     (role === "agent" && permission === "members:manage"),
 }));
 vi.mock("@or-on/crm", () => ({
+  getFieldServiceFeatureState: state.fieldService,
   getTenantSettings: state.settings,
   listApiKeys: state.apiKeys,
   listNotifications: state.notifications,
@@ -102,6 +104,29 @@ describe("settings read scope", () => {
       locale: "he",
       timezone: "Asia/Jerusalem",
     });
+    state.fieldService.mockReset().mockResolvedValue({
+      aiScheduleRequiresApproval: true,
+      aiSchedulingEnabled: false,
+      available: false,
+      calendarAccess: "none",
+      calendarProvider: null,
+      changedAt: null,
+      changedByDisplayName: null,
+      changedByUserId: null,
+      effective: false,
+      enabled: false,
+      key: "field_service",
+      ocrEnabled: false,
+      readiness: {
+        calendarCanBook: false,
+        calendarCanSuggest: false,
+        manualScheduling: true,
+        whatsAppAgent: false,
+        whatsAppChannel: false,
+      },
+      sharedTechnicianLoginEnabled: false,
+      whatsAppIntakeEnabled: false,
+    });
   });
 
   it("loads only personal account and notifications for a restricted role", async () => {
@@ -112,6 +137,7 @@ describe("settings read scope", () => {
     expect(state.invitations).not.toHaveBeenCalled();
     expect(state.apiKeys).not.toHaveBeenCalled();
     expect(state.settings).not.toHaveBeenCalled();
+    expect(state.fieldService).not.toHaveBeenCalled();
     expect(markup).toContain("current@example.test");
     expect(markup).toContain("Personal notification");
     expect(markup).not.toContain("member@example.test");
@@ -135,6 +161,7 @@ describe("settings read scope", () => {
       expect(state.invitations).toHaveBeenCalledTimes(1);
       expect(state.apiKeys).toHaveBeenCalledTimes(1);
       expect(state.settings).toHaveBeenCalledTimes(1);
+      expect(state.fieldService).toHaveBeenCalledTimes(1);
       expect(markup).toContain("member@example.test");
       expect(markup).toContain("invitee@example.test");
       expect(markup).toContain("Restricted API key");

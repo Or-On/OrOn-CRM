@@ -1,4 +1,10 @@
-export const canonicalRoles = ["owner", "admin", "agent", "viewer"] as const;
+export const canonicalRoles = [
+  "owner",
+  "admin",
+  "agent",
+  "technician",
+  "viewer",
+] as const;
 export type Role = (typeof canonicalRoles)[number];
 
 export const permissions = [
@@ -14,6 +20,11 @@ export const permissions = [
   "members:manage",
   "members:change-role",
   "tenant:manage",
+  "field-service:read",
+  "field-service:operate",
+  "field-service:manage",
+  "customer-sensitive:read",
+  "customer-sensitive:write",
 ] as const;
 export type Permission = (typeof permissions)[number];
 
@@ -32,6 +43,11 @@ const rolePermissions: Readonly<Record<Role, ReadonlySet<Permission>>> = {
     "members:manage",
     "members:change-role",
     "tenant:manage",
+    "field-service:read",
+    "field-service:operate",
+    "field-service:manage",
+    "customer-sensitive:read",
+    "customer-sensitive:write",
   ]),
   agent: new Set([
     "platform:read",
@@ -41,8 +57,20 @@ const rolePermissions: Readonly<Record<Role, ReadonlySet<Permission>>> = {
     "crm:write",
     "pipelines:manage",
     "messaging:operate",
+    "field-service:read",
+    "field-service:operate",
   ]),
-  viewer: new Set(["platform:read", "voice:read", "crm:read"]),
+  technician: new Set([
+    "platform:read",
+    "field-service:read",
+    "field-service:operate",
+  ]),
+  viewer: new Set([
+    "platform:read",
+    "voice:read",
+    "crm:read",
+    "field-service:read",
+  ]),
 };
 
 export function normalizeRole(value: string): Role | undefined {

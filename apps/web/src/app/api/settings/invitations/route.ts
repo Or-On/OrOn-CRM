@@ -22,7 +22,10 @@ export async function POST(request: Request) {
     const body = await jsonObject(request);
     if (
       typeof body.email !== "string" ||
-      (body.role !== "admin" && body.role !== "agent" && body.role !== "viewer")
+      (body.role !== "admin" &&
+        body.role !== "agent" &&
+        body.role !== "technician" &&
+        body.role !== "viewer")
     ) {
       throw new TypeError("invalid invitation");
     }
@@ -40,7 +43,7 @@ export async function POST(request: Request) {
     const invitationId = await withCurrentTenant("members:manage", (sql) =>
       createTenantInvitation(sql, {
         email: body.email as string,
-        role: body.role as "admin" | "agent" | "viewer",
+        role: body.role as "admin" | "agent" | "technician" | "viewer",
         tokenHash,
         requestId: requestId(request),
       }),

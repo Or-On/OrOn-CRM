@@ -1,5 +1,13 @@
 # Controlled staging deployment and recovery
 
+> **Historical evidence (superseded).** This file records the earlier staging
+> rehearsal and references harnesses that no longer define the active DEV
+> release path. Current deployment and recovery instructions are in
+> [`docs/deployment/dev-gcp.md`](../deployment/dev-gcp.md), and the fresh
+> post-implementation verdict is in
+> [`docs/readiness/post-implementation/release-assessment.md`](post-implementation/release-assessment.md).
+> Do not use the commands below as the current operator procedure.
+
 **Not deployed. Do not execute cloud/host actions until separately authorized.**
 One Compute Engine VM; Docker Compose/Caddy; PostgreSQL18.6 on a separate disk;
 private GCS/Artifact Registry/Secret Manager. No Cloud SQL/Kubernetes substitution.

@@ -1,12 +1,14 @@
 """Disposable production-image acceptance; no .env, provider secrets or developer volumes.
 
-Only owns project oron-readiness-stack and ignored .artifacts/readiness/stack.
+Only owns project oron-readiness-stack and ignored
+.artifacts/readiness/post-implementation-stack.
 Deliberately does not remove volumes/containers automatically, preserving failure evidence.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import os
@@ -14,13 +16,14 @@ import re
 import secrets
 import shutil
 import subprocess
+import tarfile
 import time
 import urllib.request
 from pathlib import Path
 from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[2]
-ARTIFACTS = ROOT / ".artifacts/readiness/stack"
+ARTIFACTS = ROOT / ".artifacts/readiness/post-implementation-stack"
 CONFIG = ARTIFACTS / "config"
 PROJECT = "oron-readiness-stack"
 
@@ -48,15 +51,16 @@ def environment() -> dict[str, str]:
     result.update(
         {
             "COMPOSE_DISABLE_ENV_FILE": "1",
-            "STAGING_CONFIG_DIR": str(CONFIG),
-            "STAGING_DATA_DIR": str(ARTIFACTS / "unused"),
+            "DEPLOYMENT_CONFIG_DIR": str(CONFIG),
+            "DEPLOYMENT_DATA_DIR": str(ARTIFACTS / "data"),
+            "DEPLOYMENT_DATABASE_NAME": "oron_staging",
             "WEB_IMAGE": "oron-readiness/web:candidate",
             "CONTROL_API_IMAGE": "oron-readiness/control-api:candidate",
             "MESSAGING_WORKER_IMAGE": "oron-readiness/messaging-worker:candidate",
+            "DISPATCHER_IMAGE": "oron-readiness/dispatcher:candidate",
             "MIGRATOR_IMAGE": "oron-readiness/migrator:candidate",
-            "PLATFORM_ORIGIN": "http://:8080",
-            "CADDY_ACME_EMAIL": "readiness@example.invalid",
-            "STAGING_ALLOWED_CIDRS": "127.0.0.0/8 172.16.0.0/12 192.168.0.0/16",
+            "PLATFORM_ORIGIN": "http://127.0.0.1:13880",
+            "TLS_CONTACT_EMAIL": "readiness@example.invalid",
         }
     )
     return result
@@ -103,9 +107,17 @@ def compose(*args: str, output=None, input_file=None, web_image: str | None = No
             "-p",
             PROJECT,
             "-f",
-            str(ROOT / "infra/compose/staging.yaml"),
+            str(ROOT / "infra/compose/deployment.yaml"),
             "-f",
-            str(ROOT / "infra/compose/staging.local-test.yaml"),
+            str(ROOT / "infra/compose/readiness.local.yaml"),
+            "--profile",
+            "release",
+            "--profile",
+            "bootstrap",
+            "--profile",
+            "workers",
+            "--profile",
+            "voice",
             *args,
         ],
         env=env,
@@ -121,8 +133,15 @@ def prepare() -> None:
     if CONFIG.exists():
         raise ValueError("Fixture config already exists; keep it for the same disposable cluster")
     CONFIG.mkdir(parents=True, mode=0o700)
+    for directory in (
+        ARTIFACTS / "data/postgres",
+        ARTIFACTS / "data/caddy",
+        ARTIFACTS / "data/objects",
+    ):
+        directory.mkdir(parents=True, exist_ok=True)
     password = secrets.token_hex(24)
     pepper, service = secrets.token_hex(32), secrets.token_hex(32)
+    field_key = base64.b64encode(os.urandom(32)).decode()
     # Structurally valid dummy hash. There are no seeded users and no login bypass.
     dummy = "$argon2id$v=19$m=65536,t=3,p=1$c29tZXNhbHRzb21lc2FsdA$" + "A" * 43
     roles = {
@@ -156,12 +175,39 @@ def prepare() -> None:
                 f"AUTH_SERVICE_SECRET={service}",
             ]
         ),
-        "messaging-worker.env": f"MESSAGING_DATABASE_URL={dsn('platform_messaging')}",
+        "dispatcher.env": "\n".join(
+            [
+                f"VOICE_DATABASE_URL={dsn('platform_voice')}",
+                f"AUTH_SERVICE_SECRET={service}",
+                f"FIELD_CIPHER_LOCAL_KEY={field_key}",
+                f"BLIND_INDEX_KEY={field_key}",
+                "ARTIFACTS_BACKEND=local",
+                "ARTIFACTS_LOCAL_ROOT=/var/lib/oron/objects",
+            ]
+        ),
+        "messaging-worker.env": "\n".join(
+            [
+                f"MESSAGING_DATABASE_URL={dsn('platform_messaging')}",
+                f"AUTH_SERVICE_SECRET={service}",
+            ]
+        ),
+        "bootstrap-owner.env": "\n".join(
+            [
+                f"MIGRATION_DATABASE_URL=postgresql://platform_migrator:{password}@postgres:5432/oron_staging",
+                "BOOTSTRAP_OWNER_EMAIL=operator@example.invalid",
+                "BOOTSTRAP_TENANT_NAME=Fictional readiness workspace",
+                "BOOTSTRAP_TENANT_SLUG=fictional-readiness",
+            ]
+        ),
     }
     for filename, value in files.items():
         descriptor = os.open(CONFIG / filename, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(descriptor, "w") as output:
             output.write(value + "\n")
+    password_file = CONFIG / "owner-password.txt"
+    descriptor = os.open(password_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "w") as output:
+        output.write(secrets.token_urlsafe(24) + "\n")
     print("Created fictional private fixture configuration. No account or business records seeded.")
 
 
@@ -280,14 +326,30 @@ def recovery() -> dict:
     # psql emits command tags around the one row count; require both restored/context parity.
     if sql(scoped) != sql(scoped, database):
         raise ValueError("Restored runtime-role RLS result differs")
+    object_source = ARTIFACTS / "data/objects/readiness" / f"{contact}.bin"
+    object_source.parent.mkdir(parents=True, exist_ok=True)
+    object_source.write_bytes(b"fictional-private-object-recovery-fixture")
+    object_archive = ARTIFACTS / f"recovery-objects-{time.time_ns()}.tar"
+    with tarfile.open(object_archive, "w") as output:
+        output.add(object_source, arcname=f"objects/readiness/{contact}.bin")
+    object_restore = ARTIFACTS / f"restore-objects-{secrets.token_hex(8)}"
+    object_restore.mkdir()
+    with tarfile.open(object_archive) as source:
+        source.extractall(object_restore, filter="data")
+    restored_object = object_restore / f"objects/readiness/{contact}.bin"
+    if restored_object.read_bytes() != object_source.read_bytes():
+        raise ValueError("Restored private object content mismatch")
+    object_checksum = hashlib.sha256(object_source.read_bytes()).hexdigest()
     return {
         "seconds": round(time.monotonic() - start, 3),
         "sha256": checksum,
         "bytes": archive.stat().st_size,
         "database": database,
+        "object_archive": object_archive.name,
+        "object_sha256": object_checksum,
         "scope": (
             "schema/table counts/head/forced RLS plus fictional contact content "
-            "and runtime-role RLS; no media objects"
+            "and runtime-role RLS plus one synthetic private object"
         ),
         "workers_replayed": False,
     }

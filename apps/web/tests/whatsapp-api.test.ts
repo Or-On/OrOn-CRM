@@ -2,18 +2,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
   enabled: false,
+  acceptWebhook: vi.fn(),
   queue: vi.fn(),
   page: vi.fn(),
   permission: vi.fn(),
 }));
 
 vi.mock("@or-on/crm", () => ({
+  acceptWhatsAppWebhook: state.acceptWebhook,
+  InvalidWhatsAppPayloadError: class InvalidWhatsAppPayloadError extends Error {},
+  InvalidWhatsAppSignatureError: class InvalidWhatsAppSignatureError extends Error {},
   listMessagePage: state.page,
   parseMessageCursor: () => undefined,
   queueWhatsAppOutbound: state.queue,
 }));
 vi.mock("@or-on/config", () => ({
   loadConfig: () => ({
+    databaseUrl: "postgresql://fixture.invalid/fixture",
     enableRealWhatsApp: state.enabled,
     whatsApp: {
       graphApiVersion: "v26.0",
@@ -49,7 +54,10 @@ import {
   GET,
   POST,
 } from "../src/app/api/messaging/conversations/[id]/messages/route";
-import { GET as verifyWebhook } from "../src/app/api/webhooks/whatsapp/route";
+import {
+  GET as verifyWebhook,
+  POST as acceptWebhook,
+} from "../src/app/api/webhooks/whatsapp/route";
 
 const context = {
   params: Promise.resolve({ id: "30000000-0000-4000-8000-000000000001" }),
@@ -59,6 +67,7 @@ describe("WhatsApp outbound API", () => {
   beforeEach(() => {
     vi.stubEnv("PLATFORM_ENV", "development");
     state.enabled = false;
+    state.acceptWebhook.mockReset().mockResolvedValue({ envelopes: 1 });
     state.page.mockReset();
     state.permission.mockClear();
     state.queue.mockReset().mockResolvedValue({
@@ -149,5 +158,19 @@ describe("WhatsApp outbound API", () => {
     expect(
       verifyWebhook(new Request("http://localhost/api/webhooks/whatsapp")),
     ).toMatchObject({ status: 404 });
+  });
+
+  it("rejects oversized webhook bodies before persistence", async () => {
+    state.enabled = true;
+    const response = await acceptWebhook(
+      new Request("http://localhost/api/webhooks/whatsapp", {
+        method: "POST",
+        headers: { "content-length": String(2 * 1024 * 1024 + 1) },
+        body: "{}",
+      }),
+    );
+
+    expect(response.status).toBe(413);
+    expect(state.acceptWebhook).not.toHaveBeenCalled();
   });
 });

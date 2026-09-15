@@ -209,11 +209,11 @@ jobs:
           MIGRATOR_IMAGE="example.invalid/oron/migrator@$digest" \
           docker compose -f infra/compose/deployment.yaml \
             --profile release --profile workers --profile voice config --quiet
-      - run: docker build --file services/py/control-api/Dockerfile --tag or-on/control-api:ci .
-      - run: docker build --file apps/web/Dockerfile --tag or-on/web:ci .
-      - run: docker build --file infra/images/messaging-worker.Dockerfile --tag or-on/messaging-worker:ci .
-      - run: docker build --file infra/images/dispatcher.Dockerfile --tag or-on/dispatcher:ci .
-      - run: docker build --file infra/images/migrator.Dockerfile --tag or-on/migrator:ci .
+      - run: docker build --build-arg ORON_SOURCE_REVISION="$GITHUB_SHA" --file services/py/control-api/Dockerfile --tag or-on/control-api:ci .
+      - run: docker build --build-arg ORON_SOURCE_REVISION="$GITHUB_SHA" --file apps/web/Dockerfile --tag or-on/web:ci .
+      - run: docker build --build-arg ORON_SOURCE_REVISION="$GITHUB_SHA" --file infra/images/messaging-worker.Dockerfile --tag or-on/messaging-worker:ci .
+      - run: docker build --build-arg ORON_SOURCE_REVISION="$GITHUB_SHA" --file infra/images/dispatcher.Dockerfile --tag or-on/dispatcher:ci .
+      - run: docker build --build-arg ORON_SOURCE_REVISION="$GITHUB_SHA" --file infra/images/migrator.Dockerfile --tag or-on/migrator:ci .
       - name: Authenticate to Google Cloud for immutable DEV images
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
@@ -296,6 +296,7 @@ jobs:
           archive="${RUNNER_TEMP}/oron-dev-release-${GITHUB_SHA}.tar.gz"
           tar -czf "${archive}" -C "${release_dir}" .
           echo "archive=${archive}" >>"${GITHUB_OUTPUT}"
+          echo "archive_sha256=$(sha256sum "${archive}" | cut -d' ' -f1)" >>"${GITHUB_OUTPUT}"
       - name: Transfer and deploy the release
         shell: bash
         env:
@@ -308,7 +309,7 @@ jobs:
             "${ARCHIVE}" "oron-dev:${remote_archive}"
           gcloud compute ssh oron-dev --quiet --tunnel-through-iap \
             --project website-478708 --zone me-west1-b \
-            --command="sudo /opt/oron-dev/scripts/deploy-dev.sh '${GITHUB_SHA}' '${remote_archive}'; rm -f '${remote_archive}'"
+            --command="set -e; trap 'rm -f ${remote_archive}' EXIT; sudo /opt/oron-dev/scripts/deploy-dev.sh '${GITHUB_SHA}' '${remote_archive}' '${{ steps.release.outputs.archive_sha256 }}'"
       - name: Verify the public DEV endpoint
         shell: bash
         run: |

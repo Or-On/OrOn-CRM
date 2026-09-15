@@ -33,6 +33,8 @@ const primary: PlatformTenantSummary = {
   locale: "en",
   timezone: "UTC",
   memberCount: 2,
+  fieldServiceAvailable: false,
+  fieldServiceEnabled: false,
   createdAt: "2026-09-12T10:00:00.000Z",
 };
 const secondary: PlatformTenantSummary = {
@@ -89,5 +91,38 @@ describe("platform tenant deletion", () => {
       { method: "DELETE" },
     );
     expect(state.refresh).toHaveBeenCalledOnce();
+  });
+
+  it("lets a platform administrator grant an optional capability without enabling it", async () => {
+    render(
+      localized(
+        <TenantWorkspace currentTenantId={primary.id} tenants={[primary]} />,
+      ),
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: `Manage capabilities for ${primary.name}`,
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: /Field service & technicians/u,
+      }),
+    );
+    state.mutate.mockResolvedValueOnce({
+      tenant: { ...primary, fieldServiceAvailable: true },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save capabilities" }));
+
+    await waitFor(() =>
+      expect(state.mutate).toHaveBeenCalledWith(
+        `/api/tenants/${primary.id}`,
+        { fieldServiceAvailable: true },
+        { method: "PATCH" },
+      ),
+    );
+    expect(await screen.findByText("Field service available")).toBeTruthy();
+    expect(screen.queryByText("Field service active")).toBeNull();
   });
 });

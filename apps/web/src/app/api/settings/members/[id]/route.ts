@@ -28,6 +28,7 @@ export async function PATCH(
       (body.role !== "owner" &&
         body.role !== "admin" &&
         body.role !== "agent" &&
+        body.role !== "technician" &&
         body.role !== "viewer")
     ) {
       throw new TypeError("invalid membership update");
@@ -35,7 +36,8 @@ export async function PATCH(
     await withCurrentTenant("members:change-role", (sql) =>
       updateTenantMember(sql, {
         userId: id,
-        role: body.role as "owner" | "admin" | "agent" | "viewer",
+        role: body.role as
+          "owner" | "admin" | "agent" | "technician" | "viewer",
         requestId: requestId(request),
       }),
     );

@@ -2,6 +2,7 @@
 
 import type {
   ApiKeySummary,
+  FieldServiceFeatureState,
   NotificationSummary,
   TeamMember,
   TenantInvitationSummary,
@@ -22,6 +23,7 @@ import {
   StatusIndicator,
   Surface,
   Tabs,
+  Textarea,
 } from "@or-on/ui";
 import {
   BellRing,
@@ -47,6 +49,7 @@ import { ThemeControl } from "../../i18n/theme-control";
 import { useCapability } from "../access";
 import { crmMutation } from "../crm";
 import { IdentityImage, IdentityImageEditor } from "../identity";
+import { FieldServiceSettings } from "../field-service";
 
 type SettingsTab =
   | "account"
@@ -78,6 +81,8 @@ export function ManagementPanel({
   canManageMembers = false,
   canManageTenant = false,
   canManageOwners = false,
+  fieldServiceFeature,
+  fieldServiceRuntimeReadiness,
 }: {
   readonly account: AccountSummary;
   readonly members: readonly TeamMember[];
@@ -90,6 +95,15 @@ export function ManagementPanel({
   readonly canManageMembers?: boolean;
   readonly canManageTenant?: boolean;
   readonly canManageOwners?: boolean;
+  readonly fieldServiceFeature?: FieldServiceFeatureState | undefined;
+  readonly fieldServiceRuntimeReadiness?:
+    | {
+        readonly aiProviderConfigured: boolean;
+        readonly protectedFieldsConfigured: boolean;
+        readonly privateStorageConfigured: boolean;
+        readonly storageBackend: string;
+      }
+    | undefined;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -156,6 +170,7 @@ export function ManagementPanel({
   async function saveWorkspace(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
+    const accentToken = data.get("accentToken");
     await execute("workspace", async () => {
       await crmMutation(
         "/api/settings",
@@ -165,6 +180,13 @@ export function ManagementPanel({
           defaultCurrency: data.get("defaultCurrency"),
           locale: data.get("locale"),
           timezone: data.get("timezone"),
+          businessName: data.get("businessName"),
+          businessEmail: data.get("businessEmail"),
+          businessPhone: data.get("businessPhone"),
+          businessAddress: data.get("businessAddress"),
+          accentToken: accentToken === "" ? null : accentToken,
+          reportHeader: data.get("reportHeader"),
+          reportFooter: data.get("reportFooter"),
         },
         { method: "PATCH" },
       );
@@ -764,6 +786,89 @@ export function ManagementPanel({
                   </section>
                   <section
                     className="settings-form-section"
+                    aria-labelledby="workspace-branding-heading"
+                  >
+                    <h3 id="workspace-branding-heading">
+                      <Palette aria-hidden="true" size={16} />
+                      {t("management.branding")}
+                    </h3>
+                    <p className="public-note">
+                      {t("management.brandingHint")}
+                    </p>
+                    <div className="settings-form-grid">
+                      <Input
+                        defaultValue={settings.businessName ?? ""}
+                        id="business-name"
+                        label={t("management.businessName")}
+                        maxLength={160}
+                        name="businessName"
+                      />
+                      <Input
+                        defaultValue={settings.businessEmail ?? ""}
+                        id="business-email"
+                        label={t("management.businessEmail")}
+                        maxLength={320}
+                        name="businessEmail"
+                        type="email"
+                      />
+                      <Input
+                        defaultValue={settings.businessPhone ?? ""}
+                        id="business-phone"
+                        label={t("management.businessPhone")}
+                        maxLength={40}
+                        name="businessPhone"
+                      />
+                      <Select
+                        defaultValue={settings.accentToken ?? ""}
+                        id="workspace-accent"
+                        label={t("management.accent")}
+                        name="accentToken"
+                      >
+                        <option value="">
+                          {t("management.accentDefault")}
+                        </option>
+                        {[
+                          "blue",
+                          "cyan",
+                          "emerald",
+                          "violet",
+                          "amber",
+                          "rose",
+                        ].map((accent) => (
+                          <option key={accent} value={accent}>
+                            {accent}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                    <Input
+                      defaultValue={settings.businessAddress ?? ""}
+                      id="business-address"
+                      label={t("management.businessAddress")}
+                      maxLength={500}
+                      name="businessAddress"
+                    />
+                    <div className="settings-form-grid">
+                      <Textarea
+                        defaultValue={settings.reportHeader ?? ""}
+                        id="report-header"
+                        label={t("management.reportHeader")}
+                        maxLength={500}
+                        name="reportHeader"
+                        rows={3}
+                      />
+                      <Textarea
+                        defaultValue={settings.reportFooter ?? ""}
+                        id="report-footer"
+                        label={t("management.reportFooter")}
+                        maxLength={1000}
+                        name="reportFooter"
+                        rows={3}
+                      />
+                    </div>
+                  </section>
+                  <section
+                    className="settings-form-section"
                     aria-labelledby="workspace-regional-heading"
                   >
                     <h3 id="workspace-regional-heading">
@@ -884,6 +989,9 @@ export function ManagementPanel({
                           ) : null}
                           <option value="admin">{t("status.admin")}</option>
                           <option value="agent">{t("status.agent")}</option>
+                          <option value="technician">
+                            {t("status.technician")}
+                          </option>
                           <option value="viewer">{t("status.viewer")}</option>
                         </SelectInput>
                       ) : (
@@ -941,6 +1049,7 @@ export function ManagementPanel({
                   >
                     <option value="admin">{t("status.admin")}</option>
                     <option value="agent">{t("status.agent")}</option>
+                    <option value="technician">{t("status.technician")}</option>
                     <option value="viewer">{t("status.viewer")}</option>
                   </Select>
                   <Button busy={pending} type="submit">
@@ -1221,6 +1330,14 @@ export function ManagementPanel({
                 </Link>
               ) : null}
             </div>
+            {fieldServiceFeature === undefined ? null : (
+              <FieldServiceSettings
+                initialState={fieldServiceFeature}
+                {...(fieldServiceRuntimeReadiness === undefined
+                  ? {}
+                  : { runtimeReadiness: fieldServiceRuntimeReadiness })}
+              />
+            )}
           </section>
         ) : null}
       </div>

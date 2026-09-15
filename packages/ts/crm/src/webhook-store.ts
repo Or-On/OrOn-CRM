@@ -1,7 +1,7 @@
 import postgres from "postgres";
 
 import {
-  parseWhatsAppTextEnvelopes,
+  parseWhatsAppMessageEnvelopes,
   parseWhatsAppStatusEnvelopes,
   verifyWhatsAppSignature,
 } from "./webhook.js";
@@ -35,23 +35,31 @@ export async function acceptWhatsAppWebhook(
       cause: error,
     });
   }
-  const envelopes = parseWhatsAppTextEnvelopes(payload);
+  const envelopes = parseWhatsAppMessageEnvelopes(payload);
   const statuses = parseWhatsAppStatusEnvelopes(payload);
   const sql = postgres(databaseUrl, { max: 1, prepare: false });
   try {
     const eventIds = await sql.begin(async (transaction) => {
       const ids: string[] = [];
       for (const envelope of envelopes) {
+        const contentType = envelope.contentType ?? "text";
         const rows = await transaction<AcceptedEventRow[]>`
           SELECT (ops.accept_whatsapp_inbound(
             ${envelope.providerAccountId}, ${envelope.providerEventId},
-            'whatsapp.message.text', ${transaction.json({
+            ${`whatsapp.message.${contentType}`}, ${transaction.json({
               providerAccountId: envelope.providerAccountId,
               providerEventId: envelope.providerEventId,
               providerMessageId: envelope.providerMessageId,
               from: envelope.from,
               profileName: envelope.profileName,
               text: envelope.text,
+              contentType,
+              ...(envelope.media === undefined
+                ? {}
+                : { media: envelope.media }),
+              ...(envelope.location === undefined
+                ? {}
+                : { location: envelope.location }),
               ...(envelope.occurredAt === undefined
                 ? {}
                 : { occurredAt: envelope.occurredAt }),

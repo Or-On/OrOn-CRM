@@ -23,9 +23,26 @@ export interface WhatsAppSendResult {
   readonly messageId: string;
 }
 
+export interface WhatsAppMediaDownloadRequest {
+  readonly mediaId: string;
+  readonly expectedMimeType?: string;
+  readonly expectedSha256?: string;
+  readonly beforeAttempt?: () => Promise<void>;
+}
+
+export interface WhatsAppMediaDownloadResult {
+  readonly bytes: Uint8Array;
+  readonly contentType:
+    "image/jpeg" | "image/png" | "image/webp" | "application/pdf";
+  readonly sha256: string;
+}
+
 export interface WhatsAppProvider {
   readonly name: "simulator" | "meta";
   send(request: WhatsAppSendRequest): Promise<WhatsAppSendResult>;
+  downloadMedia?(
+    request: WhatsAppMediaDownloadRequest,
+  ): Promise<WhatsAppMediaDownloadResult>;
 }
 
 export class WhatsAppProviderError extends Error {
@@ -139,6 +156,120 @@ export class MetaWhatsAppProvider implements WhatsAppProvider {
 
   public constructor(options: MetaWhatsAppProviderOptions) {
     this.#options = options;
+  }
+
+  public async downloadMedia(
+    request: WhatsAppMediaDownloadRequest,
+  ): Promise<WhatsAppMediaDownloadResult> {
+    if (!this.#options.enabled)
+      throw new WhatsAppProviderError("provider_disabled", false);
+    const { accessToken, graphApiVersion: version } = this.#options;
+    if (
+      accessToken === undefined ||
+      version === undefined ||
+      !graphVersion.test(version) ||
+      !resourceId.test(request.mediaId)
+    )
+      throw new WhatsAppProviderError("provider_not_configured", false);
+    const execute = this.#options.fetch ?? fetch;
+    const requestWithTimeout = async (url: string): Promise<Response> => {
+      await request.beforeAttempt?.();
+      const controller = new AbortController();
+      const timeout = setTimeout(
+        () => controller.abort(),
+        this.#options.timeoutMs ?? 8_000,
+      );
+      try {
+        return await execute(url, {
+          method: "GET",
+          headers: { authorization: `Bearer ${accessToken}` },
+          signal: controller.signal,
+        });
+      } catch {
+        throw new WhatsAppProviderError("media_transport_error", true);
+      } finally {
+        clearTimeout(timeout);
+      }
+    };
+    const metadataResponse = await requestWithTimeout(
+      `https://graph.facebook.com/${version}/${request.mediaId}`,
+    );
+    if (!metadataResponse.ok)
+      throw new WhatsAppProviderError(
+        `media_metadata_http_${String(metadataResponse.status)}`,
+        metadataResponse.status === 429 || metadataResponse.status >= 500,
+        metadataResponse.status,
+      );
+    const metadata = (await metadataResponse.json().catch(() => undefined)) as
+      Readonly<Record<string, unknown>> | undefined;
+    const mediaUrl =
+      typeof metadata?.url === "string" ? metadata.url : undefined;
+    if (mediaUrl === undefined)
+      throw new WhatsAppProviderError("media_metadata_invalid", false);
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(mediaUrl);
+    } catch {
+      throw new WhatsAppProviderError("media_url_invalid", false);
+    }
+    if (
+      parsedUrl.protocol !== "https:" ||
+      parsedUrl.username ||
+      parsedUrl.password ||
+      !(
+        parsedUrl.hostname === "facebook.com" ||
+        parsedUrl.hostname.endsWith(".facebook.com") ||
+        parsedUrl.hostname === "fbsbx.com" ||
+        parsedUrl.hostname.endsWith(".fbsbx.com")
+      )
+    )
+      throw new WhatsAppProviderError("media_url_invalid", false);
+    const mediaResponse = await requestWithTimeout(parsedUrl.toString());
+    if (!mediaResponse.ok)
+      throw new WhatsAppProviderError(
+        `media_download_http_${String(mediaResponse.status)}`,
+        mediaResponse.status === 429 || mediaResponse.status >= 500,
+        mediaResponse.status,
+      );
+    const declared =
+      mediaResponse.headers
+        .get("content-type")
+        ?.split(";", 1)[0]
+        ?.toLowerCase() ??
+      (typeof metadata?.mime_type === "string"
+        ? metadata.mime_type.toLowerCase()
+        : "");
+    if (
+      declared !== "image/jpeg" &&
+      declared !== "image/png" &&
+      declared !== "image/webp" &&
+      declared !== "application/pdf"
+    )
+      throw new WhatsAppProviderError("media_content_type_unsupported", false);
+    if (
+      request.expectedMimeType !== undefined &&
+      request.expectedMimeType.toLowerCase() !== declared
+    )
+      throw new WhatsAppProviderError("media_content_type_mismatch", false);
+    const contentLength = Number(mediaResponse.headers.get("content-length"));
+    if (Number.isFinite(contentLength) && contentLength > 20 * 1024 * 1024)
+      throw new WhatsAppProviderError("media_too_large", false);
+    const bytes = new Uint8Array(await mediaResponse.arrayBuffer());
+    if (bytes.byteLength < 1 || bytes.byteLength > 20 * 1024 * 1024)
+      throw new WhatsAppProviderError("media_too_large", false);
+    const digest = createHash("sha256").update(bytes).digest();
+    const sha256 = digest.toString("hex");
+    const expected = request.expectedSha256?.trim();
+    const expectedMatches =
+      expected === undefined ||
+      (/^[0-9a-f]{64}$/iu.test(expected)
+        ? expected.toLowerCase() === sha256
+        : /^[A-Za-z0-9+/]{43}=?$/u.test(expected) &&
+          expected.replace(/=+$/u, "") ===
+            digest.toString("base64").replace(/=+$/u, ""));
+    if (!expectedMatches)
+      throw new WhatsAppProviderError("media_checksum_mismatch", false);
+    return { bytes, contentType: declared, sha256 };
   }
 
   public async send(request: WhatsAppSendRequest): Promise<WhatsAppSendResult> {
