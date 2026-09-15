@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import postgres from "postgres";
 import { describe, expect, it } from "vitest";
 
@@ -35,6 +37,7 @@ import {
 } from "./contacts.js";
 import {
   ingestSimulatedInbound,
+  ingestWhatsAppInbound,
   listConversations,
   listMessages,
   sendSimulatedReply,
@@ -59,17 +62,40 @@ describe.skipIf(databaseUrl === undefined)(
         throw new Error("CRM_TEST_DATABASE_URL is required");
       const sql = postgres(databaseUrl, { max: 1, prepare: false });
       try {
-        await expect(
-          sql.begin(async (transaction) => {
+        let rolledBack = false;
+        try {
+          await sql.begin(async (transaction) => {
             await transaction`
             SELECT set_config('app.current_tenant', ${tenantId}, true),
                    set_config('app.current_user', ${userId}, true),
                    set_config('app.current_role', 'owner', true)
           `;
-            const contacts = await listContacts(transaction);
-            expect(
-              contacts.some((contact) => contact.name === "Maya Cohen"),
-            ).toBe(true);
+            const seededTenant = await transaction<
+              { id: string; name: string }[]
+            >`
+              SELECT id, name FROM tenants WHERE id = ${tenantId}::uuid
+            `;
+            expect(seededTenant).toHaveLength(1);
+            expect(seededTenant[0]?.name.trim()).not.toBe("");
+
+            const pipelineId = randomUUID();
+            await transaction`
+              INSERT INTO crm.pipelines(id, tenant_id, name, is_default)
+              VALUES(
+                ${pipelineId}::uuid,
+                ${tenantId}::uuid,
+                ${`Fictional integration pipeline ${pipelineId}`},
+                false
+              )
+            `;
+            await transaction`
+              INSERT INTO crm.pipeline_stages(
+                tenant_id, pipeline_id, name, position, probability
+              ) VALUES
+                (${tenantId}::uuid, ${pipelineId}::uuid, 'New', 0, 10),
+                (${tenantId}::uuid, ${pipelineId}::uuid, 'Review', 1, 50),
+                (${tenantId}::uuid, ${pipelineId}::uuid, 'Complete', 2, 100)
+            `;
             const imported = await importContacts(transaction, userId, [
               {
                 name: "Fictional Imported Contact",
@@ -108,7 +134,9 @@ describe.skipIf(databaseUrl === undefined)(
               notes: [{ body: "Fictional integration note" }],
             });
             expect(
-              (await listPipelineBoards(transaction))[0]?.stages,
+              (await listPipelineBoards(transaction)).find(
+                (pipeline) => pipeline.id === pipelineId,
+              )?.stages,
             ).toHaveLength(3);
 
             const broadcastId = await createSimulatorBroadcast(
@@ -207,23 +235,49 @@ describe.skipIf(databaseUrl === undefined)(
                 idempotencyKey: "phase6-disabled-real-outbound",
               }),
             ).rejects.toThrow("provider is disabled");
-            const contactForMessaging = (
-              await transaction<{ contact_id: string }[]>`
-              SELECT contact_id FROM messaging.conversations WHERE id = ${inserted.conversationId}::uuid
-            `
-            )[0]?.contact_id;
-            if (contactForMessaging === undefined)
-              throw new Error("contact fixture missing");
-            await setWhatsAppConsent(
-              transaction,
-              contactForMessaging,
-              "revoked",
-            );
+
+            const metaPhoneNumberId = `fictional-${randomUUID()}`;
+            const metaWabaId = `fictional-${randomUUID()}`;
+            const metaGraphApiVersion = "v26.0";
+            await transaction`
+              INSERT INTO messaging.channels(
+                tenant_id, kind, provider, provider_account_id,
+                display_address, status, configuration
+              ) VALUES(
+                ${tenantId}::uuid,
+                'whatsapp',
+                'meta',
+                ${metaPhoneNumberId},
+                'Fictional Meta opt-out fixture',
+                'active',
+                ${transaction.json({
+                  phoneNumberId: metaPhoneNumberId,
+                  wabaId: metaWabaId,
+                  graphApiVersion: metaGraphApiVersion,
+                })}
+              )
+            `;
+            const metaInbound = await ingestWhatsAppInbound(transaction, {
+              providerAccountId: metaPhoneNumberId,
+              providerEventId: `fictional-event-${randomUUID()}`,
+              providerMessageId: `fictional-message-${randomUUID()}`,
+              from: "+12025550198",
+              profileName: "Fictional opted-out contact",
+              text: "Fictional inbound message for opt-out validation",
+              occurredAt: new Date().toISOString(),
+            });
+            expect(
+              await setWhatsAppConsent(
+                transaction,
+                metaInbound.contactId,
+                "revoked",
+              ),
+            ).toBe(true);
             await expect(
               queueWhatsAppOutbound(
                 transaction,
                 {
-                  conversationId: inserted.conversationId,
+                  conversationId: metaInbound.conversationId,
                   senderUserId: userId,
                   provider: "meta",
                   kind: "template",
@@ -235,9 +289,9 @@ describe.skipIf(databaseUrl === undefined)(
                   idempotencyKey: "phase6-opted-out-real-outbound",
                 },
                 {
-                  graphApiVersion: "v26.0",
-                  phoneNumberId: "1312069101984418",
-                  wabaId: "1507601250680263",
+                  graphApiVersion: metaGraphApiVersion,
+                  phoneNumberId: metaPhoneNumberId,
+                  wabaId: metaWabaId,
                 },
               ),
             ).rejects.toThrow("opted out");
@@ -322,9 +376,28 @@ describe.skipIf(databaseUrl === undefined)(
               await publishCanonicalFlow(transaction, userId, flowId),
             ).toBe(true);
 
-            const voiceOutcome = (await listVoiceOutcomes(transaction))[0];
+            const voiceSessionId = randomUUID();
+            await transaction`
+              INSERT INTO public.sessions(
+                session_id, tenant_id, contact_id, provider, direction, room,
+                status, outcome, flow_id
+              ) VALUES(
+                ${voiceSessionId}::uuid,
+                ${tenantId}::uuid,
+                ${importedContact.id}::uuid,
+                'simulator',
+                'outbound',
+                ${`crm-integration-${voiceSessionId}`},
+                'ended',
+                'simulator_completed',
+                ${randomUUID()}::uuid
+              )
+            `;
+            const voiceOutcome = (await listVoiceOutcomes(transaction)).find(
+              (outcome) => outcome.sessionId === voiceSessionId,
+            );
             if (voiceOutcome === undefined)
-              throw new Error("seeded voice outcome is required");
+              throw new Error("transaction-owned voice outcome is required");
             await transaction`
               UPDATE crm.contacts SET whatsapp_consent = 'granted', whatsapp_opted_out_at = NULL
               WHERE id = (SELECT contact_id FROM public.sessions
@@ -377,8 +450,12 @@ describe.skipIf(databaseUrl === undefined)(
               (await dashboardMetrics(transaction)).contacts,
             ).toBeGreaterThan(1);
             throw new ExpectedRollback("roll back integration fixture");
-          }),
-        ).rejects.toBeInstanceOf(ExpectedRollback);
+          });
+        } catch (error) {
+          if (!(error instanceof ExpectedRollback)) throw error;
+          rolledBack = true;
+        }
+        expect(rolledBack).toBe(true);
       } finally {
         await sql.end({ timeout: 2 });
       }
