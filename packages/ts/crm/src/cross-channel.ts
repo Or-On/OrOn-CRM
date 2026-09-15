@@ -835,6 +835,7 @@ export async function queueWhatsAppAutomaticCall(
       ON channel.id = conversation.channel_id
      AND channel.tenant_id = conversation.tenant_id
      AND channel.provider = 'meta'
+     AND channel.status = 'active'
     JOIN crm.contacts contact
       ON contact.id = conversation.contact_id
      AND contact.tenant_id = conversation.tenant_id

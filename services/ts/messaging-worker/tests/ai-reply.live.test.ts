@@ -193,6 +193,7 @@ describe.skipIf(sourceUrl === undefined)(
       let knowledgeDocumentId = "";
       let whatsAppAgentVersionId = "";
       let voiceAgentVersionId = "";
+      let canonicalFlowDefinitionId = "";
       const firstInbound = `wamid.fixture-${randomUUID()}`;
       await acceptInbound(firstInbound, "Hello");
       const bootstrapStore = createMessagingStore(
@@ -384,6 +385,7 @@ describe.skipIf(sourceUrl === undefined)(
         expect(
           await publishExecutableFlow(transaction, userId, flowDefinitionId),
         ).toBe(true);
+        canonicalFlowDefinitionId = flowDefinitionId;
         await transaction`
           UPDATE crm.contacts SET voice_consent='granted'
           WHERE id=(SELECT contact_id FROM messaging.conversations
@@ -1075,6 +1077,214 @@ describe.skipIf(sourceUrl === undefined)(
         expect(afterTakeover[0]?.count).toBe(beforeTakeover[0]?.count);
       } finally {
         await takeover.close();
+      }
+
+      // Real-call admission is bound to an active Meta channel, and queued work
+      // revalidates that channel plus the exact canonical flow definition. A
+      // tenant configuration change after consent must fail closed before the
+      // telephony adapter is invoked.
+      await web.begin(async (transaction) => {
+        await transaction`SELECT set_config('app.current_tenant', ${tenantId}, true), set_config('app.current_user', ${userId}, true)`;
+        await setConversationOwnership(
+          transaction,
+          conversationId,
+          userId,
+          "ai",
+          whatsAppAgentVersionId,
+        );
+      });
+      const configurationTriggerId = randomUUID();
+      await admin`
+        INSERT INTO messaging.messages(
+          id, tenant_id, conversation_id, direction, sender_type,
+          content_type, content_text, provider, status, created_at
+        ) VALUES (
+          ${configurationTriggerId}::uuid, ${tenantId}::uuid,
+          ${conversationId}::uuid, 'inbound', 'contact', 'text',
+          'Please call me.', 'meta', 'received',
+          (SELECT GREATEST(COALESCE(max(created_at), CURRENT_TIMESTAMP),
+                           CURRENT_TIMESTAMP) + INTERVAL '1 second'
+           FROM messaging.messages
+           WHERE conversation_id=${conversationId}::uuid)
+        )
+      `;
+      await admin`
+        INSERT INTO messaging.inbound_message_origins(
+          tenant_id, message_id, contact_identity_id, sender_address
+        ) VALUES (
+          ${tenantId}::uuid, ${configurationTriggerId}::uuid,
+          ${inboundIdentityId}::uuid, '+12025550198'
+        )
+      `;
+      const blockedCall = vi
+        .fn()
+        .mockResolvedValue({ created: true, sessionId: randomUUID() });
+      const configurationStore = createMessagingStore(
+        workerUrl,
+        `configuration-change-${randomUUID()}`,
+        {
+          simulator: new SimulatorWhatsAppProvider(),
+          meta: {
+            name: "meta",
+            send: vi.fn(() =>
+              Promise.reject(new Error("must not send configuration test")),
+            ),
+          },
+        },
+        undefined,
+        {
+          automaticCallProvider: { place: blockedCall },
+          automaticCallsEnabled: true,
+          realWhatsAppEnabled: true,
+        },
+      );
+      try {
+        await admin`
+          UPDATE messaging.channels SET status='disabled'
+          WHERE tenant_id=${tenantId}::uuid
+            AND provider='meta' AND provider_account_id=${phoneNumberId}
+        `;
+        await expect(
+          worker.begin(async (transaction) => {
+            await transaction`SELECT set_config('app.current_tenant', ${tenantId}, true), set_config('app.current_user', ${userId}, true)`;
+            return queueWhatsAppAutomaticCall(
+              transaction,
+              userId,
+              conversationId,
+              configurationTriggerId,
+              `disabled-channel-${configurationTriggerId}`,
+            );
+          }),
+        ).rejects.toThrow("automatic call policy");
+        const disabledChannelJobs = await admin<{ count: number }[]>`
+          SELECT count(*)::integer AS count FROM ops.jobs
+          WHERE tenant_id=${tenantId}::uuid
+            AND job_type='whatsapp.ai.call'
+            AND callback_trigger_message_id=${configurationTriggerId}::uuid
+        `;
+        expect(disabledChannelJobs[0]?.count).toBe(0);
+
+        await admin`
+          UPDATE messaging.channels SET status='active'
+          WHERE tenant_id=${tenantId}::uuid
+            AND provider='meta' AND provider_account_id=${phoneNumberId}
+        `;
+        const queuedForDisabledChannel = await worker.begin(
+          async (transaction) => {
+            await transaction`SELECT set_config('app.current_tenant', ${tenantId}, true), set_config('app.current_user', ${userId}, true)`;
+            return queueWhatsAppAutomaticCall(
+              transaction,
+              userId,
+              conversationId,
+              configurationTriggerId,
+              `channel-state-${configurationTriggerId}`,
+            );
+          },
+        );
+        expect(queuedForDisabledChannel.queued).toBe(true);
+        await admin`
+          UPDATE messaging.channels SET status='disabled'
+          WHERE tenant_id=${tenantId}::uuid
+            AND provider='meta' AND provider_account_id=${phoneNumberId}
+        `;
+        expect(await processUntilIdle(configurationStore)).toBeGreaterThan(0);
+        expect(blockedCall).not.toHaveBeenCalled();
+        const disabledChannelJob = await admin<
+          { last_error_safe: string | null; status: string }[]
+        >`
+          SELECT status, last_error_safe FROM ops.jobs
+          WHERE id=${queuedForDisabledChannel.jobId}::uuid
+        `;
+        expect(disabledChannelJob[0]).toMatchObject({
+          status: "dead",
+          last_error_safe: "automatic call eligibility changed",
+        });
+
+        await admin`
+          UPDATE messaging.channels SET status='active'
+          WHERE tenant_id=${tenantId}::uuid
+            AND provider='meta' AND provider_account_id=${phoneNumberId}
+        `;
+        await web.begin(async (transaction) => {
+          await transaction`SELECT set_config('app.current_tenant', ${tenantId}, true), set_config('app.current_user', ${userId}, true)`;
+          await setConversationOwnership(
+            transaction,
+            conversationId,
+            userId,
+            "ai",
+            whatsAppAgentVersionId,
+          );
+        });
+        const archivedFlowTriggerId = randomUUID();
+        await admin`
+          INSERT INTO messaging.messages(
+            id, tenant_id, conversation_id, direction, sender_type,
+            content_type, content_text, provider, status, created_at
+          ) VALUES (
+            ${archivedFlowTriggerId}::uuid, ${tenantId}::uuid,
+            ${conversationId}::uuid, 'inbound', 'contact', 'text',
+            'Please call me.', 'meta', 'received',
+            (SELECT GREATEST(COALESCE(max(created_at), CURRENT_TIMESTAMP),
+                             CURRENT_TIMESTAMP) + INTERVAL '1 second'
+             FROM messaging.messages
+             WHERE conversation_id=${conversationId}::uuid)
+          )
+        `;
+        await admin`
+          INSERT INTO messaging.inbound_message_origins(
+            tenant_id, message_id, contact_identity_id, sender_address
+          ) VALUES (
+            ${tenantId}::uuid, ${archivedFlowTriggerId}::uuid,
+            ${inboundIdentityId}::uuid, '+12025550198'
+          )
+        `;
+        const queuedForArchivedFlow = await worker.begin(
+          async (transaction) => {
+            await transaction`SELECT set_config('app.current_tenant', ${tenantId}, true), set_config('app.current_user', ${userId}, true)`;
+            return queueWhatsAppAutomaticCall(
+              transaction,
+              userId,
+              conversationId,
+              archivedFlowTriggerId,
+              `archived-flow-${archivedFlowTriggerId}`,
+            );
+          },
+        );
+        expect(queuedForArchivedFlow.queued).toBe(true);
+        await admin`
+          UPDATE automation.flow_definitions
+          SET archived_at=CURRENT_TIMESTAMP
+          WHERE id=${canonicalFlowDefinitionId}::uuid
+            AND tenant_id=${tenantId}::uuid
+        `;
+        expect(await processUntilIdle(configurationStore)).toBeGreaterThan(0);
+        expect(blockedCall).not.toHaveBeenCalled();
+        const archivedFlowJob = await admin<
+          { last_error_safe: string | null; status: string }[]
+        >`
+          SELECT status, last_error_safe FROM ops.jobs
+          WHERE id=${queuedForArchivedFlow.jobId}::uuid
+        `;
+        expect(archivedFlowJob[0]).toMatchObject({
+          status: "dead",
+          last_error_safe: "automatic call eligibility changed",
+        });
+        const validPinnedJob = await admin<{ status: string }[]>`
+          SELECT status FROM ops.jobs WHERE id=${originalCall.id}::uuid
+        `;
+        expect(validPinnedJob[0]?.status).toBe("succeeded");
+      } finally {
+        await admin`
+          UPDATE messaging.channels SET status='active'
+          WHERE tenant_id=${tenantId}::uuid
+            AND provider='meta' AND provider_account_id=${phoneNumberId}
+        `;
+        await admin`
+          UPDATE automation.flow_definitions SET archived_at=NULL
+          WHERE id=${canonicalFlowDefinitionId}::uuid
+            AND tenant_id=${tenantId}::uuid
+        `;
+        await configurationStore.close();
       }
     }, 120_000);
   },

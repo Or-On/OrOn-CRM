@@ -2355,6 +2355,11 @@ async function loadAutomaticCallWork(
              contact.company AS contact_company,
              contact.lifecycle_status
       FROM messaging.conversations conversation
+      JOIN messaging.channels channel
+        ON channel.id=conversation.channel_id
+       AND channel.tenant_id=conversation.tenant_id
+       AND channel.provider='meta'
+       AND channel.status='active'
       JOIN ops.jobs authorization
         ON authorization.id=${job.id}::uuid
        AND authorization.tenant_id=conversation.tenant_id
@@ -2383,6 +2388,10 @@ async function loadAutomaticCallWork(
                AND agent.id=conversation.ai_agent_profile_version_id)
               OR node#>>'{configuration,agentVersionId}'=agent.id::text
             ))
+      JOIN automation.flow_definitions canonical_definition
+        ON canonical_definition.id=canonical.flow_definition_id
+       AND canonical_definition.tenant_id=canonical.tenant_id
+       AND canonical_definition.archived_at IS NULL
       JOIN crm.contacts contact
         ON contact.id = conversation.contact_id
        AND contact.tenant_id = conversation.tenant_id
