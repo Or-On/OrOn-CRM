@@ -139,6 +139,18 @@ describe.skipIf(databaseUrl === undefined)(
               )?.stages,
             ).toHaveLength(3);
 
+            await transaction`
+              INSERT INTO messaging.channels(
+                tenant_id, kind, provider, provider_account_id, status
+              ) VALUES(
+                ${tenantId}::uuid,
+                'whatsapp',
+                'simulator',
+                ${`crm-integration-simulator-${randomUUID()}`},
+                'active'
+              )
+            `;
+
             const broadcastId = await createSimulatorBroadcast(
               transaction,
               userId,
