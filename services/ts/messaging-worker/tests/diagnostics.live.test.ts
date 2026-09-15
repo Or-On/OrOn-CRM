@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { describe, expect, it, vi } from "vitest";
 import {
-  ingestSimulatedInbound,
+  ingestWhatsAppInbound,
   listMessagePage,
   queueWhatsAppOutbound,
 } from "@or-on/crm";
@@ -16,7 +16,18 @@ const adminUrl = process.env.MESSAGING_DIAGNOSTICS_TEST_DATABASE_URL;
 const runtimeUrl = process.env.MESSAGING_DIAGNOSTICS_RUNTIME_DATABASE_URL;
 const tenant = "10000000-0000-4000-8000-000000000001";
 const otherTenant = "10000000-0000-4000-8000-000000000002";
-const user = "20000000-0000-4000-8000-000000000001";
+const user = randomUUID();
+const providerFixtureSuffix = (
+  BigInt(`0x${randomUUID().replaceAll("-", "").slice(0, 12)}`) %
+  100_000_000_000_000n
+)
+  .toString()
+  .padStart(14, "0");
+const channelConfiguration = {
+  phoneNumberId: `9${providerFixtureSuffix}`,
+  wabaId: `8${providerFixtureSuffix}`,
+  graphApiVersion: "v26.0",
+};
 
 function connections() {
   if (!adminUrl || !runtimeUrl)
@@ -36,17 +47,48 @@ function connections() {
 
 async function fixture(admin: postgres.Sql) {
   return admin.begin(async (sql) => {
+    await sql`
+      INSERT INTO public.users(id, email, status, is_superuser)
+      VALUES (${user}::uuid, ${`diagnostics-${user}@example.invalid`}, 'active', false)
+      ON CONFLICT (id) DO NOTHING
+    `;
+    await sql`
+      INSERT INTO public.memberships(tenant_id, user_id, role)
+      VALUES (${tenant}::uuid, ${user}::uuid, 'owner')
+      ON CONFLICT (tenant_id, user_id) DO NOTHING
+    `;
     await sql`SELECT set_config('app.current_tenant', ${tenant}, true),
       set_config('app.current_user', ${user}, true), set_config('app.current_role', 'owner', true)`;
-    const inbound = await ingestSimulatedInbound(sql, user, {
-      from: "+972509999988",
+    await sql`
+      INSERT INTO messaging.channels(
+        tenant_id, kind, provider, provider_account_id, display_address,
+        status, configuration
+      ) VALUES (
+        ${tenant}::uuid, 'whatsapp', 'meta',
+        ${channelConfiguration.phoneNumberId}, 'Fictional diagnostics sender',
+        'active', ${sql.json(channelConfiguration)}
+      )
+      ON CONFLICT (provider, provider_account_id)
+        WHERE provider_account_id IS NOT NULL
+      DO UPDATE SET status = 'active',
+                    configuration = EXCLUDED.configuration,
+                    updated_at = CURRENT_TIMESTAMP
+      WHERE messaging.channels.tenant_id = EXCLUDED.tenant_id
+    `;
+    const phoneSuffix = (
+      BigInt(`0x${randomUUID().replaceAll("-", "").slice(0, 12)}`) % 10_000_000n
+    )
+      .toString()
+      .padStart(7, "0");
+    const inbound = await ingestWhatsAppInbound(sql, {
+      providerAccountId: channelConfiguration.phoneNumberId,
+      from: `+1202${phoneSuffix}`,
       profileName: "Fictional diagnostics contact",
       text: "Fictional inbound",
-      providerEventId: randomUUID(),
-      providerMessageId: randomUUID(),
+      providerEventId: `fixture-event-${randomUUID()}`,
+      providerMessageId: `wamid.fixture-${randomUUID()}`,
+      occurredAt: new Date().toISOString(),
     });
-    await sql`UPDATE crm.contacts SET whatsapp_consent='granted'
-      WHERE id=(SELECT contact_id FROM messaging.conversations WHERE id=${inbound.conversationId}::uuid)`;
     const queued = await queueWhatsAppOutbound(
       sql,
       {
@@ -61,16 +103,12 @@ async function fixture(admin: postgres.Sql) {
         language: "en_US",
         parameters: [],
       },
-      {
-        phoneNumberId: "999999999",
-        wabaId: "888888888",
-        graphApiVersion: "v26.0",
-      },
+      channelConfiguration,
     );
     await sql`UPDATE messaging.messages SET provider_payload='{"existing":"preserved"}'::jsonb
       WHERE id=${queued.messageId}::uuid`;
     await sql`UPDATE ops.jobs SET max_attempts=2 WHERE reference_id=${queued.requestId}::uuid`;
-    return queued;
+    return { ...queued, recipientAddress: `+1202${phoneSuffix}` };
   });
 }
 function store(fetcher: typeof fetch, report = vi.fn(), enabled = true) {
@@ -99,6 +137,7 @@ describe.skipIf(!adminUrl || !runtimeUrl)(
     it("persists safe details, reports once, and exposes only tenant-scoped projections", async () => {
       const admin = connections();
       const report = vi.fn();
+      let recipientAddress: string | undefined;
       const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => {
         const open = await admin<
           { count: number }[]
@@ -110,8 +149,7 @@ describe.skipIf(!adminUrl || !runtimeUrl)(
             error: {
               code: 100,
               error_subcode: 33,
-              message:
-                "Unsupported post request: fictional-never-log-token +972509999988",
+              message: `Unsupported post request: fictional-never-log-token ${recipientAddress ?? "missing-recipient"}`,
               error_data: { details: "private body private@example.invalid" },
               fbtrace_id: "private-trace-must-not-leak",
             },
@@ -122,6 +160,7 @@ describe.skipIf(!adminUrl || !runtimeUrl)(
       const worker = store(fetcher, report);
       try {
         const queued = await fixture(admin);
+        recipientAddress = queued.recipientAddress;
         expect(await worker.processAvailable()).toBe(1);
         expect(await worker.processAvailable()).toBe(0);
         expect(fetcher).toHaveBeenCalledOnce();
@@ -150,7 +189,7 @@ describe.skipIf(!adminUrl || !runtimeUrl)(
         const output = JSON.stringify(rows) + JSON.stringify(report.mock.calls);
         for (const forbidden of [
           "fictional-never-log-token",
-          "+972509999988",
+          queued.recipientAddress,
           "private body",
           "private@example.invalid",
           "private-trace-must-not-leak",
