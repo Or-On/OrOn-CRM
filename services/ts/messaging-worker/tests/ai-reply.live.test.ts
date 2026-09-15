@@ -30,7 +30,12 @@ const sourceUrl = process.env.CROSS_CHANNEL_TEST_DATABASE_URL;
 const root = fileURLToPath(new URL("../../../../", import.meta.url));
 const tenantId = "10000000-0000-4000-8000-000000000001";
 const userId = "20000000-0000-4000-8000-000000000001";
-const providerTimestampSeconds = String(Math.floor(Date.now() / 1000));
+let providerTimestampSequence = Math.floor(Date.now() / 1000);
+
+function nextProviderTimestamp(): string {
+  providerTimestampSequence += 1;
+  return String(providerTimestampSequence);
+}
 
 async function processUntilIdle(
   store: Readonly<{ processAvailable: () => Promise<number> }>,
@@ -139,6 +144,7 @@ describe.skipIf(sourceUrl === undefined)(
     async function acceptInbound(
       messageId: string,
       text: string,
+      timestamp = nextProviderTimestamp(),
     ): Promise<void> {
       const rawBody = Buffer.from(
         JSON.stringify({
@@ -155,10 +161,7 @@ describe.skipIf(sourceUrl === undefined)(
                         id: messageId,
                         from: "12025550198",
                         type: "text",
-                        // Meta timestamps have one-second precision. Keeping
-                        // every fixture event in the same second proves that
-                        // ingestion order, not random UUID order, resolves ties.
-                        timestamp: providerTimestampSeconds,
+                        timestamp,
                         text: { body: text },
                       },
                     ],
@@ -428,8 +431,20 @@ describe.skipIf(sourceUrl === undefined)(
       expect(disabledAi).not.toHaveBeenCalled();
 
       const secondInbound = `wamid.fixture-${randomUUID()}`;
-      await acceptInbound(secondInbound, "What time do you open?");
-      await acceptInbound(secondInbound, "What time do you open?");
+      // Meta timestamps have one-second precision. Keeping this complete
+      // customer turn in one second proves ingestion order, not random UUID
+      // order, resolves ties. Later scenarios resume monotonic provider time.
+      const tiedProviderTimestamp = nextProviderTimestamp();
+      await acceptInbound(
+        secondInbound,
+        "What time do you open?",
+        tiedProviderTimestamp,
+      );
+      await acceptInbound(
+        secondInbound,
+        "What time do you open?",
+        tiedProviderTimestamp,
+      );
       const thirdInbound = `wamid.fixture-${randomUUID()}`;
       const naturalInbound = `wamid.fixture-${randomUUID()}`;
 
@@ -500,9 +515,14 @@ describe.skipIf(sourceUrl === undefined)(
         await acceptInbound(
           naturalInbound,
           "The connection is unstable after restarting the router.",
+          tiedProviderTimestamp,
         );
         expect(await processUntilIdle(store)).toBeGreaterThan(0);
-        await acceptInbound(thirdInbound, "Please call me.");
+        await acceptInbound(
+          thirdInbound,
+          "Please call me.",
+          tiedProviderTimestamp,
+        );
         expect(await processUntilIdle(store)).toBeGreaterThan(0);
       } finally {
         await store.close();

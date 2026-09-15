@@ -1524,6 +1524,9 @@ async function requireCurrentTrigger(
   conversationId: string,
   triggerMessageId: string,
 ): Promise<void> {
+  // Meta's event time is only precise to one second. For equal provider times,
+  // updated_at preserves database ingestion order; a random UUID must never
+  // decide which customer turn is current.
   const latest = await transaction<{ id: string }[]>`
     SELECT id FROM messaging.messages WHERE conversation_id=${conversationId}::uuid
       AND direction='inbound'
