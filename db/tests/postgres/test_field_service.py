@@ -126,6 +126,71 @@ async def test_feature_defaults_off_but_customer_files_remain_available(
     assert await pg.fetchval("SELECT count(*) FROM crm.customer_classifications") == 0
 
 
+async def test_feature_change_actor_uses_tenant_safe_identity_lookup(
+    pg: asyncpg.Connection,
+) -> None:
+    fixture = await _tenant(pg, "Feature change actor", enabled=True)
+    other = await _tenant(pg, "Other feature actor", enabled=True)
+    expected_name = "Synthetic Feature Administrator"
+    await pg.execute(
+        "UPDATE users SET display_name=$1 WHERE id=$2",
+        expected_name,
+        fixture.user_id,
+    )
+    await pg.execute(
+        "UPDATE service.tenant_configuration "
+        "SET changed_by_user_id=$1, changed_at=CURRENT_TIMESTAMP "
+        "WHERE tenant_id=$2",
+        fixture.user_id,
+        fixture.tenant_id,
+    )
+
+    await _as_web(pg, fixture)
+    assert (
+        await pg.fetchval(
+            "SELECT platform.current_tenant_member_display_name($1)",
+            fixture.user_id,
+        )
+        == expected_name
+    )
+    assert (
+        await pg.fetchval(
+            "SELECT platform.current_tenant_member_display_name($1)",
+            other.user_id,
+        )
+        is None
+    )
+    with pytest.raises(asyncpg.InsufficientPrivilegeError):
+        async with pg.transaction():
+            await pg.fetchval(
+                "SELECT display_name FROM public.users WHERE id=$1",
+                fixture.user_id,
+            )
+
+    await pg.execute("RESET ROLE")
+    await pg.execute("SET LOCAL ROLE platform_worker")
+    await pg.execute(
+        "SELECT set_config('app.current_tenant',$1,true),"
+        "set_config('app.current_user','',true),"
+        "set_config('app.current_role','service',true)",
+        str(fixture.tenant_id),
+    )
+    assert (
+        await pg.fetchval(
+            "SELECT platform.current_tenant_member_display_name($1)",
+            fixture.user_id,
+        )
+        == expected_name
+    )
+    assert (
+        await pg.fetchval(
+            "SELECT platform.current_tenant_member_display_name($1)",
+            other.user_id,
+        )
+        is None
+    )
+
+
 async def test_platform_admin_can_manage_existing_tenant_entitlement(
     pg: asyncpg.Connection,
 ) -> None:

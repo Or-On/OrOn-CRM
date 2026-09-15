@@ -87,7 +87,9 @@ export async function getFieldServiceFeatureState(
       coalesce(configuration.calendar_access, 'none') AS calendar_access,
       configuration.calendar_provider,
       configuration.changed_by_user_id,
-      changed_by.display_name AS changed_by_display_name,
+      platform.current_tenant_member_display_name(
+        configuration.changed_by_user_id
+      ) AS changed_by_display_name,
       configuration.changed_at,
       EXISTS (
         SELECT 1 FROM messaging.channels channel
@@ -114,8 +116,6 @@ export async function getFieldServiceFeatureState(
      AND entitlement.feature_key = 'field_service'
     LEFT JOIN service.tenant_configuration configuration
       ON configuration.tenant_id = current.tenant_id
-    LEFT JOIN public.users changed_by
-      ON changed_by.id=configuration.changed_by_user_id
   `;
   const row = rows[0];
   const available = row?.available === true;

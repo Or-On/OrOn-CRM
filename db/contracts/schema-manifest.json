@@ -1,5 +1,5 @@
 {
-  "alembic_head": "b72c5f0e4d91",
+  "alembic_head": "d4e15a9c7b02",
   "expected_functions": [
     "agents.protect_approved_knowledge",
     "automation.protect_published_flow_version",
@@ -33,6 +33,7 @@
     "platform.current_tenant_logo",
     "platform.current_tenant_id",
     "platform.current_tenant_active",
+    "platform.current_tenant_member_display_name",
     "platform.current_tenant_team",
     "platform.current_tenant_invitations",
     "platform.current_user_id",
