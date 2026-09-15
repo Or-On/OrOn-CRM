@@ -25,10 +25,11 @@ def canonical_head() -> str:
 
 
 @pytest_asyncio.fixture
-async def knowledge_database(postgres_url: str) -> AsyncIterator[str]:
-    if os.environ.get("READINESS_POSTGRES_URL") is None:
+async def knowledge_database() -> AsyncIterator[str]:
+    readiness_url = os.environ.get("READINESS_POSTGRES_URL")
+    if readiness_url is None:
         pytest.skip("owned readiness migration proof requires explicit READINESS_POSTGRES_URL")
-    target = urlsplit(postgres_url)
+    target = urlsplit(readiness_url)
     if (
         target.hostname != "127.0.0.1"
         or target.port != 55439
