@@ -162,7 +162,11 @@ jobs:
           DATABASE_URL: ${{ env.READINESS_POSTGRES_URL }}
         run: |
           uv run --no-sync alembic -c db/alembic/alembic.ini upgrade head
-          uv run --no-sync python db/seeds/seed_development.py
+          DEV_AUTH_PASSWORD_HASH="$(
+            cd packages/ts/auth
+            node --input-type=module \
+              --eval "import { randomBytes } from 'node:crypto'; import { hash } from '@node-rs/argon2'; console.log(await hash(randomBytes(32).toString('base64url'), { algorithm: 2, memoryCost: 65536, timeCost: 3, parallelism: 1, outputLen: 32 }))"
+          )" uv run --no-sync python db/seeds/seed_development.py
       - name: Dedicated readiness persistence acceptance (no providers)
         run: |
           pnpm --filter @or-on/crm exec vitest run \
