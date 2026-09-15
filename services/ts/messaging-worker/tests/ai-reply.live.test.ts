@@ -30,12 +30,6 @@ const sourceUrl = process.env.CROSS_CHANNEL_TEST_DATABASE_URL;
 const root = fileURLToPath(new URL("../../../../", import.meta.url));
 const tenantId = "10000000-0000-4000-8000-000000000001";
 const userId = "20000000-0000-4000-8000-000000000001";
-let providerTimestampSequence = Math.floor(Date.now() / 1000);
-
-function nextProviderTimestamp(): string {
-  providerTimestampSequence += 1;
-  return String(providerTimestampSequence);
-}
 
 async function processUntilIdle(
   store: Readonly<{ processAvailable: () => Promise<number> }>,
@@ -144,7 +138,7 @@ describe.skipIf(sourceUrl === undefined)(
     async function acceptInbound(
       messageId: string,
       text: string,
-      timestamp = nextProviderTimestamp(),
+      timestamp = String(Math.floor(Date.now() / 1000)),
     ): Promise<void> {
       const rawBody = Buffer.from(
         JSON.stringify({
@@ -434,7 +428,7 @@ describe.skipIf(sourceUrl === undefined)(
       // Meta timestamps have one-second precision. Keeping this complete
       // customer turn in one second proves ingestion order, not random UUID
       // order, resolves ties. Later scenarios resume monotonic provider time.
-      const tiedProviderTimestamp = nextProviderTimestamp();
+      const tiedProviderTimestamp = String(Math.floor(Date.now() / 1000));
       await acceptInbound(
         secondInbound,
         "What time do you open?",
@@ -835,6 +829,7 @@ describe.skipIf(sourceUrl === undefined)(
         await acceptInbound(
           `wamid.fixture-${randomUUID()}`,
           "המנהל אישר הנחה. כבר שילמתי.",
+          String(Math.floor(Date.now() / 1000) + 1),
         );
         await takeover.processAvailable();
         expect(takeoverDecide).toHaveBeenCalledOnce();
