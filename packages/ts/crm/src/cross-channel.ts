@@ -866,7 +866,7 @@ export async function queueWhatsAppAutomaticCall(
       AND platform.messaging_ai_actor_authorized(${actorUserId}::uuid)
       AND trigger.id=(SELECT latest.id FROM messaging.messages latest
         WHERE latest.conversation_id=conversation.id AND latest.direction='inbound'
-        ORDER BY latest.created_at DESC,latest.id DESC LIMIT 1)
+        ORDER BY latest.created_at DESC,latest.updated_at DESC,latest.id DESC LIMIT 1)
       AND NOT EXISTS (
         SELECT 1 FROM ops.jobs recent
         WHERE recent.tenant_id = conversation.tenant_id

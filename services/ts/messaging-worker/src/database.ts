@@ -828,7 +828,7 @@ async function whatsappSummarySource(
      AND message.conversation_id=link.conversation_id
     WHERE link.case_id=${caseId}::uuid
       AND link.conversation_id=${conversationId}::uuid
-    ORDER BY message.created_at, message.id
+    ORDER BY message.created_at, message.updated_at, message.id
   `;
   if (messages.length === 0) return undefined;
   const checksum = factDigest(
