@@ -83,6 +83,11 @@ worker 30 and web 1.
   migrator on the actual host, so deployment now explicitly pulls each of the
   five validated immutable references before revision inspection; shell syntax
   and all 11 release tests pass.
+- That retry also proved CI was invoking the previously installed host deployer,
+  not the corrected copy packaged in the candidate archive. The handoff now
+  transfers the checked-out deployer separately, verifies its SHA-256 on the
+  host and executes that exact copy. Regression coverage forbids the stale
+  `/opt` deployer entrypoint while preserving archive checksum and exit status.
 - The first focused lint after adding strict UTF-8 validation caught one missing
   error `cause`; it was fixed and the full lint/type/build/test gates were rerun.
 - A first production build during implementation exposed a client import through
