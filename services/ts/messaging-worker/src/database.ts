@@ -2384,16 +2384,16 @@ async function loadAutomaticCallWork(
        AND channel.tenant_id=conversation.tenant_id
        AND channel.provider='meta'
        AND channel.status='active'
-      JOIN ops.jobs authorization
-        ON authorization.id=${job.id}::uuid
-       AND authorization.tenant_id=conversation.tenant_id
-       AND authorization.queue='messaging'
-       AND authorization.job_type='whatsapp.ai.call'
-       AND authorization.reference_type='conversation'
-       AND authorization.reference_id=conversation.id
-       AND authorization.callback_trigger_message_id=${payload.triggerMessageId}::uuid
-       AND authorization.callback_sender_identity_id=${payload.contactIdentityId}::uuid
-       AND authorization.callback_destination=${payload.destination}
+      JOIN ops.jobs authorized_job
+        ON authorized_job.id=${job.id}::uuid
+       AND authorized_job.tenant_id=conversation.tenant_id
+       AND authorized_job.queue='messaging'
+       AND authorized_job.job_type='whatsapp.ai.call'
+       AND authorized_job.reference_type='conversation'
+       AND authorized_job.reference_id=conversation.id
+       AND authorized_job.callback_trigger_message_id=${payload.triggerMessageId}::uuid
+       AND authorized_job.callback_sender_identity_id=${payload.contactIdentityId}::uuid
+       AND authorized_job.callback_destination=${payload.destination}
       JOIN agents.agent_profile_versions agent
         ON agent.id=${payload.agentVersionId}::uuid AND agent.tenant_id=conversation.tenant_id
         AND agent.published_at IS NOT NULL
@@ -2420,16 +2420,16 @@ async function loadAutomaticCallWork(
         ON contact.id = conversation.contact_id
        AND contact.tenant_id = conversation.tenant_id
       JOIN crm.contact_channel_identities identity
-        ON identity.id=authorization.callback_sender_identity_id
+        ON identity.id=authorized_job.callback_sender_identity_id
        AND identity.tenant_id=conversation.tenant_id
        AND identity.contact_id=contact.id
        AND identity.channel='whatsapp'
        AND identity.validation_status='valid'
       JOIN messaging.inbound_message_origins origin
         ON origin.tenant_id=conversation.tenant_id
-       AND origin.message_id=authorization.callback_trigger_message_id
-       AND origin.contact_identity_id=authorization.callback_sender_identity_id
-       AND origin.sender_address=authorization.callback_destination
+       AND origin.message_id=authorized_job.callback_trigger_message_id
+       AND origin.contact_identity_id=authorized_job.callback_sender_identity_id
+       AND origin.sender_address=authorized_job.callback_destination
        AND identity.normalized_value=origin.sender_address
       JOIN messaging.messages trigger
         ON trigger.id = origin.message_id
@@ -2473,15 +2473,25 @@ async function loadAutomaticCallWork(
       JOIN messaging.messages boundary
         ON boundary.id = ${payload.triggerMessageId}::uuid
        AND boundary.conversation_id = message.conversation_id
+      JOIN messaging.inbound_message_origins boundary_origin
+        ON boundary_origin.tenant_id = boundary.tenant_id
+       AND boundary_origin.message_id = boundary.id
+      LEFT JOIN messaging.inbound_message_origins message_origin
+        ON message_origin.tenant_id = message.tenant_id
+       AND message_origin.message_id = message.id
+      LEFT JOIN messaging.outbound_requests outbound_request
+        ON outbound_request.tenant_id = message.tenant_id
+       AND outbound_request.message_id = message.id
       WHERE message.conversation_id = ${payload.conversationId}::uuid
         AND message.content_type = 'text' AND message.content_text IS NOT NULL
-        AND (message.created_at < boundary.created_at OR
-             (message.created_at = boundary.created_at AND
-              message.updated_at < boundary.updated_at) OR
-             (message.created_at = boundary.created_at AND
-              message.updated_at = boundary.updated_at AND
-              message.id <= boundary.id))
-      ORDER BY message.created_at DESC, message.updated_at DESC, message.id DESC
+        AND ((message.direction='inbound' AND message.status='received') OR
+             (message.direction='outbound' AND
+              message.status IN ('sent','delivered','read')))
+        AND COALESCE(message_origin.created_at, outbound_request.created_at,
+                     message.created_at) <= boundary_origin.created_at
+      ORDER BY COALESCE(message_origin.created_at, outbound_request.created_at,
+                        message.created_at) DESC,
+               message.id DESC
       LIMIT 12
     `;
     const notes = await transaction<{ body: string; created_at: Date }[]>`

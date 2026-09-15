@@ -123,18 +123,25 @@ DUPLICATE_RECOVERY_QUESTION = {
     "he": "מה השתנה מאז הניסיון האחרון?",
     "en": "What changed after the last attempt?",
 }
+# Each bounded fallback pool below has at least one more distinct response than
+# this window, so a prolonged recovery loop never has to repeat audible text.
+RECENT_SPOKEN_WINDOW = 6
 RECOVERY_QUESTIONS = {
     "he": (
         PROGRESS_QUESTION["he"],
         DUPLICATE_RECOVERY_QUESTION["he"],
         "מה חשוב לבדוק עכשיו?",
         "איזה פרט יעזור להתקדם מכאן?",
+        "אפשר לנסח את הבקשה במשפט קצר אחד?",
+        "עם מה כדאי להתחיל כדי לעזור?",
     ),
     "en": (
         PROGRESS_QUESTION["en"],
         DUPLICATE_RECOVERY_QUESTION["en"],
         "What should we focus on now?",
         "Which detail would help us move forward?",
+        "Could you state your request in one short sentence?",
+        "What would you like me to help with first?",
     ),
 }
 TURN_ACKNOWLEDGEMENTS = {
@@ -152,11 +159,19 @@ PERSON_HELP_REPLIES = {
         CONVERSATION["he"]["person_help"],
         "עדיין אין לי אישור שהחיבור לנציג בוצע.",
         "אין לי כרגע אישור שנציג הצטרף לשיחה.",
+        "עדיין אין אישור שהנציג התחבר לשיחה.",
+        "כרגע לא נראה שהשיחה הועברה לנציג.",
+        "נכון לעכשיו ההעברה לנציג עדיין לא אושרה.",
+        "עוד לא התקבל אישור על חיבור לנציג.",
     ),
     "en": (
         CONVERSATION["en"]["person_help"],
         "I still cannot confirm that you have been connected to a person.",
         "I do not currently have confirmation that a person joined the conversation.",
+        "There is still no confirmation that a representative is connected.",
+        "I cannot verify a connection to human support.",
+        "No confirmed transfer to a representative is currently available.",
+        "At this point, I have no confirmation of a representative connection.",
     ),
 }
 _CALLER_NEEDS_PROGRESS = re.compile(
@@ -608,7 +623,7 @@ class VoiceEvidenceGate(FrameProcessor):
         self._fallback_behavior = fallback_behavior
         self._latest_caller_text = ""
         self._last_spoken_text: str | None = None
-        self._recent_spoken_texts: deque[str] = deque(maxlen=6)
+        self._recent_spoken_texts: deque[str] = deque(maxlen=RECENT_SPOKEN_WINDOW)
         self._generation = 0
 
     def observe_caller_text(self, text: str) -> None:

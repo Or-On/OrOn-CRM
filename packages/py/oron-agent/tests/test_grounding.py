@@ -10,6 +10,7 @@ from oron_agent.grounding import (
     DUPLICATE_RECOVERY_QUESTION,
     MODEL_CONVERSATION_INTENTS,
     PROGRESS_QUESTION,
+    RECENT_SPOKEN_WINDOW,
     RECOVERY_QUESTIONS,
     ActionReceipt,
     VoiceEvidenceContext,
@@ -208,6 +209,27 @@ def test_malformed_output_after_nonsense_gets_a_non_repeating_clarification(lang
 
 @pytest.mark.parametrize(
     ("language", "caller_text"),
+    [
+        ("he", "בננה כחולה רוקדת בתוך הראוטר"),
+        ("en", "Purple bananas rebooted seventeen clouds"),
+    ],
+)
+def test_nonsense_recovery_pool_outlives_the_spoken_history_window(language, caller_text):
+    recent = []
+    for _ in range(14):
+        reply = render_reply(
+            "not-json",
+            [],
+            language,
+            latest_caller_text=caller_text,
+            recent_spoken_texts=tuple(recent[-RECENT_SPOKEN_WINDOW:]),
+        )
+        assert reply.text not in recent[-RECENT_SPOKEN_WINDOW:]
+        recent.append(reply.text)
+
+
+@pytest.mark.parametrize(
+    ("language", "caller_text"),
     [("he", "אני רוצה לדבר עם נציג"), ("en", "I want to speak with a person")],
 )
 def test_explicit_person_request_uses_a_rendered_json_intent_not_a_tool(language, caller_text):
@@ -290,6 +312,26 @@ def test_repeated_person_request_stays_on_human_help_without_repeating(language,
 
     assert reply.decision == "person_help"
     assert reply.text != first
+
+
+@pytest.mark.parametrize(
+    ("language", "caller_text"),
+    [("en", "I want to speak with a person"), ("he", "אני רוצה לדבר עם נציג")],
+)
+def test_repeated_person_request_does_not_exhaust_the_spoken_history_window(language, caller_text):
+    recent = []
+    choice = '{"kind":"conversation","intent":"person_help"}'
+    for _ in range(14):
+        reply = render_reply(
+            choice,
+            [],
+            language,
+            latest_caller_text=caller_text,
+            recent_spoken_texts=tuple(recent[-RECENT_SPOKEN_WINDOW:]),
+        )
+        assert reply.decision == "person_help"
+        assert reply.text not in recent[-RECENT_SPOKEN_WINDOW:]
+        recent.append(reply.text)
 
 
 @pytest.mark.parametrize(

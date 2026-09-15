@@ -494,6 +494,14 @@ describe.skipIf(sourceUrl === undefined)(
       const compoundInbound = `wamid.fixture-${randomUUID()}`;
       const negativeInbound = `wamid.fixture-${randomUUID()}`;
       const nonsenseInbound = `wamid.fixture-${randomUUID()}`;
+      const queuedInvisibleMessageId = randomUUID();
+      const failedInvisibleMessageId = randomUUID();
+      const queuedInvisibleText =
+        "Queued outbound fixture must not reach call context.";
+      const failedInvisibleText =
+        "Failed outbound fixture must not reach call context.";
+      const callAcknowledgement =
+        "Your call request was queued. Recording the request does not confirm a connected call.";
 
       const aiDecide = vi
         .fn()
@@ -609,6 +617,45 @@ describe.skipIf(sourceUrl === undefined)(
         );
         expect(await processUntilIdle(store)).toBeGreaterThan(0);
         expect(automaticCall).not.toHaveBeenCalled();
+        await admin.begin(async (transaction) => {
+          await transaction`
+            INSERT INTO messaging.messages(
+              id, tenant_id, conversation_id, direction, sender_type,
+              sender_user_id, content_type, content_text, provider, status
+            ) VALUES
+              (${queuedInvisibleMessageId}::uuid, ${tenantId}::uuid,
+               ${conversationId}::uuid, 'outbound', 'user', ${userId}::uuid, 'text',
+               ${queuedInvisibleText}, 'meta', 'queued'),
+              (${failedInvisibleMessageId}::uuid, ${tenantId}::uuid,
+               ${conversationId}::uuid, 'outbound', 'user', ${userId}::uuid, 'text',
+               ${failedInvisibleText}, 'meta', 'failed')
+          `;
+          await transaction`
+            INSERT INTO messaging.outbound_requests(
+              tenant_id, conversation_id, message_id, channel_id,
+              recipient_identity_id, recipient_address, requested_by_user_id,
+              provider, message_kind, explicitly_confirmed, status,
+              idempotency_key, last_error_code, completed_at
+            )
+            SELECT ${tenantId}::uuid, conversation.id, fixture.message_id,
+                   conversation.channel_id, ${inboundIdentityId}::uuid,
+                   '+12025550198', ${userId}::uuid, 'meta', 'text', true,
+                   fixture.status, fixture.idempotency_key,
+                   CASE WHEN fixture.status='failed'
+                     THEN 'outbound_processing_failed' END,
+                   CASE WHEN fixture.status='failed'
+                     THEN CURRENT_TIMESTAMP END
+            FROM messaging.conversations conversation
+            CROSS JOIN (VALUES
+              (${queuedInvisibleMessageId}::uuid, 'queued',
+               ${`invisible-${queuedInvisibleMessageId}`}),
+              (${failedInvisibleMessageId}::uuid, 'failed',
+               ${`invisible-${failedInvisibleMessageId}`})
+            ) AS fixture(message_id, status, idempotency_key)
+            WHERE conversation.tenant_id=${tenantId}::uuid
+              AND conversation.id=${conversationId}::uuid
+          `;
+        });
         await acceptInbound(
           thirdInbound,
           "Please call me.",
@@ -698,14 +745,63 @@ describe.skipIf(sourceUrl === undefined)(
       expect(callRequest?.conversationContext).toContain(
         `Prior CRM ticket ${linkedTicketId}`,
       );
+      const callContexts = automaticCall.mock.calls.map(
+        ([request]) => (request as AutomaticCallRequest).conversationContext,
+      );
+      expect(callContexts[1]).toContain(
+        "Customer report (unverified): Please call me.",
+      );
+      for (const context of callContexts) {
+        expect(context).not.toContain(callAcknowledgement);
+        expect(context).not.toContain(queuedInvisibleText);
+        expect(context).not.toContain(failedInvisibleText);
+      }
+      const invisibleOutbound = await admin<
+        { content_text: string; request_status: string; status: string }[]
+      >`
+        SELECT message.content_text, message.status,
+               request.status AS request_status
+        FROM messaging.messages message
+        JOIN messaging.outbound_requests request
+          ON request.tenant_id=message.tenant_id
+         AND request.message_id=message.id
+        WHERE message.tenant_id=${tenantId}::uuid
+          AND message.conversation_id=${conversationId}::uuid
+          AND message.id IN (${queuedInvisibleMessageId}::uuid,
+                             ${failedInvisibleMessageId}::uuid)
+      `;
+      expect(invisibleOutbound).toHaveLength(2);
+      expect(invisibleOutbound).toEqual(
+        expect.arrayContaining([
+          {
+            content_text: queuedInvisibleText,
+            request_status: "queued",
+            status: "queued",
+          },
+          {
+            content_text: failedInvisibleText,
+            request_status: "failed",
+            status: "failed",
+          },
+        ]),
+      );
+      await admin`
+        DELETE FROM messaging.messages
+        WHERE tenant_id=${tenantId}::uuid
+          AND conversation_id=${conversationId}::uuid
+          AND id IN (${queuedInvisibleMessageId}::uuid,
+                     ${failedInvisibleMessageId}::uuid)
+      `;
       const inboundCount = await admin<{ count: number }[]>`
       SELECT count(*)::integer AS count FROM messaging.messages
-      WHERE conversation_id=${conversationId}::uuid AND direction='inbound'
+      WHERE tenant_id=${tenantId}::uuid
+        AND conversation_id=${conversationId}::uuid AND direction='inbound'
     `;
       expect(inboundCount[0]?.count).toBe(8);
       const outboundText = await admin<{ content_text: string }[]>`
       SELECT content_text FROM messaging.messages
-      WHERE conversation_id=${conversationId}::uuid AND direction='outbound'
+      WHERE tenant_id=${tenantId}::uuid
+        AND conversation_id=${conversationId}::uuid AND direction='outbound'
       ORDER BY created_at, id
     `;
       expect(outboundText.map((row) => row.content_text)).toEqual([
@@ -714,7 +810,7 @@ describe.skipIf(sourceUrl === undefined)(
         'To request a call, please reply in a separate message: "Please call me now."',
         "Understood. I will not place a call.",
         "I did not understand that. What problem are you seeing?",
-        "Your call request was queued. Recording the request does not confirm a connected call.",
+        callAcknowledgement,
       ]);
       const ownership = await admin<
         { ownership_mode: string; handoff_reason_safe: string | null }[]
@@ -853,7 +949,7 @@ describe.skipIf(sourceUrl === undefined)(
         await forgeMutableSenderMetadata(mutatedInbound, secondaryIdentityId);
         await admin`
           UPDATE crm.contact_channel_identities
-          SET normalized_value='+12025550196', updated_at=CURRENT_TIMESTAMP
+          SET normalized_value='+12025550196'
           WHERE id=${inboundIdentityId}::uuid
         `;
         expect(await processUntilIdle(mutationStore)).toBeGreaterThan(0);
@@ -886,7 +982,7 @@ describe.skipIf(sourceUrl === undefined)(
       } finally {
         await admin`
           UPDATE crm.contact_channel_identities
-          SET normalized_value='+12025550198', updated_at=CURRENT_TIMESTAMP
+          SET normalized_value='+12025550198'
           WHERE id=${inboundIdentityId}::uuid
         `;
         await mutationStore.close();
