@@ -161,7 +161,7 @@ describe.skipIf(databaseUrl === undefined)(
                 version: number;
               }[]
             >`
-              SELECT version, published_at, definition->'nodes'->1->>'label' AS label
+              SELECT version, published_at, definition->'nodes'->0->>'label' AS label
               FROM automation.flow_versions
               WHERE flow_definition_id=${canonicalFlowId}::uuid
               ORDER BY version

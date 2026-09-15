@@ -309,6 +309,9 @@ export async function listConversationPage(
           options.before.lastMessageAt,
           options.before.id,
         );
+  // Bind the cursor timestamp as text before PostgreSQL casts it. Inferring a
+  // timestamptz parameter makes the driver round-trip through JavaScript Date
+  // and silently drops the microseconds required by the keyset cursor.
   const rows = await sql.unsafe<ConversationRow[]>(
     `SELECT c.id, c.contact_id, contact.name AS contact_name, c.status,
             c.unread_count, c.last_message_at, c.last_message_preview,
@@ -353,10 +356,10 @@ export async function listConversationPage(
           OR ($3 = 'closed' AND c.status IN ('closed', 'resolved')))
         AND ($5::text IS NULL OR channel.kind = $5)
         AND ($7::uuid IS NULL OR
-          ($6::timestamptz IS NULL AND c.last_message_at IS NULL AND c.id < $7::uuid)
-          OR ($6::timestamptz IS NOT NULL AND (
-            c.last_message_at < $6::timestamptz
-            OR (c.last_message_at = $6::timestamptz AND c.id < $7::uuid)
+          ($6::text::timestamptz IS NULL AND c.last_message_at IS NULL AND c.id < $7::uuid)
+          OR ($6::text::timestamptz IS NOT NULL AND (
+            c.last_message_at < $6::text::timestamptz
+            OR (c.last_message_at = $6::text::timestamptz AND c.id < $7::uuid)
             OR c.last_message_at IS NULL)))
       ORDER BY c.last_message_at DESC NULLS LAST, c.id DESC
       LIMIT $8`,

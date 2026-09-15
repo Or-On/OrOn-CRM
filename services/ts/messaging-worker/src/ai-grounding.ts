@@ -106,6 +106,7 @@ export function safeKnowledgeStatement(value: string): boolean {
 export interface ConversationalReplyContext {
   readonly locale?: string;
   readonly recentAssistantMessages?: readonly string[];
+  readonly latestCustomerMessage?: string;
 }
 
 function normalizedReply(value: string): string {
@@ -197,6 +198,68 @@ function repeatsRecentAssistant(
           comparablePrevious.includes(comparableCandidate))
       );
     });
+}
+
+function parrotsLatestCustomer(
+  value: string,
+  latestCustomerMessage: string,
+): boolean {
+  const stripEchoFraming = (text: string): string => {
+    let framed = normalizedComparableReply(text).replace(
+      /^((?:(?:כמו\s+ש?)?(?:אמרת|ציינת)|הבנתי))\s+ש(?=\p{Script=Hebrew})/u,
+      "$1 ",
+    );
+    const prefix =
+      /^(?:(?:i\s+understand|understood)(?:\s+that)?|thanks?(?:\s+you)?\s+for\s+(?:sharing|the\s+(?:detail|details|information))|that\s+sounds\s+frustrating|(?:as\s+)?you\s+(?:said|mentioned)(?:\s+that)?|הבנתי|תודה(?:\s+רבה)?\s+על\s+(?:השיתוף|ההסבר|הפרטים)|זה\s+נשמע\s+מתסכל|(?:כמו\s+ש?)?(?:אמרת|ציינת))\s+/u;
+    // A model may stack a short acknowledgement and attribution before
+    // repeating the customer's turn. Remove only this closed set of framing;
+    // any meaning-bearing diagnosis or question remains part of the comparison.
+    for (let index = 0; index < 2; index += 1) {
+      const stripped = framed.replace(prefix, "");
+      if (stripped === framed) break;
+      framed = stripped;
+    }
+    return framed.replace(
+      /\s+(?:is\s+that\s+right|did\s+i\s+understand(?:\s+that)?\s+correctly|correct|right|האם\s+זה\s+נכון|הבנתי\s+נכון|נכון)$/u,
+      "",
+    );
+  };
+  const tokens = (text: string): string[] =>
+    text
+      .split(" ")
+      .filter(Boolean)
+      .map((token) =>
+        /^[a-z]{5,}$/u.test(token) ? token.replace(/(?:es|s)$/u, "") : token,
+      );
+  const candidate = tokens(stripEchoFraming(value));
+  const latest = tokens(normalizedComparableReply(latestCustomerMessage));
+  const leadingQuestionWords = new Set([
+    "does",
+    "do",
+    "did",
+    "is",
+    "are",
+    "can",
+    "could",
+    "would",
+    "will",
+    "האם",
+  ]);
+  while (candidate.length > 0 && leadingQuestionWords.has(candidate[0] ?? ""))
+    candidate.shift();
+  if (candidate.length === 0 || latest.length === 0) return false;
+  const exactMatch =
+    candidate.length === latest.length &&
+    candidate.every((token, index) => token === latest[index]);
+  if (exactMatch) return true;
+  const candidateTokens = new Set(candidate);
+  const latestTokens = new Set(latest);
+  const smaller = Math.min(candidateTokens.size, latestTokens.size);
+  if (smaller < 4) return false;
+  let overlap = 0;
+  for (const token of candidateTokens)
+    if (latestTokens.has(token)) overlap += 1;
+  return overlap / smaller >= 0.8;
 }
 
 function matchesRequestedLocale(value: string, locale: string): boolean {
@@ -307,12 +370,16 @@ export function safeConversationalReply(
   context: ConversationalReplyContext = {},
 ): boolean {
   const text = value.trim();
+  const latestCustomerMessage = context.latestCustomerMessage?.trim();
   return (
     passesConversationalSafety(text) &&
     !asksMoreThanOneQuestion(text) &&
     (context.locale === undefined ||
       matchesRequestedLocale(text, context.locale)) &&
-    !repeatsRecentAssistant(text, context.recentAssistantMessages ?? [])
+    !repeatsRecentAssistant(text, context.recentAssistantMessages ?? []) &&
+    (latestCustomerMessage === undefined ||
+      latestCustomerMessage.length === 0 ||
+      !parrotsLatestCustomer(text, latestCustomerMessage))
   );
 }
 
@@ -455,7 +522,11 @@ export function groundAiReply(
   facts: readonly EligibleKnowledgeFact[],
   locale: string,
   recentAssistantMessages: readonly string[] = [],
+  latestCustomerMessage = "",
 ): GroundedReply {
+  const spokenContext = latestCustomerMessage.trim()
+    ? [...recentAssistantMessages, latestCustomerMessage]
+    : recentAssistantMessages;
   if (decision.action === "knowledge") {
     const fact = facts.find(
       (item) =>
@@ -484,7 +555,7 @@ export function groundAiReply(
     }
     return nonRepeatingClarification(
       locale,
-      recentAssistantMessages,
+      spokenContext,
       knowledgeFallbackCodes,
     );
   }
@@ -493,15 +564,16 @@ export function groundAiReply(
       const selected = conversationalReply(decision.replyCode, locale);
       if (
         decision.replyCode === "callback_confirmation" ||
-        !repeatsRecentAssistant(selected.text, recentAssistantMessages)
+        !repeatsRecentAssistant(selected.text, spokenContext)
       )
         return selected;
-      return nonRepeatingClarification(locale, recentAssistantMessages);
+      return nonRepeatingClarification(locale, spokenContext);
     }
     if (
       safeConversationalReply(decision.text, {
         locale,
         recentAssistantMessages,
+        latestCustomerMessage,
       })
     ) {
       return {
@@ -513,16 +585,16 @@ export function groundAiReply(
       };
     }
     return passesConversationalSafety(decision.text.trim())
-      ? nonRepeatingClarification(locale, recentAssistantMessages)
+      ? nonRepeatingClarification(locale, spokenContext)
       : nonRepeatingClarification(
           locale,
-          recentAssistantMessages,
+          spokenContext,
           knowledgeFallbackCodes,
         );
   }
   return nonRepeatingClarification(
     locale,
-    recentAssistantMessages,
+    spokenContext,
     knowledgeFallbackCodes,
   );
 }

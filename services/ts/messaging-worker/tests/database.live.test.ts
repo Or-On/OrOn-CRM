@@ -460,6 +460,12 @@ describe.skipIf(databaseUrl === undefined)("durable messaging worker", () => {
           UPDATE messaging.messages SET object_id=NULL
           WHERE tenant_id=${mediaTenantId}::uuid
         `;
+        // Conversations retain their contact through a restrictive composite
+        // foreign key. Remove them before the tenant cascade reaches contacts.
+        await transaction`
+          DELETE FROM messaging.conversations
+          WHERE tenant_id=${mediaTenantId}::uuid
+        `;
         await transaction`
           DELETE FROM tenants WHERE id=${mediaTenantId}::uuid
         `;

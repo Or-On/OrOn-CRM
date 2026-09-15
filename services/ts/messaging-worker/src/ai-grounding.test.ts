@@ -78,6 +78,95 @@ describe("WhatsApp deterministic grounding (typed fixtures, no provider evaluati
   );
 
   it.each([
+    [
+      "en",
+      "The router still disconnects from the internet every few minutes.",
+      "I understand. The router still disconnects from the internet every few minutes.",
+    ],
+    [
+      "en",
+      "The router still disconnects from the internet every few minutes.",
+      "You said that the router still disconnects from the internet every few minutes. Is that right?",
+    ],
+    [
+      "he",
+      "הממיר עדיין מתנתק מהאינטרנט כל כמה דקות.",
+      "הבנתי. הממיר עדיין מתנתק מהאינטרנט כל כמה דקות.",
+    ],
+    [
+      "he",
+      "הממיר עדיין מתנתק מהאינטרנט כל כמה דקות.",
+      "כמו שאמרת, הממיר עדיין מתנתק מהאינטרנט כל כמה דקות. נכון?",
+    ],
+    [
+      "en",
+      "The router still disconnects from the internet every few minutes.",
+      "Okay, the router still disconnects from the internet every few minutes.",
+    ],
+    [
+      "he",
+      "הממיר עדיין מתנתק מהאינטרנט כל כמה דקות.",
+      "בסדר, הממיר עדיין מתנתק מהאינטרנט כל כמה דקות.",
+    ],
+  ] as const)(
+    "rejects a framed echo of the latest %s customer turn",
+    (locale, latestCustomerMessage, candidate) => {
+      expect(
+        safeConversationalReply(candidate, {
+          locale,
+          latestCustomerMessage,
+        }),
+      ).toBe(false);
+      expect(
+        groundAiReply(
+          { action: "reply", text: candidate },
+          [],
+          locale,
+          [],
+          latestCustomerMessage,
+        ),
+      ).toMatchObject({
+        evidence: { kind: "conversation", code: "clarify_rephrase" },
+      });
+    },
+  );
+
+  it.each([
+    [
+      "en",
+      "The router still disconnects from the internet every few minutes.",
+      "I understand. Which light is blinking when the router disconnects?",
+    ],
+    [
+      "he",
+      "הממיר עדיין מתנתק מהאינטרנט כל כמה דקות.",
+      "הבנתי. איזו נורה מהבהבת כשהממיר מתנתק?",
+    ],
+  ] as const)(
+    "keeps a meaning-bearing %s follow-up after a natural acknowledgement",
+    (locale, latestCustomerMessage, candidate) => {
+      expect(
+        safeConversationalReply(candidate, {
+          locale,
+          latestCustomerMessage,
+        }),
+      ).toBe(true);
+      expect(
+        groundAiReply(
+          { action: "reply", text: candidate },
+          [],
+          locale,
+          [],
+          latestCustomerMessage,
+        ),
+      ).toMatchObject({
+        text: candidate,
+        evidence: { kind: "conversation", code: "generated" },
+      });
+    },
+  );
+
+  it.each([
     "missing",
     "expired",
     "revoked",
@@ -154,6 +243,69 @@ describe("WhatsApp deterministic grounding (typed fixtures, no provider evaluati
           recentAssistantMessages: [previous],
         }),
       ).toBe(false);
+    },
+  );
+
+  it.each([
+    [
+      "en",
+      "The router still disconnects from the internet every few minutes.",
+      "Does the router still disconnect from the internet every few minutes?",
+    ],
+    [
+      "he",
+      "הממיר עדיין מתנתק מהאינטרנט כל כמה דקות.",
+      "האם הממיר עדיין מתנתק מהאינטרנט כל כמה דקות?",
+    ],
+  ] as const)(
+    "does not parrot the latest %s customer turn as a question",
+    (locale, latestCustomerMessage, candidate) => {
+      expect(
+        safeConversationalReply(candidate, {
+          locale,
+          latestCustomerMessage,
+        }),
+      ).toBe(false);
+      expect(
+        groundAiReply(
+          { action: "reply", text: candidate },
+          [],
+          locale,
+          [],
+          latestCustomerMessage,
+        ),
+      ).toMatchObject({
+        evidence: { kind: "conversation", code: "clarify_rephrase" },
+      });
+    },
+  );
+
+  it.each([
+    [
+      "en",
+      "I may have misunderstood. Could you describe that another way?",
+      "Could you share one detail that would help me understand what you need now?",
+    ],
+    [
+      "he",
+      "לא בטוח שהבנתי. אפשר לתאר את זה בדרך אחרת?",
+      "אפשר לציין פרט אחד שיעזור להבין מה נדרש כרגע?",
+    ],
+  ] as const)(
+    "rotates the %s fallback instead of echoing the customer",
+    (locale, latestCustomerMessage, expected) => {
+      expect(
+        groundAiReply(
+          { action: "reply", text: latestCustomerMessage },
+          [],
+          locale,
+          [],
+          latestCustomerMessage,
+        ),
+      ).toMatchObject({
+        text: expected,
+        evidence: { kind: "conversation", code: "clarify_detail" },
+      });
     },
   );
 

@@ -492,6 +492,7 @@ def render_reply(
         for text in (*recent_spoken_texts, previous_spoken_text or "")
         if isinstance(text, str) and text.strip()
     )
+    question_context = (*recent, latest_caller_text) if latest_caller_text.strip() else recent
 
     def fallback_reply() -> GroundedReply:
         if fallback_behavior == "handoff":
@@ -556,7 +557,10 @@ def render_reply(
                     _non_repeating_person_help(locale, recent),
                     "person_help",
                 )
-            if _looks_repeated(rendered, recent) and intent not in {"repeat", "goodbye"}:
+            if _looks_repeated(rendered, recent) and intent not in {
+                "repeat",
+                "goodbye",
+            }:
                 return GroundedReply(
                     _non_repeating_recovery(locale, recent),
                     "duplicate_recovery",
@@ -571,9 +575,9 @@ def render_reply(
         }
         and (question := safe_diagnostic_question(value.get("text"), language))
     ):
-        if _looks_repeated(question, recent):
+        if _looks_repeated(question, question_context):
             return GroundedReply(
-                _non_repeating_recovery(locale, recent),
+                _non_repeating_recovery(locale, question_context),
                 "duplicate_recovery",
             )
         return GroundedReply(question, "diagnostic_question")
@@ -584,9 +588,9 @@ def render_reply(
         and value["acknowledgement"] in TURN_ACKNOWLEDGEMENTS[locale]
         and (question := safe_diagnostic_question(value.get("question"), language))
     ):
-        if _looks_repeated(question, recent):
+        if _looks_repeated(question, question_context):
             return GroundedReply(
-                _non_repeating_recovery(locale, recent),
+                _non_repeating_recovery(locale, question_context),
                 "duplicate_recovery",
             )
         acknowledgement = TURN_ACKNOWLEDGEMENTS[locale][value["acknowledgement"]]

@@ -5,8 +5,11 @@ import { describe, expect, it } from "vitest";
 
 import { deleteConversation } from "./messaging.js";
 
+// Fixture setup needs the owned migrator connection. The preview runner also
+// exposes UI_TEST_DATABASE_URL, but that login intentionally has only the
+// platform_web runtime grants and must not seed feature entitlements directly.
 const databaseUrl =
-  process.env.UI_TEST_DATABASE_URL ?? process.env.CRM_TEST_DATABASE_URL;
+  process.env.CRM_TEST_DATABASE_URL ?? process.env.UI_TEST_DATABASE_URL;
 const tenantId = "10000000-0000-4000-8000-000000000001";
 const userId = "20000000-0000-4000-8000-000000000001";
 

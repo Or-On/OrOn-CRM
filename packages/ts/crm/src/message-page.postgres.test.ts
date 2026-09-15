@@ -34,8 +34,8 @@ describe.skipIf(databaseUrl === undefined)(
         );
       const sql = postgres(databaseUrl, { max: 1, prepare: false });
       try {
-        await expect(
-          sql.begin(async (transaction) => {
+        try {
+          await sql.begin(async (transaction) => {
             await transaction`SET LOCAL ROLE platform_web`;
             await transaction`SELECT set_config('app.current_tenant', ${tenant}, true), set_config('app.current_user', ${user}, true), set_config('app.current_role', 'owner', true)`;
             const baseline = await overviewMetrics(transaction);
@@ -190,8 +190,11 @@ describe.skipIf(databaseUrl === undefined)(
                 .messages,
             ).toEqual([]);
             throw new RollbackFixture();
-          }),
-        ).rejects.toBeInstanceOf(RollbackFixture);
+          });
+          throw new Error("Inbox PostgreSQL fixture did not roll back");
+        } catch (error) {
+          if (!(error instanceof RollbackFixture)) throw error;
+        }
       } finally {
         await sql.end();
       }

@@ -458,6 +458,65 @@ def test_semantic_question_repetition_is_recovered_not_only_exact_text():
 
 
 @pytest.mark.parametrize(
+    ("language", "caller_text", "model_question"),
+    [
+        (
+            "he",
+            "הממיר עדיין מתנתק מהאינטרנט כל כמה דקות.",
+            "האם הממיר עדיין מתנתק מהאינטרנט כל כמה דקות?",
+        ),
+        (
+            "en",
+            "The router still disconnects from the internet every few minutes.",
+            "Does the router still disconnect from the internet every few minutes?",
+        ),
+    ],
+)
+def test_model_cannot_parrot_the_latest_caller_turn_as_a_question(
+    language, caller_text, model_question
+):
+    reply = render_reply(
+        json.dumps({"kind": "question", "text": model_question}, ensure_ascii=False),
+        [],
+        language,
+        latest_caller_text=caller_text,
+    )
+
+    assert reply.decision == "duplicate_recovery"
+    assert reply.text != model_question
+    assert reply.text in RECOVERY_QUESTIONS[language]
+
+
+@pytest.mark.parametrize(
+    ("language", "caller_text", "model_question"),
+    [
+        ("he", "איזו נורה מהבהבת כרגע?", "איזו נורה מהבהבת כרגע?"),
+        ("en", "Which light is blinking now?", "Which light is blinking now?"),
+    ],
+)
+def test_acknowledged_turn_cannot_repeat_the_callers_question(
+    language, caller_text, model_question
+):
+    reply = render_reply(
+        json.dumps(
+            {
+                "kind": "turn",
+                "acknowledgement": "understood",
+                "question": model_question,
+            },
+            ensure_ascii=False,
+        ),
+        [],
+        language,
+        latest_caller_text=caller_text,
+    )
+
+    assert reply.decision == "duplicate_recovery"
+    assert reply.text != model_question
+    assert reply.text in RECOVERY_QUESTIONS[language]
+
+
+@pytest.mark.parametrize(
     ("language", "acknowledgement", "question", "expected"),
     [
         (

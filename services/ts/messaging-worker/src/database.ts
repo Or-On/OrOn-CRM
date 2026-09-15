@@ -2242,6 +2242,7 @@ async function processWhatsAppAiReply(
         await eligibleFacts(transaction, work.agentVersionId),
         work.locale,
         await recentDeliveredReplies(transaction, work.conversationId),
+        triggerText,
       );
       let responseText = grounded.text;
       let evidence:
@@ -3008,6 +3009,13 @@ async function requireGroundedOutbound(
     row.conversation_id,
     row.message_id,
   );
+  const triggerMessages = await transaction<{ content_text: string | null }[]>`
+    SELECT content_text FROM messaging.messages
+    WHERE id=${metadata.triggerMessageId}::uuid
+      AND conversation_id=${row.conversation_id}::uuid
+      AND direction='inbound'
+  `;
+  const latestCustomerMessage = triggerMessages[0]?.content_text ?? "";
   let expected: string | undefined;
   if (
     evidence.kind === "knowledge" &&
@@ -3040,12 +3048,14 @@ async function requireGroundedOutbound(
         [],
         metadata.locale,
         recentAssistantMessages,
+        latestCustomerMessage,
       ).text;
     else if (
       evidence.code === "generated" &&
       safeConversationalReply(row.content_text ?? "", {
         locale: metadata.locale,
         recentAssistantMessages,
+        latestCustomerMessage,
       })
     )
       expected = row.content_text ?? "";

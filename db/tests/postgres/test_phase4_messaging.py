@@ -10,14 +10,17 @@ import pytest
 pytestmark = [pytest.mark.postgres, pytest.mark.integration]
 
 
-async def _claim_inbound(postgres_url: str, worker_id: str) -> list[asyncpg.Record]:
+async def _claim_inbound(
+    postgres_url: str, worker_id: str, *, limit: int = 10
+) -> list[asyncpg.Record]:
     connection = await asyncpg.connect(postgres_url)
     try:
         async with connection.transaction():
             await connection.execute("SET LOCAL ROLE platform_messaging")
             return await connection.fetch(
-                "SELECT id, tenant_id FROM ops.claim_inbound_events($1, 10, 60)",
+                "SELECT id, tenant_id FROM ops.claim_inbound_events($1, $2, 60)",
                 worker_id,
+                limit,
             )
     finally:
         await connection.close()
@@ -90,6 +93,66 @@ async def test_verified_webhook_store_is_idempotent_and_claimed_once(
         )
         assert completed is not None
         assert completed["status"] == "processed"
+    finally:
+        await admin.execute("DELETE FROM tenants WHERE id = $1", tenant_id)
+        await admin.close()
+
+
+async def test_worker_claims_every_supported_whatsapp_event_and_rejects_others(
+    postgres_url: str,
+) -> None:
+    admin = await asyncpg.connect(postgres_url)
+    tenant_id = uuid4()
+    supported_types = (
+        "whatsapp.message.text",
+        "whatsapp.message.image",
+        "whatsapp.message.document",
+        "whatsapp.message.location",
+        "whatsapp.message.status",
+    )
+    unsupported_type = "voice.call.admission.v1"
+    event_ids: dict[str, UUID] = {}
+    try:
+        await admin.execute(
+            "INSERT INTO tenants (id, name, slug) VALUES ($1, 'Supported WhatsApp claims', $2)",
+            tenant_id,
+            f"supported-whatsapp-claims-{tenant_id}",
+        )
+        for event_type in (*supported_types, unsupported_type):
+            event_id = uuid4()
+            event_ids[event_type] = event_id
+            await admin.execute(
+                "INSERT INTO ops.inbound_events "
+                "(id, tenant_id, provider, provider_account_id, "
+                "provider_event_id, event_type, payload, available_at) "
+                "VALUES ($1, $2, 'meta', $3, $4, $5, '{}'::jsonb, "
+                "CURRENT_TIMESTAMP - interval '1 minute')",
+                event_id,
+                tenant_id,
+                f"supported-account-{tenant_id}",
+                f"supported-event-{event_id}",
+                event_type,
+            )
+
+        claimed = await _claim_inbound(postgres_url, "supported-whatsapp-worker", limit=100)
+        tenant_claims = {
+            UUID(str(row["id"])) for row in claimed if UUID(str(row["tenant_id"])) == tenant_id
+        }
+        assert tenant_claims == {event_ids[event_type] for event_type in supported_types}
+        assert event_ids[unsupported_type] not in tenant_claims
+
+        states = await admin.fetch(
+            "SELECT id, status, attempts FROM ops.inbound_events WHERE tenant_id=$1",
+            tenant_id,
+        )
+        by_id = {UUID(str(row["id"])): row for row in states}
+        for event_type in supported_types:
+            row = by_id[event_ids[event_type]]
+            assert row["status"] == "processing"
+            assert row["attempts"] == 1
+        unsupported = by_id[event_ids[unsupported_type]]
+        assert unsupported["status"] == "received"
+        assert unsupported["attempts"] == 0
     finally:
         await admin.execute("DELETE FROM tenants WHERE id = $1", tenant_id)
         await admin.close()
