@@ -39,6 +39,7 @@ from pipecat.transcriptions.language import Language
 from pipecat.utils.asyncio.task_manager import TaskManager
 
 from oron_agent.config import Settings
+from oron_agent.conversation_language import resolve_conversation_language
 from oron_agent.tts import TtsProvider, build_tts
 from oron_agent.voice_quality import VoiceQualityConfig, make_speech_transformer
 
@@ -216,7 +217,16 @@ class RealPreviewProvider:
         if not settings.enable_real_voice_providers:
             raise PermissionError("real voice providers are disabled")
         config = VoiceQualityConfig.model_validate(quality)
-        speech_text = await make_speech_transformer(config, lambda: None)(text, "*")
+        language = resolve_conversation_language(text, config.language).value
+        # Preview text is a synthetic caller turn. Route its normalization and
+        # provider language exactly like a live accepted turn while retaining
+        # every other immutable published quality setting, including voice.
+        turn_config = (
+            config
+            if language == config.language
+            else config.model_copy(update={"language": language})
+        )
+        speech_text = await make_speech_transformer(turn_config, lambda: None)(text, "*")
         if not speech_text.strip() or len(speech_text) > 2000:
             raise ValueError("speech-normalized preview exceeds its bound")
         voice = config.voiceId or (
@@ -226,7 +236,7 @@ class RealPreviewProvider:
         )
         tts = self._tts_factory(
             settings.tts_provider,
-            language=Language.HE if config.language == "he" else Language.EN,
+            language=Language.HE if language == "he" else Language.EN,
             voice=voice,
             text_filters=[],
             text_aggregation_mode=TextAggregationMode.SENTENCE,

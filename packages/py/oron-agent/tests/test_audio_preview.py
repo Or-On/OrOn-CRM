@@ -12,6 +12,7 @@ from oron_agent.audio_preview import RealPreviewProvider
 from oron_agent.config import Settings
 from pipecat.frames.frames import TTSAudioRawFrame, TTSStartedFrame, TTSStoppedFrame
 from pipecat.services.tts_service import TTSService
+from pipecat.transcriptions.language import Language
 
 
 def settings(enabled=True):
@@ -53,7 +54,7 @@ async def test_installed_pipeline_applies_pronunciation_and_returns_bounded_wav(
 
     provider = RealPreviewProvider(settings_factory=settings, tts_factory=factory)
     result = await provider.synthesize(
-        "HDMI",
+        "חיבור HDMI",
         {
             "schemaVersion": "1.0",
             "language": "he",
@@ -65,13 +66,48 @@ async def test_installed_pipeline_applies_pronunciation_and_returns_bounded_wav(
         },
         confirmed=True,
     )
-    assert fixture.received == ["אייץ די אם איי"]
+    assert fixture.received == ["חיבור אייץ די אם איי"]
     assert fixture.stopped and options["voice"] == "Harper" and options["speed"] == 1.1
+    assert options["language"] == Language.HE
     assert options["first_clause"] is False
     with wave.open(io.BytesIO(result.audio)) as wav:
         assert (wav.getframerate(), wav.getnchannels(), wav.getnframes()) == (24000, 1, 240)
     assert result.duration_seconds == 0.01 and result.provider == "soniox"
-    assert result.canonical_text == "HDMI" and result.speech_normalized_text == "אייץ די אם איי"
+    assert result.canonical_text == "חיבור HDMI"
+    assert result.speech_normalized_text == "חיבור אייץ די אם איי"
+
+
+@pytest.mark.parametrize(
+    ("text", "configured_language", "expected_language"),
+    [
+        ("Could you explain the problem?", "he", Language.EN),
+        ("אפשר להסביר מה הבעיה?", "en", Language.HE),
+    ],
+)
+async def test_preview_uses_current_text_language_without_changing_voice(
+    text, configured_language, expected_language
+):
+    fixture = FixtureTTS()
+    options = {}
+
+    def factory(provider, **kwargs):
+        options.update(kwargs)
+        return fixture
+
+    provider = RealPreviewProvider(settings_factory=settings, tts_factory=factory)
+    result = await provider.synthesize(
+        text,
+        {
+            "schemaVersion": "1.0",
+            "language": configured_language,
+            "voiceId": "Harper",
+        },
+        confirmed=True,
+    )
+
+    assert options["language"] == expected_language
+    assert options["voice"] == result.voice == "Harper"
+    assert result.canonical_text == text
 
 
 async def test_lowest_boundary_denies_before_provider_construction():
