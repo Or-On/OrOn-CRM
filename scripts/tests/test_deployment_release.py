@@ -143,6 +143,15 @@ def test_release_images_carry_and_enforce_source_revision() -> None:
         assert "org.opencontainers.image.revision" in dockerfile.read_text(encoding="utf-8")
 
 
+def test_deploy_probes_local_edge_without_requiring_public_ip_hairpin() -> None:
+    deploy = DEPLOY.read_text(encoding="utf-8")
+    assert "PLATFORM_ORIGIN must be an HTTPS origin" in deploy
+    assert '--resolve "${PLATFORM_HOST}:443:127.0.0.1"' in deploy
+    assert '--resolve "${PLATFORM_HOST}:80:127.0.0.1"' in deploy
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert "https://dev.or-on.io/login" in workflow
+
+
 def test_backup_covers_database_private_objects_and_checksums() -> None:
     backup = (ROOT / "scripts" / "backup-dev.sh").read_text(encoding="utf-8")
     assert "database.dump" in backup

@@ -216,6 +216,15 @@ trap rollback ERR
 
 # shellcheck disable=SC1091
 source "${SHARED_DIR}/deployment.env"
+if [[ ! ${PLATFORM_ORIGIN:-} =~ ^https://([A-Za-z0-9.-]+)$ ]]; then
+  echo "PLATFORM_ORIGIN must be an HTTPS origin with a DNS hostname and no path" >&2
+  exit 1
+fi
+readonly PLATFORM_HOST="${BASH_REMATCH[1]}"
+if [[ ${PLATFORM_HOST} == .* || ${PLATFORM_HOST} == *. || ${PLATFORM_HOST} == *..* ]]; then
+  echo "PLATFORM_ORIGIN contains an invalid DNS hostname" >&2
+  exit 1
+fi
 if [[ -n ${previous_release} ]]; then
   mapfile -t previous_running_services < <(compose_previous ps --services --filter status=running)
   for service in "${previous_running_services[@]}"; do
@@ -295,14 +304,17 @@ for service_and_key in \
 done
 
 for _ in {1..48}; do
-  if curl --fail --silent --show-error --max-time 10 "${PLATFORM_ORIGIN}/login" >/dev/null; then
+  if curl --fail --silent --show-error --max-time 10 \
+    --resolve "${PLATFORM_HOST}:443:127.0.0.1" "${PLATFORM_ORIGIN}/login" >/dev/null; then
     break
   fi
   sleep 5
 done
-curl --fail --silent --show-error --max-time 10 "${PLATFORM_ORIGIN}/login" >/dev/null
-http_origin="http://${PLATFORM_ORIGIN#https://}"
-redirect_status="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 "${http_origin}/")"
+curl --fail --silent --show-error --max-time 10 \
+  --resolve "${PLATFORM_HOST}:443:127.0.0.1" "${PLATFORM_ORIGIN}/login" >/dev/null
+http_origin="http://${PLATFORM_HOST}"
+redirect_status="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 \
+  --resolve "${PLATFORM_HOST}:80:127.0.0.1" "${http_origin}/")"
 if [[ ${redirect_status} != 301 && ${redirect_status} != 308 ]]; then
   echo "HTTP did not redirect to HTTPS (status ${redirect_status})" >&2
   exit 1
