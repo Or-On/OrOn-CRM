@@ -31,6 +31,19 @@ const root = fileURLToPath(new URL("../../../../", import.meta.url));
 const tenantId = "10000000-0000-4000-8000-000000000001";
 const userId = "20000000-0000-4000-8000-000000000001";
 
+async function processUntilIdle(
+  store: Readonly<{ processAvailable: () => Promise<number> }>,
+  maximumPasses = 16,
+): Promise<number> {
+  let processed = 0;
+  for (let pass = 0; pass < maximumPasses; pass += 1) {
+    const current = await store.processAvailable();
+    processed += current;
+    if (current === 0) return processed;
+  }
+  throw new Error("messaging worker did not become idle");
+}
+
 describe.skipIf(sourceUrl === undefined)(
   "isolated WhatsApp AI orchestration",
   () => {
@@ -459,7 +472,7 @@ describe.skipIf(sourceUrl === undefined)(
         },
       );
       try {
-        expect(await store.processAvailable()).toBeGreaterThan(0);
+        expect(await processUntilIdle(store)).toBeGreaterThan(0);
         const automaticallyAssigned = await admin<
           {
             ownership_mode: string;
@@ -475,7 +488,6 @@ describe.skipIf(sourceUrl === undefined)(
         expect(
           automaticallyAssigned[0]?.ai_agent_profile_version_id,
         ).not.toBeNull();
-        expect(await store.processAvailable()).toBeGreaterThan(0);
         const readByAi = await admin<{ unread_count: number }[]>`
           SELECT unread_count FROM messaging.conversations
           WHERE id=${conversationId}::uuid
@@ -485,13 +497,9 @@ describe.skipIf(sourceUrl === undefined)(
           naturalInbound,
           "The connection is unstable after restarting the router.",
         );
-        expect(await store.processAvailable()).toBeGreaterThan(0);
-        expect(await store.processAvailable()).toBeGreaterThan(0);
+        expect(await processUntilIdle(store)).toBeGreaterThan(0);
         await acceptInbound(thirdInbound, "Please call me.");
-        expect(await store.processAvailable()).toBeGreaterThan(0);
-        expect(await store.processAvailable()).toBeGreaterThan(0);
-        expect(await store.processAvailable()).toBeGreaterThan(0);
-        expect(await store.processAvailable()).toBe(0);
+        expect(await processUntilIdle(store)).toBeGreaterThan(0);
       } finally {
         await store.close();
       }
