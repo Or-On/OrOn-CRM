@@ -13,6 +13,7 @@ const state = vi.hoisted(() => ({
   superuser: false,
 }));
 
+vi.mock("server-only", () => ({}));
 vi.mock("next/navigation", () => ({
   redirect: vi.fn(),
   usePathname: () => "/settings",
