@@ -72,6 +72,7 @@ export default async function FinancePage() {
           expensePage,
           summary,
           defaultCurrency: settings.defaultCurrency,
+          tenantTimeZone: settings.timezone,
           voice,
           wallet,
           paymentSource,
@@ -90,6 +91,8 @@ export default async function FinancePage() {
           initialWallet={data.wallet}
           initialPaymentSource={data.paymentSource}
           realBillingEnabled={platformConfig.enableRealBilling}
+          referenceTime={new Date().toISOString()}
+          tenantTimeZone={data.tenantTimeZone}
         />
       </main>
     );

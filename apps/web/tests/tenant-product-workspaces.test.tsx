@@ -82,6 +82,7 @@ const members: readonly TeamMember[] = [
 ];
 
 const nowIso = new Date().toISOString();
+const originalTimeZone = process.env.TZ;
 
 function expense(id: string, overrides: Partial<Expense> = {}): Expense {
   return {
@@ -213,6 +214,8 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  if (originalTimeZone === undefined) delete process.env.TZ;
+  else process.env.TZ = originalTimeZone;
 });
 
 describe("Finance workspace", () => {
@@ -221,6 +224,8 @@ describe("Finance workspace", () => {
       localized(
         <FinanceWorkspace
           defaultCurrency="USD"
+          referenceTime="2026-09-16T12:00:00.000Z"
+          tenantTimeZone="Asia/Jerusalem"
           initialExpenses={[]}
           initialNextCursor={null}
           initialSummary={{
@@ -262,6 +267,8 @@ describe("Finance workspace", () => {
       localized(
         <FinanceWorkspace
           defaultCurrency="USD"
+          referenceTime="2026-09-16T12:00:00.000Z"
+          tenantTimeZone="Asia/Jerusalem"
           initialExpenses={[]}
           initialNextCursor={null}
           initialSummary={{
@@ -301,6 +308,8 @@ describe("Finance workspace", () => {
       localized(
         <FinanceWorkspace
           defaultCurrency="USD"
+          referenceTime="2026-09-16T12:00:00.000Z"
+          tenantTimeZone="Asia/Jerusalem"
           initialExpenses={expenses}
           initialNextCursor={null}
           initialSummary={expenseSummary}
@@ -344,6 +353,8 @@ describe("Finance workspace", () => {
       localized(
         <FinanceWorkspace
           defaultCurrency="USD"
+          referenceTime="2026-09-16T12:00:00.000Z"
+          tenantTimeZone="Asia/Jerusalem"
           initialExpenses={expenses}
           initialNextCursor={null}
           initialSummary={expenseSummary}
@@ -392,6 +403,61 @@ describe("Finance workspace", () => {
     expect(transport.refresh).toHaveBeenCalledOnce();
     expect(screen.getAllByText("Design subscription").length).toBeGreaterThan(
       0,
+    );
+  });
+
+  it("serializes an entered expense date in the tenant timezone", async () => {
+    process.env.TZ = "UTC";
+    const created = expense("tenant-date", {
+      title: "Tenant-local expense",
+      incurredAt: "2026-09-16T22:00:00.000Z",
+    });
+    transport.mutate.mockResolvedValueOnce({ expense: created });
+    render(
+      localized(
+        <FinanceWorkspace
+          defaultCurrency="USD"
+          referenceTime="2026-09-16T12:00:00.000Z"
+          tenantTimeZone="Pacific/Kiritimati"
+          initialExpenses={[]}
+          initialNextCursor={null}
+          initialSummary={{
+            totals: [],
+            expenseCount: 0,
+            recordedCount: 0,
+            pendingCount: 0,
+            voidCount: 0,
+          }}
+          voiceEstimateAvailable={false}
+          voiceEstimates={[]}
+        />,
+      ),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Add expense" }));
+    const dialog = screen.getByRole("dialog", { name: "Add expense" });
+    fireEvent.change(within(dialog).getByLabelText("Expense title"), {
+      target: { value: "Tenant-local expense" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Amount"), {
+      target: { value: "10.00" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Incurred date"), {
+      target: { value: "2026-09-17" },
+    });
+    const form = within(dialog)
+      .getByRole("button", { name: "Add expense" })
+      .closest("form");
+    if (!form) throw new Error("Expense form missing");
+    fireEvent.submit(form);
+
+    await waitFor(() => expect(transport.mutate).toHaveBeenCalledOnce());
+    expect(transport.mutate).toHaveBeenCalledWith(
+      "/api/finance/expenses",
+      expect.objectContaining({
+        incurredAt: "2026-09-16T22:00:00.000Z",
+      }),
+      { method: "POST" },
     );
   });
 });
@@ -959,6 +1025,8 @@ describe("Hebrew tenant product labels", () => {
       [
         <FinanceWorkspace
           defaultCurrency="ILS"
+          referenceTime="2026-09-16T12:00:00.000Z"
+          tenantTimeZone="Asia/Jerusalem"
           initialExpenses={[]}
           initialNextCursor={null}
           initialSummary={{

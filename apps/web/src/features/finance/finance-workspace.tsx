@@ -293,11 +293,109 @@ function emptyDraft(currency: string, category: string): ExpenseDraft {
   };
 }
 
-function dateInputValue(value: string): string {
+const DAY_MS = 86_400_000;
+
+function normalizedTimeZone(timeZone: string): string {
+  try {
+    new Intl.DateTimeFormat("en", { timeZone }).format(0);
+    return timeZone;
+  } catch {
+    return "UTC";
+  }
+}
+
+function calendarDateKey(value: string, timeZone: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  const shifted = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
-  return shifted.toISOString().slice(0, 10);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    calendar: "iso8601",
+    day: "2-digit",
+    month: "2-digit",
+    numberingSystem: "latn",
+    timeZone,
+    year: "numeric",
+  }).formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((item) => item.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+function referenceDateKey(value: string, timeZone: string): string {
+  return calendarDateKey(value, timeZone) || "1970-01-01";
+}
+
+function dateKeyOrdinal(dateKey: string): number {
+  return Date.parse(`${dateKey}T00:00:00.000Z`);
+}
+
+function dateKeyFromOrdinal(ordinal: number): string {
+  return new Date(ordinal).toISOString().slice(0, 10);
+}
+
+function timeZoneClockAsUtc(value: number, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    calendar: "iso8601",
+    day: "2-digit",
+    hour: "2-digit",
+    hourCycle: "h23",
+    minute: "2-digit",
+    month: "2-digit",
+    numberingSystem: "latn",
+    second: "2-digit",
+    timeZone,
+    year: "numeric",
+  }).formatToParts(value);
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((item) => item.type === type)?.value ?? Number.NaN);
+  return Date.UTC(
+    part("year"),
+    part("month") - 1,
+    part("day"),
+    part("hour"),
+    part("minute"),
+    part("second"),
+  );
+}
+
+function calendarDateToInstant(dateKey: string, timeZone: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateKey);
+  if (!match) throw new RangeError("Invalid calendar date");
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const localNoon = Date.UTC(year, month - 1, day, 12);
+  if (dateKeyFromOrdinal(Date.UTC(year, month - 1, day)) !== dateKey) {
+    throw new RangeError("Invalid calendar date");
+  }
+
+  let instant = localNoon;
+  for (let iteration = 0; iteration < 2; iteration += 1) {
+    const offset = timeZoneClockAsUtc(instant, timeZone) - instant;
+    instant = localNoon - offset;
+  }
+  return new Date(instant).toISOString();
+}
+
+function dateInputValue(value: string, timeZone: string): string {
+  return calendarDateKey(value, timeZone);
+}
+
+function formatCalendarDate(dateKey: string, locale: string): string {
+  return new Intl.DateTimeFormat(locale, {
+    dateStyle: "medium",
+    timeZone: "UTC",
+  }).format(new Date(`${dateKey}T12:00:00.000Z`));
+}
+
+function formatExpenseDate(
+  value: string,
+  locale: string,
+  timeZone: string,
+): string {
+  return new Intl.DateTimeFormat(locale, {
+    dateStyle: "medium",
+    timeZone,
+  }).format(new Date(value));
 }
 
 function formatMoney(value: string | number, currency: string, locale: string) {
@@ -320,24 +418,29 @@ function statusClass(status: ExpenseStatus) {
   ].join(" ");
 }
 
-function chartSeries(expenses: readonly Expense[], currency: string) {
-  const today = new Date();
-  today.setHours(23, 59, 59, 999);
-  const start = new Date(today);
-  start.setDate(start.getDate() - 29);
-  start.setHours(0, 0, 0, 0);
+function chartSeries(
+  expenses: readonly Expense[],
+  currency: string,
+  referenceDate: string,
+  timeZone: string,
+) {
+  const today = dateKeyOrdinal(referenceDate);
+  const start = today - 29 * DAY_MS;
   const buckets = Array.from({ length: 10 }, (_, index) => ({
-    date: new Date(start.getTime() + index * 3 * 86_400_000),
+    date: dateKeyFromOrdinal(start + index * 3 * DAY_MS),
     value: 0,
   }));
   for (const expense of expenses) {
     if (expense.status !== "recorded" || expense.currency !== currency)
       continue;
-    const timestamp = new Date(expense.incurredAt).getTime();
-    if (timestamp < start.getTime() || timestamp > today.getTime()) continue;
+    const timestamp = dateKeyOrdinal(
+      calendarDateKey(expense.incurredAt, timeZone),
+    );
+    if (!Number.isFinite(timestamp) || timestamp < start || timestamp > today)
+      continue;
     const index = Math.min(
       buckets.length - 1,
-      Math.floor((timestamp - start.getTime()) / (3 * 86_400_000)),
+      Math.floor((timestamp - start) / (3 * DAY_MS)),
     );
     const bucket = buckets[index];
     if (bucket !== undefined) {
@@ -348,8 +451,13 @@ function chartSeries(expenses: readonly Expense[], currency: string) {
   return buckets;
 }
 
-function buildChart(expenses: readonly Expense[], currency: string) {
-  const series = chartSeries(expenses, currency);
+function buildChart(
+  expenses: readonly Expense[],
+  currency: string,
+  referenceDate: string,
+  timeZone: string,
+) {
+  const series = chartSeries(expenses, currency, referenceDate, timeZone);
   const max = Math.max(...series.map((item) => item.value), 1);
   const points = series.map((item, index) => ({
     ...item,
@@ -379,6 +487,8 @@ export function FinanceWorkspace({
   initialWallet,
   initialPaymentSource,
   realBillingEnabled = false,
+  referenceTime,
+  tenantTimeZone,
 }: {
   readonly initialExpenses: readonly Expense[];
   readonly initialNextCursor: ExpenseCursor | null;
@@ -389,6 +499,8 @@ export function FinanceWorkspace({
   readonly initialWallet?: CampaignWallet;
   readonly initialPaymentSource?: CampaignPaymentSource | null;
   readonly realBillingEnabled?: boolean;
+  readonly referenceTime: string;
+  readonly tenantTimeZone: string;
 }) {
   const locale = useLocale();
   const t = COPY[locale.startsWith("he") ? "he" : "en"];
@@ -417,6 +529,8 @@ export function FinanceWorkspace({
   const [topupNotice, setTopupNotice] = useState<string>();
   const paymentSource = initialPaymentSource ?? null;
   const paymentReady = realBillingEnabled && paymentSource?.status === "active";
+  const timeZone = normalizedTimeZone(tenantTimeZone);
+  const referenceDate = referenceDateKey(referenceTime, timeZone);
 
   async function connectPaymentSource() {
     if (!realBillingEnabled || topupPending) return;
@@ -479,18 +593,16 @@ export function FinanceWorkspace({
     ? chartCurrency
     : defaultCurrency;
   const chart = useMemo(
-    () => buildChart(expenses, effectiveChartCurrency),
-    [expenses, effectiveChartCurrency],
+    () => buildChart(expenses, effectiveChartCurrency, referenceDate, timeZone),
+    [expenses, effectiveChartCurrency, referenceDate, timeZone],
   );
-  const now = new Date();
+  const referenceMonth = referenceDate.slice(0, 7);
   const thisMonthTotal = expenses
     .filter((expense) => {
-      const date = new Date(expense.incurredAt);
       return (
         expense.status === "recorded" &&
         expense.currency === effectiveChartCurrency &&
-        date.getMonth() === now.getMonth() &&
-        date.getFullYear() === now.getFullYear()
+        calendarDateKey(expense.incurredAt, timeZone).startsWith(referenceMonth)
       );
     })
     .reduce((sum, expense) => sum + (Number(expense.amount) || 0), 0);
@@ -517,7 +629,7 @@ export function FinanceWorkspace({
     setEditing(undefined);
     setDraft({
       ...emptyDraft(defaultCurrency, t.operations),
-      incurredAt: dateInputValue(new Date().toISOString()),
+      incurredAt: referenceDateKey(new Date().toISOString(), timeZone),
     });
     setError(undefined);
     setDialogOpen(true);
@@ -533,7 +645,7 @@ export function FinanceWorkspace({
       currency: expense.currency,
       status: expense.status === "pending" ? "pending" : "recorded",
       notes: expense.notes ?? "",
-      incurredAt: dateInputValue(expense.incurredAt),
+      incurredAt: dateInputValue(expense.incurredAt, timeZone),
     });
     setError(undefined);
     setDialogOpen(true);
@@ -556,7 +668,7 @@ export function FinanceWorkspace({
       currency: draft.currency.trim().toUpperCase(),
       status: draft.status,
       notes: draft.notes.trim() || null,
-      incurredAt: new Date(`${draft.incurredAt}T12:00:00`).toISOString(),
+      incurredAt: calendarDateToInstant(draft.incurredAt, timeZone),
       sourceKind: "manual",
       sourceReference: null,
     };
@@ -1016,7 +1128,7 @@ export function FinanceWorkspace({
                           className={styles.point}
                           cx={point.x}
                           cy={point.y}
-                          key={point.date.toISOString()}
+                          key={point.date}
                           r="1.4"
                         />
                       ))}
@@ -1035,11 +1147,9 @@ export function FinanceWorkspace({
                 </thead>
                 <tbody>
                   {chart.points.map((point) => (
-                    <tr key={point.date.toISOString()}>
+                    <tr key={point.date}>
                       <th scope="row">
-                        {new Intl.DateTimeFormat(locale, {
-                          dateStyle: "medium",
-                        }).format(point.date)}
+                        {formatCalendarDate(point.date, locale)}
                       </th>
                       <td>
                         {formatMoney(
@@ -1145,9 +1255,11 @@ export function FinanceWorkspace({
                       <td>{expense.category}</td>
                       <td>
                         <time dateTime={expense.incurredAt}>
-                          {new Intl.DateTimeFormat(locale, {
-                            dateStyle: "medium",
-                          }).format(new Date(expense.incurredAt))}
+                          {formatExpenseDate(
+                            expense.incurredAt,
+                            locale,
+                            timeZone,
+                          )}
                         </time>
                       </td>
                       <td>
@@ -1214,9 +1326,7 @@ export function FinanceWorkspace({
                   <div className={styles.mobileCardMeta}>
                     <span>{expense.category}</span>
                     <time dateTime={expense.incurredAt}>
-                      {new Intl.DateTimeFormat(locale, {
-                        dateStyle: "medium",
-                      }).format(new Date(expense.incurredAt))}
+                      {formatExpenseDate(expense.incurredAt, locale, timeZone)}
                     </time>
                     <span className={statusClass(expense.status)}>
                       {expense.status === "recorded"
