@@ -1,47 +1,46 @@
 # Release assessment
 
-Assessment date: 2026-09-15. Candidate identity is the dirty working-tree
-snapshot in [Baseline](baseline.md), not a Git commit or deployed release.
+Assessment date: 2026-09-15. The validated implementation is Git commit
+`d5cead92603ac6118968f609edd9344efec5fa73`; its exact digest-pinned images and
+schema were deployed to DEV by GitHub Actions run `34927297654`.
 
 ## Separate verdicts
 
 | Boundary | Verdict | Basis |
 | --- | --- | --- |
-| Local implementation | **CONDITIONAL PASS** | Formatting, lint, TS/Python type checks, 2,042 passed automated tests, production build, contract generation, offline migration contract, dependency checks and focused release/security regressions passed. Conditions: supported Node rerun and online DB/device/provider evidence remain. |
-| Deployed DEV | **BLOCKED** | Public reachability was observed, but exact source/image/schema identity and authenticated ordinary-role journeys were not available. This working tree was not pushed/deployed. |
+| Local/CI implementation | **PASS** | Formatting, lint, TS/Python type checks, 2,042 local tests, 128 PostgreSQL tests, 13 cross-channel acceptance cases, production build, contracts, dependency checks and five images passed on the supported CI toolchain. Three separate readiness-environment tests remain explicitly skipped. |
+| Deployed DEV | **PASS — deployment boundary** | Exact source, five image digests and schema head were verified; backup/migration and all service health checks passed; HTTP→HTTPS and login checks passed. Authenticated ordinary-role/device acceptance remains a separate blocker. |
 | Real-provider workflows | **BLOCKED** | No authorized run manifest; no real Meta delivery, two-way call, OAuth/OCR, calendar write or Stripe test transaction was performed. Simulator results remain labeled local. |
-| Production readiness | **NOT READY** | Online PostgreSQL/RLS/restore, exact-release E2E, provider/device acceptance, off-host DR, supported runtime evidence and production HA/observability decisions are incomplete. |
+| Production readiness | **NOT READY** | Authenticated exact-release E2E, provider/device acceptance, off-host restore/retention and production HA/observability decisions are incomplete. |
 
-`2,042` is 977 passing TypeScript/React tests plus 1,065 passing Python
-tests. The 202 explicitly skipped tests are not included.
+`2,042` is 977 passing TypeScript/React tests plus 1,065 passing Python tests.
+CI additionally ran 128 PostgreSQL tests, four isolated messaging diagnostics
+and 13 cross-channel cases against disposable PostgreSQL. Overlapping tests are
+not added to the local total. Explicit skips are never counted as passes.
 
 ## Release-blocking checklist
 
-1. Create an owned disposable PostgreSQL 18.6 environment, apply the entire
-   migration chain and execute all currently DB-gated TypeScript/Python
-   checks, including RLS, triggers, race conditions, upgrade/downgrade and an
-   isolated complete backup restore.
-2. Run all pnpm gates under Node `>=24.20.0 <25` and build/scan the exact five
-   immutable images.
-3. Review the 162-path dirty working tree, preserve intended changes, produce a
-   reviewed commit and allow CI to create immutable digest/source evidence.
-4. Deploy only with explicit authority; verify intended SHA, five image digests,
-   schema head, prior optional profiles, pending jobs and active-call drain.
-5. Run authenticated DEV acceptance with disposable records for every role and
+1. Run authenticated DEV acceptance with disposable records for every role and
    a second tenant, including browser/mobile/RTL/theme/accessibility checks.
-6. Establish a bounded live-provider manifest, then validate WhatsApp, voice and
+2. Establish a bounded live-provider manifest, then validate WhatsApp, voice and
    cross-channel flows one provider at a time. Use only controlled identities,
    recipients and test-mode payments.
-7. Configure encrypted off-host backup retention and restore the database plus
+3. Configure encrypted off-host backup retention and restore the database plus
    private objects/recordings into a separate destination. Agree DEV and
    production RPO/RTO.
-8. Resolve or explicitly accept every P1 in [Findings](findings.md). A release
+4. Add a registry/container advisory scan and review any actionable findings.
+5. Resolve or explicitly accept every P1 in [Findings](findings.md). A release
    cannot use local unit/build success to waive these boundaries.
+
+Completed release gates: PostgreSQL 18.6 migration/RLS execution, supported
+Node 24.20.0 pnpm gates, clean reviewed commit, five immutable image builds and
+the authorized checksum-bound DEV deployment.
 
 ## Provider run manifest status
 
-No manifest was created because this request supplied neither release authority
-nor controlled accounts/recipients/spend. Before live acceptance, record:
+The user authorized the DEV code deployment, but not provider side effects. No
+provider manifest was created because controlled accounts/recipients/spend were
+not supplied. Before live acceptance, record:
 
 - exact candidate SHA/image digests/schema and QA tenant/user roles;
 - controlled WhatsApp sender/recipient and call number/person able to answer;
@@ -62,9 +61,10 @@ pre-migration backup, migration, exact running-image verification and rollback
 to only the previously active profiles. The backup contains database, private
 objects/recordings and release/schema metadata with checksums.
 
-These procedures are **locally contract-tested only**. A separate-destination
-restore and off-host retention are release blockers; a database dump on the
-same VM is not disaster recovery.
+These procedures are contract-tested and the deployment/backup path completed
+successfully on DEV. A separate-destination restore and off-host retention are
+still production release blockers; a database dump on the same VM is not
+disaster recovery.
 
 ## Operator setup boundaries
 
@@ -83,7 +83,7 @@ same VM is not disaster recovery.
 
 ## Final recommendation
 
-Do not push-to-deploy or promote this candidate solely from this local result.
-The code is substantially more complete and the locally available gates are
-green, but the release decision is intentionally blocked at the database,
-exact-deployment, provider/device and disaster-recovery boundaries.
+The reviewed candidate is suitable for the current DEV stage and is deployed.
+Do not promote it to production yet: authenticated role/device acceptance,
+controlled real-provider validation, container advisory review and off-host
+disaster recovery remain explicit boundaries.

@@ -26,6 +26,11 @@ reported, not counted as passes.
 | `pnpm --filter @or-on/web test -- private-objects customer-document-permissions field-service-attachment-download` | PASS — 11 focused upload/authorization/header regressions |
 | `pnpm --filter @or-on/web test -- oauth-disconnect-route oauth-disconnect tenant-product-workspaces` | PASS — 19 focused OAuth lifecycle/UI tests |
 | `uv run pytest -p no:cacheprovider scripts/tests/test_deployment_release.py scripts/tests/test_db_verify.py` | PASS — 19 focused release/database-contract tests |
+| GitHub Actions CI `34927297654` on Node 24.20.0 / Python 3.14.7 | PASS — TypeScript, Python, contracts, architecture/security, PostgreSQL/Alembic and all five container builds |
+| CI PostgreSQL 18.6 migration/RLS suite | PASS — 128 passed, 3 explicit readiness-environment skips |
+| CI isolated messaging diagnostic | PASS — 4 passed; provider HTTP mocked |
+| CI isolated WhatsApp → AI → call acceptance | PASS — 13 passed; PostgreSQL real, provider HTTP/calls mocked |
+| CI `Deploy GCP DEV` | PASS — backup, migrations, exact five-image/source verification, service health and public endpoint checks |
 
 Vitest passed-test total is the sum of runner results: API client 4, config 13,
 contracts 2, auth 48, CRM 104, observability 1, platform integration 1, UI 37,
@@ -40,10 +45,10 @@ worker 30 and web 1.
 | CRM PostgreSQL Vitest files | 38 skipped | `TEST_DATABASE_URL` absent |
 | Messaging-worker PostgreSQL/live-named simulations | 30 skipped | Dedicated guarded cross-channel/readiness DB URL absent |
 | Web optional test | 1 skipped | Environment-gated by the suite |
-| Online migration, rollback and restore | **BLOCKED** | Docker daemon/local PostgreSQL unavailable; no shared DB mutation authorized |
-| Browser authenticated acceptance | **BLOCKED** | No local database-backed runtime or ordinary-role DEV credentials/exact release identity |
+| Separate-destination restore | **BLOCKED** | CI proved migration/downgrade behavior and DEV created a backup, but a complete off-host restore drill was not authorized |
+| Browser authenticated acceptance | **BLOCKED** | Exact release identity is proven, but no disposable ordinary-role DEV credentials were supplied |
 | Real Meta/voice/OAuth/OCR/Stripe | **BLOCKED** | No authorized run manifest or controlled external fixtures |
-| Container advisory/runtime smoke | **BLOCKED** | Docker daemon unavailable |
+| Container advisory scan | **BLOCKED** | Five exact images built, published and started healthy; no registry vulnerability scanner result was available |
 
 ## Warnings and failures encountered
 
@@ -64,6 +69,12 @@ worker 30 and web 1.
   teardown was reordered, the fixture was typed, and object access was moved
   behind a tenant-bound security-definer predicate so the voice role does not
   receive direct field-service table privileges.
+- Cross-channel CI then exposed a test that assumed one queue item per worker
+  poll and duplicate latest-message queries that broke when several Meta events
+  shared a one-second provider timestamp. The test now drains work until idle;
+  trigger, callback and case-evidence ordering consistently use provider time,
+  database ingestion time and UUID only as a final tie-breaker. The deterministic
+  same-second scenario and all 13 cross-channel cases pass on PostgreSQL.
 - The first focused lint after adding strict UTF-8 validation caught one missing
   error `cause`; it was fixed and the full lint/type/build/test gates were rerun.
 - A first production build during implementation exposed a client import through
@@ -88,8 +99,9 @@ worker 30 and web 1.
 - 372,669-byte PostgreSQL upgrade SQL;
 - SHA-256 `83a2cfbbd09c33f39d5abbc3fc41e9fb0a40e4c8667c238d4f327f796fb507f4`.
 
-Offline generation validates graph/contract/static SQL safety. It does not prove
-the upgrade, downgrade, grants, functions, triggers or RLS on PostgreSQL.
+Offline generation validates graph/contract/static SQL safety. GitHub Actions
+separately proved the upgrade, downgrade, grants, functions, triggers and RLS on
+PostgreSQL 18.6; it does not replace the still-required restore drill.
 
 ## Reproduction order
 

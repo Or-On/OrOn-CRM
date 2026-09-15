@@ -1,7 +1,7 @@
 # Execution baseline
 
 Captured 2026-09-15 in `C:\Users\almo9\Or-On-Integration\OrOn-Platform` and
-reconciled after the first online CI migration attempt. No secrets or customer
+reconciled after the authorized GitHub/DEV release. No secrets or customer
 records are included in the identifiers below.
 
 ## Repository identity
@@ -10,20 +10,23 @@ records are included in the identifiers below.
 | --- | --- |
 | Target remote | `https://github.com/Abssel-AI/OrOn-CRM.git` |
 | Branch | `main` |
-| HEAD | `a7d18bc7bf937154af9d120fede61355a0a09271` |
+| Initial HEAD | `a7d18bc7bf937154af9d120fede61355a0a09271` |
 | Initial working tree | 75 unstaged tracked paths, 87 untracked paths, no staged paths |
 | First candidate commit | `18009d089210591d402f542e0f10e61c847956ba` |
+| Validated implementation commit | `d5cead92603ac6118968f609edd9344efec5fa73` |
+| Successful CI/deployment run | `34927297654` — all seven jobs passed |
 | Implementation source files | 1,196 tracked/untracked, non-ignored files; `.env*`, `.artifacts` and this evidence directory excluded |
-| Corrected implementation snapshot SHA-256 | `dae4bdd8fcc398d339e096348303e2fb95f26825101fdf14c9110072bd10794f` |
+| Corrected implementation snapshot SHA-256 | `8b6eef328c9a471cdc64c3350763e609542f087c14ab2395c8e6bef0922a4797` |
 | Initial tracked implementation diff SHA-256 | `fa0fb5588f0f5fd86016cb5fb2a5979643a00671ec892ac809cd40f09f082b47` |
 | Read-only source reference | `https://github.com/Abssel-AI/Brimag.git`, `main`, `08228541cf0ccf7f65eb8517ec9c5346c29f280f` |
 
 The implementation snapshot hashes a sorted manifest of paths and Git blob IDs
 while excluding this self-referential evidence directory. The initial audit
-preserved the dirty tree without deployment. At the user's later direction it
-was committed and pushed; online CI then exposed invalid Python lint comments
-inside rendered SQL. The corrected snapshot includes that fix and a regression
-guard. No reset, clean or shared-database mutation was performed locally.
+preserved the dirty tree. At the user's later direction it was committed and
+pushed. Repeated disposable CI runs exposed and then verified fixes for invalid
+rendered SQL, migration teardown/RLS dependencies, worker-poll assumptions and
+same-second WhatsApp ordering. No reset, clean or shared-database mutation was
+performed locally.
 
 ## Toolchain and locks
 
@@ -31,14 +34,16 @@ guard. No reset, clean or shared-database mutation was performed locally.
 | --- | --- | --- |
 | Git | 2.54.0 | available |
 | Node.js | 25.9.0 | **unsupported locally**; repository requires `>=24.20.0 <25` |
+| CI Node.js | 24.20.0 | supported; full pnpm gates and image builds passed |
 | pnpm | 11.24.0 | lockfile `pnpm-lock.yaml` |
 | Python | 3.14.7 | repository requires `>=3.14,<3.15` |
 | uv | 0.12.7 | lockfile `uv.lock` |
 | Docker client | 29.7 | daemon unavailable on this workstation |
 | GNU make | unavailable | canonical commands were invoked directly |
 
-Node 25 emitted an engine warning for every pnpm command. Successful compilation
-under Node 25 does not replace the required supported-Node CI/release run.
+Node 25 emitted an engine warning for every local pnpm command. Those local
+results are retained, while GitHub Actions supplied the required supported Node
+24.20.0 verification and release build.
 
 ## Database and migration state
 
@@ -50,19 +55,26 @@ under Node 25 does not replace the required supported-Node CI/release run.
 | Offline schema contract | PASS |
 | Offline SQL | 372,669 bytes; SHA-256 `83a2cfbbd09c33f39d5abbc3fc41e9fb0a40e4c8667c238d4f327f796fb507f4` |
 | Local PostgreSQL | unavailable on checked ports; no explicit isolated `TEST_DATABASE_URL` |
-| Online migration/RLS suite | BLOCKED, not passed |
+| Online migration/RLS suite | PASS — PostgreSQL 18.6; 128 passed, 3 explicitly environment-gated skips |
+| Provider-free cross-channel acceptance | PASS — 13 passed against isolated PostgreSQL |
+| Deployed DEV schema | PASS — upgraded from `91bd6f76a3e4` through `a26f09c4d13e` to `b72c5f0e4d91` |
 
-The additive lifecycle migration is present in source but was not applied to a
-shared or deployed database. No application database was repointed for tests.
+CI applied the entire migration chain to an owned disposable database and ran
+runtime-role/RLS coverage. The authorized DEV deployment created a pre-migration
+backup and applied both new revisions. No local application database was
+repointed for tests.
 
 ## Runtime and deployment observation
 
-- `https://dev.or-on.io` answered read-only HTTP checks: HTTP redirected to
-  HTTPS, the root/login surface returned 200, and the protected health endpoint
-  returned 401 without authentication.
-- The public response does not expose enough trusted release/schema identity to
-  prove that this working tree is deployed. No ordinary-role DEV credentials
-  were used, so authenticated workflow acceptance is `BLOCKED`.
+- GitHub Actions deployed exact source `d5cead92603ac6118968f609edd9344efec5fa73`
+  using five digest-pinned images and a checksum-bound release archive. Remote
+  verification reported PostgreSQL, control API, web, Caddy, dispatcher and
+  messaging worker healthy.
+- Independent checks after deployment observed HTTP root `308`, HTTPS login
+  `200`, and protected health `401` without authentication.
+- No disposable ordinary-role DEV credentials were used, so authenticated
+  owner/admin/agent/technician/viewer and second-tenant browser acceptance
+  remains `BLOCKED`; this is not conflated with deployment success.
 - A local production server was started only with providers disabled and an
   intentionally unreachable database. The login route rendered the generic
   service-unavailable state, correctly demonstrating that a database-backed
@@ -74,7 +86,8 @@ shared or deployed database. No application database was repointed for tests.
 ## Safety boundary
 
 The repository `.env` contains user-managed real-provider configuration and no
-isolated test database. The aggregate verifier's provider preflight therefore
-refused to run as designed. Individual provider-free gates were run directly;
-the `.env` was not changed. There was no live-provider run manifest because no
-live side effect was authorized in this request.
+isolated local test database. The aggregate local verifier's provider preflight
+therefore refused to run as designed. CI supplied an isolated database and kept
+all real-provider flags disabled. The `.env` was not changed, and deployment did
+not authorize or execute a real message, call, payment, OAuth, OCR or calendar
+side effect.
