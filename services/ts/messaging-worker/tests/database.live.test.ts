@@ -220,6 +220,10 @@ describe.skipIf(databaseUrl === undefined)("durable messaging worker", () => {
       });
       try {
         expect(await store.processAvailable()).toBeGreaterThan(0);
+        let remaining = 1;
+        for (let turn = 0; turn < 200 && remaining > 0; turn += 1)
+          remaining = await store.processAvailable();
+        expect(remaining).toBe(0);
         const rawBody = Buffer.from(
           JSON.stringify({
             entry: [
@@ -248,6 +252,10 @@ describe.skipIf(databaseUrl === undefined)("durable messaging worker", () => {
         await acceptWhatsAppWebhook(databaseUrl, rawBody, signature, secret);
         await acceptWhatsAppWebhook(databaseUrl, rawBody, signature, secret);
         expect(await store.processAvailable()).toBeGreaterThan(0);
+        remaining = 1;
+        for (let turn = 0; turn < 200 && remaining > 0; turn += 1)
+          remaining = await store.processAvailable();
+        expect(remaining).toBe(0);
       } finally {
         await store.close();
       }
