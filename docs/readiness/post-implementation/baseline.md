@@ -17,9 +17,10 @@ records are included in the identifiers below.
 | Release-image preload follow-up | `15f82a2b4059594f850f849aff7c58a19ed86ca3` |
 | Checksum-bound deployer follow-up | `3c05d18130cace54da3bcc705cc1ec85e0e070d3` |
 | Loopback edge-probe follow-up | `37928276e772460112ffe6ded6e278042f2fe13a` |
+| Unprivileged Caddy config follow-up | `29b40b3608264625a0413ee24cc2e0c3916ebd65` |
 | Successful CI/deployment run | `34927297654` — all seven jobs passed |
 | Implementation source files | 1,196 tracked/untracked, non-ignored files; `.env*`, `.artifacts` and this evidence directory excluded |
-| Corrected implementation snapshot SHA-256 | `248409a935fc43245e2941269c90499f2111defa82a7f1a210823d081396f575` |
+| Corrected implementation snapshot SHA-256 | `9605e25dcd438bed2089d9b715a9f32d4f47e86cd5df86a1ef3d2766d02620a7` |
 | Initial tracked implementation diff SHA-256 | `fa0fb5588f0f5fd86016cb5fb2a5979643a00671ec892ac809cd40f09f082b47` |
 | Read-only source reference | `https://github.com/Abssel-AI/Brimag.git`, `main`, `08228541cf0ccf7f65eb8517ec9c5346c29f280f` |
 
@@ -35,9 +36,11 @@ release follow-up explicitly pulls all five immutable application references
 before inspecting digests or touching the active release. CI now also transfers,
 checksums and executes that exact candidate deployer instead of invoking a stale
 host-installed copy. The in-host edge probe resolves the real TLS hostname to
-loopback, avoiding a dependency on public-IP hairpin routing; CI retains a
-separate off-host public check. No reset, clean or shared-database mutation was
-performed locally.
+loopback, avoiding a dependency on public-IP hairpin routing; that probe also
+proved the replacement edge had no listener. The extractor now gives the
+non-secret Caddyfile read permission for the deliberately unprivileged Caddy UID,
+and CI retains a separate off-host public check. No reset, clean or
+shared-database mutation was performed locally.
 
 ## Toolchain and locks
 

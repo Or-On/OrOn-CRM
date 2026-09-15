@@ -89,10 +89,12 @@ worker 30 and web 1.
   host and executes that exact copy. Regression coverage forbids the stale
   `/opt` deployer entrypoint while preserving archive checksum and exit status.
 - With the candidate deployer active, all five images pulled, backup and Alembic
-  completed, and every container became healthy. The VM's public-IP hairpin probe
-  alone could not connect and correctly triggered rollback. The in-host probe now
-  uses loopback with the real TLS hostname, while CI keeps the independent public
-  HTTP/HTTPS check; the new release regression covers both boundaries.
+  completed, and every application container became healthy. Both public and
+  loopback probes found no edge listener, ruling out public-IP hairpin as the
+  cause. Comparison with the first successful extraction found the Caddyfile had
+  been normalized to root-only `0640` while Caddy runs as UID `65532`. The
+  non-secret config is now `0644`; the Linux-mode and bounded-diagnostics
+  regressions are included in the 12 focused release tests.
 - The first focused lint after adding strict UTF-8 validation caught one missing
   error `cause`; it was fixed and the full lint/type/build/test gates were rerun.
 - A first production build during implementation exposed a client import through
