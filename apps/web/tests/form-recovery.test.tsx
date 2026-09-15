@@ -305,7 +305,14 @@ describe("form recovery and permission presentation", () => {
   it("retains campaign input after a failed request", async () => {
     transport.mutate.mockRejectedValue(new Error("temporary failure"));
     render(
-      localized(<OperationsPanel broadcasts={[]} automations={[]} runs={[]} />),
+      localized(
+        <OperationsPanel
+          broadcasts={[]}
+          automations={[]}
+          runs={[]}
+          simulationAvailable
+        />,
+      ),
     );
     fireEvent.click(
       screen.getByRole("button", { name: en.premiumPrimary.newCampaign }),
@@ -324,7 +331,14 @@ describe("form recovery and permission presentation", () => {
   });
   it("keeps an operations draft mounted while switching index tabs", () => {
     render(
-      localized(<OperationsPanel broadcasts={[]} automations={[]} runs={[]} />),
+      localized(
+        <OperationsPanel
+          broadcasts={[]}
+          automations={[]}
+          runs={[]}
+          simulationAvailable
+        />,
+      ),
     );
     fireEvent.click(
       screen.getByRole("button", { name: en.premiumPrimary.newCampaign }),
@@ -354,6 +368,7 @@ describe("form recovery and permission presentation", () => {
           broadcasts={[]}
           initialTab="automations"
           runs={[]}
+          simulationAvailable
         />,
       ),
     );
@@ -370,6 +385,7 @@ describe("form recovery and permission presentation", () => {
           broadcasts={[]}
           initialCreate="campaigns"
           runs={[]}
+          simulationAvailable
         />,
       ),
     );
@@ -390,7 +406,12 @@ describe("form recovery and permission presentation", () => {
   it("separates campaign and flow management permissions", () => {
     const view = render(
       localized(
-        <OperationsPanel broadcasts={[]} automations={[]} runs={[]} />,
+        <OperationsPanel
+          broadcasts={[]}
+          automations={[]}
+          runs={[]}
+          simulationAvailable
+        />,
         "en",
         ["campaigns:manage"],
       ),
@@ -404,7 +425,12 @@ describe("form recovery and permission presentation", () => {
 
     view.rerender(
       localized(
-        <OperationsPanel broadcasts={[]} automations={[]} runs={[]} />,
+        <OperationsPanel
+          broadcasts={[]}
+          automations={[]}
+          runs={[]}
+          simulationAvailable
+        />,
         "en",
         ["flows:manage"],
       ),

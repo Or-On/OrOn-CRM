@@ -20,7 +20,7 @@ export async function POST(
     );
     if (!published)
       throw new TypeError(
-        "publish the linked agent before publishing this flow",
+        "publish a valid linked agent that supports every flow channel before publishing this flow",
       );
     return NextResponse.json({ published: true });
   } catch (error) {

@@ -48,11 +48,13 @@ import {
 } from "./call-provider.js";
 import {
   actionReceiptReply,
+  conversationReplyCodes,
   enforceStandaloneCallbackConsent,
   explicitlyRequestsImmediateCall,
   factDigest,
   groundAiReply,
   latestMessageLocale,
+  recentReplyWindowSize,
   safeConversationalReply,
   type EligibleKnowledgeFact,
   type GroundedReply,
@@ -1539,6 +1541,24 @@ async function requireCurrentTrigger(
     throw new TypeError("AI inbound trigger superseded");
 }
 
+async function recentDeliveredReplies(
+  transaction: postgres.TransactionSql,
+  conversationId: string,
+  excludeMessageId?: string,
+): Promise<readonly string[]> {
+  const rows = await transaction<{ content_text: string }[]>`
+    SELECT content_text FROM messaging.messages
+    WHERE conversation_id=${conversationId}::uuid
+      AND direction='outbound'
+      AND content_type='text' AND content_text IS NOT NULL
+      AND status IN ('sent','delivered','read')
+      AND (${excludeMessageId ?? null}::uuid IS NULL OR id<>${excludeMessageId ?? null}::uuid)
+    ORDER BY created_at DESC, updated_at DESC, id DESC
+    LIMIT ${recentReplyWindowSize}
+  `;
+  return rows.map((row) => row.content_text);
+}
+
 async function loadAiWork(
   sql: Sql,
   workerId: string,
@@ -1625,6 +1645,9 @@ async function loadAiWork(
         ON origin.tenant_id=message.tenant_id AND origin.message_id=message.id
       WHERE message.conversation_id = ${row.conversation_id}::uuid
         AND message.content_type = 'text' AND message.content_text IS NOT NULL
+        AND ((message.direction='inbound' AND message.status='received') OR
+             (message.direction='outbound' AND
+              message.status IN ('sent','delivered','read')))
       ORDER BY message.created_at DESC, message.updated_at DESC, message.id DESC LIMIT 50
     `;
     const config = row.configuration as Record<string, unknown> | null;
@@ -2070,6 +2093,7 @@ async function processWhatsAppAiReply(
         decision,
         await eligibleFacts(transaction, work.agentVersionId),
         work.locale,
+        await recentDeliveredReplies(transaction, work.conversationId),
       );
       let responseText = grounded.text;
       let evidence:
@@ -2795,6 +2819,7 @@ async function requireGroundedOutbound(
     readonly provider_payload: unknown;
     readonly content_text: string | null;
     readonly conversation_id: string;
+    readonly message_id: string;
     readonly requested_by_user_id: string;
   },
 ): Promise<void> {
@@ -2820,6 +2845,11 @@ async function requireGroundedOutbound(
       throw new WhatsAppProviderError("ai_trigger_superseded", false);
     throw error;
   }
+  const recentAssistantMessages = await recentDeliveredReplies(
+    transaction,
+    row.conversation_id,
+    row.message_id,
+  );
   let expected: string | undefined;
   if (
     evidence.kind === "knowledge" &&
@@ -2845,23 +2875,20 @@ async function requireGroundedOutbound(
       expected = grounded.text;
   } else if (evidence.kind === "conversation") {
     // Reuse the closed selection decoder; malformed codes cannot authorize prose.
-    const codes = [
-      "greeting",
-      "thanks",
-      "clarify",
-      "unverified_claim",
-      "knowledge_unavailable",
-    ] as const;
-    const code = codes.find((item) => item === evidence.code);
+    const code = conversationReplyCodes.find((item) => item === evidence.code);
     if (code !== undefined)
       expected = groundAiReply(
         { action: "reply", text: "", replyCode: code },
         [],
         metadata.locale,
+        recentAssistantMessages,
       ).text;
     else if (
       evidence.code === "generated" &&
-      safeConversationalReply(row.content_text ?? "")
+      safeConversationalReply(row.content_text ?? "", {
+        locale: metadata.locale,
+        recentAssistantMessages,
+      })
     )
       expected = row.content_text ?? "";
   } else if (evidence.kind === "receipt" && uuid(evidence.resourceId)) {
@@ -2915,11 +2942,13 @@ async function revalidateOutboundAttempt(
         content_text: string | null;
         provider_payload: unknown;
         conversation_id: string;
+        message_id: string;
         requested_by_user_id: string;
         sender_type: string;
       }[]
     >`
-      SELECT message.content_text, message.provider_payload, request.conversation_id,
+      SELECT message.id AS message_id, message.content_text, message.provider_payload,
+             request.conversation_id,
              request.requested_by_user_id, message.sender_type
       FROM messaging.outbound_requests request
       JOIN messaging.messages message ON message.id=request.message_id

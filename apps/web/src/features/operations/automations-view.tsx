@@ -14,6 +14,7 @@ export function AutomationsView({
   activeTab,
   pending,
   canManageFlows,
+  simulationAvailable,
   run,
   openCreation,
 }: {
@@ -22,6 +23,7 @@ export function AutomationsView({
   readonly activeTab: "campaigns" | "automations" | "history";
   readonly pending: boolean;
   readonly canManageFlows: boolean;
+  readonly simulationAvailable: boolean;
   readonly run: (operation: () => Promise<unknown>) => Promise<boolean>;
   readonly openCreation: (kind: "campaigns" | "automations") => void;
 }) {
@@ -209,7 +211,10 @@ export function AutomationsView({
                   ) : (
                     <Button
                       busy={pending}
-                      disabled={!canManageFlows}
+                      disabled={
+                        !canManageFlows ||
+                        (automation.published && !simulationAvailable)
+                      }
                       onClick={() =>
                         void run(() =>
                           crmMutation(

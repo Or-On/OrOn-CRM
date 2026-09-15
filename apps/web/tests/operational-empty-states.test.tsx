@@ -36,7 +36,14 @@ const emptyOrchestration = {
 describe("empty operational workspaces", () => {
   it("opens and focuses existing draft forms without creating work", () => {
     const view = render(
-      localized(<OperationsPanel broadcasts={[]} automations={[]} runs={[]} />),
+      localized(
+        <OperationsPanel
+          broadcasts={[]}
+          automations={[]}
+          runs={[]}
+          simulationAvailable
+        />,
+      ),
     );
     expect(screen.getByText("No campaigns yet")).toBeDefined();
     expect(screen.queryByText("0 of 0 simulated deliveries")).toBeNull();
@@ -83,7 +90,12 @@ describe("empty operational workspaces", () => {
   it("shows read-only guidance without creation shortcuts", () => {
     render(
       localized(
-        <OperationsPanel broadcasts={[]} automations={[]} runs={[]} />,
+        <OperationsPanel
+          broadcasts={[]}
+          automations={[]}
+          runs={[]}
+          simulationAvailable
+        />,
         "en",
         ["crm:read"],
       ),

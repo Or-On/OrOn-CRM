@@ -50,6 +50,7 @@ import {
   caseStatusLabel,
   technicianIdentityLabel,
 } from "./field-service-labels";
+import { FieldServiceNavigation } from "./field-service-navigation";
 
 type View = "cases" | "schedule" | "technicians";
 
@@ -466,6 +467,8 @@ export function FieldServiceWorkspace({
           </Button>
         ) : null}
       </header>
+
+      <FieldServiceNavigation active="overview" />
 
       <section
         className="field-service-metrics"

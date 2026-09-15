@@ -162,7 +162,14 @@ describe("tenant management registers", () => {
   it("retains unrelated URL scope while opening dedicated run history", () => {
     window.history.replaceState(null, "", "/operations?source=fixture");
     render(
-      localized(<OperationsPanel broadcasts={[]} automations={[]} runs={[]} />),
+      localized(
+        <OperationsPanel
+          broadcasts={[]}
+          automations={[]}
+          runs={[]}
+          simulationAvailable
+        />,
+      ),
     );
     fireEvent.click(screen.getByRole("tab", { name: /Execution history/u }));
     expect(window.location.search).toBe("?source=fixture&tab=history");

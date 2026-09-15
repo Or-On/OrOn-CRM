@@ -262,12 +262,15 @@ const workbookAccent: Readonly<Record<string, string>> = {
   violet: "6D28D9",
 };
 
-/** Produces a real XLSX workbook from an immutable finalized-report snapshot. */
+/** Produces a real XLSX workbook from an immutable signed-report snapshot. */
 export function createServiceReportWorkbook(
   report: ServiceReportDocument,
 ): Buffer {
-  if (report.revision.status !== "finalized")
-    throw new TypeError("Only a finalized report can be exported");
+  if (
+    report.revision.status !== "finalized" &&
+    report.revision.status !== "superseded"
+  )
+    throw new TypeError("Only an immutable signed report can be exported");
   const he = report.branding.locale.toLowerCase().startsWith("he");
   const labels = he
     ? {

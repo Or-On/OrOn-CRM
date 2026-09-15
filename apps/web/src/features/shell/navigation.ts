@@ -1,5 +1,7 @@
 import type { Permission } from "@or-on/auth";
 
+import { applicationPageForHref } from "./route-manifest";
+
 export type NavigationGroup = "Workspace" | "Operations" | "Platform";
 
 /** Mirrors read guards; visibility never replaces server authorization. */
@@ -160,17 +162,9 @@ export const contextualDestinations = [
 
 /** Nested and contextual routes illuminate one stable first-level destination. */
 export function activeDestination(pathname: string): string | undefined {
-  const contextual = contextualDestinations.find(
-    ({ href }) => pathname === href || pathname.startsWith(`${href}/`),
-  );
-  if (contextual !== undefined) return contextual.parentHref;
-
-  return navigation
-    .filter(
-      ({ href }) =>
-        pathname === href || (href !== "/" && pathname.startsWith(`${href}/`)),
-    )
-    .sort((a, b) => b.href.length - a.href.length)[0]?.href;
+  const matched = applicationPageForHref(pathname);
+  if (matched === undefined) return undefined;
+  return matched.navigationParent;
 }
 
 export function findDestinations(

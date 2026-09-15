@@ -124,7 +124,14 @@ describe("task-specific operational layouts", () => {
 
   it("keeps run history visible across campaign and automation views without submitting work", () => {
     render(
-      localized(<OperationsPanel broadcasts={[]} automations={[]} runs={[]} />),
+      localized(
+        <OperationsPanel
+          broadcasts={[]}
+          automations={[]}
+          runs={[]}
+          simulationAvailable
+        />,
+      ),
     );
     fireEvent.click(
       screen.getByRole("tab", {
@@ -148,7 +155,12 @@ describe("task-specific operational layouts", () => {
   it("links tabs to their panels and follows RTL keyboard direction", () => {
     render(
       localized(
-        <OperationsPanel broadcasts={[]} automations={[]} runs={[]} />,
+        <OperationsPanel
+          broadcasts={[]}
+          automations={[]}
+          runs={[]}
+          simulationAvailable
+        />,
         "he",
       ),
     );

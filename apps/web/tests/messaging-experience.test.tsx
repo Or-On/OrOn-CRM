@@ -86,6 +86,7 @@ describe("Messaging operational data presentations", () => {
             broadcasts={broadcasts}
             automations={automations}
             runs={runs}
+            simulationAvailable
           />,
           locale,
         ),
@@ -120,6 +121,7 @@ describe("Messaging operational data presentations", () => {
           automations={automations}
           runs={runs}
           initialTab="automations"
+          simulationAvailable
         />,
       ),
     );
@@ -155,9 +157,85 @@ describe("Messaging operational data presentations", () => {
     expect(mutate).not.toHaveBeenCalled();
   });
 
+  it("does not offer simulator mutations when simulation is unavailable", () => {
+    const emptyAutomations: readonly AutomationSummary[] = [
+      {
+        id: "automation-published",
+        name: "Published simulator",
+        description: "Fictional published definition",
+        version: 1,
+        validationStatus: "valid",
+        published: true,
+        executionKind: "empty",
+        createdAt: "2026-09-10T08:00:00Z",
+      },
+      {
+        id: "automation-draft",
+        name: "Draft definition",
+        description: "Fictional draft definition",
+        version: 1,
+        validationStatus: "valid",
+        published: false,
+        executionKind: "empty",
+        createdAt: "2026-09-10T09:00:00Z",
+      },
+    ];
+    render(
+      localized(
+        <OperationsPanel
+          broadcasts={broadcasts}
+          automations={emptyAutomations}
+          runs={[]}
+          simulationAvailable={false}
+        />,
+      ),
+    );
+
+    expect(
+      screen.getByText(en.deliveryFailure.simulation_disabled),
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: en.premiumPrimary.newCampaign }),
+    ).toBeNull();
+    expect(
+      screen
+        .getByRole("button", { name: en.operations.simulate })
+        .hasAttribute("disabled"),
+    ).toBe(true);
+
+    fireEvent.click(
+      screen.getByRole("tab", {
+        name: new RegExp(en.tenantOperations.automations, "u"),
+      }),
+    );
+    expect(
+      screen
+        .getByRole("button", { name: en.premiumPrimary.newAutomation })
+        .hasAttribute("disabled"),
+    ).toBe(false);
+    expect(
+      screen
+        .getByRole("button", { name: en.operations.run })
+        .hasAttribute("disabled"),
+    ).toBe(true);
+    expect(
+      screen
+        .getByRole("button", { name: en.operations.publish })
+        .hasAttribute("disabled"),
+    ).toBe(false);
+    expect(mutate).not.toHaveBeenCalled();
+  });
+
   it("restores focus and preserves unsent campaign text when the focused composer closes", () => {
     render(
-      localized(<OperationsPanel broadcasts={[]} automations={[]} runs={[]} />),
+      localized(
+        <OperationsPanel
+          broadcasts={[]}
+          automations={[]}
+          runs={[]}
+          simulationAvailable
+        />,
+      ),
     );
     const trigger = screen.getByRole("button", {
       name: en.premiumPrimary.newCampaign,

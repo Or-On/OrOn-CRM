@@ -47,7 +47,7 @@ export async function GET(
     );
     if (exported === undefined)
       return NextResponse.json(
-        { error: "Finalized report not found" },
+        { error: "Signed report not found" },
         { status: 404 },
       );
     const filename = `service-report-${safeArchiveSegment(exported.reference)}.xlsx`;

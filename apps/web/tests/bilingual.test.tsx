@@ -80,7 +80,12 @@ describe("English and Hebrew interface contracts", () => {
     );
     expect(
       renderMarkup(
-        <OperationsPanel automations={[]} broadcasts={[]} runs={[]} />,
+        <OperationsPanel
+          automations={[]}
+          broadcasts={[]}
+          runs={[]}
+          simulationAvailable
+        />,
         "he",
       ),
     ).toContain(he.operations.emptyCampaignsTitle);

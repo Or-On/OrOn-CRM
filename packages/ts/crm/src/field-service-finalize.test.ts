@@ -81,5 +81,9 @@ describe("field-service report finalization", () => {
     expect(finalization).toContain(
       "settings.tenant_id = platform.current_tenant_id()",
     );
+    expect(finalization).toContain("'signedDocument', jsonb_build_object(");
+    expect(finalization).toContain("'customerName', customer.name");
+    expect(finalization).toContain("'fullName', technician.full_name");
+    expect(finalization).toContain("'serviceLocationName', location.name");
   });
 });

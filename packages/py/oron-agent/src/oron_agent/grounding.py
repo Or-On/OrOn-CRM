@@ -92,6 +92,7 @@ CONVERSATION = {
         "repeat": "לא שמעתי את הפרט האחרון. אפשר לחזור עליו?",
         "confirm_detail": "כדי לא לטעות, אפשר לחזור על הפרט שצריך לעדכן?",
         "unverified": "אין לי כרגע מידע מאושר כדי לאשר את זה. אפשר לברר את הפרטים עם נציג.",
+        "person_help": "אפשר לבקש לדבר עם נציג. אין לי אישור שההעברה הושלמה.",
         "handoff_available": "אפשר לבקש לדבר עם נציג. אין לי אישור שההעברה הושלמה.",
         "goodbye": "תודה על השיחה. יום נעים!",
     },
@@ -105,13 +106,14 @@ CONVERSATION = {
             "I do not currently have approved information to confirm that. "
             "A person can help check the details."
         ),
+        "person_help": "You can ask to speak with a person. I cannot confirm a transfer.",
         "handoff_available": "You can ask to speak with a person. I cannot confirm a transfer.",
         "goodbye": "Thank you for calling. Have a good day!",
     },
 }
 
 MODEL_CONVERSATION_INTENTS = tuple(
-    intent for intent in CONVERSATION["en"] if intent != "acknowledge"
+    intent for intent in CONVERSATION["en"] if intent not in {"acknowledge", "handoff_available"}
 )
 PROGRESS_QUESTION = {
     "he": "האם הבעיה עדיין קיימת כרגע?",
@@ -145,12 +147,89 @@ TURN_ACKNOWLEDGEMENTS = {
         "frustrating": "That sounds frustrating.",
     },
 }
+PERSON_HELP_REPLIES = {
+    "he": (
+        CONVERSATION["he"]["person_help"],
+        "עדיין אין לי אישור שהחיבור לנציג בוצע.",
+        "אין לי כרגע אישור שנציג הצטרף לשיחה.",
+    ),
+    "en": (
+        CONVERSATION["en"]["person_help"],
+        "I still cannot confirm that you have been connected to a person.",
+        "I do not currently have confirmation that a person joined the conversation.",
+    ),
+}
 _CALLER_NEEDS_PROGRESS = re.compile(
-    r"(?:[?؟]|\b(?:what|why|how|next|continue|help|problem|issue|failed|broken|"
+    r"(?:[?؟]|\b(?:what|why|how|who|which|where|when|next|continue|help|problem|issue|failed|broken|"
     r"not\s+working|disconnected)\b|(?:מה|למה|איך|הלאה|להמשיך|עזרה|בעיה|תקלה|"
-    r"לא\s+(?:עובד|עובדת|מצליח|מצליחה)|התנתק|מנותק))",
+    r"מי|איזה|איזו|איפה|מתי|התקלקל|התקלקלה|לא\s+(?:עובד|עובדת|מצליח|מצליחה)|"
+    r"התנתק|מנותק))",
     re.IGNORECASE,
 )
+
+_CALLER_REPORTS_A_PROBLEM = re.compile(
+    r"(?:\b(?:failed|failing|broken|declined|rejected|stuck|not\s+working|need\s+help|"
+    r"problem|issue|error)\b|(?:נכשל|נכשלה|נדחה|נדחתה|תקוע|תקועה|לא\s+עובד|"
+    r"לא\s+עובדת|צריך\s+עזרה|צריכה\s+עזרה|בעיה|תקלה|שגיאה))",
+    re.IGNORECASE,
+)
+
+_CALLER_REQUESTS_VERIFICATION = re.compile(
+    r"(?:"
+    r"\b(?:confirm|verify|check)\b.{0,80}\b(?:refund|payment|discount|charge|booking|"
+    r"appointment|eligibility|warranty|promise|order|delivery|technician)\b|"
+    r"\b(?:did|have|has|was|is|are|will|can)\s+(?:you\s+)?(?:book(?:ed)?|schedule(?:d)?|"
+    r"approve(?:d)?|confirm(?:ed)?|refund(?:ed)?|charge(?:d)?|pay|paid|complete(?:d)?|"
+    r"process(?:ed)?|send|sent)\b|"
+    r"\b(?:refund|payment|discount|charge|booking|appointment|eligibility|warranty|"
+    r"order|delivery|technician)\b.{0,80}\b(?:approved|confirmed|paid|processed|"
+    r"completed|booked|scheduled|valid|eligible|covered|on\s+the\s+way)\b|"
+    r"(?:האם|אפשר\s+לבדוק|תוכל(?:י)?\s+לבדוק|מה\s+מצב).{0,80}(?:"
+    r"(?<![\w\u05d0-\u05ea])תור(?![\w\u05d0-\u05ea])|זיכוי|החזר|תשלום|הנחה|חיוב|"
+    r"הזמנה|זכאות|אחריות|טכנאי|משלוח|נקבע|אושר|שולם|בוצע|בדרך|בתוקף|מכוסה)|"
+    r"(?:זיכוי|החזר|תשלום|הנחה|חיוב|הזמנה|(?<![\w\u05d0-\u05ea])תור"
+    r"(?![\w\u05d0-\u05ea])|זכאות|אחריות|טכנאי|משלוח).{0,80}(?:נקבע|אושר|שולם|"
+    r"בוצע|הושלם|בדרך|בתוקף|מכוסה)"
+    r")",
+    re.IGNORECASE,
+)
+
+_CALLER_REQUESTS_PERSON = re.compile(
+    r"(?:"
+    r"\b(?:i\s+(?:want|need|would\s+like|prefer)|can\s+i|could\s+i|may\s+i)\b"
+    r".{0,48}\b(?:agent|human|person|representative|customer\s+service|"
+    r"support\s+(?:agent|team|representative))\b|"
+    r"\b(?:speak|talk)\s+(?:to|with)\s+(?:a\s+)?(?:human|person|representative|"
+    r"live\s+agent|agent|customer\s+service|support)\b|"
+    r"\b(?:connect|transfer)\s+me\s+(?:to|with)\s+(?:a\s+)?(?:human|person|"
+    r"representative|live\s+agent|agent|customer\s+service|support)\b|"
+    r"\b(?:human|live\s+agent|representative|customer\s+service)\s+please\b|"
+    r"(?:אני\s+(?:רוצה|צריך|צריכה|מבקש|מבקשת)|אפשר|תעביר(?:י)?|תחבר(?:י)?)"
+    r".{0,48}(?:נציג|נציגת|בן\s+אדם|מישהו\s+אנושי|שירות\s+לקוחות)|"
+    r"(?:לדבר|לשוחח).{0,16}(?:עם|אל).{0,16}(?:נציג|נציגת|בן\s+אדם|"
+    r"מישהו\s+אנושי|שירות\s+לקוחות)|"
+    r"(?:נציג|נציגת|שירות\s+לקוחות)\s+בבקשה"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _caller_requests_verification(text: str) -> bool:
+    """Detect an external-status check, not merely a support-domain noun."""
+
+    if _CALLER_REPORTS_A_PROBLEM.search(text):
+        return False
+    return bool(_CALLER_REQUESTS_VERIFICATION.search(text))
+
+
+def _caller_requests_person(text: str) -> bool:
+    """Require an explicit request; reported speech about a person is not enough."""
+
+    return bool(_CALLER_REQUESTS_PERSON.search(text))
+
+
+def _caller_needs_progress(text: str) -> bool:
+    return bool(_CALLER_NEEDS_PROGRESS.search(text) and not _caller_requests_verification(text))
 
 
 _GENERIC_FILLER_PREFIX = re.compile(
@@ -197,6 +276,15 @@ def _non_repeating_recovery(locale: str, recent_spoken_texts: Sequence[str]) -> 
         if not _looks_repeated(candidate, recent_spoken_texts):
             return candidate
     return CONVERSATION[locale]["clarify"]
+
+
+def _non_repeating_person_help(locale: str, recent_spoken_texts: Sequence[str]) -> str:
+    for candidate in PERSON_HELP_REPLIES[locale]:
+        if not _looks_repeated(candidate, recent_spoken_texts):
+            return candidate
+    # The request remains a human-help request even after every bounded wording
+    # has been used; never turn it into an unrelated troubleshooting question.
+    return PERSON_HELP_REPLIES[locale][-1]
 
 
 _UNSAFE_DIAGNOSTIC_QUESTION = re.compile(
@@ -295,7 +383,7 @@ def grounding_instruction(facts: list[KnowledgeFact], language: str) -> str:
     size = 0
     for fact in facts:
         size += len(fact.value)
-        if size > 5600 or len(payload) >= 12:
+        if size > 4750 or len(payload) >= 12:
             break
         payload.append({**fact.selector(), "value": fact.value})
     return (
@@ -326,9 +414,13 @@ def grounding_instruction(facts: list[KnowledgeFact], language: str) -> str:
         "A caller who asks to continue an existing issue, asks what happens next, challenges your "
         "last answer, or gives a new symptom needs a useful response now: use the available "
         "cross-channel history and ask the next missing safe diagnostic question. Never repeat "
-        "the previous assistant sentence. Use handoff_available only when the caller explicitly "
-        "asks for a person or a substantive investigation has exhausted every safe supported "
-        "question; never use it merely because the caller asks what happens next. "
+        "the previous assistant sentence. Intent labels are JSON string values, never function "
+        "or tool names; never call a tool using an intent label. A trusted current routing or "
+        "completion tool still takes precedence when its documented flow condition is met. Only "
+        "when no such current tool represents human transfer and the caller explicitly asks for "
+        'a person, return exactly {"kind":"conversation","intent":"person_help"}. Use '
+        "person_help only for that explicit request, never merely because the caller asks what "
+        "happens next, mentions what a representative said, or challenges an answer. "
         "If the caller's words are nonsensical or not understandable, ask one concise "
         "clarification question without echoing the nonsense or pretending to understand it. "
         "Use unverified only when the caller explicitly "
@@ -373,33 +465,55 @@ def render_reply(
     fallback_text = CONVERSATION[locale][
         "handoff_available" if fallback_behavior == "handoff" else "unverified"
     ]
-    fallback = GroundedReply(fallback_text, "unverified")
     recent = tuple(
         text
         for text in (*recent_spoken_texts, previous_spoken_text or "")
         if isinstance(text, str) and text.strip()
     )
+
+    def fallback_reply() -> GroundedReply:
+        if fallback_behavior == "handoff":
+            rendered, decision = fallback_text, "unverified"
+        elif _caller_needs_progress(latest_caller_text):
+            rendered, decision = PROGRESS_QUESTION[locale], "progress_question"
+        elif latest_caller_text and not _caller_requests_verification(latest_caller_text):
+            rendered, decision = CONVERSATION[locale]["clarify"], "clarify"
+        else:
+            rendered, decision = fallback_text, "unverified"
+        if _looks_repeated(rendered, recent):
+            return GroundedReply(
+                _non_repeating_recovery(locale, recent),
+                "duplicate_recovery",
+            )
+        return GroundedReply(rendered, decision)
+
     if len(text) > 8192:
-        return fallback
+        return fallback_reply()
     try:
         value = json.loads(text)
     except ValueError, TypeError:
         # Not a keyword denylist: unknown free text cannot make a material claim.
-        return fallback
+        return fallback_reply()
     if not isinstance(value, dict):
-        return fallback
+        return fallback_reply()
     if value.get("kind") == "conversation" and set(value) == {"kind", "intent"}:
         intent = value.get("intent")
         if isinstance(intent, str) and intent in CONVERSATION[locale]:
             rendered = CONVERSATION[locale][intent]
             decision = intent
-            if intent in {"acknowledge", "clarify"} and _CALLER_NEEDS_PROGRESS.search(
-                latest_caller_text
-            ):
+            if intent in {"acknowledge", "clarify"} and _caller_needs_progress(latest_caller_text):
                 rendered = PROGRESS_QUESTION[locale]
                 decision = "progress_question"
             elif intent == "unverified":
-                rendered = fallback_text
+                return fallback_reply()
+            elif intent in {"person_help", "handoff_available"}:
+                legacy_without_caller_context = (
+                    intent == "handoff_available" and not latest_caller_text
+                )
+                if not legacy_without_caller_context and not _caller_requests_person(
+                    latest_caller_text
+                ):
+                    return fallback_reply()
             elif intent == "clarify" and speaking_style == "balanced":
                 rendered = (
                     "כדי שאוכל לעזור, מה הכי חשוב כרגע?"
@@ -411,6 +525,14 @@ def render_reply(
                     "אני רוצה לוודא שהבנתי נכון. אפשר להסביר מה צריך לקרות?"
                     if locale == "he"
                     else "I want to make sure I understand. Could you explain what needs to happen?"
+                )
+            if _looks_repeated(rendered, recent) and intent in {
+                "person_help",
+                "handoff_available",
+            }:
+                return GroundedReply(
+                    _non_repeating_person_help(locale, recent),
+                    "person_help",
                 )
             if _looks_repeated(rendered, recent) and intent not in {"repeat", "goodbye"}:
                 return GroundedReply(
@@ -462,7 +584,7 @@ def render_reply(
         for fact in facts:
             if selector == fact.selector() and type(value["version"]) is int:
                 return GroundedReply(fact.value, "approved_fact", fact.selector())
-    return fallback
+    return fallback_reply()
 
 
 class VoiceEvidenceGate(FrameProcessor):

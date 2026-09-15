@@ -16,11 +16,14 @@ export const conversationReplyCodes = [
   "greeting",
   "thanks",
   "clarify",
+  "clarify_rephrase",
+  "clarify_detail",
   "callback_confirmation",
   "unverified_claim",
   "knowledge_unavailable",
 ] as const;
 export type ConversationReplyCode = (typeof conversationReplyCodes)[number];
+export const recentReplyWindowSize = 8;
 
 export interface GroundedReply {
   readonly text: string;
@@ -45,6 +48,14 @@ const replies: Readonly<
   greeting: ["שלום, במה אפשר לעזור?", "Hello, how can I help?"],
   thanks: ["בשמחה.", "You're welcome."],
   clarify: ["באיזה נושא נדרשת עזרה?", "What would you like help with?"],
+  clarify_rephrase: [
+    "לא בטוח שהבנתי. אפשר לתאר את זה בדרך אחרת?",
+    "I may have misunderstood. Could you describe that another way?",
+  ],
+  clarify_detail: [
+    "אפשר לציין פרט אחד שיעזור להבין מה נדרש כרגע?",
+    "Could you share one detail that would help me understand what you need now?",
+  ],
   callback_confirmation: [
     'כדי לבקש שיחה, נא לשלוח בהודעה נפרדת: "תתקשרו אליי עכשיו".',
     'To request a call, please reply in a separate message: "Please call me now."',
@@ -92,13 +103,151 @@ export function safeKnowledgeStatement(value: string): boolean {
   );
 }
 
-/**
- * Allow the model to ask natural investigative questions while retaining a
- * deterministic boundary around consequential claims.  Business facts still
- * have to travel through the approved-knowledge branch above.
- */
-export function safeConversationalReply(value: string): boolean {
+export interface ConversationalReplyContext {
+  readonly locale?: string;
+  readonly recentAssistantMessages?: readonly string[];
+}
+
+function normalizedReply(value: string): string {
+  return value
+    .normalize("NFKD")
+    .toLocaleLowerCase("en")
+    .replace(/\p{M}+/gu, "")
+    .replace(/\s+/gu, " ")
+    .replace(/[.!?؟？！،,:;]+$/gu, "")
+    .replace(
+      /^(?:please\s+|(?:could|can|would)\s+you\s+(?:please\s+)?|בבקשה\s+|אפשר\s+(?:בבקשה\s+)?)/u,
+      "",
+    )
+    .trim();
+}
+
+const defaultClarificationCodes = [
+  "clarify_rephrase",
+  "clarify_detail",
+  "clarify",
+  "knowledge_unavailable",
+] as const satisfies readonly ConversationReplyCode[];
+
+const knowledgeFallbackCodes = [
+  "knowledge_unavailable",
+  "clarify_rephrase",
+  "clarify_detail",
+  "clarify",
+] as const satisfies readonly ConversationReplyCode[];
+
+// The window contains at most eight replies. These five private variants plus
+// the four canned codes above guarantee that one safe clarification remains
+// unused without exposing more model-selectable reply codes.
+const clarificationVariants = [
+  [
+    "מה הפרט החשוב ביותר שכדאי להתמקד בו כרגע?",
+    "What is the most important detail to focus on right now?",
+  ],
+  [
+    "אפשר לתאר את התסמין הנוכחי במשפט קצר אחד?",
+    "Could you describe the current symptom in one short sentence?",
+  ],
+  [
+    "מה השתנה מיד לפני שהבעיה הופיעה?",
+    "What changed immediately before the issue appeared?",
+  ],
+  [
+    "באיזה חלק של הבעיה כדאי להתמקד קודם?",
+    "Which part of the issue should we address first?",
+  ],
+  ["אפשר לציין מה מופיע כרגע?", "Could you tell me what you see right now?"],
+] as const satisfies readonly (readonly [string, string])[];
+
+function repeatsRecentAssistant(
+  value: string,
+  recentAssistantMessages: readonly string[],
+): boolean {
+  const candidate = normalizedReply(value);
+  if (candidate.length === 0) return false;
+  return recentAssistantMessages
+    .slice(-recentReplyWindowSize)
+    .some((message) => {
+      const previous = normalizedReply(message);
+      return candidate === previous;
+    });
+}
+
+function matchesRequestedLocale(value: string, locale: string): boolean {
+  const withoutUrls = value.replace(/https?:\/\/\S+/giu, " ");
+  const words =
+    withoutUrls.match(/\p{Script=Hebrew}+|\p{Script=Latin}+/gu) ?? [];
+  const technicalIndexes = new Set<number>();
+  for (let index = 0; index < words.length;) {
+    if (!/^[A-Z][\p{Script=Latin}\p{N}]*$/u.test(words[index] ?? "")) {
+      index += 1;
+      continue;
+    }
+    let end = index + 1;
+    while (
+      end < words.length &&
+      /^[A-Z][\p{Script=Latin}\p{N}]*$/u.test(words[end] ?? "")
+    )
+      end += 1;
+    if (end - index >= 2)
+      for (let item = index; item < end; item += 1) technicalIndexes.add(item);
+    index = end;
+  }
+  const naturalWords = words.filter(
+    (word, index) =>
+      !technicalIndexes.has(index) &&
+      !/^(?:[A-Z]{2,}[A-Z0-9]*|[A-Za-z]*\d+[A-Za-z0-9]*)$/u.test(word),
+  );
+  const firstWords = (naturalWords.length > 0 ? naturalWords : words).slice(
+    0,
+    4,
+  );
+  const hebrewWords = firstWords.filter((word) =>
+    /\p{Script=Hebrew}/u.test(word),
+  ).length;
+  const latinWords = firstWords.length - hebrewWords;
+  if (locale.toLowerCase().startsWith("he"))
+    return hebrewWords > 0 && hebrewWords >= latinWords;
+  return latinWords > 0 && latinWords >= hebrewWords;
+}
+
+function startsInterrogativeClause(value: string): boolean {
   const text = value.trim();
+  return /^(?:(?:and|also)\s+)?(?:(?:what|when|where|why|how|who|which|does|do|did|is|are|can|could|would|will)\b|please\s+(?:tell|describe|explain|share)\b)|^(?:(?:ו|וגם\s+))?(?:מה|מתי|איפה|למה|איך|מי|איזה|איזו|האם|אפשר|(?:נא|בבקשה)\s+(?:לתאר|לציין|לספר))(?!\p{L})/iu.test(
+    text,
+  );
+}
+
+function asksMoreThanOneQuestion(value: string): boolean {
+  const withoutUrls = value.replace(/https?:\/\/\S+/giu, " ");
+  if ((withoutUrls.match(/[?؟？]/gu)?.length ?? 0) > 1) return true;
+  const clauses = withoutUrls.split(/[,;.!]/u);
+  if (clauses.filter(startsInterrogativeClause).length > 1) return true;
+  if (!startsInterrogativeClause(withoutUrls)) return false;
+  return /\s+(?:(?:and|also)\s+(?:what|when|where|why|how|who|which|does|do|did|is|are|can|could|would|will)\b|(?:ו(?:מה|מתי|איפה|למה|איך|מי|איזה|איזו|האם|אפשר)|וגם\s+(?:מה|מתי|איפה|למה|איך|מי|איזה|איזו|האם|אפשר))(?!\p{L}))/iu.test(
+    withoutUrls.trim(),
+  );
+}
+
+function nonRepeatingClarification(
+  locale: string,
+  recentAssistantMessages: readonly string[],
+  preferredCodes: readonly ConversationReplyCode[] = defaultClarificationCodes,
+): GroundedReply {
+  for (const code of preferredCodes) {
+    const reply = conversationalReply(code, locale);
+    if (!repeatsRecentAssistant(reply.text, recentAssistantMessages))
+      return reply;
+  }
+  for (const values of clarificationVariants) {
+    const text = localized(locale, values);
+    if (!repeatsRecentAssistant(text, recentAssistantMessages))
+      return { text, evidence: { kind: "conversation", code: "generated" } };
+  }
+  throw new TypeError("clarification fallback pool exhausted");
+}
+
+function passesConversationalSafety(text: string): boolean {
   return (
     text.length > 0 &&
     text.length <= 1000 &&
@@ -123,6 +272,24 @@ export function safeConversationalReply(value: string): boolean {
   );
 }
 
+/**
+ * Allow one natural, locale-correct investigative question while retaining a
+ * deterministic boundary around consequential claims and repetitive output.
+ */
+export function safeConversationalReply(
+  value: string,
+  context: ConversationalReplyContext = {},
+): boolean {
+  const text = value.trim();
+  return (
+    passesConversationalSafety(text) &&
+    !asksMoreThanOneQuestion(text) &&
+    (context.locale === undefined ||
+      matchesRequestedLocale(text, context.locale)) &&
+    !repeatsRecentAssistant(text, context.recentAssistantMessages ?? [])
+  );
+}
+
 /** Choose the response language from the current message, never an old turn. */
 export function latestMessageLocale(
   configuredLocale: string,
@@ -140,6 +307,7 @@ export function groundAiReply(
   decision: WhatsAppAiDecision,
   facts: readonly EligibleKnowledgeFact[],
   locale: string,
+  recentAssistantMessages: readonly string[] = [],
 ): GroundedReply {
   if (decision.action === "knowledge") {
     const fact = facts.find(
@@ -166,12 +334,28 @@ export function groundAiReply(
         },
       };
     }
-    return conversationalReply("knowledge_unavailable", locale);
+    return nonRepeatingClarification(
+      locale,
+      recentAssistantMessages,
+      knowledgeFallbackCodes,
+    );
   }
   if (decision.action === "reply") {
-    if (decision.replyCode !== undefined)
-      return conversationalReply(decision.replyCode, locale);
-    if (safeConversationalReply(decision.text)) {
+    if (decision.replyCode !== undefined) {
+      const selected = conversationalReply(decision.replyCode, locale);
+      if (
+        decision.replyCode === "callback_confirmation" ||
+        !repeatsRecentAssistant(selected.text, recentAssistantMessages)
+      )
+        return selected;
+      return nonRepeatingClarification(locale, recentAssistantMessages);
+    }
+    if (
+      safeConversationalReply(decision.text, {
+        locale,
+        recentAssistantMessages,
+      })
+    ) {
       return {
         text: decision.text.trim(),
         // Natural diagnostic questions must retain a distinct evidence code.
@@ -180,9 +364,19 @@ export function groundAiReply(
         evidence: { kind: "conversation", code: "generated" },
       };
     }
-    return conversationalReply("knowledge_unavailable", locale);
+    return passesConversationalSafety(decision.text.trim())
+      ? nonRepeatingClarification(locale, recentAssistantMessages)
+      : nonRepeatingClarification(
+          locale,
+          recentAssistantMessages,
+          knowledgeFallbackCodes,
+        );
   }
-  return conversationalReply("knowledge_unavailable", locale);
+  return nonRepeatingClarification(
+    locale,
+    recentAssistantMessages,
+    knowledgeFallbackCodes,
+  );
 }
 
 /** Consequential callback consent is an exact accepted message, never model prose. */

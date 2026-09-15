@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
-import { openReportDraft } from "@or-on/crm";
+import {
+  listServiceReportPage,
+  openReportDraft,
+  serviceReportStatuses,
+  type ServiceReportStatus,
+} from "@or-on/crm";
 
 import {
   jsonObject,
@@ -11,6 +16,49 @@ import {
   crmErrorResponse,
 } from "../../../../features/crm-route";
 import { uuid } from "../../../../features/field-service";
+
+function status(value: string | null): ServiceReportStatus | undefined {
+  if (value === null) return undefined;
+  if (!serviceReportStatuses.includes(value as ServiceReportStatus))
+    throw new TypeError("Invalid service-report status");
+  return value as ServiceReportStatus;
+}
+
+export async function GET(request: Request) {
+  try {
+    const parameters = new URL(request.url).searchParams;
+    const selectedStatus = status(parameters.get("status"));
+    const cursorAt = parameters.get("cursorAt") ?? undefined;
+    const cursorId = parameters.get("cursorId") ?? undefined;
+    if ((cursorAt === undefined) !== (cursorId === undefined))
+      throw new TypeError("Both service-report cursor fields are required");
+    if (cursorAt !== undefined && !Number.isFinite(Date.parse(cursorAt)))
+      throw new TypeError("Service-report cursor is invalid");
+    const parsedCursorId =
+      cursorId === undefined ? undefined : uuid(cursorId, "Report cursor");
+    const requestedLimit = Number(parameters.get("limit") ?? "50");
+    if (!Number.isSafeInteger(requestedLimit) || requestedLimit < 1)
+      throw new TypeError("Service-report page limit is invalid");
+    const page = await withCurrentTenant("field-service:read", (sql) =>
+      listServiceReportPage(sql, {
+        ...(selectedStatus === undefined ? {} : { status: selectedStatus }),
+        query: parameters.get("q") ?? "",
+        limit: requestedLimit,
+        ...(cursorAt === undefined || parsedCursorId === undefined
+          ? {}
+          : {
+              cursor: {
+                updatedAt: cursorAt,
+                id: parsedCursorId,
+              },
+            }),
+      }),
+    );
+    return NextResponse.json(page);
+  } catch (error) {
+    return crmErrorResponse(error);
+  }
+}
 
 export async function POST(request: Request) {
   try {

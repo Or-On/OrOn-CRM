@@ -18,29 +18,72 @@ from oron_agent.grounding import grounding_instruction, render_reply
 @dataclass(frozen=True)
 class Case:
     name: str
+    language: str
     history: list[dict[str, str]]
     latest_caller_text: str
+    allowed_decisions: frozenset[str]
 
 
 CASES = [
     Case(
         "continue-existing-issue",
+        "he",
         [],
         "אני רוצה להמשיך לדבר על הבעיה בממיר של יס.",
+        frozenset({"diagnostic_question", "acknowledged_question", "progress_question"}),
     ),
     Case(
         "challenge-filler",
+        "he",
         [{"role": "assistant", "content": "תודה על השיתוף."}],
         "מה השיתוף?",
+        frozenset({"diagnostic_question", "acknowledged_question", "progress_question"}),
     ),
     Case(
         "ask-next-step",
+        "he",
         [
             {"role": "assistant", "content": "תודה על השיתוף."},
             {"role": "user", "content": "מה השיתוף?"},
             {"role": "assistant", "content": "תודה על השיתוף."},
         ],
         "אוקיי, מה הלאה?",
+        frozenset({"diagnostic_question", "acknowledged_question", "progress_question"}),
+    ),
+    Case(
+        "english-new-fault",
+        "en",
+        [],
+        "The router disconnects every few minutes. What should I check next?",
+        frozenset({"diagnostic_question", "acknowledged_question", "progress_question"}),
+    ),
+    Case(
+        "english-nonsense",
+        "en",
+        [],
+        "Purple bananas rebooted seventeen clouds.",
+        frozenset({"clarify", "diagnostic_question"}),
+    ),
+    Case(
+        "hebrew-payment-fault",
+        "he",
+        [],
+        "התשלום נכשל ואני צריך עזרה.",
+        frozenset({"diagnostic_question", "acknowledged_question", "progress_question"}),
+    ),
+    Case(
+        "english-external-status",
+        "en",
+        [],
+        "Did you book it?",
+        frozenset({"unverified"}),
+    ),
+    Case(
+        "hebrew-person-request",
+        "he",
+        [],
+        "אני רוצה לדבר עם נציג.",
+        frozenset({"person_help"}),
     ),
 ]
 
@@ -110,18 +153,14 @@ def test_provider_advances_support_instead_of_acknowledging(case: Case):
     reply = render_reply(
         raw,
         [],
-        "he",
+        case.language,
         latest_caller_text=case.latest_caller_text,
         recent_spoken_texts=tuple(
             message["content"] for message in case.history if message["role"] == "assistant"
         ),
     )
-    assert reply.decision in {
-        "diagnostic_question",
-        "acknowledged_question",
-        "progress_question",
-    }
-    assert reply.text != "תודה על השיתוף."
+    assert reply.decision in case.allowed_decisions
+    assert reply.text not in {"תודה על השיתוף.", "Thank you for sharing."}
 
 
 def test_live_eval_inherits_the_deployed_reasoning_setting(monkeypatch):

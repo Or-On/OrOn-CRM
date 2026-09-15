@@ -80,6 +80,7 @@ from oron_agent.session_recorder import SessionRecorder, finish_after_cancellati
 from oron_agent.spoken_safety import BusinessClaimGuardFilter
 from oron_agent.storage import build_artifact_store, save_audio_file
 from oron_agent.tokens import mint_room_token
+from oron_agent.tool_call_guard import HallucinatedToolCallGuard
 from oron_agent.tracing import conversation_span_attributes, setup_process_tracing
 from oron_agent.transcript import TranscriptHandler, TranscriptMessage
 from oron_agent.transfer import make_transfer_action
@@ -446,6 +447,7 @@ async def run_bot(
     conversation_language = ConversationLanguageState(spec.language)
     caller_language_context = CallerLanguageContextProcessor(conversation_language)
     response_language = ResponseLanguageTTSProcessor(conversation_language)
+    tool_call_guard = HallucinatedToolCallGuard()
     turn_planner = HebrewTurnPlanner()
     # Artifacts are staged locally during the call and uploaded at teardown.
     session_dir = SessionDir(ctx.session_id)
@@ -518,6 +520,7 @@ async def run_bot(
         ownership_generated=VoiceControlGate(voice_control, generated=True)
         if voice_control
         else None,
+        tool_call_guard=tool_call_guard,
         ownership_speech=VoiceControlGate(voice_control) if voice_control else None,
         ownership_output=VoiceControlGate(voice_control, audio=True) if voice_control else None,
     )

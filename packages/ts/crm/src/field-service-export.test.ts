@@ -156,12 +156,21 @@ describe("field-service export artifacts", () => {
     expect(sheet).not.toContain("<f>");
   });
 
+  it("keeps a superseded signed revision exportable", () => {
+    const workbook = createServiceReportWorkbook({
+      ...report,
+      revision: { ...report.revision, status: "superseded" },
+    });
+
+    expect(zipEntries(workbook).has("[Content_Types].xml")).toBe(true);
+  });
+
   it("does not export a mutable report draft", () => {
     expect(() =>
       createServiceReportWorkbook({
         ...report,
         revision: { ...report.revision, status: "draft" },
       }),
-    ).toThrow("finalized report");
+    ).toThrow("immutable signed report");
   });
 });

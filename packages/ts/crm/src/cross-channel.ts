@@ -592,6 +592,8 @@ export async function publishCanonicalFlow(
       WHERE flow.flow_definition_id = ${definitionId}::uuid
         AND flow.published_at IS NULL AND flow.validation_status = 'valid'
         AND agent.published_at IS NOT NULL
+        AND agent.validation_status = 'valid'
+        AND agent.channel_capabilities @> definition.channel_capabilities
       ORDER BY flow.version DESC LIMIT 1
     ) RETURNING id
   `;
@@ -863,8 +865,14 @@ export async function queueWhatsAppAutomaticCall(
     JOIN automation.flow_definitions definition
       ON definition.id = flow.flow_definition_id
      AND definition.tenant_id = flow.tenant_id
-     AND definition.archived_at IS NULL
-     AND definition.channel_capabilities @> ARRAY['voice','whatsapp']::text[]
+      AND definition.archived_at IS NULL
+      AND definition.channel_capabilities @> ARRAY['voice','whatsapp']::text[]
+    JOIN agents.agent_profile_versions flow_agent
+      ON flow_agent.id=flow.agent_profile_version_id
+     AND flow_agent.tenant_id=flow.tenant_id
+     AND flow_agent.published_at IS NOT NULL
+     AND flow_agent.validation_status='valid'
+     AND flow_agent.channel_capabilities @> definition.channel_capabilities
     CROSS JOIN LATERAL jsonb_array_elements(flow.definition -> 'nodes') node
     JOIN agents.agent_profile_versions voice_agent
       ON voice_agent.tenant_id=conversation.tenant_id

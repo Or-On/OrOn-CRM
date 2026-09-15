@@ -18,6 +18,7 @@ export function CampaignsView({
   activeTab,
   pending,
   canManageCampaigns,
+  simulationAvailable,
   run,
   openCreation,
 }: {
@@ -25,6 +26,7 @@ export function CampaignsView({
   readonly activeTab: "campaigns" | "automations" | "history";
   readonly pending: boolean;
   readonly canManageCampaigns: boolean;
+  readonly simulationAvailable: boolean;
   readonly run: (operation: () => Promise<unknown>) => Promise<boolean>;
   readonly openCreation: (kind: "campaigns" | "automations") => void;
 }) {
@@ -66,6 +68,11 @@ export function CampaignsView({
       hidden={activeTab !== "campaigns"}
       role="tabpanel"
     >
+      {!simulationAvailable ? (
+        <p className="public-note" role="status">
+          {t("deliveryFailure.simulation_disabled")}
+        </p>
+      ) : null}
       {broadcasts.length ? (
         <div
           className="tenant-campaign-outcomes"
@@ -146,12 +153,12 @@ export function CampaignsView({
           <EmptyState
             title={t("operations.emptyCampaignsTitle")}
             description={t(
-              canManageCampaigns
+              canManageCampaigns && simulationAvailable
                 ? "operations.emptyCampaignsDescription"
                 : "operations.emptyReadOnly",
             )}
             action={
-              canManageCampaigns ? (
+              canManageCampaigns && simulationAvailable ? (
                 <Button
                   onClick={() => openCreation("campaigns")}
                   variant="secondary"
@@ -228,7 +235,7 @@ export function CampaignsView({
                     {broadcast.status === "draft" ? (
                       <Button
                         busy={pending}
-                        disabled={!canManageCampaigns}
+                        disabled={!canManageCampaigns || !simulationAvailable}
                         onClick={() =>
                           void run(() =>
                             crmMutation(

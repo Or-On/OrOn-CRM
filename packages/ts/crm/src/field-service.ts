@@ -158,17 +158,74 @@ export interface ServiceAttachmentSummary {
   readonly createdAt: string;
 }
 
+export const serviceOcrStatuses = [
+  "pending",
+  "processing",
+  "review_required",
+  "confirmed",
+  "failed",
+] as const;
+
+export type ServiceOcrStatus = (typeof serviceOcrStatuses)[number];
+
 export interface ServiceOcrSummary {
   readonly id: string;
   readonly attachmentId: string;
-  readonly status:
-    "pending" | "processing" | "review_required" | "confirmed" | "failed";
+  readonly status: ServiceOcrStatus;
   readonly proposedFields: Readonly<Record<string, string>>;
   readonly confirmedFields: Readonly<Record<string, string>>;
   readonly manuallyConfirmedFields: readonly string[];
   readonly confidence: number | null;
   readonly errorSafe: string | null;
   readonly attempt: number;
+}
+
+export interface ServiceOcrQueueItem extends ServiceOcrSummary {
+  readonly objectId: string;
+  readonly caseId: string;
+  readonly caseReference: string;
+  readonly caseTitle: string;
+  readonly customerName: string;
+  readonly serviceLocationName: string | null;
+  readonly category: string;
+  readonly source: string;
+  readonly attachmentProcessingStatus: string;
+  readonly evidenceStatus: "pending" | "available" | "quarantined" | "deleted";
+  readonly contentType: string;
+  readonly provider: string | null;
+  readonly model: string | null;
+  readonly provenance: Readonly<Record<string, unknown>>;
+  readonly createdAt: string;
+  readonly completedAt: string | null;
+}
+
+export const serviceOcrQueueViews = [
+  "attention",
+  "in_flight",
+  "completed",
+  "all",
+] as const;
+
+export type ServiceOcrQueueView = (typeof serviceOcrQueueViews)[number];
+
+export interface ServiceOcrQueueCursor {
+  readonly status: ServiceOcrStatus;
+  readonly createdAt: string;
+  readonly id: string;
+}
+
+export interface ServiceOcrQueueCounts {
+  /** Exact totals for the current search query, before applying a queue view. */
+  readonly all: number;
+  readonly attention: number;
+  readonly inFlight: number;
+  readonly completed: number;
+}
+
+export interface ServiceOcrQueuePage {
+  readonly items: readonly ServiceOcrQueueItem[];
+  readonly counts: ServiceOcrQueueCounts;
+  readonly nextCursor: ServiceOcrQueueCursor | null;
 }
 
 export interface ReportRevision {
@@ -182,6 +239,44 @@ export interface ReportRevision {
   readonly replacementPartDetails: string | null;
   readonly technicianNotes: string | null;
   readonly finalizedAt: string | null;
+}
+
+export const serviceReportStatuses = [
+  "draft",
+  "review_required",
+  "finalized",
+  "superseded",
+] as const;
+
+export type ServiceReportStatus = (typeof serviceReportStatuses)[number];
+
+export interface ServiceReportSummary {
+  readonly id: string;
+  readonly reportId: string;
+  readonly version: number;
+  readonly status: ServiceReportStatus;
+  readonly caseId: string;
+  readonly caseReference: string;
+  readonly caseTitle: string;
+  readonly customerContactId: string;
+  readonly customerName: string;
+  readonly visitId: string;
+  readonly visitNumber: number;
+  readonly technicianId: string;
+  readonly technicianName: string;
+  readonly finalizedAt: string | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface ServiceReportCursor {
+  readonly updatedAt: string;
+  readonly id: string;
+}
+
+export interface ServiceReportPage {
+  readonly reports: readonly ServiceReportSummary[];
+  readonly nextCursor: ServiceReportCursor | null;
 }
 
 export interface ServiceCaseDossier {
@@ -270,6 +365,17 @@ export interface ServiceReportDocument {
   readonly attachments: readonly ServiceAttachmentSummary[];
 }
 
+interface SignedReportFinalizationSnapshot {
+  readonly schemaVersion: 1;
+  readonly serviceCase: ServiceCaseSummary;
+  readonly customer: Pick<
+    CustomerDossier,
+    "contactId" | "nationalIdMasked" | "preferredLanguage" | "address"
+  >;
+  readonly visit: ServiceVisit;
+  readonly technician: TechnicianSummary;
+}
+
 export interface FieldServiceObjectMetadata {
   readonly id: string;
   readonly caseId: string;
@@ -298,6 +404,30 @@ function nullableText(value: string | null | undefined, maximum = 2_000) {
 
 function databaseJson(value: unknown): postgres.JSONValue {
   return JSON.parse(JSON.stringify(value)) as postgres.JSONValue;
+}
+
+function signedReportFinalizationSnapshot(
+  value: unknown,
+  expectedCaseId: string,
+  expectedVisitId: string,
+): SignedReportFinalizationSnapshot | undefined {
+  const stored = objectRecord(value);
+  const candidate = objectRecord(stored.signedDocument);
+  const serviceCase = objectRecord(candidate.serviceCase);
+  const customer = objectRecord(candidate.customer);
+  const visit = objectRecord(candidate.visit);
+  const technician = objectRecord(candidate.technician);
+  if (
+    candidate.schemaVersion !== 1 ||
+    serviceCase.id !== expectedCaseId ||
+    visit.id !== expectedVisitId ||
+    typeof serviceCase.customerContactId !== "string" ||
+    customer.contactId !== serviceCase.customerContactId ||
+    typeof visit.technicianId !== "string" ||
+    technician.id !== visit.technicianId
+  )
+    return undefined;
+  return candidate as unknown as SignedReportFinalizationSnapshot;
 }
 
 function storedTextRecord(value: unknown): Readonly<Record<string, string>> {
@@ -2690,6 +2820,125 @@ function reportRevision(row: {
   };
 }
 
+interface ServiceReportSummaryRow {
+  readonly id: string;
+  readonly report_id: string;
+  readonly version: number;
+  readonly status: ServiceReportStatus;
+  readonly case_id: string;
+  readonly case_reference: string;
+  readonly case_title: string;
+  readonly customer_contact_id: string;
+  readonly customer_name: string;
+  readonly visit_id: string;
+  readonly visit_number: number;
+  readonly technician_id: string;
+  readonly technician_name: string;
+  readonly finalized_at: Date | null;
+  readonly created_at: Date;
+  readonly updated_at: Date;
+}
+
+function serviceReportSummary(
+  row: ServiceReportSummaryRow,
+): ServiceReportSummary {
+  return {
+    id: row.id,
+    reportId: row.report_id,
+    version: row.version,
+    status: row.status,
+    caseId: row.case_id,
+    caseReference: row.case_reference,
+    caseTitle: row.case_title,
+    customerContactId: row.customer_contact_id,
+    customerName: row.customer_name,
+    visitId: row.visit_id,
+    visitNumber: row.visit_number,
+    technicianId: row.technician_id,
+    technicianName: row.technician_name,
+    finalizedAt: row.finalized_at?.toISOString() ?? null,
+    createdAt: row.created_at.toISOString(),
+    updatedAt: row.updated_at.toISOString(),
+  };
+}
+
+/**
+ * Lists report revisions visible to the current tenant and, for technician
+ * sessions, only the cases allowed by the existing PostgreSQL RLS policies.
+ */
+export async function listServiceReportPage(
+  sql: postgres.TransactionSql,
+  options: {
+    readonly status?: ServiceReportStatus;
+    readonly query?: string;
+    readonly limit?: number;
+    readonly cursor?: ServiceReportCursor;
+  } = {},
+): Promise<ServiceReportPage> {
+  await requireFieldService(sql);
+  const query = options.query?.trim() ?? "";
+  const limit = Math.min(Math.max(options.limit ?? 50, 1), 100);
+  const cursorDate =
+    options.cursor === undefined
+      ? undefined
+      : new Date(options.cursor.updatedAt);
+  if (cursorDate !== undefined && Number.isNaN(cursorDate.valueOf()))
+    throw new TypeError("Service-report cursor timestamp is invalid");
+  const rows = await sql.unsafe<ServiceReportSummaryRow[]>(
+    `SELECT revision.id, revision.report_id, revision.version, revision.status,
+            report.case_id, service_case.reference AS case_reference,
+            service_case.title AS case_title,
+            service_case.customer_contact_id, customer.name AS customer_name,
+            report.visit_id, visit.visit_number,
+            visit.technician_id, technician.full_name AS technician_name,
+            revision.finalized_at, revision.created_at, revision.updated_at
+       FROM service.report_revisions revision
+       JOIN service.reports report
+         ON report.tenant_id = revision.tenant_id
+        AND report.id = revision.report_id
+       JOIN service.cases service_case
+         ON service_case.tenant_id = report.tenant_id
+        AND service_case.id = report.case_id
+       JOIN crm.contacts customer
+         ON customer.tenant_id = service_case.tenant_id
+        AND customer.id = service_case.customer_contact_id
+       JOIN service.visits visit
+         ON visit.tenant_id = report.tenant_id
+        AND visit.id = report.visit_id
+       JOIN service.technicians technician
+         ON technician.tenant_id = visit.tenant_id
+        AND technician.id = visit.technician_id
+      WHERE revision.tenant_id = platform.current_tenant_id()
+        AND ($1::text IS NULL OR revision.status = $1)
+        AND ($2 = '' OR service_case.reference ILIKE '%' || $2 || '%'
+          OR service_case.title ILIKE '%' || $2 || '%'
+          OR customer.name ILIKE '%' || $2 || '%'
+          OR technician.full_name ILIKE '%' || $2 || '%')
+        AND ($3::timestamptz IS NULL OR
+          (revision.updated_at, revision.id) <
+          ($3::timestamptz, $4::uuid))
+      ORDER BY revision.updated_at DESC, revision.id DESC
+      LIMIT $5`,
+    [
+      options.status ?? null,
+      query,
+      cursorDate?.toISOString() ?? null,
+      options.cursor?.id ?? null,
+      limit + 1,
+    ],
+  );
+  const hasMore = rows.length > limit;
+  const selected = hasMore ? rows.slice(0, limit) : rows;
+  const last = selected.at(-1);
+  return {
+    reports: selected.map(serviceReportSummary),
+    nextCursor:
+      hasMore && last !== undefined
+        ? { updatedAt: last.updated_at.toISOString(), id: last.id }
+        : null,
+  };
+}
+
 export async function openReportDraft(
   sql: postgres.TransactionSql,
   actorUserId: string,
@@ -2949,6 +3198,283 @@ export async function queueAttachmentOcr(
   return row.id;
 }
 
+interface ServiceOcrQueueItemRow {
+  readonly id: string;
+  readonly attachment_id: string;
+  readonly object_id: string;
+  readonly case_id: string;
+  readonly case_reference: string;
+  readonly case_title: string;
+  readonly customer_name: string;
+  readonly service_location_name: string | null;
+  readonly category: string;
+  readonly source: string;
+  readonly attachment_processing_status: string;
+  readonly evidence_status: ServiceOcrQueueItem["evidenceStatus"];
+  readonly content_type: string;
+  readonly status: ServiceOcrStatus;
+  readonly proposed_fields: unknown;
+  readonly confirmed_fields: unknown;
+  readonly manually_confirmed_fields: string[];
+  readonly confidence: string | null;
+  readonly provider: string | null;
+  readonly model: string | null;
+  readonly provenance: unknown;
+  readonly error_safe: string | null;
+  readonly attempt: number;
+  readonly created_at: Date;
+  readonly completed_at: Date | null;
+  readonly sort_priority: number;
+}
+
+function serviceOcrQueueItem(row: ServiceOcrQueueItemRow): ServiceOcrQueueItem {
+  return {
+    id: row.id,
+    attachmentId: row.attachment_id,
+    objectId: row.object_id,
+    caseId: row.case_id,
+    caseReference: row.case_reference,
+    caseTitle: row.case_title,
+    customerName: row.customer_name,
+    serviceLocationName: row.service_location_name,
+    category: row.category,
+    source: row.source,
+    attachmentProcessingStatus: row.attachment_processing_status,
+    evidenceStatus: row.evidence_status,
+    contentType: row.content_type,
+    status: row.status,
+    proposedFields: storedTextRecord(row.proposed_fields),
+    confirmedFields: storedTextRecord(row.confirmed_fields),
+    manuallyConfirmedFields: row.manually_confirmed_fields,
+    confidence: row.confidence === null ? null : Number(row.confidence),
+    provider: row.provider,
+    model: row.model,
+    provenance: objectRecord(row.provenance),
+    errorSafe: row.error_safe,
+    attempt: row.attempt,
+    createdAt: row.created_at.toISOString(),
+    completedAt: row.completed_at?.toISOString() ?? null,
+  };
+}
+
+/**
+ * Tenant-scoped operator projection of the latest OCR attempt for each piece
+ * of service evidence. Counts are exact for the current search across every
+ * visible latest attempt; the selected view is applied only to the page rows.
+ */
+export async function listServiceOcrQueuePage(
+  sql: postgres.TransactionSql,
+  options: {
+    readonly view?: ServiceOcrQueueView;
+    readonly query?: string;
+    readonly limit?: number;
+    readonly cursor?: ServiceOcrQueueCursor;
+  } = {},
+): Promise<ServiceOcrQueuePage> {
+  const view = options.view ?? "all";
+  const query = options.query?.trim() ?? "";
+  const limit = options.limit ?? 50;
+  if (!serviceOcrQueueViews.includes(view))
+    throw new TypeError("OCR queue view is invalid");
+  if (query.length > 500) throw new TypeError("OCR queue search is too long");
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500)
+    throw new TypeError("OCR queue limit is out of range");
+  if (
+    options.cursor !== undefined &&
+    !serviceOcrStatuses.includes(options.cursor.status)
+  )
+    throw new TypeError("OCR queue cursor status is invalid");
+  const cursorDate =
+    options.cursor === undefined
+      ? undefined
+      : new Date(options.cursor.createdAt);
+  if (cursorDate !== undefined && Number.isNaN(cursorDate.valueOf()))
+    throw new TypeError("OCR queue cursor timestamp is invalid");
+
+  await requireFieldService(sql);
+  const countRows = await sql<
+    {
+      all_count: number;
+      attention_count: number;
+      in_flight_count: number;
+      completed_count: number;
+    }[]
+  >`
+    WITH parameters AS (
+      SELECT ${query}::text AS search_query
+    ), visible_results AS (
+      SELECT result.status
+      FROM service.ocr_results result
+      JOIN service.report_attachments attachment
+        ON attachment.id=result.attachment_id
+       AND attachment.tenant_id=result.tenant_id
+      JOIN service.cases service_case
+        ON service_case.id=attachment.case_id
+       AND service_case.tenant_id=attachment.tenant_id
+      JOIN crm.contacts contact
+        ON contact.id=service_case.customer_contact_id
+       AND contact.tenant_id=service_case.tenant_id
+      LEFT JOIN crm.service_locations location
+        ON location.id=service_case.service_location_id
+       AND location.tenant_id=service_case.tenant_id
+      JOIN objects.object_metadata object
+        ON object.id=attachment.object_id
+       AND object.tenant_id=attachment.tenant_id
+      CROSS JOIN parameters
+      WHERE result.tenant_id=platform.current_tenant_id()
+        AND result.attempt=(
+          SELECT max(latest.attempt)
+          FROM service.ocr_results latest
+          WHERE latest.tenant_id=result.tenant_id
+            AND latest.attachment_id=result.attachment_id
+        )
+        AND (parameters.search_query='' OR
+          service_case.reference ILIKE '%' || parameters.search_query || '%' OR
+          service_case.title ILIKE '%' || parameters.search_query || '%' OR
+          contact.name ILIKE '%' || parameters.search_query || '%' OR
+          coalesce(location.name, '') ILIKE '%' || parameters.search_query || '%' OR
+          coalesce(result.provider, '') ILIKE '%' || parameters.search_query || '%' OR
+          coalesce(result.model, '') ILIKE '%' || parameters.search_query || '%' OR
+          result.proposed_fields::text ILIKE '%' || parameters.search_query || '%' OR
+          result.confirmed_fields::text ILIKE '%' || parameters.search_query || '%')
+    )
+    SELECT count(*)::int AS all_count,
+           count(*) FILTER (
+             WHERE status IN ('review_required', 'failed')
+           )::int AS attention_count,
+           count(*) FILTER (
+             WHERE status IN ('pending', 'processing')
+           )::int AS in_flight_count,
+           count(*) FILTER (WHERE status='confirmed')::int AS completed_count
+    FROM visible_results
+  `;
+  const countRow = countRows[0];
+  const counts: ServiceOcrQueueCounts = {
+    all: countRow?.all_count ?? 0,
+    attention: countRow?.attention_count ?? 0,
+    inFlight: countRow?.in_flight_count ?? 0,
+    completed: countRow?.completed_count ?? 0,
+  };
+
+  const rows = await sql<ServiceOcrQueueItemRow[]>`
+    WITH parameters AS (
+      SELECT ${query}::text AS search_query,
+             ${view}::text AS selected_view,
+             ${options.cursor?.status ?? null}::text AS cursor_status,
+             ${cursorDate?.toISOString() ?? null}::timestamptz AS cursor_created_at,
+             ${options.cursor?.id ?? null}::uuid AS cursor_id
+    ), visible_results AS (
+      SELECT result.id, result.attachment_id, attachment.object_id,
+             service_case.id AS case_id,
+             service_case.reference AS case_reference,
+             service_case.title AS case_title,
+             contact.name AS customer_name,
+             location.name AS service_location_name,
+             attachment.category, attachment.source,
+             attachment.processing_status AS attachment_processing_status,
+             object.status AS evidence_status, object.content_type,
+             result.status, result.proposed_fields, result.confirmed_fields,
+             result.manually_confirmed_fields, result.confidence,
+             result.provider, result.model, result.provenance,
+             result.error_safe, result.attempt, result.created_at,
+             result.completed_at,
+             CASE result.status
+               WHEN 'review_required' THEN 0
+               WHEN 'failed' THEN 1
+               WHEN 'processing' THEN 2
+               WHEN 'pending' THEN 3
+               ELSE 4
+             END AS sort_priority
+      FROM service.ocr_results result
+      JOIN service.report_attachments attachment
+        ON attachment.id=result.attachment_id
+       AND attachment.tenant_id=result.tenant_id
+      JOIN service.cases service_case
+        ON service_case.id=attachment.case_id
+       AND service_case.tenant_id=attachment.tenant_id
+      JOIN crm.contacts contact
+        ON contact.id=service_case.customer_contact_id
+       AND contact.tenant_id=service_case.tenant_id
+      LEFT JOIN crm.service_locations location
+        ON location.id=service_case.service_location_id
+       AND location.tenant_id=service_case.tenant_id
+      JOIN objects.object_metadata object
+        ON object.id=attachment.object_id
+       AND object.tenant_id=attachment.tenant_id
+      CROSS JOIN parameters
+      WHERE result.tenant_id=platform.current_tenant_id()
+        AND result.attempt=(
+          SELECT max(latest.attempt)
+          FROM service.ocr_results latest
+          WHERE latest.tenant_id=result.tenant_id
+            AND latest.attachment_id=result.attachment_id
+        )
+        AND (parameters.search_query='' OR
+          service_case.reference ILIKE '%' || parameters.search_query || '%' OR
+          service_case.title ILIKE '%' || parameters.search_query || '%' OR
+          contact.name ILIKE '%' || parameters.search_query || '%' OR
+          coalesce(location.name, '') ILIKE '%' || parameters.search_query || '%' OR
+          coalesce(result.provider, '') ILIKE '%' || parameters.search_query || '%' OR
+          coalesce(result.model, '') ILIKE '%' || parameters.search_query || '%' OR
+          result.proposed_fields::text ILIKE '%' || parameters.search_query || '%' OR
+          result.confirmed_fields::text ILIKE '%' || parameters.search_query || '%')
+    )
+    SELECT visible_results.*
+    FROM visible_results
+    CROSS JOIN parameters
+    WHERE (parameters.selected_view='all'
+      OR (parameters.selected_view='attention' AND
+        visible_results.status IN ('review_required', 'failed'))
+      OR (parameters.selected_view='in_flight' AND
+        visible_results.status IN ('pending', 'processing'))
+      OR (parameters.selected_view='completed' AND
+        visible_results.status='confirmed'))
+      AND (parameters.cursor_status IS NULL
+        OR visible_results.sort_priority > CASE parameters.cursor_status
+          WHEN 'review_required' THEN 0
+          WHEN 'failed' THEN 1
+          WHEN 'processing' THEN 2
+          WHEN 'pending' THEN 3
+          ELSE 4
+        END
+        OR (visible_results.sort_priority = CASE parameters.cursor_status
+            WHEN 'review_required' THEN 0
+            WHEN 'failed' THEN 1
+            WHEN 'processing' THEN 2
+            WHEN 'pending' THEN 3
+            ELSE 4
+          END
+          AND (visible_results.created_at, visible_results.id) <
+            (parameters.cursor_created_at, parameters.cursor_id)))
+    ORDER BY visible_results.sort_priority,
+             visible_results.created_at DESC, visible_results.id DESC
+    LIMIT ${limit + 1}
+  `;
+  const hasMore = rows.length > limit;
+  const selected = hasMore ? rows.slice(0, limit) : rows;
+  const last = selected.at(-1);
+  return {
+    items: selected.map(serviceOcrQueueItem),
+    counts,
+    nextCursor:
+      hasMore && last !== undefined
+        ? {
+            status: last.status,
+            createdAt: last.created_at.toISOString(),
+            id: last.id,
+          }
+        : null,
+  };
+}
+
+/** Compatibility projection for callers that need a bounded, unfiltered list. */
+export async function listServiceOcrQueue(
+  sql: postgres.TransactionSql,
+  limit = 200,
+): Promise<readonly ServiceOcrQueueItem[]> {
+  return (await listServiceOcrQueuePage(sql, { view: "all", limit })).items;
+}
+
 function safeOcrCorrections(value: unknown): Readonly<Record<string, string>> {
   if (value === null || typeof value !== "object" || Array.isArray(value))
     throw new TypeError("OCR corrections must be an object");
@@ -3110,6 +3636,68 @@ export async function finalizeReportRevision(
     UPDATE service.report_revisions revision SET
       status = 'finalized', finalized_at = clock_timestamp(),
       finalized_by_user_id = ${actorUserId}::uuid,
+      customer_snapshot = revision.customer_snapshot || jsonb_build_object(
+        'signedDocument', jsonb_build_object(
+          'schemaVersion', 1,
+          'serviceCase', jsonb_build_object(
+            'id', service_case.id,
+            'reference', service_case.reference,
+            'customerContactId', service_case.customer_contact_id,
+            'customerName', customer.name,
+            'serviceLocationId', service_case.service_location_id,
+            'serviceLocationName', location.name,
+            'serviceLocationAddress', location.address,
+            'status', service_case.status,
+            'title', service_case.title,
+            'faultDescription', service_case.fault_description,
+            'warrantyStatus', service_case.warranty_status,
+            'productType', service_case.product_type,
+            'productModel', service_case.product_model,
+            'serialNumber', service_case.serial_number,
+            'priority', service_case.priority,
+            'createdAt', service_case.created_at,
+            'updatedAt', service_case.updated_at
+          ),
+          'customer', jsonb_build_object(
+            'contactId', customer.id,
+            'nationalIdMasked', CASE WHEN customer_profile.national_id_hint IS NULL
+              THEN NULL ELSE repeat('•', 6) || customer_profile.national_id_hint END,
+            'preferredLanguage', customer_profile.preferred_language,
+            'address', customer_profile.address
+          ),
+          'visit', jsonb_build_object(
+            'id', visit.id,
+            'caseId', visit.case_id,
+            'appointmentId', visit.appointment_id,
+            'technicianId', visit.technician_id,
+            'visitNumber', visit.visit_number,
+            'status', visit.status,
+            'arrivalAt', visit.arrival_at,
+            'departureAt', visit.departure_at,
+            'durationSeconds', CASE
+              WHEN visit.arrival_at IS NULL OR visit.departure_at IS NULL THEN NULL
+              ELSE greatest(
+                0,
+                round(extract(epoch FROM visit.departure_at - visit.arrival_at))
+              )::integer
+            END,
+            'arrivalSignatureObjectId', visit.arrival_signature_object_id,
+            'departureSignatureObjectId', visit.departure_signature_object_id,
+            'arrivalIdentity', visit.arrival_identity,
+            'departureIdentity', visit.departure_identity
+          ),
+          'technician', jsonb_build_object(
+            'id', technician.id,
+            'linkedUserId', technician.linked_user_id,
+            'employeeIdentifier', technician.employee_identifier,
+            'fullName', technician.full_name,
+            'phone', technician.phone,
+            'email', technician.email,
+            'identityVerification', technician.identity_verification,
+            'active', technician.active
+          )
+        )
+      ),
       branding_snapshot = jsonb_build_object(
         'businessName', coalesce(
           settings.business_name,
@@ -3129,8 +3717,28 @@ export async function finalizeReportRevision(
         'locale', settings.locale,
         'timezone', settings.timezone
       ), updated_at = CURRENT_TIMESTAMP
-    FROM crm.tenant_settings settings
+    FROM service.reports report
+    JOIN service.cases service_case
+      ON service_case.id = report.case_id
+     AND service_case.tenant_id = report.tenant_id
+    JOIN crm.contacts customer
+      ON customer.id = service_case.customer_contact_id
+     AND customer.tenant_id = service_case.tenant_id
+    LEFT JOIN crm.customer_profiles customer_profile
+      ON customer_profile.contact_id = customer.id
+     AND customer_profile.tenant_id = customer.tenant_id
+    LEFT JOIN crm.service_locations location
+      ON location.id = service_case.service_location_id
+     AND location.tenant_id = service_case.tenant_id
+    JOIN service.visits visit
+      ON visit.id = report.visit_id
+     AND visit.tenant_id = report.tenant_id
+    JOIN service.technicians technician
+      ON technician.id = visit.technician_id
+     AND technician.tenant_id = visit.tenant_id
+    JOIN crm.tenant_settings settings ON settings.tenant_id = report.tenant_id
     WHERE revision.id = ${revisionId}::uuid
+      AND report.id = revision.report_id
       AND settings.tenant_id = platform.current_tenant_id()
     RETURNING revision.id, revision.report_id, revision.version, revision.status,
       revision.diagnosis, revision.work_performed, revision.part_replaced,
@@ -4270,8 +4878,9 @@ function recordText(
 }
 
 /**
- * Reads an immutable, finalized report using its captured customer/product and
- * tenant-branding snapshots. Current tenant branding is deliberately not read.
+ * Reads an immutable signed report using its captured customer/product and
+ * tenant-branding snapshots. Superseded revisions remain part of the durable
+ * report history; current tenant branding is deliberately not read.
  */
 export async function getServiceReportDocument(
   sql: postgres.TransactionSql,
@@ -4291,20 +4900,28 @@ export async function getServiceReportDocument(
            revision.product_snapshot, revision.branding_snapshot
     FROM service.report_revisions revision
     JOIN service.reports report ON report.id=revision.report_id
-    WHERE revision.id=${revisionId}::uuid AND revision.status='finalized'
+    WHERE revision.id=${revisionId}::uuid
+      AND revision.status IN ('finalized', 'superseded')
   `;
   const row = rows[0];
   if (row === undefined) return undefined;
-  const [dossier, technicians] = await Promise.all([
-    getServiceCaseDossier(sql, row.case_id),
-    listTechnicians(sql),
-  ]);
+  const customerSnapshot = objectRecord(row.customer_snapshot);
+  const signedSnapshot = signedReportFinalizationSnapshot(
+    customerSnapshot,
+    row.case_id,
+    row.visit_id,
+  );
+  const dossier = await getServiceCaseDossier(sql, row.case_id);
   if (dossier === undefined) return undefined;
   const revision = dossier.reports.find((item) => item.id === revisionId);
-  const visitRecord = dossier.visits.find((item) => item.id === row.visit_id);
-  const technician = technicians.find(
-    (item) => item.id === visitRecord?.technicianId,
-  );
+  const visitRecord =
+    signedSnapshot?.visit ??
+    dossier.visits.find((item) => item.id === row.visit_id);
+  const technician =
+    signedSnapshot?.technician ??
+    (await listTechnicians(sql, true)).find(
+      (item) => item.id === visitRecord?.technicianId,
+    );
   if (
     revision === undefined ||
     visitRecord === undefined ||
@@ -4314,11 +4931,14 @@ export async function getServiceReportDocument(
   const branding = objectRecord(row.branding_snapshot);
   return {
     revision,
-    serviceCase: dossier.serviceCase,
-    customer: dossier.customer,
+    serviceCase: signedSnapshot?.serviceCase ?? dossier.serviceCase,
+    customer:
+      signedSnapshot === undefined
+        ? dossier.customer
+        : { ...dossier.customer, ...signedSnapshot.customer },
     visit: visitRecord,
     technician,
-    customerSnapshot: objectRecord(row.customer_snapshot),
+    customerSnapshot,
     productSnapshot: objectRecord(row.product_snapshot),
     branding: {
       businessName:

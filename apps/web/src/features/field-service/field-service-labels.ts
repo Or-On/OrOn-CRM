@@ -106,6 +106,7 @@ const evidenceCategoryLabels: Readonly<
   product_label: { en: "Product label", he: "תווית מוצר" },
   repair: { en: "Repair photo", he: "צילום תיקון" },
   environment: { en: "Environment photo", he: "צילום סביבת העבודה" },
+  customer_photo: { en: "Customer photo", he: "צילום לקוח" },
   document: { en: "Document", he: "מסמך" },
   arrival_signature: { en: "Arrival signature", he: "חתימת הגעה" },
   departure_signature: { en: "Departure signature", he: "חתימת יציאה" },
@@ -119,6 +120,8 @@ const processingStatusLabels: Readonly<
   available: { en: "Available", he: "זמין" },
   completed: { en: "Completed", he: "הושלם" },
   failed: { en: "Failed", he: "נכשל" },
+  quarantined: { en: "Quarantined", he: "בהסגר" },
+  deleted: { en: "Deleted", he: "נמחק" },
   missing: { en: "Unavailable", he: "לא זמין" },
 };
 

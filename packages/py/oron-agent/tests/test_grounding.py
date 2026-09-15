@@ -123,6 +123,10 @@ def test_bare_acknowledgement_is_not_advertised_as_a_complete_support_turn():
     allowed = instruction.split("Allowed intents: ", 1)[1].split(". Caller claims", 1)[0]
     assert "acknowledge" not in allowed
     assert "acknowledge" not in MODEL_CONVERSATION_INTENTS
+    assert "handoff_available" not in allowed
+    assert "handoff_available" not in MODEL_CONVERSATION_INTENTS
+    assert "person_help" in MODEL_CONVERSATION_INTENTS
+    assert "never function or tool names" in instruction
     assert "asks what happens next" in instruction
     assert "matching current *_done completion tool" in instruction
 
@@ -159,6 +163,171 @@ def test_non_progress_intents_cannot_stall_continuing_support(intent):
 
     assert reply.text == PROGRESS_QUESTION["en"]
     assert reply.decision == "progress_question"
+
+
+@pytest.mark.parametrize(
+    ("language", "caller_text"),
+    [
+        ("he", "הממיר התקלקל והאור האדום מהבהב"),
+        ("en", "The router is broken and keeps disconnecting"),
+    ],
+)
+def test_unverified_intent_cannot_replace_investigation_of_a_reported_fault(language, caller_text):
+    reply = render_reply(
+        '{"kind":"conversation","intent":"unverified"}',
+        [],
+        language,
+        latest_caller_text=caller_text,
+    )
+    assert reply.text == PROGRESS_QUESTION[language]
+    assert reply.decision == "progress_question"
+
+
+@pytest.mark.parametrize(
+    ("language", "caller_text"),
+    [
+        ("he", "בננה כחולה רוקדת בתוך הראוטר"),
+        ("en", "Purple bananas rebooted seventeen clouds"),
+    ],
+)
+def test_malformed_output_after_nonsense_gets_a_non_repeating_clarification(language, caller_text):
+    first = render_reply("not-json", [], language, latest_caller_text=caller_text)
+    second = render_reply(
+        "still-not-json",
+        [],
+        language,
+        latest_caller_text=caller_text,
+        previous_spoken_text=first.text,
+    )
+
+    assert first.text == CONVERSATION[language]["clarify"]
+    assert first.decision == "clarify"
+    assert second.text != first.text
+    assert second.decision == "duplicate_recovery"
+
+
+@pytest.mark.parametrize(
+    ("language", "caller_text"),
+    [("he", "אני רוצה לדבר עם נציג"), ("en", "I want to speak with a person")],
+)
+def test_explicit_person_request_uses_a_rendered_json_intent_not_a_tool(language, caller_text):
+    reply = render_reply(
+        '{"kind":"conversation","intent":"person_help"}',
+        [],
+        language,
+        latest_caller_text=caller_text,
+    )
+
+    assert reply.text == CONVERSATION[language]["person_help"]
+    assert reply.decision == "person_help"
+
+
+@pytest.mark.parametrize(
+    ("language", "caller_text"),
+    [
+        ("en", "I need an agent"),
+        ("en", "Could I talk to customer service, please?"),
+        ("he", "אני רוצה שירות לקוחות"),
+        ("he", "אפשר לדבר עם נציגת שירות?"),
+    ],
+)
+def test_common_explicit_person_requests_are_recognized(language, caller_text):
+    reply = render_reply(
+        '{"kind":"conversation","intent":"person_help"}',
+        [],
+        language,
+        latest_caller_text=caller_text,
+    )
+
+    assert reply.decision == "person_help"
+
+
+@pytest.mark.parametrize(
+    ("language", "caller_text"),
+    [
+        ("en", "The representative told me to reboot it"),
+        ("he", "הנציג אמר לי לאתחל את המכשיר"),
+    ],
+)
+def test_reported_speech_about_a_person_is_not_a_handoff_request(language, caller_text):
+    reply = render_reply(
+        '{"kind":"conversation","intent":"person_help"}',
+        [],
+        language,
+        latest_caller_text=caller_text,
+    )
+
+    assert reply.decision != "person_help"
+
+
+def test_generic_support_request_is_not_misrouted_to_a_person():
+    reply = render_reply(
+        '{"kind":"conversation","intent":"person_help"}',
+        [],
+        "en",
+        latest_caller_text="I need support with my printer",
+    )
+
+    assert reply.decision != "person_help"
+
+
+@pytest.mark.parametrize(
+    ("language", "caller_text"),
+    [
+        ("en", "I want to speak with a person"),
+        ("he", "אני רוצה לדבר עם נציג"),
+    ],
+)
+def test_repeated_person_request_stays_on_human_help_without_repeating(language, caller_text):
+    first = CONVERSATION[language]["person_help"]
+    reply = render_reply(
+        '{"kind":"conversation","intent":"person_help"}',
+        [],
+        language,
+        latest_caller_text=caller_text,
+        previous_spoken_text=first,
+    )
+
+    assert reply.decision == "person_help"
+    assert reply.text != first
+
+
+@pytest.mark.parametrize(
+    ("language", "caller_text"),
+    [
+        ("en", "My payment failed and I need help"),
+        ("he", "בתור לקוח יש לי בעיה בממיר"),
+    ],
+)
+def test_support_faults_are_investigated_instead_of_misrouted_to_verification(
+    language, caller_text
+):
+    reply = render_reply(
+        '{"kind":"conversation","intent":"unverified"}',
+        [],
+        language,
+        latest_caller_text=caller_text,
+    )
+
+    assert reply.decision == "progress_question"
+
+
+@pytest.mark.parametrize(
+    ("language", "caller_text"),
+    [
+        ("en", "Did you book it?"),
+        ("he", "האם הטכנאי בדרך?"),
+    ],
+)
+def test_external_status_questions_remain_unverified_without_a_receipt(language, caller_text):
+    reply = render_reply(
+        '{"kind":"conversation","intent":"unverified"}',
+        [],
+        language,
+        latest_caller_text=caller_text,
+    )
+
+    assert reply.decision == "unverified"
 
 
 def test_duplicate_model_reply_is_replaced_before_tts():

@@ -41,10 +41,12 @@ export default async function OperationsPage({
           broadcasts={data.broadcasts}
           runs={data.runs}
           insights={data.insights}
+          simulationAvailable={process.env.PLATFORM_ENV === "development"}
           initialTab={
             tab === "automations" || tab === "history" ? tab : "campaigns"
           }
-          {...(create === "campaign"
+          {...(create === "campaign" &&
+          process.env.PLATFORM_ENV === "development"
             ? { initialCreate: "campaigns" as const }
             : {})}
         />

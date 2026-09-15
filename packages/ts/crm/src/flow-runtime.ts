@@ -16,7 +16,7 @@ import {
 import { queueWhatsAppOutbound } from "./whatsapp-outbound.js";
 import type { JsonValue } from "./types.js";
 
-async function validateRetainedReferences(
+export async function validateRetainedReferences(
   sql: postgres.TransactionSql,
   flow: CanonicalFlow,
 ) {
@@ -30,6 +30,18 @@ async function validateRetainedReferences(
       ${configurationText(cfg, "flowId")}::uuid, ${Number(cfg.flowVersion)}::integer) AS available`;
       if (!rows[0]?.available)
         throw new TypeError("retained voice flow version is unavailable");
+      if (cfg.agentVersionId === undefined) continue;
+      const agentVersionId = configurationText(cfg, "agentVersionId");
+      const agents = await sql<{ available: boolean }[]>`SELECT EXISTS (
+          SELECT 1 FROM agents.agent_profile_versions agent
+          WHERE agent.tenant_id=platform.current_tenant_id()
+            AND agent.id=${agentVersionId}::uuid
+            AND agent.published_at IS NOT NULL
+            AND agent.validation_status='valid'
+            AND agent.channel_capabilities @> ARRAY['voice']::text[]
+        ) AS available`;
+      if (!agents[0]?.available)
+        throw new TypeError("pinned voice agent version is unavailable");
     }
 }
 
@@ -95,7 +107,10 @@ export async function queueCanonicalSimulation(
     JOIN agents.agent_profile_versions agent
       ON agent.id=flow.agent_profile_version_id AND agent.tenant_id=flow.tenant_id
     WHERE flow.flow_definition_id=${definitionId}::uuid AND flow.published_at IS NOT NULL
-      AND agent.published_at IS NOT NULL ORDER BY flow.version DESC LIMIT 1`;
+      AND agent.published_at IS NOT NULL
+      AND agent.validation_status='valid'
+      AND agent.channel_capabilities @> definition.channel_capabilities
+    ORDER BY flow.version DESC LIMIT 1`;
   const version = versions[0];
   if (!version?.channel_capabilities.includes(channel))
     throw new TypeError("published compatible agent and flow required");

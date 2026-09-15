@@ -9,14 +9,20 @@ import {
   createServiceCase,
   createServiceLocation,
   createServiceVisit,
+  finalizeReportRevision,
   getServiceCaseDossier,
+  getServiceReportDocument,
   linkCaseCall,
   linkCaseConversation,
   listServiceCaseLinkCandidates,
+  listServiceReportPage,
+  openReportDraft,
   rescheduleServiceAppointment,
+  saveReportDraft,
   scheduleServiceAppointment,
   suggestNextServiceAppointment,
 } from "./field-service.js";
+import { createServiceReportWorkbook } from "./field-service-export.js";
 
 const databaseUrl = process.env.CRM_TEST_DATABASE_URL;
 
@@ -140,6 +146,213 @@ async function isolated(
 describe.skipIf(databaseUrl === undefined)(
   "field-service scheduling against PostgreSQL RLS",
   () => {
+    it("lists only tenant-visible report revisions with stable report metadata", async () =>
+      isolated(async (sql, fixture) => {
+        const appointment = await scheduleServiceAppointment(
+          sql,
+          fixture.userId,
+          {
+            caseId: fixture.caseId,
+            technicianId: fixture.technicianId,
+            startsAt: "2026-10-05T08:00:00.000Z",
+            endsAt: "2026-10-05T09:00:00.000Z",
+            timezone: "UTC",
+            source: "manual",
+            idempotencyKey: "field-service-report-index-appointment",
+          },
+        );
+        const visit = await createServiceVisit(
+          sql,
+          fixture.userId,
+          fixture.caseId,
+          fixture.technicianId,
+          appointment.id,
+        );
+        const report = await openReportDraft(
+          sql,
+          fixture.userId,
+          fixture.caseId,
+          visit.id,
+          "field-service-report-index-draft",
+        );
+
+        const page = await listServiceReportPage(sql, {
+          query: "Fictional scheduling customer",
+          status: "draft",
+          limit: 10,
+        });
+
+        expect(page.nextCursor).toBeNull();
+        expect(page.reports).toEqual([
+          expect.objectContaining({
+            id: report.id,
+            reportId: report.reportId,
+            caseId: fixture.caseId,
+            caseReference: "FS-SCHEDULE-APP",
+            customerName: "Fictional scheduling customer",
+            visitId: visit.id,
+            technicianId: fixture.technicianId,
+            status: "draft",
+          }),
+        ]);
+      }));
+
+    it("keeps signed report presentation data immutable after CRM edits", async () =>
+      isolated(async (sql, fixture) => {
+        const locationId = await createServiceLocation(sql, {
+          customerContactId: fixture.contactId,
+          name: "Original service location",
+          address: "1 Original Street",
+        });
+        await sql`
+          UPDATE service.cases SET service_location_id=${locationId}::uuid
+          WHERE id=${fixture.caseId}::uuid
+        `;
+        await sql`
+          INSERT INTO crm.customer_profiles(
+            tenant_id, contact_id, preferred_language, address
+          ) VALUES(
+            ${fixture.tenantId}::uuid, ${fixture.contactId}::uuid,
+            'en', '1 Original Street'
+          )
+        `;
+        const appointment = await scheduleServiceAppointment(
+          sql,
+          fixture.userId,
+          {
+            caseId: fixture.caseId,
+            technicianId: fixture.technicianId,
+            startsAt: "2026-10-06T08:00:00.000Z",
+            endsAt: "2026-10-06T09:00:00.000Z",
+            timezone: "UTC",
+            source: "manual",
+            idempotencyKey: "signed-report-snapshot-appointment",
+          },
+        );
+        const visit = await createServiceVisit(
+          sql,
+          fixture.userId,
+          fixture.caseId,
+          fixture.technicianId,
+          appointment.id,
+        );
+        const report = await openReportDraft(
+          sql,
+          fixture.userId,
+          fixture.caseId,
+          visit.id,
+          "signed-report-snapshot-draft",
+        );
+        await saveReportDraft(sql, fixture.userId, report.id, {
+          diagnosis: "Original diagnosis",
+          workPerformed: "Original repair",
+          partReplaced: false,
+        });
+
+        const evidence = async (
+          category:
+            "arrival_signature" | "departure_signature" | "fault" | "module",
+          reportRevisionId: string | null,
+        ) => {
+          const checksum = `${randomUUID().replaceAll("-", "")}${randomUUID().replaceAll("-", "")}`;
+          const objects = await sql<{ id: string }[]>`
+            INSERT INTO objects.object_metadata(
+              tenant_id, owner_type, owner_id, category, content_type,
+              byte_size, checksum, storage_backend, storage_key, status
+            ) VALUES(
+              ${fixture.tenantId}::uuid, 'service_case', ${fixture.caseId}::uuid,
+              ${category}, 'image/png', 9, ${checksum}, 'local',
+              ${`synthetic/${fixture.tenantId}/${randomUUID()}.png`}, 'available'
+            ) RETURNING id
+          `;
+          const objectId = objects[0]?.id;
+          if (objectId === undefined)
+            throw new Error("Signed report evidence fixture was not created");
+          await sql`
+            INSERT INTO service.report_attachments(
+              tenant_id, case_id, visit_id, report_revision_id, object_id,
+              category, source
+            ) VALUES(
+              ${fixture.tenantId}::uuid, ${fixture.caseId}::uuid, ${visit.id}::uuid,
+              ${reportRevisionId}::uuid, ${objectId}::uuid, ${category}, 'technician'
+            )
+          `;
+          return objectId;
+        };
+        const arrivalObjectId = await evidence("arrival_signature", null);
+        const departureObjectId = await evidence("departure_signature", null);
+        await evidence("fault", report.id);
+        await evidence("module", report.id);
+        await sql`
+          UPDATE service.visits SET
+            status='departed',
+            arrival_at='2026-10-06T08:00:00.000Z'::timestamptz,
+            departure_at='2026-10-06T09:00:00.000Z'::timestamptz,
+            arrival_signature_object_id=${arrivalObjectId}::uuid,
+            departure_signature_object_id=${departureObjectId}::uuid,
+            arrival_identity=${sql.json({ fullName: "Original Technician" })},
+            departure_identity=${sql.json({ fullName: "Original Technician" })}
+          WHERE id=${visit.id}::uuid
+        `;
+        await finalizeReportRevision(
+          sql,
+          fixture.userId,
+          report.id,
+          "signed-report-snapshot-finalize",
+        );
+        const before = await getServiceReportDocument(sql, report.id);
+        if (before === undefined)
+          throw new Error("Finalized report fixture could not be read");
+        const beforeWorkbook = createServiceReportWorkbook(before);
+
+        await sql`
+          UPDATE crm.contacts SET name='Changed customer'
+          WHERE id=${fixture.contactId}::uuid
+        `;
+        await sql`
+          UPDATE crm.customer_profiles SET address='99 Changed Avenue'
+          WHERE contact_id=${fixture.contactId}::uuid
+        `;
+        await sql`
+          UPDATE crm.service_locations SET
+            name='Changed location', address='99 Changed Avenue'
+          WHERE id=${locationId}::uuid
+        `;
+        await sql`
+          UPDATE service.technicians SET
+            full_name='Changed Technician', employee_identifier='CHANGED-99',
+            active=false
+          WHERE id=${fixture.technicianId}::uuid
+        `;
+        await sql`
+          UPDATE service.cases SET
+            title='Changed case title', fault_description='Changed fault'
+          WHERE id=${fixture.caseId}::uuid
+        `;
+
+        const after = await getServiceReportDocument(sql, report.id);
+        expect(after).toMatchObject({
+          serviceCase: {
+            customerName: "Fictional scheduling customer",
+            serviceLocationName: "Original service location",
+            serviceLocationAddress: "1 Original Street",
+            title: "Fictional scheduling case",
+            faultDescription: "Synthetic scheduling evidence",
+          },
+          customer: { address: "1 Original Street" },
+          technician: {
+            fullName: "Fictional Scheduling Technician",
+            employeeIdentifier: "SCHEDULE-01",
+            active: true,
+          },
+        });
+        if (after === undefined)
+          throw new Error("Finalized report fixture changed unexpectedly");
+        expect(createServiceReportWorkbook(after).equals(beforeWorkbook)).toBe(
+          true,
+        );
+      }));
+
     it("keeps read-only AI suggestions unbooked while manual scheduling remains available", async () =>
       isolated(async (sql, fixture) => {
         const groundedSuggestion = await suggestNextServiceAppointment(

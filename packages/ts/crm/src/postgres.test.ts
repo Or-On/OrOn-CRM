@@ -365,6 +365,43 @@ describe.skipIf(databaseUrl === undefined)(
                 { id: "end", source: "handoff", target: "end" },
               ],
             };
+            const incompatibleAgentId = await createAgentProfileDraft(
+              transaction,
+              userId,
+              {
+                name: `Fictional WhatsApp-only agent ${randomUUID()}`,
+                systemPrompt: "Operate only through approved simulator paths.",
+                channels: ["whatsapp"],
+              },
+            );
+            expect(
+              await publishAgentProfile(
+                transaction,
+                userId,
+                incompatibleAgentId,
+              ),
+            ).toBe(true);
+            const incompatibleVersions = await transaction<{ id: string }[]>`
+              SELECT id FROM agents.agent_profile_versions
+              WHERE agent_profile_id = ${incompatibleAgentId}::uuid
+            `;
+            const incompatibleVersionId = incompatibleVersions[0]?.id;
+            if (incompatibleVersionId === undefined)
+              throw new Error("incompatible agent version was not created");
+            const incompatibleFlowId = await createCanonicalFlowDraft(
+              transaction,
+              userId,
+              "Fictional incompatible cross-channel flow",
+              incompatibleVersionId,
+              flow,
+            );
+            expect(
+              await publishCanonicalFlow(
+                transaction,
+                userId,
+                incompatibleFlowId,
+              ),
+            ).toBe(false);
             const flowId = await createCanonicalFlowDraft(
               transaction,
               userId,

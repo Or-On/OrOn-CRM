@@ -34,6 +34,33 @@ def test_complete_turn_planner_sits_between_llm_and_tts():
     assert processors == [tin, stt, ua, llm, "turn-planner", tts, tout, aa]
 
 
+def test_unknown_tool_guard_sits_before_the_turn_planner():
+    tin, stt, ua, llm, tts, tout, aa = _PROCESSORS
+    processors = build_agent_processors(
+        tin,
+        stt,
+        ua,
+        llm,
+        tts,
+        tout,
+        aa,
+        tool_call_guard="tool-call-guard",
+        turn_planner="turn-planner",
+    )
+
+    assert processors == [
+        tin,
+        stt,
+        ua,
+        llm,
+        "tool-call-guard",
+        "turn-planner",
+        tts,
+        tout,
+        aa,
+    ]
+
+
 def test_ownership_gates_cover_all_producers_before_buffers():
     tin, stt, ua, llm, tts, tout, aa = _PROCESSORS
     processors = build_agent_processors(
@@ -47,6 +74,7 @@ def test_ownership_gates_cover_all_producers_before_buffers():
         ownership_input="input-gate",
         ownership_model="model-gate",
         ownership_generated="generated-gate",
+        tool_call_guard="tool-call-guard",
         ownership_speech="speech-gate",
         ownership_output="audio-gate",
         tts_trim="trim",
@@ -54,7 +82,12 @@ def test_ownership_gates_cover_all_producers_before_buffers():
     )
     assert processors.index("input-gate") < processors.index(stt)
     assert processors.index("model-gate") < processors.index(llm)
-    assert processors.index(llm) < processors.index("generated-gate") < processors.index("planner")
+    assert (
+        processors.index(llm)
+        < processors.index("generated-gate")
+        < processors.index("tool-call-guard")
+        < processors.index("planner")
+    )
     assert processors.index("speech-gate") < processors.index(tts)
     assert processors.index(tts) < processors.index("audio-gate") < processors.index("trim")
 

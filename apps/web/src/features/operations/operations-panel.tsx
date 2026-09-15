@@ -28,6 +28,7 @@ export function OperationsPanel({
   initialCreate,
   initialTab = "campaigns",
   insights,
+  simulationAvailable,
 }: {
   readonly broadcasts: readonly BroadcastSummary[];
   readonly automations: readonly AutomationSummary[];
@@ -35,17 +36,22 @@ export function OperationsPanel({
   readonly initialCreate?: CreationTab;
   readonly insights?: TenantOperationalInsights;
   readonly initialTab?: OperationsTab;
+  readonly simulationAvailable: boolean;
 }) {
   const t = useTranslations();
   const locale = useLocale();
   const canManageCampaigns = useCapability("campaigns:manage");
   const canManageFlows = useCapability("flows:manage");
   const router = useRouter();
+  const allowedInitialCreate =
+    initialCreate === "campaigns" && !simulationAvailable
+      ? undefined
+      : initialCreate;
   const [activeTab, setActiveTab] = useState<OperationsTab>(
-    initialCreate ?? initialTab,
+    allowedInitialCreate ?? initialTab,
   );
   const [creation, setCreation] = useState<CreationTab | undefined>(
-    initialCreate,
+    allowedInitialCreate,
   );
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
@@ -55,16 +61,21 @@ export function OperationsPanel({
     description: "",
   });
   const number = new Intl.NumberFormat(locale);
+  const activeCanManage =
+    activeTab === "campaigns" ? canManageCampaigns : canManageFlows;
+  const campaignSimulationUnavailable =
+    activeTab === "campaigns" && canManageCampaigns && !simulationAvailable;
 
   useEffect(() => setActiveTab(initialTab), [initialTab]);
   useEffect(() => {
-    if (initialCreate !== undefined) {
-      setActiveTab(initialCreate);
-      setCreation(initialCreate);
+    if (allowedInitialCreate !== undefined) {
+      setActiveTab(allowedInitialCreate);
+      setCreation(allowedInitialCreate);
     }
-  }, [initialCreate]);
+  }, [allowedInitialCreate]);
 
   function openCreation(kind: CreationTab) {
+    if (kind === "campaigns" && !simulationAvailable) return;
     setCreation(kind);
     setError(undefined);
   }
@@ -86,6 +97,7 @@ export function OperationsPanel({
 
   async function createCampaign(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!simulationAvailable) return;
     if (await run(() => crmMutation("/api/campaigns", campaignDraft))) {
       setCampaignDraft({ name: "", body: "" });
       setCreation(undefined);
@@ -114,9 +126,7 @@ export function OperationsPanel({
             </div>
           </div>
           <div className="operation-command__actions">
-            {(
-              activeTab === "campaigns" ? canManageCampaigns : canManageFlows
-            ) ? (
+            {campaignSimulationUnavailable ? null : activeCanManage ? (
               <Button
                 onClick={() =>
                   openCreation(
@@ -217,6 +227,7 @@ export function OperationsPanel({
           activeTab={activeTab}
           pending={pending}
           canManageCampaigns={canManageCampaigns}
+          simulationAvailable={simulationAvailable}
           run={run}
           openCreation={openCreation}
         />
@@ -226,6 +237,7 @@ export function OperationsPanel({
           activeTab={activeTab}
           pending={pending}
           canManageFlows={canManageFlows}
+          simulationAvailable={simulationAvailable}
           run={run}
           openCreation={openCreation}
         />
@@ -259,7 +271,7 @@ export function OperationsPanel({
         >
           <fieldset
             className="form-fieldset"
-            disabled={pending || !canManageCampaigns}
+            disabled={pending || !canManageCampaigns || !simulationAvailable}
           >
             <Input
               data-dialog-initial-focus
@@ -294,7 +306,11 @@ export function OperationsPanel({
                 {error}
               </p>
             ) : null}
-            <Button busy={pending} disabled={!canManageCampaigns} type="submit">
+            <Button
+              busy={pending}
+              disabled={!canManageCampaigns || !simulationAvailable}
+              type="submit"
+            >
               {t("operations.draft")}
             </Button>
           </fieldset>

@@ -811,7 +811,8 @@ export function OrchestrationPanel({
                       (agent) =>
                         agent.published &&
                         agent.versionId &&
-                        agent.channels.includes("whatsapp"),
+                        agent.channels.includes("whatsapp") &&
+                        agent.channels.includes("voice"),
                     )
                     .map((agent) => (
                       <option key={agent.id} value={agent.versionId ?? ""}>

@@ -28,6 +28,7 @@ def build_agent_processors(
     ownership_recognition=None,
     ownership_model=None,
     ownership_generated=None,
+    tool_call_guard=None,
     ownership_speech=None,
     ownership_output=None,
 ) -> list:
@@ -85,6 +86,12 @@ def build_agent_processors(
     processors.append(llm)
     if ownership_generated is not None:
         processors.append(ownership_generated)
+    # Pipecat announces a function call before it determines whether the
+    # current node actually advertised that function. Filter model-invented
+    # intent-as-tool calls before the turn planner mistakes them for a real,
+    # intentionally silent flow transition.
+    if tool_call_guard is not None:
+        processors.append(tool_call_guard)
     # Text filters run after TTS aggregation and cannot repair a clause that was
     # already sent. The planner emits one AggregatedTextFrame for the complete,
     # bounded LLM turn, bypassing the comma fast path.
