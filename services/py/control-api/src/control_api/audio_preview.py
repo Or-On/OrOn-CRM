@@ -15,6 +15,22 @@ from sqlalchemy import text
 from control_api.auth import InvalidServiceAssertion, ServiceAssertionVerifier, ServicePrincipal
 
 
+def published_voice_quality(
+    raw_quality: object, locale: object, *, configured: bool
+) -> dict[str, Any] | None:
+    """Resolve the same locale-aware legacy default used by the CRM editor.
+
+    Older published versions predate the structured quality editor. They are
+    still valid runtime versions, so an absent quality key must not make an
+    authorized preview or typed evaluation disappear. An explicitly supplied
+    malformed value remains invalid rather than being silently repaired.
+    """
+    if configured:
+        return raw_quality if isinstance(raw_quality, dict) else None
+    language = "he" if isinstance(locale, str) and locale.lower().startswith("he") else "en"
+    return {"schemaVersion": "1.0", "language": language}
+
+
 class AudioPreviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -105,7 +121,9 @@ class PostgresAudioPreviewRepository:
                 (
                     await database.execute(
                         text("""
-                SELECT version.channel_configuration->'quality' AS quality
+                SELECT version.channel_configuration->'quality' AS quality,
+                       version.channel_configuration ? 'quality' AS quality_configured,
+                       version.locale
                 FROM agents.agent_profile_versions version
                 JOIN agents.agent_profiles profile ON profile.id=version.agent_profile_id
                   AND profile.tenant_id=version.tenant_id
@@ -121,8 +139,11 @@ class PostgresAudioPreviewRepository:
                 .mappings()
                 .one_or_none()
             )
-            quality = row["quality"] if row is not None else None
-            return quality if isinstance(quality, dict) else None
+            if row is None:
+                return None
+            return published_voice_quality(
+                row["quality"], row["locale"], configured=row["quality_configured"] is True
+            )
 
     async def audit_audio_preview(
         self, principal: ServicePrincipal, version_id: UUID, request_id: UUID, status: str

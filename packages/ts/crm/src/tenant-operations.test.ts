@@ -16,7 +16,10 @@ import {
   updateTenantSettings,
 } from "./management.js";
 import { createTask } from "./tasks.js";
-import { deleteTenantForAdministrator } from "./tenants.js";
+import {
+  createTenantWithDefaults,
+  deleteTenantForAdministrator,
+} from "./tenants.js";
 
 const actorId = "10000000-0000-4000-8000-000000000001";
 const recordId = "20000000-0000-4000-8000-000000000001";
@@ -275,6 +278,21 @@ describe("tenant settings repository", () => {
 });
 
 describe("platform tenant administration repository", () => {
+  it("rejects unsupported IANA time-zone names before tenant creation", async () => {
+    const fixture = transaction([]);
+
+    await expect(
+      createTenantWithDefaults(fixture.sql, {
+        name: "Fictional workspace",
+        slug: "fictional-workspace",
+        currency: "USD",
+        locale: "en",
+        timezone: "Mars/Olympus_Mons",
+      }),
+    ).rejects.toThrow("valid currency and timezone");
+    expect(fixture.statements).toHaveLength(0);
+  });
+
   it("deletes only through the guarded database function", async () => {
     const fixture = transaction([[{ deleted: true }]]);
 

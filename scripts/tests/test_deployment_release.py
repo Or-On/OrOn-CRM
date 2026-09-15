@@ -147,6 +147,19 @@ def test_release_images_carry_and_enforce_source_revision() -> None:
         assert "org.opencontainers.image.revision" in dockerfile.read_text(encoding="utf-8")
 
 
+def test_control_api_image_contains_the_opt_in_voice_evaluation_runtime() -> None:
+    dockerfile = (ROOT / "services" / "py" / "control-api" / "Dockerfile").read_text(
+        encoding="utf-8"
+    )
+
+    assert "COPY packages/py/oron-agent packages/py/oron-agent" in dockerfile
+    assert "COPY packages/py/oron-hebrew packages/py/oron-hebrew" in dockerfile
+    assert "--package or-on-control-api --extra voice" in dockerfile
+    assert "libpcre2-8-0=10.42-1+deb12u1 libsndfile1" in dockerfile
+    assert "uv pip uninstall nltk" in dockerfile
+    assert 'python -c "import control_api.app; import oron_agent.agent_evaluation"' in dockerfile
+
+
 def test_deploy_probes_local_edge_without_requiring_public_ip_hairpin() -> None:
     deploy = DEPLOY.read_text(encoding="utf-8")
     assert "PLATFORM_ORIGIN must be an HTTPS origin" in deploy

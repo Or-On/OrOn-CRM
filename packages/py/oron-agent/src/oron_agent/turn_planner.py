@@ -14,6 +14,7 @@ from oron_hebrew.filters import normalize_question_boundary
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     Frame,
+    FunctionCallsStartedFrame,
     InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -43,11 +44,14 @@ class HebrewTurnPlanner(FrameProcessor):
         self._overflow = False
         self._parts: list[str] = []
         self._collecting = False
+        self._function_call_started = False
+        self._pending_function_call = False
         self._skip_tts = False
 
     def _reset_turn(self) -> None:
         self._parts = []
         self._collecting = False
+        self._function_call_started = False
         self._skip_tts = False
         self._first_token_ns = None
         self._length = 0
@@ -63,11 +67,15 @@ class HebrewTurnPlanner(FrameProcessor):
         if isinstance(frame, InterruptionFrame):
             self._generation += 1
             self._reset_turn()
+            self._pending_function_call = False
             await self.push_frame(frame, direction)
             return
 
         if isinstance(frame, LLMFullResponseStartFrame):
+            pending_function_call = self._pending_function_call
             self._reset_turn()
+            self._function_call_started = pending_function_call
+            self._pending_function_call = False
             self._generation += 1
             self._started_ns = time.monotonic_ns()
             self._collecting = True
@@ -92,6 +100,19 @@ class HebrewTurnPlanner(FrameProcessor):
                     self._parts.append(frame.text)
             return
 
+        if isinstance(frame, FunctionCallsStartedFrame):
+            # A tool-only turn is intentionally silent; the transition target
+            # owns the next spoken line. Remember it so an empty-completion
+            # recovery does not talk over or duplicate that transition. This
+            # is a priority SystemFrame and can overtake the response-start
+            # ControlFrame, so retain an early signal for that next start.
+            if self._collecting:
+                self._function_call_started = True
+            else:
+                self._pending_function_call = True
+            await self.push_frame(frame, direction)
+            return
+
         if isinstance(frame, LLMTextFrame):
             # Late tokens from a cancelled generation must not bypass full-turn
             # validation merely because there is no longer an open buffer.
@@ -104,6 +125,13 @@ class HebrewTurnPlanner(FrameProcessor):
                     if self._overflow
                     else "".join(self._parts)
                 )
+                if not planned.strip() and not self._function_call_started:
+                    # Some compatible providers can finish with zero content
+                    # and no tool call (for example after provider-side safety
+                    # suppression). Silence is not a usable phone response.
+                    # Emit a typed selector, not invented prose: the downstream
+                    # evidence gate renders its locale-aware safe clarification.
+                    planned = '{"kind":"conversation","intent":"clarify"}'
                 # The evidence gate parses structured selectors after this
                 # buffer. Never insert spoken punctuation inside model JSON.
                 if not planned.lstrip().startswith("{"):
@@ -128,6 +156,7 @@ class HebrewTurnPlanner(FrameProcessor):
                     )
                     await self.push_frame(planned_frame, direction)
             self._reset_turn()
+            self._pending_function_call = False
             await self.push_frame(frame, direction)
             return
 

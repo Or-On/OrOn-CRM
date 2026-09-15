@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   actionReceiptReply,
+  enforceStandaloneCallbackConsent,
   explicitlyRequestsImmediateCall,
   groundAiReply,
   latestMessageLocale,
@@ -25,6 +26,30 @@ const selection = {
 };
 
 describe("WhatsApp deterministic grounding (typed fixtures, no provider evaluation)", () => {
+  it("turns model-classified compound callback text into a standalone confirmation request", () => {
+    const classified = {
+      action: "request_call" as const,
+      reasonCode: "call_requested" as const,
+      text: "",
+    };
+    const decision = enforceStandaloneCallbackConsent(classified, false);
+
+    expect(decision).toEqual({
+      action: "reply",
+      replyCode: "callback_confirmation",
+      text: "",
+    });
+    expect(groundAiReply(decision, [], "en")).toMatchObject({
+      text: 'To request a call, please reply in a separate message: "Please call me now."',
+      evidence: { kind: "conversation", code: "callback_confirmation" },
+    });
+    expect(groundAiReply(decision, [], "he")).toMatchObject({
+      text: 'כדי לבקש שיחה, נא לשלוח בהודעה נפרדת: "תתקשרו אליי עכשיו".',
+      evidence: { kind: "conversation", code: "callback_confirmation" },
+    });
+    expect(enforceStandaloneCallbackConsent(classified, true)).toBe(classified);
+  });
+
   it("renders the exact eligible field, never model wording or changed critical values", () => {
     const result = groundAiReply(selection, [fact], "he");
     expect(result.text).toBe(fact.value);
@@ -191,6 +216,70 @@ describe("WhatsApp deterministic grounding (typed fixtures, no provider evaluati
     "Could you call me tomorrow?",
     "Yes, call me tomorrow",
     "אשמח שתחזרו אליי מחר",
+    "When you finish checking, call me",
+    "When you finish checking; please call me",
+    "When you finish checking. Please call me",
+    "When you finish checking? Please call me",
+    "Once the technician is free, please call me now",
+    "After you review the photos, please call me",
+    "If the reset fails, call me",
+    "If the reset fails; call me",
+    "If the reset fails! Call me",
+    "If possible, please call me now",
+    "Until you know more, please call me",
+    "כשתסיימו לבדוק, תתקשרו אליי",
+    "כשתסיימו לבדוק; תתקשרו אליי",
+    "כשתסיימו לבדוק. תתקשרו אליי",
+    "כשתסיימו לבדוק? תתקשרו אליי",
+    "אחרי שתבדקו את התמונות, בבקשה תתקשרו אליי",
+    "אם האיפוס לא יעבוד, תתקשרו אליי",
+    "אם האיפוס לא יעבוד; תתקשרו אליי",
+    "אם האיפוס לא יעבוד! תתקשרו אליי",
+    "אם אפשר, בבקשה תתקשרו אליי עכשיו",
+    "עד שיגיע החלק, תחזרו אליי",
+    "ברגע שהטכנאי יתפנה, תתקשרו אליי",
+    "אשמח אם שתתקשרו אליי",
+    "Do not. Please call me",
+    "Do not? Please call me",
+    "Do not! Please call me",
+    "Do not... Please call me",
+    "Do not… Please call me",
+    `Do not ${"treat this padding as fresh consent ".repeat(10)}. Please call me`,
+    "אל. תתקשרו אליי",
+    "אל? תתקשרו אליי",
+    "אל! תתקשרו אליי",
+    "אל... תתקשרו אליי",
+    "אל… תתקשרו אליי",
+    `אל ${"תתייחסו למילוי הזה כהסכמה חדשה ".repeat(10)}. תתקשרו אליי`,
+    "אי אפשר להתקשר אליי",
+    "אי-אפשר להתקשר אליי",
+    "אי־אפשר להתקשר אליי",
+    "אי... אפשר להתקשר אליי",
+    "אי אפשר. בבקשה תתקשרו אליי",
+    "The representative said. Please call me",
+    "The representative said… Please call me",
+    "Tomorrow. Please call me",
+    "Tomorrow… Please call me",
+    "הנציג אמר. בבקשה תתקשרו אליי",
+    "הנציג אמר… בבקשה תתקשרו אליי",
+    "מחר. בבקשה תתקשרו אליי",
+    "מחר… בבקשה תתקשרו אליי",
+    "The refrigerator is still leaking, so please call me now",
+    "The device fails when it gets warm, so please call me now",
+    "Should the reset fail, please call me",
+    "The representative says to call me now",
+    "On Friday, please call me",
+    "Actually I do not want a call. Please call me",
+    "יש תקלה, בבקשה תתקשרו אליי",
+    "המכשיר נכבה כשהוא מתחמם, בבקשה תתקשרו אליי עכשיו",
+    "במידה שהאיפוס ייכשל, תתקשרו אליי",
+    "הנציג אומר להתקשר אליי עכשיו",
+    "ביום שישי, בבקשה תתקשרו אליי",
+    "כנראה אי אפשר כרגע. בבקשה תתקשרו אליי",
+    `When ${"the unresolved condition remains ".repeat(10)}, please call me`,
+    `If ${"the unresolved condition remains ".repeat(10)}, please call me now`,
+    `כאשר ${"התנאי עדיין לא התקיים ".repeat(10)}, בבקשה תתקשרו אליי`,
+    `אם ${"התנאי עדיין לא התקיים ".repeat(10)}, תתקשרו אליי עכשיו`,
   ])(
     "refuses ambiguous, negated, quoted and forged callback intent: %s",
     (value) => {

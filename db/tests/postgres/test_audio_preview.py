@@ -15,7 +15,9 @@ pytestmark = [pytest.mark.postgres, pytest.mark.integration, pytest.mark.rls]
 
 async def test_preview_published_binding_current_manager_audit_and_readonly_grants(postgres_url):
     engine = create_async_engine(postgres_url.replace("postgresql://", "postgresql+asyncpg://", 1))
-    tenant, other, user, profile, version, draft = (uuid4() for _ in range(6))
+    tenant, other, user, profile, version, draft, legacy_profile, legacy_version = (
+        uuid4() for _ in range(8)
+    )
     source, document = uuid4(), uuid4()
     params = {
         "tenant": tenant,
@@ -24,6 +26,8 @@ async def test_preview_published_binding_current_manager_audit_and_readonly_gran
         "profile": profile,
         "version": version,
         "draft": draft,
+        "legacy_profile": legacy_profile,
+        "legacy_version": legacy_version,
         "source": source,
         "document": document,
         "selection": json.dumps({"schemaVersion": "1.0", "sourceIds": [str(source)]}),
@@ -55,9 +59,20 @@ async def test_preview_published_binding_current_manager_audit_and_readonly_gran
                 )
                 await connection.execute(
                     text(
-                        "INSERT INTO agents.agent_profiles(id,tenant_id,name) "
-                        "VALUES (:profile,:tenant,'Preview fixture')"
+                        "INSERT INTO agents.agent_profiles(id,tenant_id,name) VALUES "
+                        "(:profile,:tenant,'Preview fixture'),"
+                        "(:legacy_profile,:tenant,'Legacy preview fixture')"
                     ),
+                    params,
+                )
+                await connection.execute(
+                    text("""
+                    INSERT INTO agents.agent_profile_versions(id,tenant_id,agent_profile_id,version,
+                        system_prompt,locale,channel_capabilities,validation_status,published_at,
+                        channel_configuration,knowledge_configuration)
+                    VALUES (:legacy_version,:tenant,:legacy_profile,1,'Legacy fixture','he-IL',
+                        ARRAY['voice'],'valid',CURRENT_TIMESTAMP,'{}'::jsonb,'{}'::jsonb)
+                """),
                     params,
                 )
                 await connection.execute(
@@ -121,6 +136,15 @@ async def test_preview_published_binding_current_manager_audit_and_readonly_gran
                     "schemaVersion": "1.0",
                     "language": "he",
                 }
+                assert await repository.load_audio_preview_quality(
+                    actor, legacy_profile, legacy_version
+                ) == {"schemaVersion": "1.0", "language": "he"}
+                legacy_context = await evaluator.load_evaluation_context(
+                    actor, legacy_profile, legacy_version
+                )
+                assert legacy_context is not None
+                assert legacy_context["quality"] == {"schemaVersion": "1.0", "language": "he"}
+                assert legacy_context["knowledge"] == []
                 assert await repository.load_audio_preview_quality(actor, profile, draft) is None
                 context = await evaluator.load_evaluation_context(actor, profile, version)
                 assert context["knowledge"][0]["documentId"] == str(document)

@@ -8,6 +8,7 @@ import {
   getContactDetail,
   getCustomerDossier,
   getFieldServiceFeatureState,
+  getTenantSettings,
   listContactActivity,
   listCustomerClassifications,
   listCustomerServiceCases,
@@ -45,14 +46,21 @@ export default async function ContactDetailPage({
     const { id } = await params;
     const [customer, flows] = await Promise.all([
       withCurrentTenant("crm:read", async (sql, session) => {
-        const [contact, activity, dossier, classifications, fieldService] =
-          await Promise.all([
-            getContactDetail(sql, id),
-            listContactActivity(sql, id),
-            getCustomerDossier(sql, id),
-            listCustomerClassifications(sql),
-            getFieldServiceFeatureState(sql),
-          ]);
+        const [
+          contact,
+          activity,
+          dossier,
+          classifications,
+          fieldService,
+          settings,
+        ] = await Promise.all([
+          getContactDetail(sql, id),
+          listContactActivity(sql, id),
+          getCustomerDossier(sql, id),
+          listCustomerClassifications(sql),
+          getFieldServiceFeatureState(sql),
+          getTenantSettings(sql),
+        ]);
         const principal = {
           role: session.tenant.role,
           isSuperuser: session.isSuperuser,
@@ -74,6 +82,7 @@ export default async function ContactDetailPage({
                   ),
                 },
           classifications,
+          timezone: settings.timezone,
           fieldServiceEnabled: fieldService.effective,
           serviceCases: fieldService.effective
             ? await listCustomerServiceCases(sql, id)
@@ -98,6 +107,7 @@ export default async function ContactDetailPage({
           contact={customer.contact}
           customerDossier={customer.dossier}
           classifications={customer.classifications}
+          timezone={customer.timezone}
           serviceCases={customer.serviceCases}
           fieldServiceEnabled={customer.fieldServiceEnabled}
           canReadSensitive={customer.canReadSensitive}

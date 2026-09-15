@@ -75,6 +75,21 @@ describe("form recovery and permission presentation", () => {
     ).toBeTruthy();
     expect(transport.mutate).not.toHaveBeenCalled();
   });
+  it("renders contact dates in the explicit tenant timezone", () => {
+    const view = render(
+      localized(
+        <ContactDetailPanel
+          contact={contact}
+          activity={[]}
+          timezone="America/Los_Angeles"
+        />,
+      ),
+    );
+    expect(
+      view.container.querySelector(`time[datetime="${contact.createdAt}"]`)
+        ?.textContent,
+    ).toBe("Sep 2, 2026");
+  });
   it("keeps the relationship readable and opens focused profile and permission dialogs", () => {
     const view = render(
       localized(<ContactDetailPanel contact={contact} activity={[]} />),

@@ -1,5 +1,5 @@
 {
-  "alembic_head": "f22c1b7e9a40",
+  "alembic_head": "5e9a34d1c7b2",
   "expected_functions": [
     "agents.protect_approved_knowledge",
     "automation.protect_published_flow_version",
@@ -65,6 +65,7 @@
     "service.enqueue_call_case_summary",
     "service.enqueue_whatsapp_case_summary",
     "service.field_service_enabled",
+    "service.lock_current_technician_session_context",
     "service.prevent_appointment_conflict",
     "service.prevent_finalized_report_mutation",
     "service.prevent_signed_visit_mutation",

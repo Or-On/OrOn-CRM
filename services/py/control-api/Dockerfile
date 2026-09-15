@@ -5,7 +5,7 @@ ARG ORON_SOURCE_REVISION=unknown
 LABEL org.opencontainers.image.revision="${ORON_SOURCE_REVISION}"
 
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends libpcre2-8-0=10.42-1+deb12u1 \
+    && apt-get install --yes --no-install-recommends libpcre2-8-0=10.42-1+deb12u1 libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PATH=/app/.venv/bin:$PATH
@@ -19,13 +19,17 @@ COPY packages/py/platform-integration packages/py/platform-integration
 COPY packages/py/oron-common packages/py/oron-common
 COPY packages/py/oron-db packages/py/oron-db
 COPY packages/py/oron-flows packages/py/oron-flows
+COPY packages/py/oron-hebrew packages/py/oron-hebrew
+COPY packages/py/oron-agent packages/py/oron-agent
 COPY packages/py/oron-secrets packages/py/oron-secrets
 COPY packages/py/oron-tenancy packages/py/oron-tenancy
 COPY packages/py/oron-sessions packages/py/oron-sessions
 COPY services/py/control-api services/py/control-api
 COPY services/py/dispatcher services/py/dispatcher
 COPY services/py/voice-agent services/py/voice-agent
-RUN uv sync --frozen --no-dev --package or-on-control-api \
+RUN uv sync --frozen --no-dev --package or-on-control-api --extra voice \
+    && uv pip uninstall nltk \
+    && python -c "import control_api.app; import oron_agent.agent_evaluation" \
     && addgroup --system platform \
     && adduser --system --ingroup platform --home /app platform \
     && chown -R platform:platform /app

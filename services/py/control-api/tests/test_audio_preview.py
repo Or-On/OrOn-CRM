@@ -6,7 +6,11 @@ from uuid import uuid4
 
 import pytest
 from control_api.app import create_app
-from control_api.audio_preview import AudioPreviewRequest, AudioPreviewService
+from control_api.audio_preview import (
+    AudioPreviewRequest,
+    AudioPreviewService,
+    published_voice_quality,
+)
 from control_api.auth import ServicePrincipal
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -28,6 +32,24 @@ def command(**changes):
     return AudioPreviewRequest(
         agent_id=uuid4(), version_id=uuid4(), text="שלום", confirmed=True, **changes
     )
+
+
+@pytest.mark.parametrize(
+    ("locale", "expected_language"),
+    [("he", "he"), ("he-IL", "he"), ("en", "en"), ("en-US", "en")],
+)
+def test_legacy_published_versions_get_locale_aware_quality_defaults(locale, expected_language):
+    assert published_voice_quality(None, locale, configured=False) == {
+        "schemaVersion": "1.0",
+        "language": expected_language,
+    }
+
+
+def test_explicit_quality_is_preserved_and_malformed_quality_is_rejected():
+    quality = {"schemaVersion": "1.0", "language": "en", "speakingStyle": "concise"}
+    assert published_voice_quality(quality, "he", configured=True) is quality
+    assert published_voice_quality(None, "he", configured=True) is None
+    assert published_voice_quality([], "he", configured=True) is None
 
 
 class Store:

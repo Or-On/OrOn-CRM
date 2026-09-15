@@ -10,7 +10,11 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
-from control_api.audio_preview import AudioPreviewRequest, PostgresAudioPreviewRepository
+from control_api.audio_preview import (
+    AudioPreviewRequest,
+    PostgresAudioPreviewRepository,
+    published_voice_quality,
+)
 from control_api.auth import InvalidServiceAssertion, ServiceAssertionVerifier, ServicePrincipal
 
 
@@ -77,7 +81,9 @@ class PostgresAgentEvaluationRepository(PostgresAudioPreviewRepository):
                 (
                     await database.execute(
                         text("""
-                SELECT system_prompt,channel_configuration->'quality' AS quality
+                SELECT system_prompt,channel_configuration->'quality' AS quality,
+                       channel_configuration ? 'quality' AS quality_configured,
+                       locale
                 FROM agents.agent_profile_versions
                 WHERE id=:version AND agent_profile_id=:agent AND tenant_id=:tenant
                   AND published_at IS NOT NULL AND validation_status='valid'
@@ -89,7 +95,12 @@ class PostgresAgentEvaluationRepository(PostgresAudioPreviewRepository):
                 .mappings()
                 .one_or_none()
             )
-            if row is None or not isinstance(row["quality"], dict):
+            if row is None:
+                return None
+            quality = published_voice_quality(
+                row["quality"], row["locale"], configured=row["quality_configured"] is True
+            )
+            if quality is None:
                 return None
             documents = (
                 (
@@ -121,7 +132,7 @@ class PostgresAgentEvaluationRepository(PostgresAudioPreviewRepository):
             )
             return {
                 "system_prompt": row["system_prompt"],
-                "quality": row["quality"],
+                "quality": quality,
                 "knowledge": [
                     {
                         "tenantId": str(principal.tenant_id),

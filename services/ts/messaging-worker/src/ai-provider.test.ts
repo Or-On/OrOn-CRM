@@ -181,6 +181,9 @@ describe("OpenAiCompatibleChatProvider", () => {
     expect(body.messages[0]?.content).toContain(
       "never ask the customer to classify it as old or new",
     );
+    expect(body.messages[0]?.content).toContain(
+      "standalone explicit request to be called now",
+    );
   });
 
   it("keeps injected caller claims and previous assistant statements in labeled data and selects only fact keys", async () => {
@@ -271,6 +274,27 @@ describe("OpenAiCompatibleChatProvider", () => {
       action: "request_call",
       text: "I am starting the call you requested now.",
       reasonCode: "call_requested",
+    });
+  });
+
+  it("accepts the bounded standalone callback-confirmation reply code", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        responseFor({
+          action: "reply",
+          text: null,
+          replyCode: "callback_confirmation",
+          reasonCode: null,
+          documentId: null,
+          factKey: null,
+        }),
+      ),
+    );
+    await expect(provider().decide(request)).resolves.toEqual({
+      action: "reply",
+      replyCode: "callback_confirmation",
+      text: "",
     });
   });
 

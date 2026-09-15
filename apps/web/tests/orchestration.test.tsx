@@ -76,7 +76,15 @@ describe("canonical simulator API and UI", () => {
   it("renders explicitly labeled simulator controls and retained version fields", () => {
     const markup = renderToStaticMarkup(
       <OrchestrationPanel
-        activity={[]}
+        activity={[
+          {
+            eventId: "activity-fixture",
+            sourceType: "voice_session",
+            eventType: "voice.call.started",
+            occurredAt: "2026-09-15T21:30:00.000Z",
+            metadata: {},
+          },
+        ]}
         agents={[]}
         conversations={[]}
         handoffs={[]}
@@ -103,6 +111,7 @@ describe("canonical simulator API and UI", () => {
           unpricedEvents: 0,
           estimatedCostUsd: null,
         }}
+        timezone="Asia/Jerusalem"
       />,
     );
     expect(markup).toContain("Queue flow simulation");
@@ -113,5 +122,6 @@ describe("canonical simulator API and UI", () => {
     expect(markup).toContain(en.orchestration.agents);
     expect(markup).toContain(en.orchestration.flows);
     expect(markup).toContain(en.orchestration.handoffs);
+    expect(markup).toContain("Sep 16, 2026, 12:30 AM");
   });
 });

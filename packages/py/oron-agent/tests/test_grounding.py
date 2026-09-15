@@ -10,6 +10,7 @@ from oron_agent.grounding import (
     DUPLICATE_RECOVERY_QUESTION,
     MODEL_CONVERSATION_INTENTS,
     PROGRESS_QUESTION,
+    RECOVERY_QUESTIONS,
     ActionReceipt,
     VoiceEvidenceContext,
     VoiceEvidenceGate,
@@ -123,6 +124,7 @@ def test_bare_acknowledgement_is_not_advertised_as_a_complete_support_turn():
     assert "acknowledge" not in allowed
     assert "acknowledge" not in MODEL_CONVERSATION_INTENTS
     assert "asks what happens next" in instruction
+    assert "matching current *_done completion tool" in instruction
 
 
 @pytest.mark.parametrize(
@@ -143,6 +145,19 @@ def test_acknowledgement_fallback_advances_an_active_support_turn(language, call
     )
     locale = "he" if language == "he" else "en"
     assert reply.text == PROGRESS_QUESTION[locale]
+    assert reply.decision == "progress_question"
+
+
+@pytest.mark.parametrize("intent", ["acknowledge", "clarify"])
+def test_non_progress_intents_cannot_stall_continuing_support(intent):
+    reply = render_reply(
+        json.dumps({"kind": "conversation", "intent": intent}),
+        [],
+        "en",
+        latest_caller_text="I need to continue with this issue",
+    )
+
+    assert reply.text == PROGRESS_QUESTION["en"]
     assert reply.decision == "progress_question"
 
 
@@ -182,6 +197,118 @@ async def test_repeated_acknowledgement_cannot_repeat_its_spoken_recovery(monkey
         DUPLICATE_RECOVERY_QUESTION["he"],
     ]
     assert all("תודה על השיתוף" not in frame.text for frame in pushed)
+
+
+@pytest.mark.asyncio
+async def test_non_adjacent_diagnostic_question_is_not_repeated(monkeypatch):
+    async def load():
+        return []
+
+    gate = VoiceEvidenceGate(tenant_id=TENANT, language="he", load_records=load)
+    pushed = []
+
+    async def capture(frame, _direction):
+        pushed.append(frame)
+
+    monkeypatch.setattr(gate, "push_frame", capture)
+    for question in (
+        "האם הבעיה עדיין קיימת כרגע?",
+        "מה השתנה מאז הניסיון האחרון?",
+        "האם הבעיה עדיין קיימת כרגע?",
+    ):
+        await gate.process_frame(
+            AggregatedTextFrame(
+                json.dumps({"kind": "question", "text": question}, ensure_ascii=False),
+                AggregationType.SENTENCE,
+            ),
+            FrameDirection.DOWNSTREAM,
+        )
+
+    assert [frame.text for frame in pushed] == [
+        "האם הבעיה עדיין קיימת כרגע?",
+        "מה השתנה מאז הניסיון האחרון?",
+        "מה חשוב לבדוק עכשיו?",
+    ]
+    assert pushed[-1].metadata["grounding"]["decision"] == "duplicate_recovery"
+
+
+def test_semantic_question_repetition_is_recovered_not_only_exact_text():
+    reply = render_reply(
+        json.dumps(
+            {"kind": "question", "text": "האם הבעיה בממיר עדיין קיימת כרגע?"},
+            ensure_ascii=False,
+        ),
+        [],
+        "he",
+        recent_spoken_texts=("האם התקלה בממיר עדיין קיימת?",),
+    )
+    assert reply.decision == "duplicate_recovery"
+    assert reply.text in RECOVERY_QUESTIONS["he"]
+
+
+@pytest.mark.parametrize(
+    ("language", "acknowledgement", "question", "expected"),
+    [
+        (
+            "he",
+            "understood",
+            "איזו נורה מהבהבת כרגע?",
+            "הבנתי. איזו נורה מהבהבת כרגע?",
+        ),
+        (
+            "en",
+            "frustrating",
+            "Which light is blinking now?",
+            "That sounds frustrating. Which light is blinking now?",
+        ),
+    ],
+)
+def test_fixed_acknowledgement_and_safe_question_form_one_natural_turn(
+    language, acknowledgement, question, expected
+):
+    reply = render_reply(
+        json.dumps(
+            {"kind": "turn", "acknowledgement": acknowledgement, "question": question},
+            ensure_ascii=False,
+        ),
+        [],
+        language,
+    )
+    assert reply.text == expected
+    assert reply.decision == "acknowledged_question"
+
+
+def test_repeated_filler_is_omitted_when_the_next_question_is_new():
+    reply = render_reply(
+        json.dumps(
+            {
+                "kind": "turn",
+                "acknowledgement": "understood",
+                "question": "What color is the light now?",
+            }
+        ),
+        [],
+        "en",
+        recent_spoken_texts=("I understand. Which light is blinking?",),
+    )
+    assert reply.text == "What color is the light now?"
+    assert reply.decision == "acknowledged_question"
+
+
+def test_free_text_or_unsafe_acknowledged_turn_fails_closed():
+    for payload in [
+        {
+            "kind": "turn",
+            "acknowledgement": "Your refund is confirmed",
+            "question": "When should it arrive?",
+        },
+        {
+            "kind": "turn",
+            "acknowledgement": "understood",
+            "question": "What is your one-time code?",
+        },
+    ]:
+        assert render_reply(json.dumps(payload), [], "en").decision == "unverified"
 
 
 @pytest.mark.parametrize(

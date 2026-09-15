@@ -775,7 +775,11 @@ interface AutomaticCallCandidate {
   voice_configuration: unknown;
 }
 
-/** Conservative accepted intent; quoted, negated and future requests need clarification. */
+/**
+ * Admit only a standalone, explicit request for an immediate callback.
+ * Compound text is never action-scoped consent; the AI must ask the customer
+ * to confirm the callback in a separate message before any real-call side effect.
+ */
 export function explicitWhatsAppCallbackIntent(text: string): boolean {
   const normalized = text.normalize("NFKC").replace(/\s+/gu, " ").trim();
   const request = normalized.replace(
@@ -785,7 +789,7 @@ export function explicitWhatsAppCallbackIntent(text: string): boolean {
   const english =
     /^(?:(?:please\s+)?call\s+me(?:\s+now)?(?:\s+please)?|(?:can|could|would|will)\s+you\s+(?:please\s+)?call\s+me(?:\s+now)?(?:\s+please)?|(?:please\s+)?give\s+me\s+a\s+call(?:\s+now)?(?:\s+please)?|i(?:\s+would|['’]d)\s+like\s+(?:you\s+)?to\s+call\s+me(?:\s+now)?(?:\s+please)?|i\s+want\s+(?:you\s+)?to\s+call\s+me(?:\s+now)?(?:\s+please)?|can\s+i\s+(?:get|have)\s+a\s+call(?:\s+now)?(?:\s+please)?)[.!?\s]*$/iu;
   const hebrew =
-    /^(?:(?:אפשר\s+)?(?:תתקשרו|תתקשר|תתקשרי|התקשרו|התקשר|התקשרי|תחזרו|תחזור|תחזרי)\s+אליי?(?:\s+עכשיו)?(?:\s+בבקשה)?|אפשר\s+ש(?:תתקשרו|תתקשר|תתקשרי|תחזרו|תחזור|תחזרי)\s+אליי?(?:\s+עכשיו)?(?:\s+בבקשה)?|(?:אשמח|אני\s+(?:אשמח|רוצה))\s+(?:אם\s+)?ש(?:תתקשרו|תתקשר|תתקשרי|תחזרו|תחזור|תחזרי)\s+אליי?(?:\s+עכשיו)?(?:\s+בבקשה)?|(?:(?:את|אתה)\s+)?(?:יכולה|יכול|יכולים|יכולות|תוכלו|תוכל|תוכלי)\s+להתקשר\s+אליי?(?:\s+עכשיו)?(?:\s+בבקשה)?|(?:אפשר\s+)?להתקשר\s+אליי?(?:\s+עכשיו)?|אפשר\s+(?:לקבל\s+)?שיחה\s+טלפונית(?:\s+עכשיו)?)[.!?\s]*$/iu;
+    /^(?:(?:בבקשה\s+|אפשר\s+)?(?:תתקשרו|תתקשר|תתקשרי|התקשרו|התקשר|התקשרי|תחזרו|תחזור|תחזרי)\s+אליי?(?:\s+עכשיו)?(?:\s+בבקשה)?|אפשר\s+ש(?:תתקשרו|תתקשר|תתקשרי|תחזרו|תחזור|תחזרי)\s+אליי?(?:\s+עכשיו)?(?:\s+בבקשה)?|(?:אשמח|אני\s+(?:אשמח|רוצה))\s+ש(?:תתקשרו|תתקשר|תתקשרי|תחזרו|תחזור|תחזרי)\s+אליי?(?:\s+עכשיו)?(?:\s+בבקשה)?|(?:(?:את|אתה)\s+)?(?:יכולה|יכול|יכולים|יכולות|תוכלו|תוכל|תוכלי)\s+להתקשר\s+אליי?(?:\s+עכשיו)?(?:\s+בבקשה)?|(?:אפשר\s+)?להתקשר\s+אליי?(?:\s+עכשיו)?|אפשר\s+(?:לקבל\s+)?שיחה\s+טלפונית(?:\s+עכשיו)?)[.!?\s]*$/iu;
   const englishRepresentative =
     /^(?:(?:(?:i(?:\s+would|['’]d)\s+like|i\s+want)\s+(?:a|an)|can\s+(?:a|an))\s+(?:representative|agent)\s+(?:to\s+)?call\s+me|(?:please\s+)?have\s+(?:a\s+)?(?:representative|agent|someone)\s+call\s+me)(?:\s+now)?(?:[,،]\s*please|\s+please)?[.!?\s]*$/iu;
   const hebrewRepresentative =

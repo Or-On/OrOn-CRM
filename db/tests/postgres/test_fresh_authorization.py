@@ -28,8 +28,8 @@ async def authorization_connection(
         await connection.close()
 
 
-async def _session(pg: asyncpg.Connection) -> tuple[UUID, UUID, UUID]:
-    user, tenant = await _identity(pg, "admin")
+async def _session(pg: asyncpg.Connection, role: str = "admin") -> tuple[UUID, UUID, UUID]:
+    user, tenant = await _identity(pg, role)
     now = datetime.now(UTC)
     session = await pg.fetchval(
         "SELECT platform.auth_create_session($1,$2,$3,$4,43200,$5,$6,NULL,NULL,'lock-test')",
@@ -43,7 +43,13 @@ async def _session(pg: asyncpg.Connection) -> tuple[UUID, UUID, UUID]:
     return user, tenant, session
 
 
-async def _lock(pg: asyncpg.Connection, user: UUID, tenant: UUID, session: UUID) -> bool:
+async def _lock(
+    pg: asyncpg.Connection,
+    user: UUID,
+    tenant: UUID,
+    session: UUID,
+    expected_role: str = "admin",
+) -> bool:
     await pg.execute(
         "SELECT set_config('app.current_tenant',$1,true),set_config('app.current_user',$2,true)",
         str(tenant),
@@ -51,7 +57,9 @@ async def _lock(pg: asyncpg.Connection, user: UUID, tenant: UUID, session: UUID)
     )
     await pg.execute("SET LOCAL ROLE platform_web")
     return await pg.fetchval(
-        "SELECT platform.lock_current_authorization($1,'admin',false,0)", session
+        "SELECT platform.lock_current_authorization($1,$2,false,0)",
+        session,
+        expected_role,
     )
 
 
@@ -89,6 +97,13 @@ async def test_valid_identity_and_privilege_surface(pg: asyncpg.Connection):
         "SELECT has_function_privilege('platform_messaging',"
         "'platform.lock_current_authorization(uuid,text,boolean,integer)','EXECUTE')"
     )
+
+
+async def test_fresh_authorization_accepts_canonical_technician(
+    pg: asyncpg.Connection,
+) -> None:
+    user, tenant, session = await _session(pg, "technician")
+    assert await _lock(pg, user, tenant, session, "technician")
 
 
 @pytest.mark.parametrize("change", ["role", "tenant", "revoked"])

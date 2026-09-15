@@ -7,6 +7,7 @@ const dependencies = vi.hoisted(() => ({
   classifications: vi.fn(),
   dossier: vi.fn(),
   fieldService: vi.fn(),
+  settings: vi.fn(),
   voiceClient: vi.fn(),
   flows: vi.fn(),
   tenant: vi.fn(),
@@ -16,6 +17,7 @@ vi.mock("@or-on/crm", () => ({
   getContactDetail: dependencies.contact,
   getCustomerDossier: dependencies.dossier,
   getFieldServiceFeatureState: dependencies.fieldService,
+  getTenantSettings: dependencies.settings,
   listContactActivity: dependencies.activity,
   listCustomerClassifications: dependencies.classifications,
 }));
@@ -68,6 +70,7 @@ describe("contact page optional dependency isolation", () => {
       preferredLanguage: null,
     });
     dependencies.fieldService.mockResolvedValue({ effective: false });
+    dependencies.settings.mockResolvedValue({ timezone: "Asia/Jerusalem" });
     dependencies.tenant.mockImplementation(
       async (
         _permission: string,

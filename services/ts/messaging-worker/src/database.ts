@@ -48,6 +48,7 @@ import {
 } from "./call-provider.js";
 import {
   actionReceiptReply,
+  enforceStandaloneCallbackConsent,
   explicitlyRequestsImmediateCall,
   factDigest,
   groundAiReply,
@@ -1991,7 +1992,7 @@ async function processWhatsAppAiReply(
     const identityConflict =
       work.serviceIntake?.customerResolutionStatus === "conflict";
     const intakeRequiresHuman = work.serviceIntake?.status === "handed_off";
-    const decision: WhatsAppAiDecision =
+    const classifiedDecision: WhatsAppAiDecision =
       identityConflict || intakeRequiresHuman
         ? {
             action: "handoff",
@@ -2006,6 +2007,10 @@ async function processWhatsAppAiReply(
             }
           : await (automation.aiProvider?.decide(work) ??
               Promise.reject(new TypeError("WhatsApp AI is disabled")));
+    const decision = enforceStandaloneCallbackConsent(
+      classifiedDecision,
+      explicitCallRequested,
+    );
     await sql.begin(async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
       await requireOwnedJob(transaction, workerId, job.id);

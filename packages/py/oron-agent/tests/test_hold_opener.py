@@ -1,4 +1,4 @@
-"""The greeting cannot be talked over; everything after it can.
+"""The greeting cannot be talked over; early caller speech is replayed after it.
 
 The opener is what says who is calling and why. A caller who barges in never
 hears either — and on 2026-07-27 a caller who answered mid-greeting said "הלו?"
@@ -34,7 +34,7 @@ async def _feed(proc, *frames):
         await proc.process_frame(f, FrameDirection.DOWNSTREAM)
 
 
-async def test_caller_audio_is_dropped_while_the_bot_is_greeting(collect):
+async def test_caller_audio_is_held_while_the_bot_is_greeting(collect):
     proc = HoldOpener(lambda: False, max_hold_secs=30)
 
     await _feed(proc, _audio(), _audio(), _audio())
@@ -51,7 +51,8 @@ async def test_audio_flows_once_the_opener_has_finished(collect):
 
     done["v"] = True
     await _feed(proc, _audio(), _audio())
-    assert len(collect) == 2
+    # The first answer frame is delayed until the opener completes, not lost.
+    assert len(collect) == 3
 
 
 async def test_the_hold_never_re_arms(collect):
@@ -86,4 +87,13 @@ async def test_a_bot_that_never_greets_does_not_stay_deaf(collect):
 
     await asyncio.sleep(0.06)
     await _feed(proc, _audio())
-    assert len(collect) == 1
+    assert len(collect) == 2
+
+
+async def test_buffer_is_bounded_if_the_transport_never_finishes_the_opener(collect):
+    proc = HoldOpener(lambda: False, max_hold_secs=0.02)
+
+    await _feed(proc, *[_audio() for _ in range(8)])
+
+    assert len(proc._buffered) <= 3
+    assert proc._discarded > 0

@@ -55,14 +55,13 @@ export async function POST(request: Request, context: Context) {
       const kind = attendanceKind(body.kind);
       const visit = await withCurrentTenant(
         "field-service:operate",
-        async (sql, session) =>
+        async (sql) =>
           (await beginVisitAttendanceRequest(sql, {
             visitId,
             kind,
             requestId: operationKey,
           })) ??
           signVisitAttendance(sql, {
-            authSessionId: session.sessionId,
             visitId,
             signatureObjectId: uuid(body.signatureObjectId, "Signature"),
             kind,
@@ -123,7 +122,6 @@ export async function POST(request: Request, context: Context) {
           source: "technician",
         });
         const visit = await signVisitAttendance(sql, {
-          authSessionId: session.sessionId,
           visitId,
           signatureObjectId: objectId,
           kind,

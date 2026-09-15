@@ -2,6 +2,7 @@
 
 import { activityLabel } from "../../i18n/activity-label";
 import { errorMessage } from "../../i18n/error-message";
+import { tenantDateFormatter } from "../../i18n/tenant-date-time";
 import { useCapability } from "../access";
 import { useLocale, useTranslations } from "next-intl";
 
@@ -71,6 +72,7 @@ export function OrchestrationPanel({
   initialTab = "agents",
   runs = [],
   insights,
+  timezone = "UTC",
 }: {
   readonly activity: readonly ContactActivity[];
   readonly agents: readonly AgentProfileSummary[];
@@ -84,11 +86,16 @@ export function OrchestrationPanel({
   readonly initialTab?: OrchestrationTab;
   readonly runs?: readonly AutomationRunSummary[];
   readonly insights?: TenantOperationalInsights;
+  readonly timezone?: string;
 }) {
   const t = useTranslations();
   const canEdit = useCapability("flows:manage");
   const canHandoff = useCapability("messaging:operate");
   const locale = useLocale();
+  const dateTime = tenantDateFormatter(locale, timezone, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<OrchestrationTab>(initialTab);
   const [selectedFlowId, setSelectedFlowId] = useState<string | undefined>(
@@ -1031,8 +1038,8 @@ export function OrchestrationPanel({
               <li key={`${item.sourceType}-${item.eventId}`}>
                 <div>
                   <strong>{activityLabel(item.eventType, t)}</strong>
-                  <time>
-                    {new Date(item.occurredAt).toLocaleString(locale)}
+                  <time dateTime={item.occurredAt}>
+                    {dateTime.format(new Date(item.occurredAt))}
                   </time>
                 </div>
                 <details className="technical-details">
@@ -1179,7 +1186,7 @@ export function OrchestrationPanel({
                     <strong>{handoff.reasonSafe}</strong>
                     <p>
                       {handoff.sourceChannel} ·{" "}
-                      {new Date(handoff.requestedAt).toLocaleString(locale)}
+                      {dateTime.format(new Date(handoff.requestedAt))}
                     </p>
                   </div>
                   <Badge

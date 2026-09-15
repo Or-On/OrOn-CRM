@@ -83,6 +83,160 @@ async def _auth_session(pg: asyncpg.Connection, user_id: UUID, tenant_id: UUID, 
     )
 
 
+async def test_authenticated_session_context_is_narrow_and_cannot_be_spoofed(
+    pg: asyncpg.Connection,
+) -> None:
+    first = await _tenant(pg, "Session context first", enabled=True)
+    second = await _tenant(pg, "Session context second", enabled=True)
+    first_session = await _auth_session(pg, first.user_id, first.tenant_id, "field-session-first")
+    second_session = await _auth_session(
+        pg, second.user_id, second.tenant_id, "field-session-second"
+    )
+
+    await _as_web(pg, first)
+    await pg.execute("SELECT set_config('app.current_session',$1,true)", str(first_session))
+    with pytest.raises(asyncpg.InsufficientPrivilegeError):
+        async with pg.transaction():
+            await pg.fetchval(
+                "SELECT absolute_expires_at FROM platform.auth_sessions WHERE id=$1",
+                first_session,
+            )
+
+    context = await pg.fetchrow(
+        "SELECT session_id,absolute_expires_at "
+        "FROM service.lock_current_technician_session_context()"
+    )
+    assert context is not None
+    assert context["session_id"] == first_session
+    assert context["absolute_expires_at"] > datetime.now(UTC)
+
+    await pg.execute("SELECT set_config('app.current_session',$1,true)", str(second_session))
+    assert (
+        await pg.fetchrow("SELECT * FROM service.lock_current_technician_session_context()") is None
+    )
+    await pg.execute("SELECT set_config('app.current_session','not-a-session',true)")
+    assert (
+        await pg.fetchrow("SELECT * FROM service.lock_current_technician_session_context()") is None
+    )
+
+    await pg.execute("RESET ROLE")
+    await pg.execute(
+        "UPDATE platform.auth_sessions SET revoked_at=clock_timestamp() WHERE id=$1",
+        first_session,
+    )
+    await _as_web(pg, first)
+    await pg.execute("SELECT set_config('app.current_session',$1,true)", str(first_session))
+    assert (
+        await pg.fetchrow("SELECT * FROM service.lock_current_technician_session_context()") is None
+    )
+
+
+async def test_technician_identity_requires_a_valid_scoped_session(
+    pg: asyncpg.Connection,
+) -> None:
+    fixture = await _tenant(pg, "Technician identity", enabled=True)
+    foreign = await _tenant(pg, "Foreign technician identity", enabled=True)
+    technician_user = uuid4()
+    viewer_user = uuid4()
+    await pg.execute(
+        "INSERT INTO users(id,email,status) VALUES ($1,$2,'active'),($3,$4,'active')",
+        technician_user,
+        f"{technician_user}@example.test",
+        viewer_user,
+        f"{viewer_user}@example.test",
+    )
+    await pg.execute(
+        "INSERT INTO memberships(user_id,tenant_id,role) VALUES "
+        "($1,$2,'technician'),($3,$2,'viewer')",
+        technician_user,
+        fixture.tenant_id,
+        viewer_user,
+    )
+    technician_id = await pg.fetchval(
+        "INSERT INTO service.technicians"
+        "(tenant_id,linked_user_id,full_name,employee_identifier,created_by_user_id) "
+        "VALUES ($1,$2,'Fictional Technician','TECH-BOUNDARY',$3) RETURNING id",
+        fixture.tenant_id,
+        technician_user,
+        fixture.user_id,
+    )
+    case_id = await pg.fetchval(
+        "INSERT INTO service.cases"
+        "(tenant_id,reference,customer_contact_id,title,fault_description,created_by_user_id) "
+        "VALUES ($1,$2,$3,'Identity boundary case','Synthetic fault',$4) RETURNING id",
+        fixture.tenant_id,
+        f"FS-IDENTITY-{uuid4().hex[:8]}",
+        fixture.contact_id,
+        fixture.user_id,
+    )
+    visit_id = await pg.fetchval(
+        "INSERT INTO service.visits(tenant_id,case_id,technician_id,visit_number) "
+        "VALUES ($1,$2,$3,1) RETURNING id",
+        fixture.tenant_id,
+        case_id,
+        technician_id,
+    )
+    valid_session = await _auth_session(
+        pg, technician_user, fixture.tenant_id, "field-technician-valid"
+    )
+    revoked_session = await _auth_session(
+        pg, technician_user, fixture.tenant_id, "field-technician-revoked"
+    )
+    expired_session = await _auth_session(
+        pg, technician_user, fixture.tenant_id, "field-technician-expired"
+    )
+    viewer_session = await _auth_session(pg, viewer_user, fixture.tenant_id, "field-viewer-session")
+    foreign_session = await _auth_session(
+        pg, foreign.user_id, foreign.tenant_id, "field-foreign-session"
+    )
+    await pg.execute(
+        "UPDATE platform.auth_sessions SET revoked_at=clock_timestamp() WHERE id=$1",
+        revoked_session,
+    )
+    await pg.execute(
+        "UPDATE platform.auth_sessions "
+        "SET idle_expires_at=clock_timestamp()-interval '1 second' WHERE id=$1",
+        expired_session,
+    )
+
+    await pg.execute("SET LOCAL ROLE platform_web")
+
+    async def context(user_id: UUID, role: str, session_id: UUID) -> asyncpg.Record | None:
+        await pg.execute(
+            "SELECT set_config('app.current_tenant',$1,true),"
+            "set_config('app.current_user',$2,true),"
+            "set_config('app.current_role',$3,true),"
+            "set_config('app.current_session',$4,true)",
+            str(fixture.tenant_id),
+            str(user_id),
+            role,
+            str(session_id),
+        )
+        return await pg.fetchrow("SELECT * FROM service.lock_current_technician_session_context()")
+
+    resolved = await context(technician_user, "technician", valid_session)
+    assert resolved is not None
+    assert resolved["session_id"] == valid_session
+    identity_id = await pg.fetchval(
+        "INSERT INTO service.technician_session_identities"
+        "(tenant_id,auth_session_id,visit_id,technician_id,full_name,"
+        "employee_identifier,verification_state,server_nonce,expires_at) "
+        "SELECT platform.current_tenant_id(),session.session_id,$1,$2,"
+        "'Fictional Technician','TECH-BOUNDARY','self_declared',$3,"
+        "LEAST(session.absolute_expires_at,clock_timestamp()+interval '12 hours') "
+        "FROM service.lock_current_technician_session_context() session RETURNING id",
+        visit_id,
+        technician_id,
+        uuid4().hex,
+    )
+    assert identity_id is not None
+
+    assert await context(viewer_user, "viewer", viewer_session) is None
+    assert await context(technician_user, "technician", foreign_session) is None
+    assert await context(technician_user, "technician", revoked_session) is None
+    assert await context(technician_user, "technician", expired_session) is None
+
+
 async def test_feature_defaults_off_but_customer_files_remain_available(
     pg: asyncpg.Connection,
 ) -> None:

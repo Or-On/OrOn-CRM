@@ -86,6 +86,15 @@ export async function createTenantWithDefaults(
     throw new TypeError("Enter a valid tenant name and URL slug");
   if (!/^[A-Z]{3}$/u.test(currency) || !timezone || timezone.length > 100)
     throw new TypeError("Enter a valid currency and timezone");
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: timezone }).format(0);
+  } catch (error) {
+    if (error instanceof RangeError)
+      throw new TypeError("Enter a valid currency and timezone", {
+        cause: error,
+      });
+    throw error;
+  }
   const rows = await sql<{ id: string }[]>`
     SELECT platform.create_tenant_with_defaults(
       ${name}, ${slug}, ${currency}, ${input.locale}, ${timezone}, ${ownerEmail}::citext

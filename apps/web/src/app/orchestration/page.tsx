@@ -12,6 +12,7 @@ import {
   listContacts,
   listConversations,
   listHandoffs,
+  getTenantSettings,
   listVoiceOutcomes,
   summarizeCrossChannelUsage,
 } from "@or-on/crm";
@@ -39,6 +40,7 @@ export default async function OrchestrationPage({
         : "agents";
     const data = await withCurrentTenant("crm:read", async (sql) => {
       const contacts = await listContacts(sql, { limit: 50 });
+      const settings = await getTenantSettings(sql);
       const selected =
         contacts.find((contact) => contact.id === requested) ?? contacts[0];
       return {
@@ -47,6 +49,7 @@ export default async function OrchestrationPage({
         insights: await tenantOperationalInsights(sql),
         flows: await listAutomations(sql),
         handoffs: await listHandoffs(sql),
+        timezone: settings.timezone,
         contacts,
         ...(selected ? { activityContactId: selected.id } : {}),
         conversations: await listConversations(sql),

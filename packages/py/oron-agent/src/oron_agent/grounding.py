@@ -8,9 +8,12 @@ responses are checked before TTS and eligibility is read again for every reply.
 from __future__ import annotations
 
 import asyncio
+import difflib
 import json
 import re
-from collections.abc import Awaitable, Callable
+import unicodedata
+from collections import deque
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -118,6 +121,30 @@ DUPLICATE_RECOVERY_QUESTION = {
     "he": "מה השתנה מאז הניסיון האחרון?",
     "en": "What changed after the last attempt?",
 }
+RECOVERY_QUESTIONS = {
+    "he": (
+        PROGRESS_QUESTION["he"],
+        DUPLICATE_RECOVERY_QUESTION["he"],
+        "מה חשוב לבדוק עכשיו?",
+        "איזה פרט יעזור להתקדם מכאן?",
+    ),
+    "en": (
+        PROGRESS_QUESTION["en"],
+        DUPLICATE_RECOVERY_QUESTION["en"],
+        "What should we focus on now?",
+        "Which detail would help us move forward?",
+    ),
+}
+TURN_ACKNOWLEDGEMENTS = {
+    "he": {
+        "understood": "הבנתי.",
+        "frustrating": "זה נשמע מתסכל.",
+    },
+    "en": {
+        "understood": "I understand.",
+        "frustrating": "That sounds frustrating.",
+    },
+}
 _CALLER_NEEDS_PROGRESS = re.compile(
     r"(?:[?؟]|\b(?:what|why|how|next|continue|help|problem|issue|failed|broken|"
     r"not\s+working|disconnected)\b|(?:מה|למה|איך|הלאה|להמשיך|עזרה|בעיה|תקלה|"
@@ -126,11 +153,50 @@ _CALLER_NEEDS_PROGRESS = re.compile(
 )
 
 
-def _non_repeating_recovery(locale: str, previous_spoken_text: str | None) -> str:
-    progress = PROGRESS_QUESTION[locale]
-    if previous_spoken_text and progress == previous_spoken_text.strip():
-        return DUPLICATE_RECOVERY_QUESTION[locale]
-    return progress
+_GENERIC_FILLER_PREFIX = re.compile(
+    r"^(?:(?:i\s+understand|understood|thanks?(?:\s+you)?(?:\s+for\s+(?:sharing|"
+    r"the\s+(?:detail|information)))?|that\s+sounds\s+frustrating)|"
+    r"(?:הבנתי|תודה(?:\s+רבה)?(?:\s+על\s+(?:השיתוף|ההסבר|הפרטים))?|"
+    r"זה\s+נשמע\s+מתסכל))[\s,.!?؟،-]+",
+    re.IGNORECASE,
+)
+
+
+def _canonical_spoken(text: str) -> str:
+    normalized = unicodedata.normalize("NFKD", text).casefold()
+    normalized = "".join(char for char in normalized if not unicodedata.combining(char))
+    normalized = _GENERIC_FILLER_PREFIX.sub("", normalized.strip())
+    return " ".join(re.findall(r"[a-z0-9א-ת]+", normalized))
+
+
+def _looks_repeated(candidate: str, recent_spoken_texts: Sequence[str]) -> bool:
+    key = _canonical_spoken(candidate)
+    if not key:
+        return False
+    candidate_tokens = set(key.split())
+    for previous in recent_spoken_texts:
+        previous_key = _canonical_spoken(previous)
+        if not previous_key:
+            continue
+        if key == previous_key:
+            return True
+        if (
+            min(len(key), len(previous_key)) >= 20
+            and difflib.SequenceMatcher(None, key, previous_key).ratio() >= 0.88
+        ):
+            return True
+        previous_tokens = set(previous_key.split())
+        smaller = min(len(candidate_tokens), len(previous_tokens))
+        if smaller >= 4 and len(candidate_tokens & previous_tokens) / smaller >= 0.8:
+            return True
+    return False
+
+
+def _non_repeating_recovery(locale: str, recent_spoken_texts: Sequence[str]) -> str:
+    for candidate in RECOVERY_QUESTIONS[locale]:
+        if not _looks_repeated(candidate, recent_spoken_texts):
+            return candidate
+    return CONVERSATION[locale]["clarify"]
 
 
 _UNSAFE_DIAGNOSTIC_QUESTION = re.compile(
@@ -234,6 +300,12 @@ def grounding_instruction(facts: list[KnowledgeFact], language: str) -> str:
         payload.append({**fact.selector(), "value": fact.value})
     return (
         "VOICE EVIDENCE PROTOCOL v1. Continue using the existing routing tools when needed. "  # noqa: S608 - LLM protocol, not SQL
+        "CRITICAL ROUTING OVERRIDE: when the previous assistant turn summarized the current "
+        "step objective and asked whether it understood correctly, and the latest caller turn "
+        "confirms that summary, the objective is complete. You MUST call the matching current "
+        "*_done completion tool immediately and return no spoken JSON. Never ask another "
+        "diagnostic question after that confirmation. This routing rule overrides the spoken "
+        "response rules below. "
         f"The latest accepted caller turn is in {'Hebrew' if locale == 'he' else 'English'}; "
         "select the intent for that language and the renderer will speak it in that language. "
         "For spoken output return ONE JSON object, without markdown or other text. "
@@ -244,6 +316,10 @@ def grounding_instruction(facts: list[KnowledgeFact], language: str) -> str:
         "or clarification. It must end with one question mark. It must not instruct an "
         "action, request a password, authentication code, financial or government "
         "identifier, or contain a claim that something was approved or completed. "
+        'When a brief human acknowledgement helps, use {"kind":"turn",'
+        '"acknowledgement":"understood","question":"..."} or select acknowledgement '
+        '"frustrating". The renderer supplies the fixed acknowledgement; never put free text '
+        "in that field, and do not add the same acknowledgement on every turn. "
         "When the caller reports a symptom, problem, interruption or failed prior step and one "
         "missing observation can advance the investigation, use a safe diagnostic question. "
         "Do not use a bare acknowledgement, greeting, or unverified for that situation. "
@@ -252,8 +328,10 @@ def grounding_instruction(facts: list[KnowledgeFact], language: str) -> str:
         "cross-channel history and ask the next missing safe diagnostic question. Never repeat "
         "the previous assistant sentence. Use handoff_available only when the caller explicitly "
         "asks for a person or a substantive investigation has exhausted every safe supported "
-        "question; never use it merely because the caller asks what happens next. Use unverified "
-        "only when the caller explicitly "
+        "question; never use it merely because the caller asks what happens next. "
+        "If the caller's words are nonsensical or not understandable, ask one concise "
+        "clarification question without echoing the nonsense or pretending to understand it. "
+        "Use unverified only when the caller explicitly "
         "asks you to verify a business fact, policy, promise, eligibility decision or completed "
         "external action that is absent from approved data. "
         'Otherwise use {"kind":"conversation","intent":"..."}. For the unverified intent, '
@@ -289,12 +367,18 @@ def render_reply(
     fallback_behavior: str = "clarify",
     latest_caller_text: str = "",
     previous_spoken_text: str | None = None,
+    recent_spoken_texts: Sequence[str] = (),
 ) -> GroundedReply:
     locale = "he" if language.startswith("he") else "en"
     fallback_text = CONVERSATION[locale][
         "handoff_available" if fallback_behavior == "handoff" else "unverified"
     ]
     fallback = GroundedReply(fallback_text, "unverified")
+    recent = tuple(
+        text
+        for text in (*recent_spoken_texts, previous_spoken_text or "")
+        if isinstance(text, str) and text.strip()
+    )
     if len(text) > 8192:
         return fallback
     try:
@@ -309,7 +393,9 @@ def render_reply(
         if isinstance(intent, str) and intent in CONVERSATION[locale]:
             rendered = CONVERSATION[locale][intent]
             decision = intent
-            if intent == "acknowledge" and _CALLER_NEEDS_PROGRESS.search(latest_caller_text):
+            if intent in {"acknowledge", "clarify"} and _CALLER_NEEDS_PROGRESS.search(
+                latest_caller_text
+            ):
                 rendered = PROGRESS_QUESTION[locale]
                 decision = "progress_question"
             elif intent == "unverified":
@@ -326,13 +412,9 @@ def render_reply(
                     if locale == "he"
                     else "I want to make sure I understand. Could you explain what needs to happen?"
                 )
-            if (
-                previous_spoken_text
-                and rendered.strip() == previous_spoken_text.strip()
-                and intent not in {"repeat", "goodbye"}
-            ):
+            if _looks_repeated(rendered, recent) and intent not in {"repeat", "goodbye"}:
                 return GroundedReply(
-                    _non_repeating_recovery(locale, previous_spoken_text),
+                    _non_repeating_recovery(locale, recent),
                     "duplicate_recovery",
                 )
             return GroundedReply(rendered, decision)
@@ -345,12 +427,30 @@ def render_reply(
         }
         and (question := safe_diagnostic_question(value.get("text"), language))
     ):
-        if previous_spoken_text and question.strip() == previous_spoken_text.strip():
+        if _looks_repeated(question, recent):
             return GroundedReply(
-                _non_repeating_recovery(locale, previous_spoken_text),
+                _non_repeating_recovery(locale, recent),
                 "duplicate_recovery",
             )
         return GroundedReply(question, "diagnostic_question")
+    if (
+        value.get("kind") == "turn"
+        and set(value) == {"kind", "acknowledgement", "question"}
+        and isinstance(value.get("acknowledgement"), str)
+        and value["acknowledgement"] in TURN_ACKNOWLEDGEMENTS[locale]
+        and (question := safe_diagnostic_question(value.get("question"), language))
+    ):
+        if _looks_repeated(question, recent):
+            return GroundedReply(
+                _non_repeating_recovery(locale, recent),
+                "duplicate_recovery",
+            )
+        acknowledgement = TURN_ACKNOWLEDGEMENTS[locale][value["acknowledgement"]]
+        acknowledgement_repeated = any(
+            previous.strip().startswith(acknowledgement) for previous in recent
+        )
+        rendered = question if acknowledgement_repeated else f"{acknowledgement} {question}"
+        return GroundedReply(rendered, "acknowledged_question")
     if value.get("kind") == "fact" and set(value) == {
         "kind",
         "sourceId",
@@ -386,6 +486,7 @@ class VoiceEvidenceGate(FrameProcessor):
         self._fallback_behavior = fallback_behavior
         self._latest_caller_text = ""
         self._last_spoken_text: str | None = None
+        self._recent_spoken_texts: deque[str] = deque(maxlen=6)
         self._generation = 0
 
     def observe_caller_text(self, text: str) -> None:
@@ -416,11 +517,13 @@ class VoiceEvidenceGate(FrameProcessor):
                 fallback_behavior=self._fallback_behavior,
                 latest_caller_text=self._latest_caller_text,
                 previous_spoken_text=self._last_spoken_text,
+                recent_spoken_texts=tuple(self._recent_spoken_texts),
             )
             frame.text = reply.text
             frame.raw_text = reply.text
             frame.metadata["grounding"] = {"decision": reply.decision, **reply.evidence}
             self._last_spoken_text = reply.text
+            self._recent_spoken_texts.append(reply.text)
         await self.push_frame(frame, direction)
 
 

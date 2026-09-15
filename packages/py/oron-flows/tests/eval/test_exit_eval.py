@@ -1,253 +1,339 @@
-"""Does this flow still leave the conversation on the model you switched to?
+"""Opt-in provider evaluation for neutral support-flow routing.
 
-`deploy.env.example` puts any OpenAI-compatible LLM one metadata key away, and
-this flow navigates by TOOL CALLS. A model that mishandles them does not degrade
-audibly — it keeps selling to someone who already said goodbye, which is what a
-real caller heard on 2026-07-27.
+This is deliberately based on the compiled ``EXAMPLE_HE`` and ``EXAMPLE_EN``
+support flows. The
+former provider harness used a political-persuasion fixture; Gemini could
+legitimately suppress that request with zero completion tokens, which measured
+content policy rather than the CRM's function-calling contract.
 
-Measured 2026-08-01 against the canvass `talk` node: on the pre-#65 wording
-gemma-4-31b left on 6 of 12 goodbyes where gemini-2.5-flash left on 12 of 12, on
-byte-identical text. The prompt contradicted itself and Gemini's instruction
-hierarchy happened to resolve it the way we meant. "It works on Vertex" is
-therefore not evidence about any other model, which is why this exists.
+The endpoint remains explicit and paid. It accepts the deployment variable
+names, with ``ORON_LLM_*`` endpoint overrides for a deliberate comparison run::
 
-Opt-in — it costs money and needs a network. Configured by the same three
-variables that select the model in production, so a passing run describes the
-deployment rather than a bench rig:
-
-    ORON_LLM_BASE_URL=https://api.cerebras.ai/v1 \
-    ORON_LLM_MODEL=gemma-4-31b \
+    LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai \
+    LLM_MODEL=gemini-2.5-flash \
+    LLM_REASONING_EFFORT=none \
     LLM_API_KEY=... \
-    uv run pytest packages/oron-flows/tests/eval -s
+    ORON_RUN_PROVIDER_EVALS=true \
+    uv run pytest packages/py/oron-flows/tests/eval/test_exit_eval.py -s
 
-Unset any of them and it reports `unavailable` instead of passing quietly.
+Without that explicit opt-in, or with an unset endpoint or key, the paid test
+reports ``unavailable``. Ordinary CI never makes a provider request.
 """
 
 from __future__ import annotations
 
 import os
 from collections import Counter
+from dataclasses import dataclass
 
 import httpx
 import pytest
+from oron_agent.grounding import grounding_instruction, render_reply
 from oron_flows.compose import expand
 from oron_flows.node import FlowNode
-from oron_flows.seeds import CANVASS_HE
+from oron_flows.seeds import EXAMPLE_EN, EXAMPLE_HE
 from pydantic import BaseModel
 
 RUNS = 3
 
-# A mid-call conversation, as the LLM would see it. Fourteen turns rather than a
-# cold prompt: the exit is the LAST thing the model does, and a model that has
-# already produced thirteen turns of Hebrew persuasion behaves differently from
-# one answering its first message.
-HISTORY: list[tuple[str, str]] = [
-    (
-        "assistant",
-        "תודה. אז… רצינו לשתף אותך בכמה מחשבות על השר אלי כהן. "
-        "אבל קודם — מה הכי חשוב לך שישתפר במדינה היום?",
-    ),
-    ("user", "יוקר המחיה. אי אפשר לחיות ככה."),
-    (
-        "assistant",
-        "אני שומע אותך. השר כהן רואה חשבון מוסמך שניהל תקציבים גדולים שנים, "
-        "אז הוא מבין את הכלכלה מבפנים. מה הכי מכביד עליך?",
-    ),
-    ("user", "הכל. אוכל, דיור, חשמל."),
-    (
-        "assistant",
-        "מובן לגמרי. הוא כיום שר האנרגיה והתשתיות ומוביל שינוי במערך האנרגיה. "
-        "מה היית רוצה לראות משתנה קודם?",
-    ),
-    ("user", "תשמע, כל הפוליטיקאים מבטיחים ולא עושים כלום."),
-    (
-        "assistant",
-        "אני מבין את התסכול, והוא לגיטימי. אני מעדיף להצביע על מה שכבר נעשה — "
-        "הרפורמות שלו חסכו למשק מיליארדים. זה משנה משהו בעיניך?",
-    ),
-    ("user", "אולי. אבל אני לא בטוח שהוא מבין אנשים כמוני."),
-    (
-        "assistant",
-        "שאלה הוגנת. הוא מחולון, רב סרן במילואים, נשוי ואב לארבעה ילדים — "
-        "חיים די רגילים. מה היה משכנע אותך שמישהו באמת מבין?",
-    ),
-    ("user", "שיבוא לגור פה חודש."),
-    ("assistant", "זה הוגן, ובאמת קשה להתווכח עם זה. מה הכי היה משנה לך אם היה קורה?"),
-    ("user", "שהמחירים ירדו."),
-    (
-        "assistant",
-        "ברור. הוא שימש שר כלכלה, מודיעין, חוץ ועכשיו אנרגיה ותשתיות — "
-        "תיקים שנוגעים ישירות לזה. יש עוד משהו שחשוב לך שאדע?",
-    ),
-]
+
+def support_node(locale: str = "he") -> FlowNode:
+    """Return the actual compiled conversational support node."""
+
+    composition = EXAMPLE_HE if locale == "he" else EXAMPLE_EN
+    return next(node for node in expand(composition).nodes if node.name == "collect_reason")
 
 
-def talk_node() -> FlowNode:
-    """The real compiled node — never a copy of its prompt.
+@dataclass(frozen=True)
+class Endpoint:
+    base_url: str
+    model: str
+    api_key: str
+    reasoning_effort: str | None
+    temperature: float
+    max_tokens: int
 
-    A restated prompt would let this eval keep certifying wording that
-    ``seeds.py`` no longer ships, which is the failure mode where a green
-    harness blesses something that never ran.
-    """
-    return next(n for n in expand(CANVASS_HE).nodes if n.name == "talk")
 
+def request(endpoint: Endpoint, case: ExitCase) -> dict:
+    """Build the same messages, tools, and quality knobs used by DEV voice."""
 
-def request(model: str, last_turn: str) -> dict:
-    """An OpenAI-compatible chat request for `last_turn` arriving mid-call."""
-    node = talk_node()
-    messages = [{"role": m.role.value, "content": m.content} for m in node.task_messages]
+    node = support_node(case.locale)
+    messages = [
+        {"role": message.role.value, "content": message.content} for message in node.task_messages
+    ]
     if node.role_message:
         messages.insert(0, {"role": "system", "content": node.role_message})
-    messages += [{"role": role, "content": text} for role, text in HISTORY]
-    messages.append({"role": "user", "content": last_turn})
+    messages += [{"role": role, "content": text} for role, text in case.history]
+    messages.append({"role": "user", "content": case.last_turn})
+    messages.append({"role": "system", "content": grounding_instruction([], case.locale)})
 
     tools = [
         {
             "type": "function",
             "function": {
-                "name": f.name,
-                "description": f.description,
+                "name": function.name,
+                "description": function.description,
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        p.name: {"type": p.type.value, "description": p.description}
-                        for p in f.parameters
+                        parameter.name: {
+                            "type": parameter.type.value,
+                            "description": parameter.description,
+                        }
+                        for parameter in function.parameters
                     },
-                    "required": [p.name for p in f.parameters if p.required],
+                    "required": [
+                        parameter.name for parameter in function.parameters if parameter.required
+                    ],
                 },
             },
         }
-        for f in node.functions
+        for function in node.functions
     ]
-    return {"model": model, "messages": messages, "tools": tools}
+    payload: dict[str, object] = {
+        "model": endpoint.model,
+        "messages": messages,
+        "tools": tools,
+        "tool_choice": "auto",
+        "temperature": endpoint.temperature,
+        "max_tokens": endpoint.max_tokens,
+    }
+    if endpoint.reasoning_effort:
+        payload["reasoning_effort"] = endpoint.reasoning_effort
+    return payload
 
 
-def exit_function_names() -> set[str]:
-    """Every function on the node that leaves it, read off the routes.
-
-    Hardcoding `talk_done` would have hidden the finding this harness exists to
-    surface: `global_stop_calling` also leaves, to a different node.
-    """
-    return {f.name for f in talk_node().functions if f.routes}
+def exit_function_names(locale: str) -> set[str]:
+    return {function.name for function in support_node(locale).functions if function.routes}
 
 
 class ExitCase(BaseModel):
-    """One last caller turn, and which exit — if any — it should route to.
-
-    `expect` is the point. Both exits end the node, so "did it leave" is passed
-    by a model that sends a do-not-call request to the node that asks for a vote.
-    """
-
     label: str
+    locale: str
+    history: list[tuple[str, str]]
     last_turn: str
     expect: str | None
 
 
 CASES = [
-    # Not the same as a goodbye: this one must reach `respect`, and routing it to
-    # `close` asks a voter for their vote right after they demanded to be left alone.
     ExitCase(
-        label="explicit stop",
-        last_turn="תפסיקו להתקשר אלי, תורידו אותי מהרשימה.",
-        expect="global_stop_calling",
+        label="he objective complete",
+        locale="he",
+        history=[
+            ("assistant", "שלום, הגעתם למוקד. איך אפשר לעזור?"),
+            ("user", "הממיר לא מצליח להתחבר לאינטרנט."),
+            ("assistant", "הבנתי שהממיר לא מתחבר לאינטרנט. זה תיאור נכון?"),
+        ],
+        last_turn="כן, הבנת נכון.",
+        expect="collect_reason_done",
     ),
-    ExitCase(label="firm goodbye", last_turn="ביי ביי, יום טוב.", expect="talk_done"),
-    ExitCase(label="soft close", last_turn="לא, זהו. תודה.", expect="talk_done"),
-    # The control. Without it "always exits" scores a perfect run, and ships a
-    # bot that hangs up on engaged voters.
     ExitCase(
-        label="still engaged",
-        last_turn="רגע, מה הוא עשה בתחום האנרגיה?",
+        label="he explicit stop",
+        locale="he",
+        history=[
+            ("assistant", "שלום, הגעתם למוקד. איך אפשר לעזור?"),
+            ("user", "אני מתקשר בגלל תקלה בממיר."),
+            ("assistant", "מה בדיוק מופיע על המסך כרגע?"),
+        ],
+        last_turn="תפסיקי בבקשה את השיחה עכשיו.",
+        expect="global_caller_goodbye",
+    ),
+    ExitCase(
+        label="he still engaged",
+        locale="he",
+        history=[
+            ("assistant", "שלום, הגעתם למוקד. איך אפשר לעזור?"),
+            ("user", "אני מתקשר בגלל תקלה בממיר."),
+            ("assistant", "מה בדיוק מופיע על המסך כרגע?"),
+        ],
+        last_turn="עוד לא הסברתי את כל הבעיה; מה תרצי לדעת קודם?",
+        expect=None,
+    ),
+    ExitCase(
+        label="en objective complete",
+        locale="en",
+        history=[
+            ("assistant", "Hello, you've reached support. How can I help?"),
+            ("user", "My set-top box cannot connect to the internet."),
+            (
+                "assistant",
+                "I understand that the set-top box cannot connect to the internet. Is that right?",
+            ),
+        ],
+        last_turn="Yes, that's exactly right.",
+        expect="collect_reason_done",
+    ),
+    ExitCase(
+        label="en goodbye",
+        locale="en",
+        history=[
+            ("assistant", "Hello, you've reached support. How can I help?"),
+            ("user", "I was calling about a connection issue."),
+            ("assistant", "What happens when you try to connect?"),
+        ],
+        last_turn="Thanks, that's all. Goodbye.",
+        expect="global_caller_goodbye",
+    ),
+    ExitCase(
+        label="en still engaged",
+        locale="en",
+        history=[
+            ("assistant", "Hello, you've reached support. How can I help?"),
+            ("user", "I am calling about a problem with my set-top box."),
+            ("assistant", "What exactly appears on the screen?"),
+        ],
+        last_turn="I haven't explained the whole issue yet. What do you need to know first?",
         expect=None,
     ),
 ]
 
 
-class Endpoint(BaseModel):
-    base_url: str
-    model: str
-    api_key: str
-
-
 def _endpoint() -> Endpoint | None:
-    values = {
-        "base_url": os.environ.get("ORON_LLM_BASE_URL", ""),
-        "model": os.environ.get("ORON_LLM_MODEL", ""),
-        "api_key": os.environ.get("LLM_API_KEY", ""),
-    }
-    return Endpoint(**values) if all(values.values()) else None
+    if os.environ.get("ORON_RUN_PROVIDER_EVALS", "").strip().lower() != "true":
+        return None
+    base_url = os.environ.get("ORON_LLM_BASE_URL") or os.environ.get("LLM_BASE_URL", "")
+    model = os.environ.get("ORON_LLM_MODEL") or os.environ.get("LLM_MODEL", "")
+    api_key = os.environ.get("LLM_API_KEY", "")
+    if not all((base_url, model, api_key)):
+        return None
+    return Endpoint(
+        base_url=base_url,
+        model=model,
+        api_key=api_key,
+        reasoning_effort=os.environ.get("ORON_LLM_REASONING_EFFORT")
+        or os.environ.get("LLM_REASONING_EFFORT"),
+        temperature=float(os.environ.get("LLM_TEMPERATURE", "0.4")),
+        max_tokens=int(os.environ.get("LLM_MAX_TOKENS", "256")),
+    )
 
 
-def _called(client: httpx.Client, endpoint: Endpoint, case: ExitCase) -> str | None:
-    """The function the model chose, or None when it answered in text."""
+@dataclass(frozen=True)
+class Outcome:
+    function: str | None
+    content: str | None
+    finish_reason: str | None
+
+
+def _outcome(client: httpx.Client, endpoint: Endpoint, case: ExitCase) -> Outcome:
     response = client.post(
         f"{endpoint.base_url.rstrip('/')}/chat/completions",
         headers={"Authorization": f"Bearer {endpoint.api_key}"},
-        json=request(endpoint.model, case.last_turn),
+        json=request(endpoint, case),
         timeout=90.0,
     )
     response.raise_for_status()
-    calls = response.json()["choices"][0]["message"].get("tool_calls") or []
-    return calls[0]["function"]["name"] if calls else None
+    choice = response.json()["choices"][0]
+    message = choice["message"]
+    calls = message.get("tool_calls") or []
+    return Outcome(
+        function=calls[0]["function"]["name"] if calls else None,
+        content=message.get("content"),
+        finish_reason=choice.get("finish_reason"),
+    )
 
 
-def test_the_flow_leaves_when_the_caller_is_done_and_not_before():
+def test_neutral_support_flow_routes_completion_and_exit_but_not_an_active_caller():
     endpoint = _endpoint()
     if endpoint is None:
-        pytest.skip("unavailable — set ORON_LLM_BASE_URL, ORON_LLM_MODEL and LLM_API_KEY")
+        pytest.skip(
+            "unavailable — set ORON_RUN_PROVIDER_EVALS=true plus LLM_BASE_URL, "
+            "LLM_MODEL and LLM_API_KEY "
+            "(ORON_LLM_BASE_URL/MODEL may override the endpoint)"
+        )
 
-    exits = exit_function_names()
-    print(f"\n[exit-eval] {endpoint.model} @ {endpoint.base_url} — exits: {sorted(exits)}")
+    exits = {locale: exit_function_names(locale) for locale in ("he", "en")}
+    print(f"\n[exit-eval] {endpoint.model} — neutral support exits: {exits}")
 
-    failures = []
+    failures: list[str] = []
     with httpx.Client() as client:
         for case in CASES:
-            chosen = Counter(_called(client, endpoint, case) for _ in range(RUNS))
-            left = sum(n for name, n in chosen.items() if name in exits)
+            outcomes = [_outcome(client, endpoint, case) for _ in range(RUNS)]
+            chosen = Counter(outcome.function for outcome in outcomes)
             routed = chosen[case.expect]
-            wanted_left = RUNS if case.expect else 0
-            picked = ", ".join(f"{name or 'text'}x{n}" for name, n in chosen.items())
-            verdict = "ok" if routed == RUNS else ("MISROUTED" if left == wanted_left else "FAIL")
-            print(
-                f"  {case.label:16} left {left}/{RUNS} "
-                f" routed {routed}/{RUNS}  [{picked}]  {verdict}"
-            )
-            if verdict != "ok":
+            if case.expect is None:
+                useful = sum(
+                    render_reply(
+                        outcome.content or "",
+                        [],
+                        case.locale,
+                        latest_caller_text=case.last_turn,
+                        recent_spoken_texts=tuple(
+                            text for role, text in case.history if role == "assistant"
+                        ),
+                    ).decision
+                    in {
+                        "diagnostic_question",
+                        "acknowledged_question",
+                        # The production renderer replaces a provider's repeated
+                        # question before TTS; evaluate the caller-visible turn,
+                        # not only the raw selection.
+                        "duplicate_recovery",
+                    }
+                    for outcome in outcomes
+                    if outcome.function is None and outcome.finish_reason == "stop"
+                )
+                passed = routed == RUNS and useful == RUNS
+            else:
+                passed = routed == RUNS and all(
+                    outcome.finish_reason in {"stop", "tool_calls"} for outcome in outcomes
+                )
+            picked = ", ".join(f"{name or 'text'}x{count}" for name, count in chosen.items())
+            print(f"  {case.label:18} [{picked}]  {'ok' if passed else 'FAIL'}")
+            if not passed:
                 failures.append(
-                    f"{case.label}: wanted {case.expect or 'no call'} x{RUNS}, got {picked}"
+                    f"{case.label}: wanted {case.expect or 'useful text'} x{RUNS}, got {picked}"
                 )
 
     assert not failures, "; ".join(failures)
 
 
-def test_only_one_exit_claims_a_goodbye():
-    """Exactly one exit may trigger on a goodbye, because they route apart.
+def test_neutral_support_exit_conditions_do_not_overlap():
+    for locale in ("he", "en"):
+        node = support_node(locale)
+        goodbye = next(
+            function for function in node.functions if function.name == "global_caller_goodbye"
+        )
+        done = next(
+            function for function in node.functions if function.name == "collect_reason_done"
+        )
 
-    `talk_done` goes to `close`, which asks for the vote and is the point of the
-    call. `global_stop_calling` goes to `respect`, the do-not-call path where
-    nobody is ever asked. Until 2026-08-01 both claimed a goodbye: the task
-    message (#65) told the model to call `talk_done` when "they say goodbye",
-    and the `stop_calling` edge's `when` clause said "says goodbye" too. Which
-    one fired was left to the model's instruction hierarchy.
+        assert (
+            "goodbye" in goodbye.description.lower()
+            or "end the call" in goodbye.description.lower()
+        )
+        assert "objective has been accomplished" in done.description.lower()
+        assert goodbye.routes != done.routes
 
-    Measured on "תפסיקו להתקשר אלי, תורידו אותי מהרשימה", an explicit
-    do-not-call: gemini-2.5-flash misrouted it to `talk_done` in both batches of
-    three — 2/3 then 1/3, unstable but never zero — while gemma-4-31b chose
-    `global_stop_calling` 3/3. Narrowing the edge to a do-not-call request took
-    Gemini to 3/3 and left gemma unchanged.
 
-    Needs no network: the collision is visible in the compiled node.
-    """
-    node = talk_node()
-    task = " ".join(m.content for m in node.task_messages).lower()
+def test_live_eval_inherits_production_quality_knobs(monkeypatch):
+    monkeypatch.setenv("ORON_RUN_PROVIDER_EVALS", "true")
+    monkeypatch.delenv("ORON_LLM_BASE_URL", raising=False)
+    monkeypatch.delenv("ORON_LLM_MODEL", raising=False)
+    monkeypatch.delenv("ORON_LLM_REASONING_EFFORT", raising=False)
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.invalid/v1")
+    monkeypatch.setenv("LLM_MODEL", "fixture-model")
+    monkeypatch.setenv("LLM_API_KEY", "fixture-key")
+    monkeypatch.setenv("LLM_REASONING_EFFORT", "none")
+    monkeypatch.setenv("LLM_TEMPERATURE", "0.25")
+    monkeypatch.setenv("LLM_MAX_TOKENS", "192")
 
-    instructed = {f.name for f in node.functions if f.routes and f.name in task}
-    described = {
-        f.name for f in node.functions if f.routes and "says goodbye" in f.description.lower()
-    }
+    endpoint = _endpoint()
 
-    assert len(instructed | described) <= 1, (
-        f"a goodbye triggers {sorted(instructed | described)} — instructed by the task "
-        f"message: {sorted(instructed)}, claimed by a description: {sorted(described)}. "
-        "Which one fires is decided by the model's instruction hierarchy."
-    )
+    assert endpoint is not None
+    assert endpoint.base_url == "https://example.invalid/v1"
+    assert endpoint.model == "fixture-model"
+    assert endpoint.reasoning_effort == "none"
+    assert endpoint.temperature == 0.25
+    assert endpoint.max_tokens == 192
+
+
+def test_provider_eval_ignores_config_without_explicit_opt_in(monkeypatch):
+    monkeypatch.delenv("ORON_RUN_PROVIDER_EVALS", raising=False)
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.invalid/v1")
+    monkeypatch.setenv("LLM_MODEL", "fixture-model")
+    monkeypatch.setenv("LLM_API_KEY", "fixture-key")
+
+    assert _endpoint() is None
+
+    monkeypatch.setenv("ORON_RUN_PROVIDER_EVALS", "0")
+    assert _endpoint() is None

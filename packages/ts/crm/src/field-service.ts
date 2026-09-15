@@ -2344,7 +2344,6 @@ export async function createServiceVisit(
 export async function identifyTechnicianSession(
   sql: postgres.TransactionSql,
   input: {
-    readonly authSessionId: string;
     readonly visitId: string;
     readonly technicianId: string;
     readonly fullName: string;
@@ -2354,6 +2353,15 @@ export async function identifyTechnicianSession(
   },
 ): Promise<string> {
   const feature = await requireFieldService(sql);
+  const sessionRows = await sql<
+    { session_id: string; absolute_expires_at: Date }[]
+  >`
+    SELECT session_id, absolute_expires_at
+    FROM service.lock_current_technician_session_context()
+  `;
+  const session = sessionRows[0];
+  if (session === undefined)
+    throw new TypeError("The authenticated session is no longer valid");
   const existing = await sql<
     {
       id: string;
@@ -2364,7 +2372,7 @@ export async function identifyTechnicianSession(
   >`
     SELECT id, technician_id, full_name, employee_identifier
     FROM service.technician_session_identities
-    WHERE auth_session_id = ${input.authSessionId}::uuid
+    WHERE auth_session_id = ${session.session_id}::uuid
       AND visit_id = ${input.visitId}::uuid
   `;
   const prior = existing[0];
@@ -2387,26 +2395,21 @@ export async function identifyTechnicianSession(
       employee_identifier, contact_information, verification_state,
       server_nonce, expires_at
     ) SELECT
-      platform.current_tenant_id(), session.id, visit.id, technician.id,
+      platform.current_tenant_id(), ${session.session_id}::uuid, visit.id,
+      technician.id,
       ${fullName}, ${identifier}, ${nullableText(input.contactInformation, 320)},
       CASE
-        WHEN technician.linked_user_id=session.user_id
+        WHEN technician.linked_user_id=platform.current_user_id()
           THEN technician.identity_verification
         ELSE 'self_declared'
       END,
       ${randomUUID()},
-      LEAST(session.absolute_expires_at, CURRENT_TIMESTAMP + interval '12 hours')
-    FROM platform.auth_sessions session
-    JOIN service.visits visit ON visit.id = ${input.visitId}::uuid
+      LEAST(${session.absolute_expires_at}, CURRENT_TIMESTAMP + interval '12 hours')
+    FROM service.visits visit
     JOIN service.technicians technician ON technician.id = ${input.technicianId}::uuid
       AND technician.id = visit.technician_id AND technician.active
-    JOIN public.memberships membership
-      ON membership.tenant_id=session.active_tenant_id
-     AND membership.user_id=session.user_id
-    WHERE session.id = ${input.authSessionId}::uuid
-      AND session.active_tenant_id = platform.current_tenant_id()
-      AND session.revoked_at IS NULL
-      AND session.absolute_expires_at > CURRENT_TIMESTAMP
+    WHERE visit.tenant_id = platform.current_tenant_id()
+      AND ${session.absolute_expires_at} > clock_timestamp()
       AND visit.status IN ('assigned','arrived')
       AND lower(btrim(technician.full_name)) = lower(btrim(${fullName}))
       AND (
@@ -2414,8 +2417,11 @@ export async function identifyTechnicianSession(
         OR technician.employee_identifier = ${identifier}
       )
       AND (
-        technician.linked_user_id = session.user_id
-        OR (${feature.sharedTechnicianLoginEnabled} AND membership.role = 'technician')
+        technician.linked_user_id = platform.current_user_id()
+        OR (
+          ${feature.sharedTechnicianLoginEnabled}
+          AND coalesce(current_setting('app.current_role', true), '') = 'technician'
+        )
       )
     RETURNING id
   `;
@@ -2440,7 +2446,6 @@ export async function identifyTechnicianSession(
 export async function signVisitAttendance(
   sql: postgres.TransactionSql,
   input: {
-    readonly authSessionId: string;
     readonly visitId: string;
     readonly signatureObjectId: string;
     readonly kind: "arrival" | "departure";
@@ -2448,6 +2453,12 @@ export async function signVisitAttendance(
   },
 ): Promise<ServiceVisit> {
   await requireFieldService(sql);
+  const sessionRows = await sql<{ session_id: string }[]>`
+    SELECT session_id FROM service.lock_current_technician_session_context()
+  `;
+  const session = sessionRows[0];
+  if (session === undefined)
+    throw new TypeError("The authenticated session is no longer valid");
   const identities = await sql<
     {
       technician_id: string;
@@ -2474,7 +2485,7 @@ export async function signVisitAttendance(
      AND attachment.processing_status='available'
     JOIN objects.object_metadata object ON object.id = ${input.signatureObjectId}::uuid
       AND object.status = 'available' AND object.content_type IN ('image/png','image/jpeg','image/webp')
-    WHERE identity.auth_session_id = ${input.authSessionId}::uuid
+    WHERE identity.auth_session_id = ${session.session_id}::uuid
       AND identity.visit_id = ${input.visitId}::uuid
       AND identity.expires_at > CURRENT_TIMESTAMP
   `;

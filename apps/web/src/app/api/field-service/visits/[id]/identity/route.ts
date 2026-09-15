@@ -4,7 +4,7 @@ import { identifyTechnicianSession } from "@or-on/crm";
 import {
   jsonObject,
   requestId,
-  withCurrentTenant,
+  withFreshCurrentTenant,
 } from "../../../../../../features/auth";
 import {
   assertCrmMutation,
@@ -35,11 +35,10 @@ export async function POST(request: Request, context: Context) {
       body.contactInformation,
       "Contact information",
     );
-    const identityId = await withCurrentTenant(
+    const identityId = await withFreshCurrentTenant(
       "field-service:operate",
-      (sql, session) =>
+      (sql) =>
         identifyTechnicianSession(sql, {
-          authSessionId: session.sessionId,
           visitId: uuid(id, "Visit"),
           technicianId: uuid(body.technicianId, "Technician"),
           fullName: text(body.fullName, "Technician name"),

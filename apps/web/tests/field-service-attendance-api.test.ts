@@ -141,6 +141,15 @@ describe("atomic field-service attendance evidence", () => {
       "link",
       "sign",
     ]);
+    expect(state.sign).toHaveBeenCalledWith(
+      {},
+      {
+        visitId,
+        signatureObjectId: objectId,
+        kind: "arrival",
+        requestId: "attendance-test-request",
+      },
+    );
     expect(state.discard).not.toHaveBeenCalled();
   });
 

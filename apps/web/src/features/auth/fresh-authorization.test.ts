@@ -81,6 +81,25 @@ describe("fresh authorization transaction boundary", () => {
       state.operation.mock.invocationCallOrder[0] ?? 0,
     );
   });
+  it("accepts a canonical technician for a freshly authorized field-service operation", async () => {
+    state.resolve.mockResolvedValueOnce({
+      sessionId: "technician-session",
+      userId: "technician-user",
+      isSuperuser: false,
+      rotationCount: 4,
+      tenant: { tenantId: "tenant", role: "technician" },
+    });
+
+    expect(
+      await withFreshCurrentTenant("field-service:operate", state.operation),
+    ).toBe("stored");
+    expect(state.sql.mock.calls[0]?.slice(1)).toEqual([
+      "technician-session",
+      "technician",
+      false,
+      4,
+    ]);
+  });
   it("does not write if authorization changed after the initial resolve", async () => {
     state.sql.mockResolvedValueOnce([{ allowed: false }]);
     await expect(

@@ -16,6 +16,7 @@ export const conversationReplyCodes = [
   "greeting",
   "thanks",
   "clarify",
+  "callback_confirmation",
   "unverified_claim",
   "knowledge_unavailable",
 ] as const;
@@ -44,6 +45,10 @@ const replies: Readonly<
   greeting: ["שלום, במה אפשר לעזור?", "Hello, how can I help?"],
   thanks: ["בשמחה.", "You're welcome."],
   clarify: ["באיזה נושא נדרשת עזרה?", "What would you like help with?"],
+  callback_confirmation: [
+    'כדי לבקש שיחה, נא לשלוח בהודעה נפרדת: "תתקשרו אליי עכשיו".',
+    'To request a call, please reply in a separate message: "Please call me now."',
+  ],
   unverified_claim: [
     "הבנתי את הפרטים שמסרת. אין לי כרגע אישור מאומת לכך. האם לבקש בדיקה של נציג?",
     "I understand what you reported. I do not currently have verification of that. Would you like an operator to review it?",
@@ -183,6 +188,20 @@ export function groundAiReply(
 /** Consequential callback consent is an exact accepted message, never model prose. */
 export function explicitlyRequestsImmediateCall(text: string): boolean {
   return explicitWhatsAppCallbackIntent(text);
+}
+
+/** Model classification can request clarification, but never manufacture call consent. */
+export function enforceStandaloneCallbackConsent(
+  decision: WhatsAppAiDecision,
+  explicitStandaloneConsent: boolean,
+): WhatsAppAiDecision {
+  return decision.action === "request_call" && !explicitStandaloneConsent
+    ? {
+        action: "reply",
+        replyCode: "callback_confirmation",
+        text: "",
+      }
+    : decision;
 }
 
 /** Only durable server receipts may select these acknowledgements. */

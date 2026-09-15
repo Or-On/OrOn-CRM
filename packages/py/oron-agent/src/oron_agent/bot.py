@@ -76,7 +76,7 @@ from oron_agent.pipeline import build_agent_processors
 from oron_agent.quality_observer import VoiceQualityObserver
 from oron_agent.recognition import RecognitionAcceptanceProcessor
 from oron_agent.runtime_sessions import RuntimeSessions
-from oron_agent.session_recorder import SessionRecorder
+from oron_agent.session_recorder import SessionRecorder, finish_after_cancellation
 from oron_agent.spoken_safety import BusinessClaimGuardFilter
 from oron_agent.storage import build_artifact_store, save_audio_file
 from oron_agent.tokens import mint_room_token
@@ -537,6 +537,8 @@ async def run_bot(
     # Outbound pick-up, once known. A dict for the same reason call_clock is one:
     # the transport handlers stay free of `nonlocal`.
     pickup: dict[str, bool] = {}
+    finalize_lock = asyncio.Lock()
+    finalized = False
     # Bound, not inline: its open interruption needs settling at call end.
     turn_taking_observer = TurnTakingObserver(turn_taking)
     quality_observer = VoiceQualityObserver(llm=llm, tts=tts, transport_output=transport.output())
@@ -654,41 +656,46 @@ async def run_bot(
     async def on_audio_data(_buffer, audio, sample_rate, num_channels):
         await save_audio_file(audio, session_dir.recording, sample_rate, num_channels)
 
-    async def finalize(status: SessionStatus) -> None:
+    async def finalize(status: SessionStatus) -> bool:
         """Flush artifacts, upload them, then close the session row. Runs once —
         both exit paths funnel through here."""
-        if (joined := call_clock.get("joined")) is not None:
-            usage.call_seconds = time.monotonic() - joined
-        # stop_recording triggers on_audio_data; give it a moment to land before
-        # the upload walks the directory (jpost does the same).
-        await audiobuffer.stop_recording()
-        await asyncio.sleep(2)
-        await transcript_handler.finalize()
-        quality_writer = getattr(sessions, "record_voice_quality", None)
-        if quality_writer is not None:
-            try:
-                async with asyncio.timeout(2.0):
-                    await quality_writer(
-                        ctx, quality_observer.finalize(), agent_version_id=agent_version_id
-                    )
-            except Exception:
-                logger.warning("voice quality summary persistence unavailable")
-        await store.upload_dir(str(session_dir.path), ctx.session_id)
-        turn_taking_observer.settle_open_interruption()
-        logger.info(
-            f"interruptions={turn_taking.interruptions} "
-            f"wordless={turn_taking.wordless_interruptions} (session={ctx.session_id})"
-        )
-        # The node the flow was sitting on when the call ended. On a terminal
-        # node that is the business result — the flow names its own endings, so
-        # nothing has to be inferred from the transcript later. On any other node
-        # the call ended early, and the name says where it stopped.
-        await recorder.finish(
-            status,
-            usage,
-            answered=pickup.get("answered"),
-            outcome=flow_manager.current_node,
-        )
+        nonlocal finalized
+        async with finalize_lock:
+            if finalized:
+                return True
+            if (joined := call_clock.get("joined")) is not None:
+                usage.call_seconds = time.monotonic() - joined
+            # stop_recording triggers on_audio_data; give it a moment to land before
+            # the upload walks the directory (jpost does the same).
+            await audiobuffer.stop_recording()
+            await asyncio.sleep(2)
+            await transcript_handler.finalize()
+            quality_writer = getattr(sessions, "record_voice_quality", None)
+            if quality_writer is not None:
+                try:
+                    async with asyncio.timeout(2.0):
+                        await quality_writer(
+                            ctx, quality_observer.finalize(), agent_version_id=agent_version_id
+                        )
+                except Exception:
+                    logger.warning("voice quality summary persistence unavailable")
+            await store.upload_dir(str(session_dir.path), ctx.session_id)
+            turn_taking_observer.settle_open_interruption()
+            logger.info(
+                f"interruptions={turn_taking.interruptions} "
+                f"wordless={turn_taking.wordless_interruptions} (session={ctx.session_id})"
+            )
+            # The node the flow was sitting on when the call ended. On a terminal
+            # node that is the business result — the flow names its own endings, so
+            # nothing has to be inferred from the transcript later. On any other node
+            # the call ended early, and the name says where it stopped.
+            finalized = await recorder.finish(
+                status,
+                usage,
+                answered=pickup.get("answered"),
+                outcome=flow_manager.current_node,
+            )
+            return finalized
 
     # Canonical LiveKit handlers: start when the first human joins; tear down on disconnect.
     @transport.event_handler("on_first_participant_joined")
@@ -783,6 +790,12 @@ async def run_bot(
         ready.set()
     try:
         await runner.run()
+    except asyncio.CancelledError:
+        # A room-finished webhook can cancel this task before the transport's
+        # participant-left callback completes. Preserve the call's private
+        # artifacts and usage before propagating cancellation to the dispatcher.
+        await finish_after_cancellation(lambda: finalize(SessionStatus.ENDED))
+        raise
     except Exception:
         # The agent knows the call failed right now. Without this the row sits at
         # `started` until the sweeper ages it out, up to STALE_SESSION_MINUTES later.

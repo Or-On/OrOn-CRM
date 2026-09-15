@@ -2,6 +2,7 @@
 
 import { errorMessage } from "../../i18n/error-message";
 import { activityLabel } from "../../i18n/activity-label";
+import { tenantDateFormatter } from "../../i18n/tenant-date-time";
 import { useCapability } from "../access";
 import { useTranslations, useLocale } from "next-intl";
 
@@ -141,6 +142,7 @@ export function ContactDetailPanel({
   fieldServiceEnabled = false,
   realVoiceEnabled = false,
   serviceCases = [],
+  timezone = "UTC",
   voiceAvailable = true,
   voiceFlows = [],
 }: {
@@ -154,12 +156,20 @@ export function ContactDetailPanel({
   readonly fieldServiceEnabled?: boolean;
   readonly realVoiceEnabled?: boolean;
   readonly serviceCases?: readonly ServiceCaseSummary[];
+  readonly timezone?: string;
   readonly voiceAvailable?: boolean;
   readonly voiceFlows?: readonly FlowSummary[];
 }) {
   const t = useTranslations();
   const canEdit = useCapability("crm:write");
   const locale = useLocale();
+  const date = tenantDateFormatter(locale, timezone, {
+    dateStyle: "medium",
+  });
+  const dateTime = tenantDateFormatter(locale, timezone, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
@@ -493,9 +503,7 @@ export function ContactDetailPanel({
                 <dt>{t("premiumPrimary.profileSince")}</dt>
                 <dd>
                   <time dateTime={contact.createdAt}>
-                    {new Intl.DateTimeFormat(locale, {
-                      dateStyle: "medium",
-                    }).format(new Date(contact.createdAt))}
+                    {date.format(new Date(contact.createdAt))}
                   </time>
                 </dd>
               </div>
@@ -504,9 +512,7 @@ export function ContactDetailPanel({
                 <dd>
                   {contact.lastActivityAt ? (
                     <time dateTime={contact.lastActivityAt}>
-                      {new Intl.DateTimeFormat(locale, {
-                        dateStyle: "medium",
-                      }).format(new Date(contact.lastActivityAt))}
+                      {date.format(new Date(contact.lastActivityAt))}
                     </time>
                   ) : (
                     t("tenantPrimary.noInteraction")
@@ -695,7 +701,7 @@ export function ContactDetailPanel({
                     <div>
                       <strong>{activityLabel(item.eventType, t)}</strong>
                       <time dateTime={item.occurredAt}>
-                        {new Date(item.occurredAt).toLocaleString(locale)}
+                        {dateTime.format(new Date(item.occurredAt))}
                       </time>
                     </div>
                   </li>
@@ -748,7 +754,9 @@ export function ContactDetailPanel({
                   <article key={note.id}>
                     <p dir="auto">{note.body}</p>
                     <small>
-                      {new Date(note.createdAt).toLocaleString(locale)}
+                      <time dateTime={note.createdAt}>
+                        {dateTime.format(new Date(note.createdAt))}
+                      </time>
                     </small>
                   </article>
                 ))

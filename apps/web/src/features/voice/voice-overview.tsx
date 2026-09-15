@@ -26,6 +26,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type SyntheticEvent } from "react";
 
 import { errorMessage } from "../../i18n/error-message";
+import { tenantDateFormatter } from "../../i18n/tenant-date-time";
 import { useCapability } from "../access";
 import { voiceMutation } from "./mutation";
 import { summarizeVoiceSample } from "./voice-presentation";
@@ -48,15 +49,21 @@ export function VoiceOverview({
   numbers,
   reconciliation,
   sessions,
+  timezone = "UTC",
 }: {
   readonly flows: readonly FlowSummary[];
   readonly numbers: readonly PhoneNumberSummary[];
   readonly reconciliation: ReconciliationReport;
   readonly sessions: readonly VoiceSessionSummary[];
+  readonly timezone?: string;
 }) {
   const t = useTranslations();
   const canEdit = useCapability("voice:operate");
   const locale = useLocale();
+  const dateTime = tenantDateFormatter(locale, timezone, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<VoiceTab>("calls");
   const [showNumberSetup, setShowNumberSetup] = useState(false);
@@ -374,7 +381,7 @@ export function VoiceOverview({
                       </td>
                       <td>
                         <time dateTime={session.created_at}>
-                          {new Date(session.created_at).toLocaleString(locale)}
+                          {dateTime.format(new Date(session.created_at))}
                         </time>
                       </td>
                       <td>

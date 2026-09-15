@@ -88,6 +88,7 @@ describe("voice operator surfaces", () => {
         numbers={[]}
         reconciliation={{ findings: [], ok: true, provider_enabled: false }}
         sessions={[session]}
+        timezone="Pacific/Kiritimati"
       />,
     );
     const detailMarkup = renderMarkup(
@@ -106,6 +107,7 @@ describe("voice operator surfaces", () => {
     expect(listMarkup).toContain("Estimated cost");
     expect(listMarkup).toContain("$0.0123");
     expect(listMarkup).toContain("Live · partial estimate");
+    expect(listMarkup).toContain("Sep 11, 2026, 12:00 AM");
     expect(detailMarkup).toContain("Estimated usage cost");
     expect(detailMarkup).toContain("Speech recognition");
     expect(detailMarkup).toContain("$0.0030");

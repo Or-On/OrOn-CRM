@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import logging
 import time
+from collections.abc import Awaitable, Callable
 
 from oron_common import CallContext, CallUsage
 from oron_sessions import SessionStatus
@@ -25,6 +26,7 @@ class SessionRecorder:
         self._store = store
         self._recorded = False
         self._finalized = False
+        self._finish_lock = asyncio.Lock()
         self._usage_task: asyncio.Task[None] | None = None
 
     async def start(self, *, room: str) -> None:
@@ -93,7 +95,7 @@ class SessionRecorder:
         *,
         answered: bool | None = None,
         outcome: str | None = None,
-    ) -> None:
+    ) -> bool:
         """Finalize at most once, so a clean end is never overwritten by a
         teardown error and vice versa. No-op if no row was ever created —
         PATCHing a session the API never accepted is a guaranteed 404.
@@ -105,22 +107,74 @@ class SessionRecorder:
         uploaded a partial artifact, so absence is discovered from the object not
         being there rather than inferred from a null column.
         """
-        if not self._recorded or self._finalized:
-            return
-        self._finalized = True
-        await self._stop_usage_reporting()
-        session_id = self._ctx.session_id
-        await self._client.finalize(
-            session_id,
-            status=status,
-            answered=answered,
-            outcome=outcome,
-            recording_uri=self._store.uri(session_id, RECORDING_PATH),
-            transcript_uri=self._store.uri(session_id, TRANSCRIPT_PATH),
-            tenant_id=self._ctx.tenant_id,
-            usage=usage,
-        )
+        async with self._finish_lock:
+            if not self._recorded:
+                return False
+            if self._finalized:
+                return True
+            await self._stop_usage_reporting()
+            session_id = self._ctx.session_id
+            persisted = await self._client.finalize(
+                session_id,
+                status=status,
+                answered=answered,
+                outcome=outcome,
+                recording_uri=self._store.uri(session_id, RECORDING_PATH),
+                transcript_uri=self._store.uri(session_id, TRANSCRIPT_PATH),
+                tenant_id=self._ctx.tenant_id,
+                usage=usage,
+            )
+            # A cancelled or rejected persistence attempt must remain retryable.
+            # The dispatcher can finish the room while the agent is committing
+            # artifacts; marking this before the await previously left copied
+            # files with permanently NULL recording/transcript pointers.
+            if persisted:
+                self._finalized = True
+            return persisted
 
     async def aclose(self) -> None:
         await self._stop_usage_reporting()
         await self._client.aclose()
+
+
+async def finish_after_cancellation(
+    finalize: Callable[[], Awaitable[bool]],
+    *,
+    timeout_seconds: float = 30.0,
+) -> bool:
+    """Complete bounded teardown even after the owning call task is cancelled.
+
+    LiveKit's room-finished webhook and the transport's participant-left event
+    race by design. The dispatcher cancels the in-process agent for the former;
+    without shielding, that cancellation can land after files are copied but
+    before their database pointers are committed. Repeated cancellation remains
+    deferred until this cleanup task completes, then the caller re-raises the
+    original cancellation.
+    """
+
+    async def run_finalize() -> bool:
+        return await finalize()
+
+    cleanup = asyncio.create_task(run_finalize(), name="voice-call-finalization")
+    deadline = asyncio.get_running_loop().time() + max(0.0, timeout_seconds)
+    while not cleanup.done():
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            cleanup.cancel()
+
+            def consume_result(task: asyncio.Task[bool]) -> None:
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    task.exception()
+
+            cleanup.add_done_callback(consume_result)
+            logger.error("voice call finalization exceeded %.1fs", timeout_seconds)
+            return False
+        try:
+            await asyncio.wait({cleanup}, timeout=remaining)
+        except asyncio.CancelledError:
+            continue
+    try:
+        return await cleanup
+    except Exception:
+        logger.exception("voice call finalization failed during cancellation cleanup")
+        return False

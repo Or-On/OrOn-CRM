@@ -5,7 +5,7 @@ import time
 import uuid
 
 import pytest
-from oron_agent.session_recorder import SessionRecorder
+from oron_agent.session_recorder import SessionRecorder, finish_after_cancellation
 from oron_agent.storage import GcsArtifactStore
 from oron_common import CallContext, CallUsage
 from oron_sessions import SessionStatus
@@ -162,6 +162,78 @@ async def test_failed_sessions_carry_artifact_uris_too():
     assert call["status"] is SessionStatus.FAILED
     assert str(ctx.session_id) in call["recording_uri"]
     assert str(ctx.session_id) in call["transcript_uri"]
+
+
+async def test_cancelled_database_finalize_remains_retryable():
+    client, _ctx, recorder = make_recorder()
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    attempts = 0
+
+    async def delayed_finalize(*args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            entered.set()
+            await release.wait()
+        return True
+
+    client.finalize = delayed_finalize
+    await recorder.start(room="r1")
+    first = asyncio.create_task(recorder.finish(SessionStatus.ENDED, CallUsage()))
+    await entered.wait()
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+    release.set()
+    await recorder.finish(SessionStatus.ENDED, CallUsage())
+    assert attempts == 2
+
+
+async def test_rejected_database_finalize_remains_retryable():
+    client, _ctx, recorder = make_recorder()
+    results = iter((False, True))
+
+    async def retryable_finalize(*args, **kwargs):
+        return next(results)
+
+    client.finalize = retryable_finalize
+    await recorder.start(room="r1")
+
+    assert await recorder.finish(SessionStatus.ENDED, CallUsage()) is False
+    assert await recorder.finish(SessionStatus.ENDED, CallUsage()) is True
+
+
+async def test_call_finalization_is_shielded_from_repeated_cancellation():
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    completed = False
+
+    async def finalize():
+        nonlocal completed
+        entered.set()
+        await release.wait()
+        completed = True
+        return True
+
+    task = asyncio.create_task(finish_after_cancellation(finalize))
+    await entered.wait()
+    task.cancel()
+    await asyncio.sleep(0)
+    task.cancel()
+    release.set()
+    await task
+    assert completed is True
+
+
+async def test_call_finalization_has_a_hard_timeout():
+    never_finishes = asyncio.Event()
+
+    async def finalize():
+        await never_finishes.wait()
+        return True
+
+    assert await finish_after_cancellation(finalize, timeout_seconds=0.01) is False
 
 
 @pytest.mark.parametrize("status", [SessionStatus.ENDED, SessionStatus.FAILED])

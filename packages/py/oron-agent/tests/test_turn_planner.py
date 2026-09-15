@@ -5,6 +5,8 @@ from oron_agent.turn_planner import HebrewTurnPlanner
 from oron_hebrew.filters import HebrewNormalizeFilter
 from pipecat.frames.frames import (
     AggregatedTextFrame,
+    FunctionCallFromLLM,
+    FunctionCallsStartedFrame,
     InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -184,3 +186,72 @@ async def test_interruption_resets_overflow_budget_for_next_generation(monkeypat
         if isinstance(call.args[0], AggregatedTextFrame)
     ]
     assert len(utterances) == 1 and utterances[0].text == "שלום"
+
+
+@pytest.mark.asyncio
+async def test_empty_provider_completion_becomes_a_typed_safe_clarification(monkeypatch):
+    planner = HebrewTurnPlanner()
+    planner.push_frame = AsyncMock()
+
+    await planner.process_frame(LLMFullResponseStartFrame(), FrameDirection.DOWNSTREAM)
+    await planner.process_frame(LLMFullResponseEndFrame(), FrameDirection.DOWNSTREAM)
+
+    utterances = [
+        call.args[0]
+        for call in planner.push_frame.call_args_list
+        if isinstance(call.args[0], AggregatedTextFrame)
+    ]
+    assert len(utterances) == 1
+    assert utterances[0].text == '{"kind":"conversation","intent":"clarify"}'
+    assert utterances[0].metadata["voice_delivery_state"] == "generated"
+    assert utterances[0].metadata["model_first_token_ms"] is None
+
+
+@pytest.mark.asyncio
+async def test_legitimate_tool_only_completion_remains_silent(monkeypatch):
+    planner = HebrewTurnPlanner()
+    planner.push_frame = AsyncMock()
+    tool_call = FunctionCallFromLLM(
+        function_name="support_done",
+        tool_call_id="call-1",
+        arguments={},
+        context=None,
+    )
+
+    await planner.process_frame(LLMFullResponseStartFrame(), FrameDirection.DOWNSTREAM)
+    await planner.process_frame(
+        FunctionCallsStartedFrame(function_calls=[tool_call]), FrameDirection.DOWNSTREAM
+    )
+    await planner.process_frame(LLMFullResponseEndFrame(), FrameDirection.DOWNSTREAM)
+
+    assert not any(
+        isinstance(call.args[0], AggregatedTextFrame) for call in planner.push_frame.call_args_list
+    )
+    assert any(
+        isinstance(call.args[0], FunctionCallsStartedFrame)
+        for call in planner.push_frame.call_args_list
+    )
+
+
+@pytest.mark.asyncio
+async def test_priority_tool_signal_may_overtake_start_and_still_remains_silent(monkeypatch):
+    planner = HebrewTurnPlanner()
+    planner.push_frame = AsyncMock()
+    tool_call = FunctionCallFromLLM(
+        function_name="support_done",
+        tool_call_id="call-early",
+        arguments={},
+        context=None,
+    )
+
+    # FunctionCallsStartedFrame is a SystemFrame while response boundaries are
+    # ControlFrames; the pipeline may deliver the priority signal first.
+    await planner.process_frame(
+        FunctionCallsStartedFrame(function_calls=[tool_call]), FrameDirection.DOWNSTREAM
+    )
+    await planner.process_frame(LLMFullResponseStartFrame(), FrameDirection.DOWNSTREAM)
+    await planner.process_frame(LLMFullResponseEndFrame(), FrameDirection.DOWNSTREAM)
+
+    assert not any(
+        isinstance(call.args[0], AggregatedTextFrame) for call in planner.push_frame.call_args_list
+    )
