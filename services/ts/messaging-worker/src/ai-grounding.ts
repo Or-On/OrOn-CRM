@@ -122,6 +122,13 @@ function normalizedReply(value: string): string {
     .trim();
 }
 
+function normalizedComparableReply(value: string): string {
+  return normalizedReply(value)
+    .replace(/[.!?؟？！،,:;"'()׳״]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
 const defaultClarificationCodes = [
   "clarify_rephrase",
   "clarify_detail",
@@ -165,11 +172,22 @@ function repeatsRecentAssistant(
 ): boolean {
   const candidate = normalizedReply(value);
   if (candidate.length === 0) return false;
+  const comparableCandidate = normalizedComparableReply(value);
   return recentAssistantMessages
     .slice(-recentReplyWindowSize)
     .some((message) => {
       const previous = normalizedReply(message);
-      return candidate === previous;
+      if (candidate === previous) return true;
+      const comparablePrevious = normalizedComparableReply(message);
+      // Reject verbatim recycling of a complete recent turn even when the
+      // model adds a short acknowledgement or another sentence around it.
+      // Very short phrases are intentionally excluded because words such as
+      // "thanks" can occur naturally in a later, otherwise distinct reply.
+      return (
+        comparablePrevious.length >= 18 &&
+        comparablePrevious.split(" ").length >= 4 &&
+        comparableCandidate.includes(comparablePrevious)
+      );
     });
 }
 
@@ -295,8 +313,16 @@ export function latestMessageLocale(
   configuredLocale: string,
   latestText: string,
 ): "he" | "en" {
-  const hebrewWords = latestText.match(/\p{Script=Hebrew}+/gu)?.length ?? 0;
-  const latinWords = latestText.match(/\p{Script=Latin}+/gu)?.length ?? 0;
+  // Links, email addresses and machine identifiers are evidence, not a
+  // reliable language signal. In particular, a Hebrew customer pasting a
+  // long support URL must not receive an English reply because the hostname
+  // happens to contain more Latin tokens than the actual sentence.
+  const naturalText = latestText
+    .replace(/https?:\/\/\S+/giu, " ")
+    .replace(/\b[^\s@]+@[^\s@]+\.[^\s@]+\b/giu, " ")
+    .replace(/\b(?=\S*[\p{L}\p{N}])(?=\S*\d)[\p{L}\p{N}._/-]+\b/giu, " ");
+  const hebrewWords = naturalText.match(/\p{Script=Hebrew}+/gu)?.length ?? 0;
+  const latinWords = naturalText.match(/\p{Script=Latin}+/gu)?.length ?? 0;
   if (hebrewWords > latinWords) return "he";
   if (latinWords > hebrewWords) return "en";
   return configuredLocale.toLowerCase().startsWith("he") ? "he" : "en";

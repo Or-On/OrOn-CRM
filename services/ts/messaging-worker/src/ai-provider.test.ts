@@ -184,6 +184,12 @@ describe("OpenAiCompatibleChatProvider", () => {
     expect(body.messages[0]?.content).toContain(
       "standalone explicit request to be called now",
     );
+    expect(body.messages[0]?.content).toContain(
+      "incoherent, random characters, or unrelated nonsense",
+    );
+    expect(body.messages[0]?.content).toContain(
+      "Never repeat the previous assistant question or sentence",
+    );
   });
 
   it("keeps injected caller claims and previous assistant statements in labeled data and selects only fact keys", async () => {

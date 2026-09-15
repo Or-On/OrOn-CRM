@@ -289,6 +289,33 @@ describe("WhatsApp deterministic grounding (typed fixtures, no provider evaluati
     });
   });
 
+  it.each([
+    [
+      "What model is the device? Thanks. Could you send a photo?",
+      "What model is the device?",
+    ],
+    ["תודה. מה מופיע כרגע על המסך? אפשר לצרף צילום.", "מה מופיע כרגע על המסך?"],
+  ])(
+    "rejects a reply that embeds a complete recent question: %s",
+    (candidate, previous) => {
+      const locale = /\p{Script=Hebrew}/u.test(candidate) ? "he" : "en";
+      expect(
+        safeConversationalReply(candidate, {
+          locale,
+          recentAssistantMessages: [previous],
+        }),
+      ).toBe(false);
+      const grounded = groundAiReply(
+        { action: "reply", text: candidate },
+        [],
+        locale,
+        [previous],
+      );
+      expect(grounded.text).not.toBe(candidate);
+      expect(grounded.text).not.toBe(previous);
+    },
+  );
+
   it("keeps unavailable and unsafe fallback evidence stable during reconstruction", () => {
     const unavailable = groundAiReply(
       {
@@ -403,6 +430,13 @@ describe("WhatsApp deterministic grounding (typed fixtures, no provider evaluati
     ["he", "The router is offline", "en"],
     ["he", "WhatsApp לא עובד", "he"],
     ["en", "1234?!", "en"],
+    [
+      "en",
+      "לא עובד https://support.example.com/products/router/setup/troubleshooting",
+      "he",
+    ],
+    ["en", "המסך מציג ERR-502 ומבקש לנסות שוב", "he"],
+    ["he", "Please email me at person@example.com", "en"],
   ] as const)(
     "uses only the latest message for locale selection: %s / %s",
     (configured, text, expected) => {

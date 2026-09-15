@@ -17,6 +17,13 @@ from pipecat.transcriptions.language import Language
 
 _HEBREW_LETTER = re.compile(r"[\u05d0-\u05ea]")
 _LATIN_LETTER = re.compile(r"[A-Za-z]")
+_URL = re.compile(r"https?://\S+", re.IGNORECASE)
+_EMAIL = re.compile(r"\b[^\s@]+@[^\s@]+\.[^\s@]+\b", re.IGNORECASE)
+_MACHINE_IDENTIFIER = re.compile(
+    r"(?<!\w)(?=\S*[A-Za-z\u05d0-\u05ea])(?=\S*\d)"
+    r"[A-Za-z\u05d0-\u05ea0-9._/-]+(?!\w)",
+    re.IGNORECASE,
+)
 
 
 class ConversationLanguage(StrEnum):
@@ -44,8 +51,15 @@ def detect_conversation_language(
     provider value breaks ties and handles short Latin/Hebrew utterances.
     """
 
-    hebrew = len(_HEBREW_LETTER.findall(text))
-    latin = len(_LATIN_LETTER.findall(text))
+    # Links, email addresses and machine identifiers are evidence, not a
+    # reliable language signal. A Hebrew caller pasting a long support URL or
+    # saying an English-looking error code must still receive a Hebrew turn.
+    natural_text = _MACHINE_IDENTIFIER.sub(
+        " ",
+        _EMAIL.sub(" ", _URL.sub(" ", text)),
+    )
+    hebrew = len(_HEBREW_LETTER.findall(natural_text))
+    latin = len(_LATIN_LETTER.findall(natural_text))
     provider = _language_from_provider(provider_language)
     # Product and person names often use the other script and can be longer
     # than the surrounding utterance. Soniox's turn-level identification is the
@@ -57,6 +71,28 @@ def detect_conversation_language(
     if latin >= 2 and latin > hebrew:
         return ConversationLanguage.ENGLISH
     return provider
+
+
+def resolve_conversation_language(
+    text: str,
+    fallback: str,
+    provider_language: object = None,
+) -> ConversationLanguage:
+    """Resolve one turn, retaining the authored language only when it is ambiguous.
+
+    Typed evaluations do not carry Soniox metadata, while live calls do. Keeping
+    the fallback in this shared helper makes both paths apply the same script
+    rules without treating digits, punctuation, or silence as a language switch.
+    """
+
+    detected = detect_conversation_language(text, provider_language)
+    if detected is not None:
+        return detected
+    return (
+        ConversationLanguage.HEBREW
+        if str(fallback).lower().startswith("he")
+        else ConversationLanguage.ENGLISH
+    )
 
 
 def conversation_language_instruction(language: ConversationLanguage) -> str:
@@ -79,11 +115,7 @@ class ConversationLanguageState:
     """Mutable state scoped to one call; the authored flow language is the fallback."""
 
     def __init__(self, default: str):
-        self.default = (
-            ConversationLanguage.HEBREW
-            if str(default).lower().startswith("he")
-            else ConversationLanguage.ENGLISH
-        )
+        self.default = resolve_conversation_language("", default)
         self.current = self.default
 
     def observe(self, frame: TranscriptionFrame) -> bool:

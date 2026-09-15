@@ -5,6 +5,7 @@ from oron_agent.conversation_language import (
     ConversationLanguageState,
     ResponseLanguageTTSProcessor,
     detect_conversation_language,
+    resolve_conversation_language,
 )
 from pipecat.frames.frames import (
     AggregatedTextFrame,
@@ -22,6 +23,13 @@ from pipecat.utils.text.base_text_aggregator import AggregationType
     [
         ("אני צריך עזרה", None, ConversationLanguage.HEBREW),
         ("I need help", None, ConversationLanguage.ENGLISH),
+        (
+            "לא עובד https://support.example.com/products/router/setup/troubleshooting",
+            None,
+            ConversationLanguage.HEBREW,
+        ),
+        ("המסך מציג ERR-502 ומבקש לנסות שוב", None, ConversationLanguage.HEBREW),
+        ("Please email person@example.com", None, ConversationLanguage.ENGLISH),
         ("WhatsApp לא עובד", Language.HE, ConversationLanguage.HEBREW),
         ("OK", Language.EN, ConversationLanguage.ENGLISH),
         ("1234", None, None),
@@ -29,6 +37,19 @@ from pipecat.utils.text.base_text_aggregator import AggregationType
 )
 def test_language_detection_uses_script_then_provider(text, provider, expected):
     assert detect_conversation_language(text, provider) is expected
+
+
+@pytest.mark.parametrize(
+    ("text", "fallback", "expected"),
+    [
+        ("Can you help me?", "he-IL", ConversationLanguage.ENGLISH),
+        ("אפשר לעזור לי?", "en-US", ConversationLanguage.HEBREW),
+        ("1234", "he-IL", ConversationLanguage.HEBREW),
+        ("...", "en-US", ConversationLanguage.ENGLISH),
+    ],
+)
+def test_turn_language_uses_authored_fallback_only_for_ambiguous_text(text, fallback, expected):
+    assert resolve_conversation_language(text, fallback) is expected
 
 
 @pytest.mark.asyncio

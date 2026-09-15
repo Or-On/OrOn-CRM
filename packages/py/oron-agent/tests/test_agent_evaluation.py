@@ -3,8 +3,13 @@
 import asyncio
 
 import pytest
-from oron_agent.agent_evaluation import EvaluationSettings, RealEvaluationProvider
+from oron_agent.agent_evaluation import (
+    EvaluationSettings,
+    RealEvaluationProvider,
+    render_evaluation,
+)
 from oron_agent.config import Settings
+from oron_agent.grounding import CONVERSATION
 from pydantic import ValidationError
 
 
@@ -50,6 +55,69 @@ async def test_uses_installed_llm_factory_pinned_bounds_with_no_tools():
     assert not llm.context.tools
     assert "ZERO tools" in llm.context.messages[0]["content"]
     assert llm.context.messages[1]["content"] == "Fictional scenario"
+
+
+@pytest.mark.parametrize(
+    ("caller_text", "configured_language", "expected_protocol_language"),
+    [
+        ("Can you help me?", "he", "accepted caller turn is in English"),
+        ("אפשר לעזור לי?", "en", "accepted caller turn is in Hebrew"),
+    ],
+)
+async def test_provider_protocol_follows_current_typed_turn_language(
+    caller_text, configured_language, expected_protocol_language
+):
+    settings = Settings(
+        _env_file=None,
+        ENABLE_REAL_VOICE_PROVIDERS=True,
+        LIVEKIT_URL="ws://127.0.0.1:7880",
+        LIVEKIT_API_KEY="fixture",
+        LIVEKIT_API_SECRET="fixture",
+        SONIOX_API_KEY="fixture",
+        GOOGLE_CLOUD_PROJECT="fixture",
+    )
+    llm = LLM()
+    provider = RealEvaluationProvider(
+        settings_factory=lambda: settings, llm_factory=lambda *args, **kwargs: llm
+    )
+
+    await provider.evaluate(
+        caller_text,
+        {
+            "system_prompt": "Tenant style",
+            "quality": {"language": configured_language},
+            "knowledge": [],
+        },
+        "fictional",
+        confirmed=True,
+    )
+
+    assert expected_protocol_language in llm.context.messages[0]["content"]
+
+
+@pytest.mark.parametrize(
+    ("caller_text", "configured_language", "expected"),
+    [
+        ("blorp zangle froop", "he", CONVERSATION["en"]["clarify"]),
+        ("בלה קשקוש פלופ", "en", CONVERSATION["he"]["clarify"]),
+    ],
+)
+def test_evaluation_nonsense_is_clarified_in_the_callers_language(
+    caller_text, configured_language, expected
+):
+    reply = render_evaluation(
+        '{"kind":"conversation","intent":"unverified"}',
+        {
+            "system_prompt": "Tenant style",
+            "quality": {"language": configured_language},
+            "knowledge": [],
+        },
+        "fictional",
+        caller_text=caller_text,
+    )
+
+    assert reply.text == expected
+    assert reply.decision == "clarify"
 
 
 async def test_existing_kill_flag_blocks_before_any_provider_construction():

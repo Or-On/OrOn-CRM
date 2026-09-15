@@ -103,6 +103,7 @@ async def test_actual_selector_is_rendered_with_fresh_provenance_and_unknown_cos
 @pytest.mark.parametrize("mode", ["revoked", "injected", "conflicting"])
 async def test_stale_conflicting_and_raw_injection_never_return_model_claim(mode):
     actor, command, store, provider = fixture()
+    command = command.model_copy(update={"text": "Has my refund been approved?"})
     if mode == "revoked":
         provider.revoke = True
     elif mode == "injected":
@@ -120,6 +121,20 @@ async def test_stale_conflicting_and_raw_injection_never_return_model_claim(mode
     )
     assert result.decision == "unverified" and not result.sources
     assert "private reasoning" not in result.model_dump_json() and "refunded" not in result.response
+
+
+async def test_typed_evaluation_renders_in_the_current_turn_language_and_clarifies_nonsense():
+    actor, command, store, provider = fixture()
+    store.context["quality"]["language"] = "he"
+    provider.selection = '{"kind":"conversation","intent":"unverified"}'
+    command = command.model_copy(update={"text": "blorp zangle froop"})
+
+    result = await AgentEvaluationService(store, enabled=True, provider=provider).evaluate(
+        actor, command
+    )
+
+    assert result.response == "Could you explain a little more?"
+    assert result.decision == "clarify"
 
 
 async def test_disabled_wrong_version_and_timeout_are_non_spending_or_bounded():

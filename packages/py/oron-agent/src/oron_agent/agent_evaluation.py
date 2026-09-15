@@ -15,6 +15,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from oron_agent.audio_preview import install_private_provider_logging, private_provider_logging
 from oron_agent.config import Settings
+from oron_agent.conversation_language import resolve_conversation_language
 from oron_agent.grounding import GroundedReply, eligible_facts, grounding_instruction, render_reply
 from oron_agent.llm import LlmProvider, LlmReasoningEffort, build_llm
 from oron_agent.voice_quality import VoiceQualityConfig
@@ -84,14 +85,22 @@ class EvaluationSettings(BaseSettings):
         return self
 
 
-def render_evaluation(selection: str, context: dict[str, Any], tenant_id: str) -> GroundedReply:
+def render_evaluation(
+    selection: str,
+    context: dict[str, Any],
+    tenant_id: str,
+    *,
+    caller_text: str = "",
+) -> GroundedReply:
     quality = VoiceQualityConfig.model_validate(context["quality"])
+    language = resolve_conversation_language(caller_text, quality.language).value
     return render_reply(
         selection,
         eligible_facts(context["knowledge"], tenant_id),
-        quality.language,
+        language,
         speaking_style=quality.speakingStyle,
         fallback_behavior=quality.fallbackBehavior,
+        latest_caller_text=caller_text,
     )
 
 
@@ -116,6 +125,7 @@ class RealEvaluationProvider:
             if not settings.enable_real_voice_providers:
                 raise PermissionError("real voice providers are disabled")
             quality = VoiceQualityConfig.model_validate(context["quality"])
+            language = resolve_conversation_language(text, quality.language).value
             llm = self._llm_factory(
                 settings.llm_provider,
                 project_id=settings.google_cloud_project,
@@ -132,7 +142,7 @@ class RealEvaluationProvider:
                 request_timeout_secs=min(settings.llm_request_timeout_secs, 10),
             )
             protocol = grounding_instruction(
-                eligible_facts(context["knowledge"], tenant_id), quality.language
+                eligible_facts(context["knowledge"], tenant_id), language
             )
             prompt = (
                 "READ-ONLY TYPED EVALUATION. No routing, business, messaging or other tools exist. "

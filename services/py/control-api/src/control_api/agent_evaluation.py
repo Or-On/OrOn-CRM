@@ -223,7 +223,12 @@ class AgentEvaluationService:
             )
             if fresh is None:
                 raise HTTPException(403, "evaluation access changed")
-            reply = render_evaluation(output.selection, fresh, str(principal.tenant_id))
+            reply = render_evaluation(
+                output.selection,
+                fresh,
+                str(principal.tenant_id),
+                caller_text=command.text,
+            )
             evidence = reply.evidence
             sources = (
                 [
