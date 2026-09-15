@@ -79,8 +79,10 @@ worker 30 and web 1.
 - A later documentation-only candidate passed all six build, test, database and
   container gates, then its DEV rollout found that default `compose pull`
   omitted the profiled migrator image on a clean host. Rollback preserved the
-  previously healthy release. The deployment now pulls every participating
-  profile before revision inspection; shell syntax and all 11 release tests pass.
+  previously healthy release. Enabling those profiles still omitted the
+  migrator on the actual host, so deployment now explicitly pulls each of the
+  five validated immutable references before revision inspection; shell syntax
+  and all 11 release tests pass.
 - The first focused lint after adding strict UTF-8 validation caught one missing
   error `cause`; it was fixed and the full lint/type/build/test gates were rerun.
 - A first production build during implementation exposed a client import through

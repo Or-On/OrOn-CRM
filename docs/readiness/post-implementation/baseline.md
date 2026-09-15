@@ -14,10 +14,10 @@ records are included in the identifiers below.
 | Initial working tree | 75 unstaged tracked paths, 87 untracked paths, no staged paths |
 | First candidate commit | `18009d089210591d402f542e0f10e61c847956ba` |
 | Validated implementation commit | `d5cead92603ac6118968f609edd9344efec5fa73` |
-| Release-image preload follow-up | `46112afba598585800ed71ab594aed20f0139f9b` |
+| Release-image preload follow-up | `15f82a2b4059594f850f849aff7c58a19ed86ca3` |
 | Successful CI/deployment run | `34927297654` — all seven jobs passed |
 | Implementation source files | 1,196 tracked/untracked, non-ignored files; `.env*`, `.artifacts` and this evidence directory excluded |
-| Corrected implementation snapshot SHA-256 | `f56ccd2f2e5995916f0e2ef4ffbbc3523b40f1b7673220f613477ed894649ea5` |
+| Corrected implementation snapshot SHA-256 | `8eb27ea00b90c6f2474617ccb505a98bdfba254214c8b37833dc2388ab072fcb` |
 | Initial tracked implementation diff SHA-256 | `fa0fb5588f0f5fd86016cb5fb2a5979643a00671ec892ac809cd40f09f082b47` |
 | Read-only source reference | `https://github.com/Abssel-AI/Brimag.git`, `main`, `08228541cf0ccf7f65eb8517ec9c5346c29f280f` |
 
@@ -27,10 +27,11 @@ preserved the dirty tree. At the user's later direction it was committed and
 pushed. Repeated disposable CI runs exposed and then verified fixes for invalid
 rendered SQL, migration teardown/RLS dependencies, worker-poll assumptions and
 same-second WhatsApp ordering. A later evidence-only rollout exposed that
-profiled one-shot images were not included in the default Compose pull; the
-release follow-up now preloads every participating profile before inspecting
-digests or touching the active release. No reset, clean or shared-database
-mutation was performed locally.
+profiled one-shot images were not included in the default Compose pull. Enabling
+those profiles still omitted the migrator on the actual host, so the final
+release follow-up explicitly pulls all five immutable application references
+before inspecting digests or touching the active release. No reset, clean or
+shared-database mutation was performed locally.
 
 ## Toolchain and locks
 
