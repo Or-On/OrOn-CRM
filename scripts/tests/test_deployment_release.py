@@ -110,11 +110,15 @@ def test_release_validator_rejects_unsafe_or_incomplete_archives(
 
 def test_ci_preserves_deploy_exit_status_and_binds_archive_checksum() -> None:
     workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert "deployer_sha256=$(sha256sum scripts/deploy-dev.sh" in workflow
+    assert 'scripts/deploy-dev.sh "oron-dev:${remote_deployer}"' in workflow
+    assert "sha256sum '${remote_deployer}'" in workflow
     assert (
-        "deploy-dev.sh '${GITHUB_SHA}' '${remote_archive}' "
-        "'${{ steps.release.outputs.archive_sha256 }}'" in workflow
+        "sudo bash '${remote_deployer}' '${GITHUB_SHA}' "
+        "'${remote_archive}' '${ARCHIVE_SHA256}'" in workflow
     )
-    assert "set -e; trap 'rm -f ${remote_archive}' EXIT" in workflow
+    assert "trap 'rm -f ${remote_archive} ${remote_deployer}' EXIT" in workflow
+    assert "/opt/oron-dev/scripts/deploy-dev.sh" not in workflow
     assert "deploy-dev.sh '${GITHUB_SHA}' '${remote_archive}'; rm -f" not in workflow
 
 

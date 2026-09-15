@@ -297,19 +297,26 @@ jobs:
           tar -czf "${archive}" -C "${release_dir}" .
           echo "archive=${archive}" >>"${GITHUB_OUTPUT}"
           echo "archive_sha256=$(sha256sum "${archive}" | cut -d' ' -f1)" >>"${GITHUB_OUTPUT}"
+          echo "deployer_sha256=$(sha256sum scripts/deploy-dev.sh | cut -d' ' -f1)" >>"${GITHUB_OUTPUT}"
       - name: Transfer and deploy the release
         shell: bash
         env:
           ARCHIVE: ${{ steps.release.outputs.archive }}
+          ARCHIVE_SHA256: ${{ steps.release.outputs.archive_sha256 }}
+          DEPLOYER_SHA256: ${{ steps.release.outputs.deployer_sha256 }}
         run: |
           set -Eeuo pipefail
           remote_archive="/tmp/oron-dev-release-${GITHUB_SHA}.tar.gz"
+          remote_deployer="/tmp/oron-dev-deploy-${GITHUB_SHA}.sh"
           gcloud compute scp --quiet --tunnel-through-iap \
             --project website-478708 --zone me-west1-b \
             "${ARCHIVE}" "oron-dev:${remote_archive}"
+          gcloud compute scp --quiet --tunnel-through-iap \
+            --project website-478708 --zone me-west1-b \
+            scripts/deploy-dev.sh "oron-dev:${remote_deployer}"
           gcloud compute ssh oron-dev --quiet --tunnel-through-iap \
             --project website-478708 --zone me-west1-b \
-            --command="set -e; trap 'rm -f ${remote_archive}' EXIT; sudo /opt/oron-dev/scripts/deploy-dev.sh '${GITHUB_SHA}' '${remote_archive}' '${{ steps.release.outputs.archive_sha256 }}'"
+            --command="set -e; trap 'rm -f ${remote_archive} ${remote_deployer}' EXIT; test \"\$(sha256sum '${remote_deployer}' | cut -d' ' -f1)\" = '${DEPLOYER_SHA256}'; sudo bash '${remote_deployer}' '${GITHUB_SHA}' '${remote_archive}' '${ARCHIVE_SHA256}'"
       - name: Verify the public DEV endpoint
         shell: bash
         run: |
