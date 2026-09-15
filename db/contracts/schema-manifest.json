@@ -58,6 +58,7 @@
     "platform.update_current_user_profile",
     "service.configure_current_tenant",
     "service.current_actor_can_access_case",
+    "service.current_actor_can_access_object",
     "service.current_actor_can_access_technician",
     "service.enqueue_call_case_summary",
     "service.enqueue_whatsapp_case_summary",

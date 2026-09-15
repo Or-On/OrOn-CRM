@@ -358,7 +358,7 @@ async def test_tenant_isolation_covers_evidence_identities_settings_and_exports(
         export_id = await pg.fetchval(
             "INSERT INTO service.export_records"
             "(tenant_id,case_id,format,branding_snapshot,requested_by_user_id) "
-            "VALUES ($1,$2,'pdf',jsonb_build_object('businessName',$3),$4) "
+            "VALUES ($1,$2,'pdf',jsonb_build_object('businessName',$3::text),$4) "
             "RETURNING id",
             fixture.tenant_id,
             case_id,

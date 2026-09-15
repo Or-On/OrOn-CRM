@@ -1595,6 +1595,38 @@ def upgrade() -> None:
         $$
     """)
     op.execute("""
+        CREATE FUNCTION service.current_actor_can_access_object(
+          p_tenant_id uuid, p_object_id uuid, p_owner_type text, p_owner_id uuid
+        ) RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER
+        SET search_path = pg_catalog AS $$
+          SELECT CASE
+            WHEN p_tenant_id IS DISTINCT FROM platform.current_tenant_id()
+              THEN false
+            WHEN coalesce(current_setting('app.current_role', true), '') <> 'technician'
+              THEN true
+            WHEN p_owner_type = 'service_case'
+              THEN service.current_actor_can_access_case(p_owner_id)
+            WHEN p_owner_type = 'message' THEN EXISTS (
+              SELECT 1 FROM service.report_attachments scoped_attachment
+              WHERE scoped_attachment.object_id = p_object_id
+                AND scoped_attachment.tenant_id = p_tenant_id
+                AND service.current_actor_can_access_case(scoped_attachment.case_id)
+            )
+            WHEN p_owner_type = 'contact' THEN EXISTS (
+              SELECT 1 FROM crm.customer_documents customer_document
+              JOIN service.cases scoped_case
+                ON scoped_case.customer_contact_id=customer_document.contact_id
+               AND scoped_case.tenant_id=customer_document.tenant_id
+              WHERE customer_document.object_id=p_object_id
+                AND customer_document.tenant_id=p_tenant_id
+                AND customer_document.deleted_at IS NULL
+                AND service.current_actor_can_access_case(scoped_case.id)
+            )
+            ELSE false
+          END
+        $$
+    """)
+    op.execute("""
         CREATE FUNCTION platform.set_tenant_feature_entitlement(
           p_tenant_id uuid, p_available boolean, p_request_id text
         ) RETURNS void LANGUAGE plpgsql VOLATILE SECURITY DEFINER
@@ -1847,53 +1879,18 @@ def upgrade() -> None:
     op.execute("""
         CREATE POLICY object_metadata_field_service_technician_scope
         ON objects.object_metadata AS RESTRICTIVE
-        USING (
-          coalesce(current_setting('app.current_role', true), '') <> 'technician'
-          OR (owner_type = 'service_case'
-            AND service.current_actor_can_access_case(owner_id))
-          OR (owner_type = 'message' AND EXISTS (
-            SELECT 1 FROM service.report_attachments scoped_attachment
-            WHERE scoped_attachment.object_id = object_metadata.id
-              AND scoped_attachment.tenant_id = object_metadata.tenant_id
-              AND service.current_actor_can_access_case(scoped_attachment.case_id)
-          ))
-          OR (owner_type = 'contact' AND EXISTS (
-            SELECT 1 FROM crm.customer_documents customer_document
-            JOIN service.cases scoped_case
-              ON scoped_case.customer_contact_id=customer_document.contact_id
-             AND scoped_case.tenant_id=customer_document.tenant_id
-            WHERE customer_document.object_id=object_metadata.id
-              AND customer_document.tenant_id=object_metadata.tenant_id
-              AND customer_document.deleted_at IS NULL
-              AND service.current_actor_can_access_case(scoped_case.id)
-          ))
-        )
-        WITH CHECK (
-          coalesce(current_setting('app.current_role', true), '') <> 'technician'
-          OR (owner_type = 'service_case'
-            AND service.current_actor_can_access_case(owner_id))
-          OR (owner_type = 'message' AND EXISTS (
-            SELECT 1 FROM service.report_attachments scoped_attachment
-            WHERE scoped_attachment.object_id = object_metadata.id
-              AND scoped_attachment.tenant_id = object_metadata.tenant_id
-              AND service.current_actor_can_access_case(scoped_attachment.case_id)
-          ))
-          OR (owner_type = 'contact' AND EXISTS (
-            SELECT 1 FROM crm.customer_documents customer_document
-            JOIN service.cases scoped_case
-              ON scoped_case.customer_contact_id=customer_document.contact_id
-             AND scoped_case.tenant_id=customer_document.tenant_id
-            WHERE customer_document.object_id=object_metadata.id
-              AND customer_document.tenant_id=object_metadata.tenant_id
-              AND customer_document.deleted_at IS NULL
-              AND service.current_actor_can_access_case(scoped_case.id)
-          ))
-        )
+        USING (service.current_actor_can_access_object(
+          tenant_id, id, owner_type, owner_id
+        ))
+        WITH CHECK (service.current_actor_can_access_object(
+          tenant_id, id, owner_type, owner_id
+        ))
     """)
 
     op.execute("""
         GRANT USAGE ON SCHEMA service
-          TO platform_web, platform_worker, platform_messaging, platform_readonly
+          TO platform_web, platform_worker, platform_messaging,
+             platform_voice, platform_readonly
     """)
     op.execute("""
         GRANT SELECT ON platform.tenant_feature_entitlements
@@ -1921,7 +1918,8 @@ def upgrade() -> None:
     op.execute("""
         REVOKE ALL ON FUNCTION
           service.current_actor_can_access_case(uuid),
-          service.current_actor_can_access_technician(uuid) FROM PUBLIC
+          service.current_actor_can_access_technician(uuid),
+          service.current_actor_can_access_object(uuid,uuid,text,uuid) FROM PUBLIC
     """)
     op.execute("""
         GRANT EXECUTE ON FUNCTION service.field_service_enabled()
@@ -1930,8 +1928,10 @@ def upgrade() -> None:
     op.execute("""
         GRANT EXECUTE ON FUNCTION
           service.current_actor_can_access_case(uuid),
-          service.current_actor_can_access_technician(uuid)
-          TO platform_web, platform_worker, platform_messaging, platform_readonly
+          service.current_actor_can_access_technician(uuid),
+          service.current_actor_can_access_object(uuid,uuid,text,uuid)
+          TO platform_web, platform_worker, platform_messaging,
+             platform_voice, platform_readonly
     """)
     op.execute("""
         REVOKE ALL ON FUNCTION
@@ -2001,7 +2001,6 @@ def downgrade() -> None:
     )
     op.execute("DROP FUNCTION platform.list_tenant_field_service_entitlements_for_administrator()")
     op.execute("DROP FUNCTION platform.set_tenant_feature_entitlement(uuid,boolean,text)")
-    op.execute("DROP FUNCTION service.field_service_enabled()")
     op.execute("DROP TRIGGER trg_queue_call_case_summary_session ON public.sessions")
     op.execute("DROP FUNCTION service.queue_call_summary_from_session()")
     op.execute("DROP TRIGGER trg_queue_call_case_summary_link ON service.case_calls")
@@ -2030,8 +2029,10 @@ def downgrade() -> None:
 
     for table in reversed(SERVICE_TABLES):
         op.execute(f'DROP TABLE service."{table}"')
+    op.execute("DROP FUNCTION service.current_actor_can_access_object(uuid,uuid,text,uuid)")
     op.execute("DROP FUNCTION service.current_actor_can_access_technician(uuid)")
     op.execute("DROP FUNCTION service.current_actor_can_access_case(uuid)")
+    op.execute("DROP FUNCTION service.field_service_enabled()")
     op.execute("DROP SCHEMA service")
     for table in (
         "customer_documents",

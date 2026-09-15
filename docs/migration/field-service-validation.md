@@ -39,8 +39,8 @@ private-object validation, WhatsApp worker contracts, and existing application
 regressions. PostgreSQL-dependent tests remain explicitly skipped unless an
 isolated test database is supplied.
 
-The offline migration verification generated 372,970 bytes of SQL with SHA-256
-`92fe079f03118c8d1cd9a46a4b4f5797003103c4b4f6dbebb939d63f9da00db6`.
+The offline migration verification generated 372,669 bytes of SQL with SHA-256
+`83a2cfbbd09c33f39d5abbc3fc41e9fb0a40e4c8667c238d4f327f796fb507f4`.
 
 ## Environment-gated validation
 

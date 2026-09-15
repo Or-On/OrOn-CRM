@@ -59,6 +59,11 @@ worker 30 and web 1.
 - The first online CI migration attempt exposed four inline Python lint comments
   rendered as PostgreSQL statements. The comments were removed and the offline
   validator now rejects any line that begins with a Python-style `#` comment.
+- The next CI run upgraded to the new head and then exposed downgrade ordering,
+  a polymorphic fixture parameter and a cross-role RLS policy dependency. The
+  teardown was reordered, the fixture was typed, and object access was moved
+  behind a tenant-bound security-definer predicate so the voice role does not
+  receive direct field-service table privileges.
 - The first focused lint after adding strict UTF-8 validation caught one missing
   error `cause`; it was fixed and the full lint/type/build/test gates were rerun.
 - A first production build during implementation exposed a client import through
@@ -80,8 +85,8 @@ worker 30 and web 1.
 
 - base `0001`, one head `b72c5f0e4d91`;
 - 68 revisions total, 22 Or-On revisions;
-- 372,970-byte PostgreSQL upgrade SQL;
-- SHA-256 `92fe079f03118c8d1cd9a46a4b4f5797003103c4b4f6dbebb939d63f9da00db6`.
+- 372,669-byte PostgreSQL upgrade SQL;
+- SHA-256 `83a2cfbbd09c33f39d5abbc3fc41e9fb0a40e4c8667c238d4f327f796fb507f4`.
 
 Offline generation validates graph/contract/static SQL safety. It does not prove
 the upgrade, downgrade, grants, functions, triggers or RLS on PostgreSQL.
