@@ -14,9 +14,10 @@ records are included in the identifiers below.
 | Initial working tree | 75 unstaged tracked paths, 87 untracked paths, no staged paths |
 | First candidate commit | `18009d089210591d402f542e0f10e61c847956ba` |
 | Validated implementation commit | `d5cead92603ac6118968f609edd9344efec5fa73` |
+| Release-image preload follow-up | `46112afba598585800ed71ab594aed20f0139f9b` |
 | Successful CI/deployment run | `34927297654` — all seven jobs passed |
 | Implementation source files | 1,196 tracked/untracked, non-ignored files; `.env*`, `.artifacts` and this evidence directory excluded |
-| Corrected implementation snapshot SHA-256 | `8b6eef328c9a471cdc64c3350763e609542f087c14ab2395c8e6bef0922a4797` |
+| Corrected implementation snapshot SHA-256 | `f56ccd2f2e5995916f0e2ef4ffbbc3523b40f1b7673220f613477ed894649ea5` |
 | Initial tracked implementation diff SHA-256 | `fa0fb5588f0f5fd86016cb5fb2a5979643a00671ec892ac809cd40f09f082b47` |
 | Read-only source reference | `https://github.com/Abssel-AI/Brimag.git`, `main`, `08228541cf0ccf7f65eb8517ec9c5346c29f280f` |
 
@@ -25,8 +26,11 @@ while excluding this self-referential evidence directory. The initial audit
 preserved the dirty tree. At the user's later direction it was committed and
 pushed. Repeated disposable CI runs exposed and then verified fixes for invalid
 rendered SQL, migration teardown/RLS dependencies, worker-poll assumptions and
-same-second WhatsApp ordering. No reset, clean or shared-database mutation was
-performed locally.
+same-second WhatsApp ordering. A later evidence-only rollout exposed that
+profiled one-shot images were not included in the default Compose pull; the
+release follow-up now preloads every participating profile before inspecting
+digests or touching the active release. No reset, clean or shared-database
+mutation was performed locally.
 
 ## Toolchain and locks
 

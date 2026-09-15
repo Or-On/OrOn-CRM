@@ -26,6 +26,7 @@ reported, not counted as passes.
 | `pnpm --filter @or-on/web test -- private-objects customer-document-permissions field-service-attachment-download` | PASS — 11 focused upload/authorization/header regressions |
 | `pnpm --filter @or-on/web test -- oauth-disconnect-route oauth-disconnect tenant-product-workspaces` | PASS — 19 focused OAuth lifecycle/UI tests |
 | `uv run pytest -p no:cacheprovider scripts/tests/test_deployment_release.py scripts/tests/test_db_verify.py` | PASS — 19 focused release/database-contract tests |
+| `uv run pytest -p no:cacheprovider scripts/tests/test_deployment_release.py` after release-preload hardening | PASS — 11 focused release tests |
 | GitHub Actions CI `34927297654` on Node 24.20.0 / Python 3.14.7 | PASS — TypeScript, Python, contracts, architecture/security, PostgreSQL/Alembic and all five container builds |
 | CI PostgreSQL 18.6 migration/RLS suite | PASS — 128 passed, 3 explicit readiness-environment skips |
 | CI isolated messaging diagnostic | PASS — 4 passed; provider HTTP mocked |
@@ -75,6 +76,11 @@ worker 30 and web 1.
   trigger, callback and case-evidence ordering consistently use provider time,
   database ingestion time and UUID only as a final tie-breaker. The deterministic
   same-second scenario and all 13 cross-channel cases pass on PostgreSQL.
+- A later documentation-only candidate passed all six build, test, database and
+  container gates, then its DEV rollout found that default `compose pull`
+  omitted the profiled migrator image on a clean host. Rollback preserved the
+  previously healthy release. The deployment now pulls every participating
+  profile before revision inspection; shell syntax and all 11 release tests pass.
 - The first focused lint after adding strict UTF-8 validation caught one missing
   error `cause`; it was fixed and the full lint/type/build/test gates were rerun.
 - A first production build during implementation exposed a client import through
