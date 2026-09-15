@@ -22,6 +22,9 @@ env:
   ENABLE_REAL_TELEPHONY: "false"
   ENABLE_REAL_WHATSAPP: "false"
   ENABLE_REAL_VOICE_PROVIDERS: "false"
+  ENABLE_WHATSAPP_AI: "false"
+  ENABLE_WHATSAPP_AUTO_CALLS: "false"
+  ORON_RUN_PROVIDER_EVALS: "false"
 
 jobs:
   typescript:
@@ -94,9 +97,23 @@ jobs:
           --health-interval 3s
           --health-timeout 5s
           --health-retries 20
+      readiness-postgres:
+        image: postgres:18.6-bookworm
+        env:
+          POSTGRES_DB: oron_readiness
+          POSTGRES_USER: platform_migrator
+          POSTGRES_PASSWORD: ci-only-password
+        ports:
+          - 55439:5432
+        options: >-
+          --health-cmd "pg_isready -U platform_migrator -d oron_readiness"
+          --health-interval 3s
+          --health-timeout 5s
+          --health-retries 20
     env:
       DATABASE_URL: postgresql://platform_migrator:ci-only-password@127.0.0.1:5432/or_on_platform_ci
       TEST_DATABASE_URL: postgresql://platform_migrator:ci-only-password@127.0.0.1:5432/or_on_platform_ci
+      READINESS_POSTGRES_URL: postgresql://platform_migrator:ci-only-password@127.0.0.1:55439/oron_readiness
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@ae62891fec2bb8e7d6c99fc78c9fec3a63790f8d # v10.0.0
@@ -126,6 +143,10 @@ jobs:
         run: >-
           pnpm --filter @or-on/crm exec vitest run
           src/field-service.postgres.test.ts
+      - name: Comprehensive isolated TypeScript PostgreSQL acceptance (no providers)
+        env:
+          MIGRATION_DATABASE_URL: ${{ env.DATABASE_URL }}
+        run: uv run --no-sync python scripts/preview_ui.py --check-db
       - name: Isolated WhatsApp diagnostic persistence (mocked HTTP)
         env:
           MIGRATION_DATABASE_URL: ${{ env.DATABASE_URL }}
@@ -136,6 +157,19 @@ jobs:
         run: >-
           pnpm --filter @or-on/messaging-worker exec vitest run
           tests/ai-reply.live.test.ts tests/call-followup.live.test.ts
+      - name: Initialize dedicated readiness PostgreSQL
+        env:
+          DATABASE_URL: ${{ env.READINESS_POSTGRES_URL }}
+        run: |
+          uv run --no-sync alembic -c db/alembic/alembic.ini upgrade head
+          uv run --no-sync python db/seeds/seed_development.py
+      - name: Dedicated readiness persistence acceptance (no providers)
+        run: |
+          pnpm --filter @or-on/crm exec vitest run \
+            src/agent-quality.postgres.test.ts \
+            src/handoff-idempotency.postgres.test.ts
+          pnpm --filter @or-on/messaging-worker exec vitest run \
+            tests/readiness.live.test.ts
 
   contracts:
     name: Contract freshness

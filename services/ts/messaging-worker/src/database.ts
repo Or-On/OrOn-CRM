@@ -1464,6 +1464,8 @@ interface AiWork {
   readonly conversationId: string;
   readonly locale: string;
   readonly provider: "simulator" | "meta";
+  readonly recipientAddress?: string;
+  readonly recipientIdentityId?: string;
   readonly systemPrompt: string;
   readonly serviceIntake?: NonNullable<
     Parameters<WhatsAppAiProvider["decide"]>[0]["serviceIntake"]
@@ -1611,13 +1613,19 @@ async function loadAiWork(
         direction: "inbound" | "outbound";
         content_text: string;
         created_at: Date;
+        sender_address: string | null;
+        sender_identity_id: string | null;
       }[]
     >`
-      SELECT id, direction, content_text, created_at
-      FROM messaging.messages
-      WHERE conversation_id = ${row.conversation_id}::uuid
-        AND content_type = 'text' AND content_text IS NOT NULL
-      ORDER BY created_at DESC, updated_at DESC, id DESC LIMIT 50
+      SELECT message.id, message.direction, message.content_text,
+             message.created_at, origin.contact_identity_id AS sender_identity_id,
+             origin.sender_address
+      FROM messaging.messages message
+      LEFT JOIN messaging.inbound_message_origins origin
+        ON origin.tenant_id=message.tenant_id AND origin.message_id=message.id
+      WHERE message.conversation_id = ${row.conversation_id}::uuid
+        AND message.content_type = 'text' AND message.content_text IS NOT NULL
+      ORDER BY message.created_at DESC, message.updated_at DESC, message.id DESC LIMIT 50
     `;
     const config = row.configuration as Record<string, unknown> | null;
     const channelConfiguration =
@@ -1636,6 +1644,23 @@ async function loadAiWork(
     );
     if (triggerMessage === undefined)
       throw new TypeError("AI conversation has no inbound trigger message");
+    const recipientIdentityId =
+      typeof triggerMessage.sender_identity_id === "string" &&
+      /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/iu.test(
+        triggerMessage.sender_identity_id,
+      )
+        ? triggerMessage.sender_identity_id
+        : undefined;
+    const recipientAddress =
+      typeof triggerMessage.sender_address === "string" &&
+      /^\+[1-9][0-9]{7,14}$/u.test(triggerMessage.sender_address)
+        ? triggerMessage.sender_address
+        : undefined;
+    if (
+      row.provider === "meta" &&
+      (recipientIdentityId === undefined || recipientAddress === undefined)
+    )
+      throw new TypeError("AI inbound trigger has no trusted sender identity");
     const responseLocale = latestMessageLocale(
       row.locale,
       triggerMessage.content_text,
@@ -1805,6 +1830,9 @@ async function loadAiWork(
       },
       locale: responseLocale,
       provider: row.provider,
+      ...(recipientIdentityId === undefined || recipientAddress === undefined
+        ? {}
+        : { recipientIdentityId, recipientAddress }),
       channelConfiguration,
       triggerMessageId,
       messages: orderedHistory.map((message) => ({
@@ -2135,6 +2163,13 @@ async function processWhatsAppAiReply(
             kind: "text",
             provider: work.provider,
             realProviderEnabled: automation.realWhatsAppEnabled === true,
+            ...(work.recipientIdentityId === undefined ||
+            work.recipientAddress === undefined
+              ? {}
+              : {
+                  recipientIdentityId: work.recipientIdentityId,
+                  recipientAddress: work.recipientAddress,
+                }),
             senderUserId: work.authorizedUserId,
             senderType: "agent",
             text: responseText,
@@ -2204,8 +2239,10 @@ interface AutomaticCallPayload {
   readonly canonicalFlowVersionId: string;
   readonly ownershipEpoch: string;
   readonly actorUserId: string;
+  readonly contactIdentityId: string;
   readonly contactId: string;
   readonly conversationId: string;
+  readonly destination: string;
   readonly flowId: string;
   readonly flowVersion: number;
   readonly mode: "real";
@@ -2227,10 +2264,14 @@ function parseAutomaticCallPayload(value: unknown): AutomaticCallPayload {
     !/^\d{1,19}$/u.test(payload.ownershipEpoch) ||
     typeof payload.actorUserId !== "string" ||
     !uuid.test(payload.actorUserId) ||
+    typeof payload.contactIdentityId !== "string" ||
+    !uuid.test(payload.contactIdentityId) ||
     typeof payload.contactId !== "string" ||
     !uuid.test(payload.contactId) ||
     typeof payload.conversationId !== "string" ||
     !uuid.test(payload.conversationId) ||
+    typeof payload.destination !== "string" ||
+    !/^\+[1-9][0-9]{7,14}$/u.test(payload.destination) ||
     typeof payload.flowId !== "string" ||
     !uuid.test(payload.flowId) ||
     typeof payload.flowVersion !== "number" ||
@@ -2301,7 +2342,7 @@ async function loadAutomaticCallWork(
     `;
     const eligible = await transaction<
       {
-        normalized_value: string;
+        sender_address: string;
         trigger_text: string;
         agent_version_id: string;
         contact_name: string;
@@ -2309,11 +2350,21 @@ async function loadAutomaticCallWork(
         lifecycle_status: string;
       }[]
     >`
-      SELECT identity.normalized_value, trigger.content_text AS trigger_text,
+      SELECT origin.sender_address, trigger.content_text AS trigger_text,
              agent.id AS agent_version_id, contact.name AS contact_name,
              contact.company AS contact_company,
              contact.lifecycle_status
       FROM messaging.conversations conversation
+      JOIN ops.jobs authorization
+        ON authorization.id=${job.id}::uuid
+       AND authorization.tenant_id=conversation.tenant_id
+       AND authorization.queue='messaging'
+       AND authorization.job_type='whatsapp.ai.call'
+       AND authorization.reference_type='conversation'
+       AND authorization.reference_id=conversation.id
+       AND authorization.callback_trigger_message_id=${payload.triggerMessageId}::uuid
+       AND authorization.callback_sender_identity_id=${payload.contactIdentityId}::uuid
+       AND authorization.callback_destination=${payload.destination}
       JOIN agents.agent_profile_versions agent
         ON agent.id=${payload.agentVersionId}::uuid AND agent.tenant_id=conversation.tenant_id
         AND agent.published_at IS NOT NULL
@@ -2335,22 +2386,25 @@ async function loadAutomaticCallWork(
       JOIN crm.contacts contact
         ON contact.id = conversation.contact_id
        AND contact.tenant_id = conversation.tenant_id
-      JOIN LATERAL (
-        SELECT candidate.normalized_value
-        FROM crm.contact_channel_identities candidate
-        WHERE candidate.contact_id = contact.id
-          AND candidate.channel = 'whatsapp'
-          AND candidate.normalized_value IS NOT NULL
-          AND candidate.validation_status <> 'invalid'
-        ORDER BY candidate.is_primary DESC,
-                 candidate.created_at
-        LIMIT 1
-      ) identity ON true
+      JOIN crm.contact_channel_identities identity
+        ON identity.id=authorization.callback_sender_identity_id
+       AND identity.tenant_id=conversation.tenant_id
+       AND identity.contact_id=contact.id
+       AND identity.channel='whatsapp'
+       AND identity.validation_status='valid'
+      JOIN messaging.inbound_message_origins origin
+        ON origin.tenant_id=conversation.tenant_id
+       AND origin.message_id=authorization.callback_trigger_message_id
+       AND origin.contact_identity_id=authorization.callback_sender_identity_id
+       AND origin.sender_address=authorization.callback_destination
+       AND identity.normalized_value=origin.sender_address
       JOIN messaging.messages trigger
-        ON trigger.id = ${payload.triggerMessageId}::uuid
+        ON trigger.id = origin.message_id
+       AND trigger.tenant_id = origin.tenant_id
        AND trigger.conversation_id = conversation.id
        AND trigger.direction = 'inbound'
        AND trigger.content_type = 'text'
+       AND trigger.provider = 'meta'
       WHERE conversation.id = ${payload.conversationId}::uuid
         AND conversation.contact_id = ${payload.contactId}::uuid
         AND conversation.ownership_mode = 'ai'
@@ -2364,7 +2418,7 @@ async function loadAutomaticCallWork(
     const row = eligible[0];
     if (
       row === undefined ||
-      !/^\+[1-9][0-9]{7,14}$/u.test(row.normalized_value) ||
+      !/^\+[1-9][0-9]{7,14}$/u.test(row.sender_address) ||
       !explicitlyRequestsImmediateCall(row.trigger_text)
     )
       throw new TypeError("automatic call eligibility changed");
@@ -2455,10 +2509,10 @@ async function loadAutomaticCallWork(
       contactId: payload.contactId,
       conversationContext: conversationContext(messages.reverse(), evidence),
       conversationId: payload.conversationId,
-      destination: row.normalized_value,
+      destination: row.sender_address,
       flowId: payload.flowId,
       flowVersion: payload.flowVersion,
-      idempotencyKey: `whatsapp-auto-call:${job.id}`,
+      idempotencyKey: `whatsapp-auto-call:${payload.triggerMessageId}`,
       jobId: job.id,
       tenantId: job.tenant_id,
     };
@@ -2812,11 +2866,23 @@ async function requireGroundedOutbound(
         expected = actionReceiptReply("handoff", metadata.locale);
     } else if (evidence.operation === "callback") {
       const receipt = await transaction<{ id: string }[]>`
-        SELECT id FROM ops.jobs WHERE id=${evidence.resourceId}::uuid
-          AND reference_id=${row.conversation_id}::uuid AND job_type='whatsapp.ai.call'
-          AND payload->>'actorUserId'=${row.requested_by_user_id}
-          AND payload->>'triggerMessageId'=${metadata.triggerMessageId}
-          AND status IN ('queued','running','retry','succeeded')
+        SELECT job.id FROM ops.jobs job
+        JOIN messaging.inbound_message_origins origin
+          ON origin.tenant_id=job.tenant_id
+         AND origin.message_id=job.callback_trigger_message_id
+         AND origin.contact_identity_id=job.callback_sender_identity_id
+         AND origin.sender_address=job.callback_destination
+        JOIN crm.contact_channel_identities identity
+          ON identity.tenant_id=origin.tenant_id
+         AND identity.id=origin.contact_identity_id
+         AND identity.normalized_value=origin.sender_address
+         AND identity.validation_status='valid'
+        WHERE job.id=${evidence.resourceId}::uuid
+          AND job.reference_id=${row.conversation_id}::uuid
+          AND job.job_type='whatsapp.ai.call'
+          AND job.callback_trigger_message_id=${metadata.triggerMessageId}::uuid
+          AND job.payload->>'actorUserId'=${row.requested_by_user_id}
+          AND job.status IN ('queued','running','retry','succeeded')
       `;
       if (receipt[0] !== undefined)
         expected = actionReceiptReply("callback", metadata.locale);
@@ -2855,7 +2921,9 @@ async function revalidateOutboundAttempt(
       WHERE request.id=${work.requestId}::uuid AND request.status='sending'
         AND request.message_id=${work.messageId}::uuid
         AND channel.status='active' AND channel.provider=request.provider
-        AND request.provider=${work.provider} AND identity.normalized_value=${work.recipient}
+        AND request.provider=${work.provider}
+        AND request.recipient_address=${work.recipient}
+        AND identity.normalized_value=request.recipient_address
         AND identity.contact_id=contact.id AND identity.validation_status='valid'
         AND contact.lifecycle_status='active'
         AND platform.messaging_ai_actor_authorized(request.requested_by_user_id)
@@ -2896,7 +2964,7 @@ async function loadOutboundWork(
         idempotency_key: string;
         message_id: string;
         message_kind: "text" | "template";
-        normalized_value: string;
+        recipient_address: string;
         parameters: unknown;
         provider: "simulator" | "meta";
         request_id: string;
@@ -2917,6 +2985,7 @@ async function loadOutboundWork(
         AND request.tenant_id = platform.current_tenant_id()
         AND request.message_id = message.id
         AND request.recipient_identity_id = identity.id
+        AND request.recipient_address = identity.normalized_value
         AND request.status = 'queued'
         AND request.conversation_id = conversation.id AND message.conversation_id = conversation.id
         AND request.channel_id = channel.id AND conversation.channel_id = channel.id
@@ -2936,7 +3005,7 @@ async function loadOutboundWork(
                 request.template_language, request.template_parameters AS parameters,
                 message.content_text, message.sender_type, message.provider_payload,
                 request.conversation_id, request.requested_by_user_id,
-                identity.normalized_value, channel.provider_account_id AS sender_phone_number_id
+                request.recipient_address, channel.provider_account_id AS sender_phone_number_id
     `;
     const row = rows[0];
     if (row === undefined)
@@ -2961,7 +3030,7 @@ async function loadOutboundWork(
       requestId: row.request_id,
       messageId: row.message_id,
       provider: row.provider,
-      recipient: row.normalized_value,
+      recipient: row.recipient_address,
       idempotencyKey: row.idempotency_key,
       delivery,
       tenantId: job.tenant_id,

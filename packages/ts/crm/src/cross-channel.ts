@@ -767,7 +767,9 @@ export interface AutomaticCallCommand {
 }
 
 interface AutomaticCallCandidate {
+  contact_identity_id: string;
   contact_id: string;
+  destination: string;
   agent_version_id: string;
   canonical_flow_version_id: string;
   ownership_epoch: string;
@@ -823,7 +825,9 @@ export async function queueWhatsAppAutomaticCall(
     throw new TypeError("automatic call idempotency key is invalid");
 
   const candidates = await sql<AutomaticCallCandidate[]>`
-    SELECT conversation.contact_id, conversation.ownership_epoch, trigger.content_text AS trigger_text,
+    SELECT conversation.contact_id, callback_identity.id AS contact_identity_id,
+           callback_identity.normalized_value AS destination,
+           conversation.ownership_epoch, trigger.content_text AS trigger_text,
            voice_agent.id AS agent_version_id, flow.id AS canonical_flow_version_id,
            node -> 'configuration' AS voice_configuration
     FROM messaging.conversations conversation
@@ -840,6 +844,16 @@ export async function queueWhatsAppAutomaticCall(
      AND trigger.direction = 'inbound'
      AND trigger.content_type = 'text'
      AND trigger.provider = 'meta'
+    JOIN messaging.inbound_message_origins callback_origin
+      ON callback_origin.tenant_id = conversation.tenant_id
+     AND callback_origin.message_id = trigger.id
+    JOIN crm.contact_channel_identities callback_identity
+      ON callback_identity.id = callback_origin.contact_identity_id
+     AND callback_identity.tenant_id = callback_origin.tenant_id
+     AND callback_identity.contact_id = contact.id
+     AND callback_identity.channel = 'whatsapp'
+     AND callback_identity.validation_status = 'valid'
+     AND callback_identity.normalized_value = callback_origin.sender_address
     JOIN automation.flow_versions flow
       ON flow.tenant_id = conversation.tenant_id
      AND flow.agent_profile_version_id = conversation.ai_agent_profile_version_id
@@ -923,8 +937,10 @@ export async function queueWhatsAppAutomaticCall(
 
   const payload = {
     actorUserId,
+    contactIdentityId: candidate.contact_identity_id,
     contactId: candidate.contact_id,
     conversationId,
+    destination: candidate.destination,
     flowId,
     flowVersion,
     mode: "real",
@@ -936,13 +952,14 @@ export async function queueWhatsAppAutomaticCall(
   const inserted = await sql<{ id: string }[]>`
     INSERT INTO ops.jobs
       (tenant_id, queue, job_type, reference_type, reference_id, payload,
-       idempotency_key, max_attempts)
+       idempotency_key, max_attempts, callback_trigger_message_id,
+       callback_sender_identity_id, callback_destination)
     VALUES (platform.current_tenant_id(), 'messaging', 'whatsapp.ai.call',
             'conversation', ${conversationId}::uuid,
-            ${sql.json(databaseJson(payload))}, ${idempotencyKey}, 3)
-    ON CONFLICT (COALESCE(tenant_id, '00000000-0000-0000-0000-000000000000'::uuid),
-                 queue, idempotency_key) WHERE idempotency_key IS NOT NULL
-    DO NOTHING RETURNING id
+            ${sql.json(databaseJson(payload))}, ${idempotencyKey}, 3,
+            ${triggerMessageId}::uuid, ${candidate.contact_identity_id}::uuid,
+            ${candidate.destination})
+    ON CONFLICT DO NOTHING RETURNING id
   `;
   const created = inserted[0] !== undefined;
   const rows = created
@@ -952,13 +969,17 @@ export async function queueWhatsAppAutomaticCall(
         WHERE tenant_id = platform.current_tenant_id()
           AND queue = 'messaging' AND job_type = 'whatsapp.ai.call'
           AND reference_id = ${conversationId}::uuid
-          AND idempotency_key = ${idempotencyKey}
+          AND callback_trigger_message_id = ${triggerMessageId}::uuid
+          AND callback_sender_identity_id = ${candidate.contact_identity_id}::uuid
+          AND callback_destination = ${candidate.destination}
           AND payload = ${sql.json(databaseJson(payload))}::jsonb
         LIMIT 1
       `;
   const job = rows[0];
   if (job === undefined)
-    throw new TypeError("idempotency key belongs to different call work");
+    throw new TypeError(
+      "callback authorization belongs to different call work",
+    );
   if (created)
     await auditAction(
       sql,

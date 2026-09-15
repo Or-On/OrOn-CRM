@@ -144,6 +144,40 @@ describe("WhatsApp outbound API", () => {
       realProviderEnabled: true,
       explicitlyConfirmed: true,
     });
+    expect(state.queue.mock.calls[0]?.[2]).toEqual({
+      graphApiVersion: "v26.0",
+      phoneNumberId: "1312069101984418",
+      wabaId: "1507601250680263",
+    });
+  });
+
+  it("does not let request data override conversation-derived recipient routing", async () => {
+    state.enabled = true;
+    await POST(
+      new Request("http://localhost/api/messages", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "api-routing-12345",
+        },
+        body: JSON.stringify({
+          provider: "meta",
+          kind: "text",
+          text: "Confirmed",
+          confirmReal: true,
+          recipientIdentityId: "90000000-0000-4000-8000-000000000009",
+          recipientAddress: "+12025550199",
+        }),
+      }),
+      context,
+    );
+
+    expect(state.queue.mock.calls[0]?.[1]).not.toHaveProperty(
+      "recipientIdentityId",
+    );
+    expect(state.queue.mock.calls[0]?.[1]).not.toHaveProperty(
+      "recipientAddress",
+    );
   });
 
   it("verifies Meta GET challenges only while explicitly enabled", () => {

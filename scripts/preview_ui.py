@@ -48,10 +48,7 @@ def run(command: list[str], environment: dict[str, str], *, cwd: Path = ROOT) ->
         capture_output=True,
     )
     if completed.returncode:
-        if (
-            command == ["pnpm", "--filter", "@or-on/crm", "test"]
-            or command[-1] == "tests/diagnostics.live.test.ts"
-        ):
+        if command[0] == "pnpm":
             diagnostic = completed.stdout + completed.stderr
             for key, value in environment.items():
                 if any(word in key for word in ("URL", "PASSWORD", "SECRET", "PEPPER")) and value:
@@ -122,6 +119,8 @@ async def main(
                 "ENABLE_REAL_WHATSAPP": "false",
                 "ENABLE_REAL_TELEPHONY": "false",
                 "ENABLE_REAL_VOICE_PROVIDERS": "false",
+                "ENABLE_WHATSAPP_AI": "false",
+                "ENABLE_WHATSAPP_AUTO_CALLS": "false",
                 "AUTH_COOKIE_SECURE": "false",
                 "PLATFORM_ENV": "development",
                 "AUTH_TOKEN_PEPPER": secrets.token_hex(32),
@@ -248,12 +247,45 @@ async def main(
             return
         if check_db:
             environment["UI_TEST_DATABASE_URL"] = environment["DATABASE_URL"]
-            result = run(["pnpm", "--filter", "@or-on/crm", "test"], environment)
-            # On success print only the summary, not SQL or fixture payloads.
-            for line in result.splitlines():
-                if "Test Files" in line or "Tests " in line:
-                    print(line, flush=True)
-            print("Isolated PostgreSQL CRM tests passed as a platform_web member.", flush=True)
+            # The target URL belongs to the disposable database's migrator. The
+            # role-aware suites either switch to platform_web explicitly or use
+            # the narrower runtime URL above. No configured developer database
+            # or provider is reachable from this environment.
+            environment["CRM_TEST_DATABASE_URL"] = target
+            environment["TEST_DATABASE_URL"] = target
+            environment["MESSAGING_WORKER_TEST_DATABASE_URL"] = target
+            commands = (
+                ["pnpm", "--filter", "@or-on/crm", "test"],
+                [
+                    "pnpm",
+                    "--filter",
+                    "@or-on/web",
+                    "exec",
+                    "vitest",
+                    "run",
+                    "tests/oauth-credential.postgres.test.ts",
+                ],
+                [
+                    "pnpm",
+                    "--filter",
+                    "@or-on/messaging-worker",
+                    "exec",
+                    "vitest",
+                    "run",
+                    "tests/database.live.test.ts",
+                ],
+            )
+            for command in commands:
+                result = run(command, environment)
+                # On success print only the summary, not SQL or fixture payloads.
+                for line in result.splitlines():
+                    if "Test Files" in line or "Tests " in line:
+                        print(line, flush=True)
+            print(
+                "Comprehensive isolated TypeScript PostgreSQL tests passed. "
+                "All provider HTTP was disabled or mocked.",
+                flush=True,
+            )
             return
         artifact.parent.mkdir(exist_ok=True)
         artifact.write_text(
@@ -372,7 +404,9 @@ async def main(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--check-db", action="store_true", help="Run CRM tests in an owned fixture DB"
+        "--check-db",
+        action="store_true",
+        help="Run provider-free TypeScript persistence tests in an owned fixture DB",
     )
     parser.add_argument(
         "--production", action="store_true", help="Preview existing Next production output"

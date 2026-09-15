@@ -131,6 +131,40 @@ async def test_authenticated_session_context_is_narrow_and_cannot_be_spoofed(
     )
 
 
+async def test_report_branding_reads_only_the_authorized_current_tenant_name(
+    pg: asyncpg.Connection,
+) -> None:
+    first = await _tenant(pg, "Report branding first", enabled=True)
+    second = await _tenant(pg, "Report branding second", enabled=True)
+    await pg.execute(
+        "INSERT INTO crm.tenant_settings"
+        "(tenant_id,display_name,default_currency,locale,timezone) "
+        "VALUES ($1,NULL,'USD','en','UTC'),($2,NULL,'USD','en','UTC')",
+        first.tenant_id,
+        second.tenant_id,
+    )
+
+    await _as_web(pg, first)
+    assert await pg.fetchval("SELECT platform.current_tenant_name()") == "Report branding first"
+    assert (
+        await pg.fetchval(
+            "SELECT coalesce(settings.business_name,settings.display_name,"
+            "platform.current_tenant_name()) "
+            "FROM crm.tenant_settings settings "
+            "WHERE settings.tenant_id=platform.current_tenant_id()"
+        )
+        == "Report branding first"
+    )
+    with pytest.raises(asyncpg.InsufficientPrivilegeError):
+        async with pg.transaction():
+            await pg.fetchval("SELECT name FROM public.tenants WHERE id=$1", first.tenant_id)
+
+    # Changing only the tenant GUC cannot reveal another tenant's name because
+    # the actor must be an active member of the selected tenant.
+    await pg.execute("SELECT set_config('app.current_tenant',$1,true)", str(second.tenant_id))
+    assert await pg.fetchval("SELECT platform.current_tenant_name()") is None
+
+
 async def test_technician_identity_requires_a_valid_scoped_session(
     pg: asyncpg.Connection,
 ) -> None:

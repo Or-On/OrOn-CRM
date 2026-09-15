@@ -278,4 +278,16 @@ describe("explicit WhatsApp callback intent", () => {
   ])("rejects conditional or deferred callback wording: %s", (text) => {
     expect(explicitWhatsAppCallbackIntent(text)).toBe(false);
   });
+
+  it.each([
+    "purple triangles argue with seven",
+    "the router repeats the last question",
+    "משולשים סגולים מתווכחים עם שבע",
+    "הנתב חוזר על השאלה האחרונה",
+  ])(
+    "does not turn unrelated or nonsensical text into call consent: %s",
+    (text) => {
+      expect(explicitWhatsAppCallbackIntent(text)).toBe(false);
+    },
+  );
 });

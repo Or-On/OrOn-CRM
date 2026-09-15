@@ -3111,7 +3111,11 @@ export async function finalizeReportRevision(
       status = 'finalized', finalized_at = clock_timestamp(),
       finalized_by_user_id = ${actorUserId}::uuid,
       branding_snapshot = jsonb_build_object(
-        'businessName', coalesce(settings.business_name, settings.display_name, tenant.name),
+        'businessName', coalesce(
+          settings.business_name,
+          settings.display_name,
+          platform.current_tenant_name()
+        ),
         'logoVersion', settings.logo_updated_at,
         'logoData', CASE WHEN settings.logo_data IS NULL
           THEN NULL ELSE encode(settings.logo_data, 'base64') END,
@@ -3126,7 +3130,6 @@ export async function finalizeReportRevision(
         'timezone', settings.timezone
       ), updated_at = CURRENT_TIMESTAMP
     FROM crm.tenant_settings settings
-    JOIN public.tenants tenant ON tenant.id = settings.tenant_id
     WHERE revision.id = ${revisionId}::uuid
       AND settings.tenant_id = platform.current_tenant_id()
     RETURNING revision.id, revision.report_id, revision.version, revision.status,

@@ -3,8 +3,9 @@
 import asyncio
 
 import pytest
-from oron_agent.agent_evaluation import RealEvaluationProvider
+from oron_agent.agent_evaluation import EvaluationSettings, RealEvaluationProvider
 from oron_agent.config import Settings
+from pydantic import ValidationError
 
 
 class LLM:
@@ -62,6 +63,50 @@ async def test_existing_kill_flag_blocks_before_any_provider_construction():
         await provider.evaluate("test", {}, "fixture", confirmed=True)
     with pytest.raises(ValueError):
         await provider.evaluate("test", {}, "fixture", confirmed=False)
+
+
+async def test_default_evaluation_config_does_not_require_call_or_audio_secrets(monkeypatch):
+    monkeypatch.setenv("ENABLE_REAL_VOICE_PROVIDERS", "true")
+    monkeypatch.setenv("LLM_PROVIDER", "openai-compat")
+    monkeypatch.setenv("LLM_API_KEY", "fixture-key")
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.invalid/v1")
+    monkeypatch.setenv("LLM_MODEL", "fixture-model")
+    for name in (
+        "LIVEKIT_URL",
+        "LIVEKIT_API_KEY",
+        "LIVEKIT_API_SECRET",
+        "SONIOX_API_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    llm = LLM()
+    options = {}
+
+    def factory(provider, **kwargs):
+        options.update(kwargs)
+        return llm
+
+    result = await RealEvaluationProvider(llm_factory=factory).evaluate(
+        "Fictional scenario",
+        {"system_prompt": "Tenant style", "quality": {}, "knowledge": []},
+        "fictional",
+        confirmed=True,
+    )
+
+    assert result.provider == "openai-compat"
+    assert result.model == "fixture-model"
+    assert options["base_url"] == "https://example.invalid/v1"
+    assert llm.closed
+
+
+def test_enabled_evaluation_still_requires_the_selected_llm_config(monkeypatch):
+    monkeypatch.setenv("ENABLE_REAL_VOICE_PROVIDERS", "true")
+    monkeypatch.setenv("LLM_PROVIDER", "openai-compat")
+    for name in ("LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL"):
+        monkeypatch.delenv(name, raising=False)
+
+    with pytest.raises(ValidationError, match="LLM_API_KEY, LLM_BASE_URL, LLM_MODEL"):
+        EvaluationSettings(_env_file=None)
 
 
 @pytest.mark.parametrize("cancel", [False, True])

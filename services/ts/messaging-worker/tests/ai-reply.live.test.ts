@@ -19,7 +19,10 @@ import {
 } from "@or-on/crm";
 
 import { createMessagingStore } from "../src/database.js";
-import type { AutomaticCallRequest } from "../src/call-provider.js";
+import {
+  AutomaticCallProviderError,
+  type AutomaticCallRequest,
+} from "../src/call-provider.js";
 import {
   SimulatorWhatsAppProvider,
   type WhatsAppSendRequest,
@@ -172,8 +175,23 @@ describe.skipIf(sourceUrl === undefined)(
       await acceptWhatsAppWebhook(workerUrl, rawBody, signature, appSecret);
     }
 
+    async function forgeMutableSenderMetadata(
+      providerMessageId: string,
+      identityId: string,
+    ): Promise<void> {
+      await admin`
+        UPDATE messaging.messages
+        SET provider_payload=jsonb_set(
+          coalesce(provider_payload, '{}'::jsonb),
+          '{senderIdentityId}', to_jsonb(${identityId}::text), true)
+        WHERE tenant_id=${tenantId}::uuid
+          AND provider='meta' AND provider_message_id=${providerMessageId}
+      `;
+    }
+
     it("runs signed inbound to AI reply and starts an explicitly requested durable call", async () => {
       let knowledgeDocumentId = "";
+      let whatsAppAgentVersionId = "";
       let voiceAgentVersionId = "";
       const firstInbound = `wamid.fixture-${randomUUID()}`;
       await acceptInbound(firstInbound, "Hello");
@@ -203,6 +221,35 @@ describe.skipIf(sourceUrl === undefined)(
       const conversationId = conversation[0]?.id;
       if (conversationId === undefined)
         throw new Error("inbound conversation was not created");
+      const inboundIdentity = await admin<{ id: string }[]>`
+        UPDATE crm.contact_channel_identities identity
+        SET is_primary=false
+        FROM messaging.conversations conversation
+        WHERE conversation.id=${conversationId}::uuid
+          AND identity.contact_id=conversation.contact_id
+          AND identity.channel='whatsapp'
+          AND identity.normalized_value='+12025550198'
+        RETURNING identity.id
+      `;
+      const inboundIdentityId = inboundIdentity[0]?.id;
+      if (inboundIdentityId === undefined)
+        throw new Error("signed inbound identity was not persisted");
+      // Consent belongs to the sender of the signed inbound request, not to a
+      // different primary number that happens to share the CRM contact.
+      const secondaryIdentities = await admin<{ id: string }[]>`
+        INSERT INTO crm.contact_channel_identities
+          (tenant_id, contact_id, channel, normalized_value, display_value,
+           provider, provider_identity_id, validation_status, is_primary)
+        SELECT ${tenantId}::uuid, conversation.contact_id, 'whatsapp',
+               '+12025550199', '+12025550199', 'meta', '+12025550199',
+               'valid', true
+        FROM messaging.conversations conversation
+        WHERE conversation.id=${conversationId}::uuid
+        RETURNING id
+      `;
+      const secondaryIdentityId = secondaryIdentities[0]?.id;
+      if (secondaryIdentityId === undefined)
+        throw new Error("secondary WhatsApp identity fixture missing");
       const linkedTicketId = randomUUID();
       await admin`
         INSERT INTO crm.tasks
@@ -278,6 +325,7 @@ describe.skipIf(sourceUrl === undefined)(
         const versionId = versions[0]?.id;
         if (versionId === undefined)
           throw new Error("published version missing");
+        whatsAppAgentVersionId = versionId;
         const voiceProfileId = await createAgentProfileDraft(
           transaction,
           userId,
@@ -441,6 +489,9 @@ describe.skipIf(sourceUrl === undefined)(
       );
       const thirdInbound = `wamid.fixture-${randomUUID()}`;
       const naturalInbound = `wamid.fixture-${randomUUID()}`;
+      const compoundInbound = `wamid.fixture-${randomUUID()}`;
+      const negativeInbound = `wamid.fixture-${randomUUID()}`;
+      const nonsenseInbound = `wamid.fixture-${randomUUID()}`;
 
       const aiDecide = vi
         .fn()
@@ -453,16 +504,37 @@ describe.skipIf(sourceUrl === undefined)(
         .mockResolvedValueOnce({
           action: "reply",
           text: "Is the router light steady or blinking?",
+        })
+        .mockResolvedValueOnce({
+          action: "request_call",
+          reasonCode: "call_requested",
+          text: "",
+        })
+        .mockResolvedValueOnce({
+          action: "reply",
+          text: "Understood. I will not place a call.",
+        })
+        .mockResolvedValueOnce({
+          action: "reply",
+          text: "I did not understand that. What problem are you seeing?",
         });
       const metaSend = vi
         .fn<(request: WhatsAppSendRequest) => Promise<WhatsAppSendResult>>()
         .mockResolvedValueOnce({ messageId: "wamid.ai-reply" })
         .mockResolvedValueOnce({ messageId: "wamid.natural-reply" })
+        .mockResolvedValueOnce({ messageId: "wamid.confirm-call" })
+        .mockResolvedValueOnce({ messageId: "wamid.negative-reply" })
+        .mockResolvedValueOnce({ messageId: "wamid.nonsense-reply" })
         .mockResolvedValueOnce({ messageId: "wamid.call-ack" });
-      const automaticCall = vi.fn().mockResolvedValue({
-        created: true,
-        sessionId: "60000000-0000-4000-8000-000000000001",
-      });
+      const automaticCall = vi
+        .fn()
+        .mockRejectedValueOnce(
+          new AutomaticCallProviderError("call_http_503", true),
+        )
+        .mockResolvedValue({
+          created: true,
+          sessionId: "60000000-0000-4000-8000-000000000001",
+        });
       const store = createMessagingStore(
         workerUrl,
         `ai-${randomUUID()}`,
@@ -511,18 +583,52 @@ describe.skipIf(sourceUrl === undefined)(
           "The connection is unstable after restarting the router.",
           tiedProviderTimestamp,
         );
+        expect(await store.processAvailable()).toBeGreaterThan(0);
+        await forgeMutableSenderMetadata(naturalInbound, secondaryIdentityId);
         expect(await processUntilIdle(store)).toBeGreaterThan(0);
+        await acceptInbound(
+          compoundInbound,
+          "The connection is still unstable, so please call me now.",
+          tiedProviderTimestamp,
+        );
+        expect(await processUntilIdle(store)).toBeGreaterThan(0);
+        expect(automaticCall).not.toHaveBeenCalled();
+        await acceptInbound(
+          negativeInbound,
+          "Do not call me.",
+          tiedProviderTimestamp,
+        );
+        expect(await processUntilIdle(store)).toBeGreaterThan(0);
+        expect(automaticCall).not.toHaveBeenCalled();
+        await acceptInbound(
+          nonsenseInbound,
+          "purple triangles argue with seven",
+          tiedProviderTimestamp,
+        );
+        expect(await processUntilIdle(store)).toBeGreaterThan(0);
+        expect(automaticCall).not.toHaveBeenCalled();
         await acceptInbound(
           thirdInbound,
           "Please call me.",
           tiedProviderTimestamp,
         );
+        expect(await store.processAvailable()).toBeGreaterThan(0);
+        await forgeMutableSenderMetadata(thirdInbound, secondaryIdentityId);
+        expect(await processUntilIdle(store)).toBeGreaterThan(0);
+        const expeditedRetries = await admin<{ id: string }[]>`
+          UPDATE ops.jobs SET available_at=CURRENT_TIMESTAMP
+          WHERE tenant_id=${tenantId}::uuid
+            AND reference_id=${conversationId}::uuid
+            AND job_type='whatsapp.ai.call' AND status='retry'
+          RETURNING id
+        `;
+        expect(expeditedRetries).toHaveLength(1);
         expect(await processUntilIdle(store)).toBeGreaterThan(0);
       } finally {
         await store.close();
       }
 
-      expect(aiDecide).toHaveBeenCalledTimes(2);
+      expect(aiDecide).toHaveBeenCalledTimes(5);
       const firstAiRequest = aiDecide.mock.calls[0]?.[0] as
         | {
             contactContext?: {
@@ -544,8 +650,13 @@ describe.skipIf(sourceUrl === undefined)(
         matchedBy: "verified_whatsapp_identity",
         knownBeforeConversation: true,
       });
-      expect(metaSend).toHaveBeenCalledTimes(3);
-      expect(automaticCall).toHaveBeenCalledTimes(1);
+      expect(metaSend).toHaveBeenCalledTimes(6);
+      expect(
+        metaSend.mock.calls.every(
+          ([request]) => request.recipient === "+12025550198",
+        ),
+      ).toBe(true);
+      expect(automaticCall).toHaveBeenCalledTimes(2);
       const inboundNotifications = await admin<{ count: number }[]>`
         SELECT count(*)::integer AS count FROM messaging.notifications
         WHERE tenant_id=${tenantId}::uuid
@@ -553,7 +664,7 @@ describe.skipIf(sourceUrl === undefined)(
           AND reference_type='conversation'
           AND reference_id=${conversationId}::uuid
       `;
-      expect(inboundNotifications[0]?.count).toBeGreaterThanOrEqual(4);
+      expect(inboundNotifications[0]?.count).toBeGreaterThanOrEqual(7);
       expect(automaticCall).toHaveBeenCalledWith(
         expect.objectContaining({
           conversationId,
@@ -571,6 +682,15 @@ describe.skipIf(sourceUrl === undefined)(
         "Customer report (unverified): Please call me.",
       );
       expect(callRequest?.conversationContext).toContain(
+        "Customer report (unverified): The connection is still unstable, so please call me now.",
+      );
+      expect(callRequest?.conversationContext).toContain(
+        'Prior assistant statement (unverified): To request a call, please reply in a separate message: "Please call me now."',
+      );
+      expect(callRequest?.conversationContext).toContain(
+        "Customer report (unverified): purple triangles argue with seven",
+      );
+      expect(callRequest?.conversationContext).toContain(
         "Tenant CRM contact: Fictional Customer.",
       );
       expect(callRequest?.conversationContext).toContain(
@@ -580,7 +700,7 @@ describe.skipIf(sourceUrl === undefined)(
       SELECT count(*)::integer AS count FROM messaging.messages
       WHERE conversation_id=${conversationId}::uuid AND direction='inbound'
     `;
-      expect(inboundCount[0]?.count).toBe(5);
+      expect(inboundCount[0]?.count).toBe(8);
       const outboundText = await admin<{ content_text: string }[]>`
       SELECT content_text FROM messaging.messages
       WHERE conversation_id=${conversationId}::uuid AND direction='outbound'
@@ -589,6 +709,9 @@ describe.skipIf(sourceUrl === undefined)(
       expect(outboundText.map((row) => row.content_text)).toEqual([
         "Opening hours: 09:00–17:00.",
         "Is the router light steady or blinking?",
+        'To request a call, please reply in a separate message: "Please call me now."',
+        "Understood. I will not place a call.",
+        "I did not understand that. What problem are you seeing?",
         "Your call request was queued. Recording the request does not confirm a connected call.",
       ]);
       const ownership = await admin<
@@ -620,14 +743,39 @@ describe.skipIf(sourceUrl === undefined)(
 
       const originalCalls = await admin<
         {
+          callback_destination: string;
+          callback_sender_identity_id: string;
+          callback_trigger_message_id: string;
           id: string;
           idempotency_key: string;
-          payload: { triggerMessageId: string };
+          payload: {
+            contactIdentityId: string;
+            destination: string;
+            triggerMessageId: string;
+          };
         }[]
       >`
-        SELECT id,idempotency_key,payload FROM ops.jobs WHERE reference_id=${conversationId}::uuid AND job_type='whatsapp.ai.call'`;
+        SELECT id, idempotency_key, payload, callback_destination,
+               callback_sender_identity_id, callback_trigger_message_id
+        FROM ops.jobs
+        WHERE reference_id=${conversationId}::uuid
+          AND job_type='whatsapp.ai.call'`;
       const originalCall = originalCalls[0];
       if (!originalCall) throw new Error("callback fixture receipt missing");
+      expect(originalCall.payload.contactIdentityId).toBe(inboundIdentityId);
+      expect(originalCall.payload.destination).toBe("+12025550198");
+      expect(originalCall.callback_sender_identity_id).toBe(inboundIdentityId);
+      expect(originalCall.callback_destination).toBe("+12025550198");
+      expect(originalCall.callback_trigger_message_id).toBe(
+        originalCall.payload.triggerMessageId,
+      );
+      expect(callRequest?.idempotencyKey).toBe(
+        `whatsapp-auto-call:${originalCall.callback_trigger_message_id}`,
+      );
+      expect(automaticCall.mock.calls[1]?.[0]).toMatchObject({
+        idempotencyKey: callRequest?.idempotencyKey,
+        jobId: originalCall.id,
+      });
       await worker.begin(async (transaction) => {
         await transaction`SELECT set_config('app.current_tenant', ${tenantId}, true), set_config('app.current_user', ${userId}, true)`;
         const replay = await queueWhatsAppAutomaticCall(
@@ -639,13 +787,110 @@ describe.skipIf(sourceUrl === undefined)(
         );
         expect(replay).toMatchObject({ jobId: originalCall.id, queued: false });
       });
+      await admin`
+        UPDATE ops.jobs SET created_at=CURRENT_TIMESTAMP-INTERVAL '11 minutes'
+        WHERE id=${originalCall.id}::uuid
+      `;
+
+      // A current identity record is mutable CRM state. Once the signed inbound
+      // message has admitted work, changing that record must fail the queued
+      // attempt instead of redirecting either the callback or its acknowledgement.
+      const mutatedInbound = `wamid.fixture-${randomUUID()}`;
+      const mutationDecide = vi.fn().mockResolvedValue({
+        action: "request_call",
+        reasonCode: "call_requested",
+        text: "",
+      });
+      const mutationSend = vi
+        .fn<(request: WhatsAppSendRequest) => Promise<WhatsAppSendResult>>()
+        .mockResolvedValue({ messageId: "must-not-send-mutated-recipient" });
+      const mutationCall = vi
+        .fn()
+        .mockResolvedValue({ created: true, sessionId: randomUUID() });
+      const mutationStore = createMessagingStore(
+        workerUrl,
+        `recipient-mutation-${randomUUID()}`,
+        {
+          simulator: new SimulatorWhatsAppProvider(),
+          meta: { name: "meta", send: mutationSend },
+        },
+        undefined,
+        {
+          aiProvider: { decide: mutationDecide },
+          automaticCallProvider: { place: mutationCall },
+          automaticCallsEnabled: true,
+          realWhatsAppEnabled: true,
+        },
+      );
+      try {
+        await acceptInbound(mutatedInbound, "Okay, please call me now.");
+        expect(await mutationStore.processAvailable()).toBeGreaterThan(0);
+        const triggers = await admin<{ id: string }[]>`
+          SELECT id FROM messaging.messages
+          WHERE tenant_id=${tenantId}::uuid AND provider='meta'
+            AND provider_message_id=${mutatedInbound}
+        `;
+        const mutatedTriggerId = triggers[0]?.id ?? "";
+        if (!mutatedTriggerId)
+          throw new Error("recipient-mutation trigger was not persisted");
+        const admitted = await admin<
+          { callback_destination: string; count: number }[]
+        >`
+          SELECT min(callback_destination) AS callback_destination,
+                 count(*)::integer AS count
+          FROM ops.jobs
+          WHERE tenant_id=${tenantId}::uuid
+            AND job_type='whatsapp.ai.call'
+            AND callback_trigger_message_id=${mutatedTriggerId}::uuid
+          GROUP BY callback_trigger_message_id
+        `;
+        expect(admitted[0]).toEqual({
+          callback_destination: "+12025550198",
+          count: 1,
+        });
+        await forgeMutableSenderMetadata(mutatedInbound, secondaryIdentityId);
+        await admin`
+          UPDATE crm.contact_channel_identities
+          SET normalized_value='+12025550196', updated_at=CURRENT_TIMESTAMP
+          WHERE id=${inboundIdentityId}::uuid
+        `;
+        expect(await processUntilIdle(mutationStore)).toBeGreaterThan(0);
+        expect(mutationCall).not.toHaveBeenCalled();
+        expect(mutationSend).not.toHaveBeenCalled();
+        const failedCallback = await admin<
+          { last_error_safe: string | null; status: string }[]
+        >`
+          SELECT status, last_error_safe FROM ops.jobs
+          WHERE tenant_id=${tenantId}::uuid
+            AND job_type='whatsapp.ai.call'
+            AND callback_trigger_message_id=${mutatedTriggerId}::uuid
+        `;
+        expect(failedCallback[0]).toMatchObject({
+          status: "dead",
+          last_error_safe: "automatic call eligibility changed",
+        });
+        const failedReply = await admin<
+          { last_error_code: string | null; recipient_address: string }[]
+        >`
+          SELECT request.last_error_code, request.recipient_address
+          FROM messaging.outbound_requests request
+          JOIN messaging.messages message ON message.id=request.message_id
+          WHERE message.provider_payload#>>'{aiGrounding,triggerMessageId}'=${mutatedTriggerId}
+        `;
+        expect(failedReply[0]).toEqual({
+          last_error_code: "outbound_eligibility_changed",
+          recipient_address: "+12025550198",
+        });
+      } finally {
+        await admin`
+          UPDATE crm.contact_channel_identities
+          SET normalized_value='+12025550198', updated_at=CURRENT_TIMESTAMP
+          WHERE id=${inboundIdentityId}::uuid
+        `;
+        await mutationStore.close();
+      }
       await web.begin(async (transaction) => {
         await transaction`SELECT set_config('app.current_tenant', ${tenantId}, true), set_config('app.current_user', ${userId}, true)`;
-        const assigned = await transaction<
-          { ai_agent_profile_version_id: string }[]
-        >`SELECT ai_agent_profile_version_id FROM messaging.conversations WHERE id=${conversationId}::uuid`;
-        const versionId = assigned[0]?.ai_agent_profile_version_id;
-        if (!versionId) throw new Error("assigned fixture version missing");
         await setConversationOwnership(
           transaction,
           conversationId,
@@ -657,7 +902,7 @@ describe.skipIf(sourceUrl === undefined)(
           conversationId,
           userId,
           "ai",
-          versionId,
+          whatsAppAgentVersionId,
         );
       });
       await expect(
@@ -671,39 +916,29 @@ describe.skipIf(sourceUrl === undefined)(
             originalCall.idempotency_key,
           );
         }),
-      ).rejects.toThrow("different call work");
+      ).rejects.toThrow("automatic call policy");
       const obsoleteCallId = randomUUID();
-      await admin`INSERT INTO ops.jobs(id,tenant_id,queue,job_type,reference_type,reference_id,payload,idempotency_key,max_attempts)
-        SELECT ${obsoleteCallId}::uuid,tenant_id,queue,job_type,reference_type,reference_id,payload,${`stale-${obsoleteCallId}`},3
-        FROM ops.jobs WHERE id=${originalCall.id}::uuid`;
-      const stalePlace = vi
-        .fn()
-        .mockResolvedValue({ created: true, sessionId: randomUUID() });
-      const staleCall = createMessagingStore(
-        workerUrl,
-        `stale-call-${randomUUID()}`,
-        {
-          simulator: new SimulatorWhatsAppProvider(),
-          meta: { name: "meta", send: metaSend },
-        },
-        undefined,
-        {
-          automaticCallsEnabled: true,
-          automaticCallProvider: { place: stalePlace },
-        },
-      );
-      try {
-        await staleCall.processAvailable();
-        expect(stalePlace).not.toHaveBeenCalled();
-        const [state] =
-          await admin`SELECT status FROM ops.jobs WHERE id=${obsoleteCallId}::uuid`;
-        expect(state?.status).toBe("dead");
-        const [current] =
-          await admin`SELECT ownership_mode FROM messaging.conversations WHERE id=${conversationId}::uuid`;
-        expect(current?.ownership_mode).toBe("ai");
-      } finally {
-        await staleCall.close();
-      }
+      await expect(
+        admin`
+          INSERT INTO ops.jobs(
+            id, tenant_id, queue, job_type, reference_type, reference_id,
+            payload, idempotency_key, max_attempts,
+            callback_trigger_message_id, callback_sender_identity_id,
+            callback_destination
+          )
+          SELECT ${obsoleteCallId}::uuid, tenant_id, queue, job_type,
+                 reference_type, reference_id, payload,
+                 ${`stale-${obsoleteCallId}`}, 3,
+                 callback_trigger_message_id, callback_sender_identity_id,
+                 callback_destination
+          FROM ops.jobs WHERE id=${originalCall.id}::uuid
+        `,
+      ).rejects.toThrow("uq_jobs_whatsapp_callback_trigger");
+      const cloned = await admin<{ count: number }[]>`
+        SELECT count(*)::integer AS count FROM ops.jobs
+        WHERE id=${obsoleteCallId}::uuid
+      `;
+      expect(cloned[0]?.count).toBe(0);
 
       // Real repository projection and least-privilege worker, fake providers:
       // a source revoked after generation cannot escape from the outbound queue.

@@ -11,6 +11,8 @@ export type WhatsAppOutboundInput =
       readonly kind: "text";
       readonly provider: "simulator" | "meta";
       readonly realProviderEnabled: boolean;
+      readonly recipientAddress?: string;
+      readonly recipientIdentityId?: string;
       readonly senderUserId: string;
       readonly senderType?: "user" | "agent";
       readonly text: string;
@@ -24,6 +26,8 @@ export type WhatsAppOutboundInput =
       readonly parameters: readonly string[];
       readonly provider: "simulator" | "meta";
       readonly realProviderEnabled: boolean;
+      readonly recipientAddress?: string;
+      readonly recipientIdentityId?: string;
       readonly senderUserId: string;
       readonly senderType?: "user" | "agent";
       readonly templateName: string;
@@ -44,8 +48,12 @@ export interface QueuedWhatsAppOutbound {
 }
 
 interface ConversationContact {
+  channel_id: string;
+  conversation_id: string;
   contact_id: string;
+  customer_service_window_expires_at: Date | null;
   lifecycle_status: string;
+  ownership_epoch: string;
   whatsapp_consent: string;
   whatsapp_opted_out_at: Date | null;
   recipient_identity_id: string;
@@ -64,6 +72,25 @@ function validateInput(input: WhatsAppOutboundInput): void {
     throw new TypeError(
       "real WhatsApp delivery requires explicit confirmation",
     );
+  if (
+    input.recipientIdentityId !== undefined &&
+    !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/iu.test(
+      input.recipientIdentityId,
+    )
+  )
+    throw new TypeError("invalid WhatsApp recipient identity");
+  if (
+    (input.recipientIdentityId === undefined) !==
+    (input.recipientAddress === undefined)
+  )
+    throw new TypeError(
+      "WhatsApp recipient identity and address must be bound together",
+    );
+  if (
+    input.recipientAddress !== undefined &&
+    normalizeE164(input.recipientAddress) !== input.recipientAddress
+  )
+    throw new TypeError("invalid WhatsApp recipient address");
   if (input.kind === "text") {
     const text = input.text.trim();
     if (text.length === 0 || text.length > 4096)
@@ -81,68 +108,25 @@ function validateInput(input: WhatsAppOutboundInput): void {
   }
 }
 
-async function ensureChannel(
-  sql: postgres.TransactionSql,
-  provider: "simulator" | "meta",
-  configuration: WhatsAppChannelConfiguration | undefined,
-): Promise<string> {
-  if (provider === "meta" && configuration === undefined)
-    throw new TypeError("real WhatsApp channel is not configured");
-  if (provider === "simulator") {
-    const existing = await sql<{ id: string }[]>`
-      SELECT id FROM messaging.channels
-      WHERE tenant_id = platform.current_tenant_id() AND provider = 'simulator'
-      ORDER BY created_at LIMIT 1
-    `;
-    if (existing[0]?.id !== undefined) return existing[0].id;
-  }
-  const accountId =
-    provider === "meta" ? configuration?.phoneNumberId : undefined;
-  const rows = await sql<{ id: string }[]>`
-    INSERT INTO messaging.channels
-      (tenant_id, kind, provider, provider_account_id, display_address, status, configuration)
-    VALUES (
-      platform.current_tenant_id(), 'whatsapp', ${provider},
-      ${accountId ?? null},
-      ${provider === "meta" ? "Meta WhatsApp Cloud API" : "WhatsApp simulator"},
-      'active',
-      ${sql.json(
-        provider === "meta"
-          ? {
-              graphApiVersion: configuration?.graphApiVersion,
-              phoneNumberId: configuration?.phoneNumberId,
-              wabaId: configuration?.wabaId,
-            }
-          : { mode: "simulator" },
-      )}
-    )
-    ON CONFLICT (provider, provider_account_id) WHERE provider_account_id IS NOT NULL
-    DO UPDATE SET configuration = EXCLUDED.configuration, status = 'active',
-                  updated_at = CURRENT_TIMESTAMP
-    RETURNING id
-  `;
-  if (rows[0]?.id !== undefined) return rows[0].id;
-  const simulator = await sql<{ id: string }[]>`
-    SELECT id FROM messaging.channels
-    WHERE tenant_id = platform.current_tenant_id() AND provider = 'simulator'
-    ORDER BY created_at LIMIT 1
-  `;
-  const id = simulator[0]?.id;
-  if (id === undefined) throw new Error("WhatsApp channel resolution failed");
-  return id;
-}
-
 export async function queueWhatsAppOutbound(
   sql: postgres.TransactionSql,
   input: WhatsAppOutboundInput,
   channelConfiguration?: WhatsAppChannelConfiguration,
 ): Promise<QueuedWhatsAppOutbound> {
   validateInput(input);
+  if (input.provider === "meta" && channelConfiguration === undefined)
+    throw new TypeError("real WhatsApp channel is not configured");
   const fingerprint = createHash("sha256")
     .update(
       JSON.stringify({
         conversationId: input.conversationId,
         provider: input.provider,
+        ...(input.recipientIdentityId === undefined
+          ? {}
+          : {
+              recipientIdentityId: input.recipientIdentityId,
+              recipientAddress: input.recipientAddress,
+            }),
         senderUserId: input.senderUserId,
         senderType: input.senderType ?? "user",
         delivery:
@@ -187,24 +171,86 @@ export async function queueWhatsAppOutbound(
     };
   }
 
-  const contacts = await sql<ConversationContact[]>`
-    SELECT conversation.contact_id, contact.lifecycle_status,
-           contact.whatsapp_consent, contact.whatsapp_opted_out_at,
-           identity.id AS recipient_identity_id, identity.normalized_value
-    FROM messaging.conversations conversation
-    JOIN crm.contacts contact ON contact.id = conversation.contact_id
-      AND contact.tenant_id = conversation.tenant_id
-    JOIN LATERAL (
-      SELECT id, normalized_value
-      FROM crm.contact_channel_identities
-      WHERE tenant_id = conversation.tenant_id
-        AND contact_id = conversation.contact_id
-        AND channel = 'whatsapp' AND validation_status = 'valid'
-        AND normalized_value IS NOT NULL
-      ORDER BY is_primary DESC, created_at, id LIMIT 1
-    ) identity ON true
-    WHERE conversation.id = ${input.conversationId}::uuid
-  `;
+  const contacts =
+    input.provider === "meta"
+      ? await sql<ConversationContact[]>`
+          SELECT conversation.id AS conversation_id,
+                 conversation.channel_id, conversation.contact_id,
+                 conversation.customer_service_window_expires_at,
+                 conversation.ownership_epoch, contact.lifecycle_status,
+                 contact.whatsapp_consent, contact.whatsapp_opted_out_at,
+                 identity.id AS recipient_identity_id,
+                 identity.normalized_value
+          FROM messaging.conversations conversation
+          JOIN messaging.channels channel
+            ON channel.id=conversation.channel_id
+           AND channel.tenant_id=conversation.tenant_id
+           AND channel.kind='whatsapp' AND channel.provider='meta'
+           AND channel.status='active'
+          JOIN crm.contacts contact ON contact.id=conversation.contact_id
+           AND contact.tenant_id=conversation.tenant_id
+          JOIN LATERAL (
+            SELECT inbound.id
+            FROM messaging.messages inbound
+            WHERE inbound.tenant_id=conversation.tenant_id
+              AND inbound.conversation_id=conversation.id
+              AND inbound.direction='inbound' AND inbound.provider='meta'
+            ORDER BY inbound.created_at DESC, inbound.updated_at DESC,
+                     inbound.id DESC
+            LIMIT 1
+          ) latest_inbound ON true
+          JOIN messaging.inbound_message_origins origin
+            ON origin.tenant_id=conversation.tenant_id
+           AND origin.message_id=latest_inbound.id
+          JOIN crm.contact_channel_identities identity
+            ON identity.id=origin.contact_identity_id
+           AND identity.tenant_id=origin.tenant_id
+           AND identity.contact_id=contact.id
+           AND identity.channel='whatsapp'
+           AND identity.validation_status='valid'
+           AND identity.normalized_value=origin.sender_address
+          WHERE conversation.id=${input.conversationId}::uuid
+            AND channel.provider_account_id=${channelConfiguration?.phoneNumberId ?? null}
+            AND channel.configuration->>'phoneNumberId'=${channelConfiguration?.phoneNumberId ?? null}
+            AND channel.configuration->>'wabaId'=${channelConfiguration?.wabaId ?? null}
+            AND channel.configuration->>'graphApiVersion'=${channelConfiguration?.graphApiVersion ?? null}
+            AND (${input.recipientIdentityId ?? null}::uuid IS NULL
+              OR identity.id=${input.recipientIdentityId ?? null}::uuid)
+            AND (${input.recipientAddress ?? null}::text IS NULL
+              OR origin.sender_address=${input.recipientAddress ?? null})
+          LIMIT 1
+        `
+      : await sql<ConversationContact[]>`
+          SELECT conversation.id AS conversation_id,
+                 conversation.channel_id, conversation.contact_id,
+                 conversation.customer_service_window_expires_at,
+                 conversation.ownership_epoch, contact.lifecycle_status,
+                 contact.whatsapp_consent, contact.whatsapp_opted_out_at,
+                 identity.id AS recipient_identity_id,
+                 identity.normalized_value
+          FROM messaging.conversations conversation
+          JOIN messaging.channels channel
+            ON channel.id=conversation.channel_id
+           AND channel.tenant_id=conversation.tenant_id
+           AND channel.kind='whatsapp' AND channel.provider='simulator'
+           AND channel.status='active'
+          JOIN crm.contacts contact ON contact.id=conversation.contact_id
+           AND contact.tenant_id=conversation.tenant_id
+          JOIN LATERAL (
+            SELECT candidate.id, candidate.normalized_value
+            FROM crm.contact_channel_identities candidate
+            WHERE candidate.tenant_id=conversation.tenant_id
+              AND candidate.contact_id=conversation.contact_id
+              AND candidate.channel='whatsapp'
+              AND candidate.validation_status='valid'
+              AND candidate.normalized_value IS NOT NULL
+            ORDER BY candidate.is_primary DESC, candidate.created_at,
+                     candidate.id
+            LIMIT 1
+          ) identity ON true
+          WHERE conversation.id=${input.conversationId}::uuid
+          LIMIT 1
+        `;
   const contact = contacts[0];
   if (contact === undefined)
     throw new TypeError("conversation has no valid WhatsApp recipient");
@@ -220,32 +266,11 @@ export async function queueWhatsAppOutbound(
       throw new TypeError("WhatsApp consent is required");
   }
 
-  const channelId = await ensureChannel(
-    sql,
-    input.provider,
-    channelConfiguration,
-  );
-  const conversations = await sql<
-    {
-      id: string;
-      customer_service_window_expires_at: Date | null;
-      ownership_epoch: string;
-    }[]
-  >`
-    INSERT INTO messaging.conversations (tenant_id, channel_id, contact_id, status)
-    VALUES (platform.current_tenant_id(), ${channelId}::uuid, ${contact.contact_id}::uuid, 'open')
-    ON CONFLICT (tenant_id, channel_id, contact_id)
-    DO UPDATE SET status = 'open', updated_at = CURRENT_TIMESTAMP
-    RETURNING id, customer_service_window_expires_at, ownership_epoch
-  `;
-  const conversation = conversations[0];
-  if (conversation === undefined)
-    throw new Error("outbound conversation resolution failed");
   if (
     input.provider === "meta" &&
     input.kind === "text" &&
-    (conversation.customer_service_window_expires_at === null ||
-      conversation.customer_service_window_expires_at.getTime() <= Date.now())
+    (contact.customer_service_window_expires_at === null ||
+      contact.customer_service_window_expires_at.getTime() <= Date.now())
   )
     throw new TypeError(
       "free-form text is outside the customer-service window; use an approved template",
@@ -264,7 +289,7 @@ export async function queueWhatsAppOutbound(
     INSERT INTO messaging.messages
       (tenant_id, conversation_id, direction, sender_type, sender_user_id,
        content_type, content_text, structured_content, provider, status)
-    VALUES (platform.current_tenant_id(), ${conversation.id}::uuid, 'outbound', ${input.senderType ?? "user"},
+    VALUES (platform.current_tenant_id(), ${contact.conversation_id}::uuid, 'outbound', ${input.senderType ?? "user"},
             ${input.senderUserId}::uuid, ${input.kind}, ${content},
             ${structured === undefined ? null : sql.json(structured)}, ${input.provider}, 'queued')
     RETURNING id
@@ -274,17 +299,17 @@ export async function queueWhatsAppOutbound(
     throw new Error("outbound message insert failed");
   const requests = await sql<{ id: string }[]>`
     INSERT INTO messaging.outbound_requests
-      (tenant_id, conversation_id, message_id, channel_id, recipient_identity_id,
+      (tenant_id, conversation_id, message_id, channel_id, recipient_identity_id, recipient_address,
        requested_by_user_id, provider, message_kind, template_name, template_language,
        template_parameters, explicitly_confirmed, idempotency_key, ai_ownership_epoch, request_fingerprint)
-    VALUES (platform.current_tenant_id(), ${conversation.id}::uuid, ${messageId}::uuid,
-            ${channelId}::uuid, ${contact.recipient_identity_id}::uuid,
+    VALUES (platform.current_tenant_id(), ${contact.conversation_id}::uuid, ${messageId}::uuid,
+            ${contact.channel_id}::uuid, ${contact.recipient_identity_id}::uuid, ${contact.normalized_value},
             ${input.senderUserId}::uuid, ${input.provider}, ${input.kind},
             ${input.kind === "template" ? input.templateName : null},
             ${input.kind === "template" ? input.language : null},
             ${input.kind === "template" ? sql.json(input.parameters) : null},
             ${input.explicitlyConfirmed}, ${input.idempotencyKey},
-            ${input.senderType === "agent" ? conversation.ownership_epoch : null}, ${fingerprint})
+            ${input.senderType === "agent" ? contact.ownership_epoch : null}, ${fingerprint})
     RETURNING id
   `;
   const requestId = requests[0]?.id;
@@ -295,8 +320,8 @@ export async function queueWhatsAppOutbound(
   // again, so the badge represents new customer activity after this reply.
   await sql`
     UPDATE messaging.conversations
-    SET unread_count = 0, updated_at = CURRENT_TIMESTAMP
-    WHERE id = ${conversation.id}::uuid
+    SET status = 'open', unread_count = 0, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ${contact.conversation_id}::uuid
   `;
   await sql`
     INSERT INTO ops.jobs
@@ -318,7 +343,7 @@ export async function queueWhatsAppOutbound(
   return {
     requestId,
     messageId,
-    conversationId: conversation.id,
+    conversationId: contact.conversation_id,
     provider: input.provider,
     queued: true,
   };

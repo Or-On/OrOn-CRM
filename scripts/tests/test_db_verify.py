@@ -20,7 +20,7 @@ def test_graph_has_preserved_oron_root_and_one_target_head() -> None:
     assert report.bases == ("0001",)
     assert report.heads == (manifest["alembic_head"],)
     assert report.branch_points == ("8eda5976c920",)
-    assert report.revision_count == 71
+    assert report.revision_count == 73
 
 
 def test_rendered_postgresql_contract_passes_static_security_checks() -> None:
@@ -35,6 +35,51 @@ def test_final_fresh_authorization_definition_accepts_canonical_technicians() ->
     )[0]
 
     assert "('owner','admin','agent','viewer','technician')" in final_definition
+
+
+def test_report_tenant_name_boundary_does_not_grant_private_table_access() -> None:
+    sql = render_offline_sql()
+
+    assert "CREATE FUNCTION platform.current_tenant_name()" in sql
+    assert "GRANT EXECUTE ON FUNCTION platform.current_tenant_name() TO platform_web" in sql
+    assert "GRANT SELECT ON public.tenants TO platform_web" not in sql
+
+
+def test_whatsapp_binding_migration_quarantines_work_in_both_directions() -> None:
+    migration = (
+        MANIFEST_PATH.parent.parent
+        / "alembic"
+        / "versions"
+        / "8d3a9f0c2b71_bind_whatsapp_sender_and_callback.py"
+    ).read_text(encoding="utf-8")
+    upgrade, downgrade = migration.split("def downgrade() -> None:", maxsplit=1)
+
+    upgrade_quarantine = upgrade.index("whatsapp.outbound.legacy_quarantined")
+    upgrade_terminalize = upgrade.index("last_error_code='legacy_recipient_binding_unavailable'")
+    terminal_audit_backfill = upgrade.index("SET recipient_address=identity.normalized_value")
+    assert upgrade_quarantine < upgrade_terminalize < terminal_audit_backfill
+    assert "request.status IN ('sent', 'delivered', 'read', 'failed')" in upgrade
+    assert "conversation.callback.legacy_quarantined" in upgrade
+
+    outbound_downgrade = downgrade.index("whatsapp.outbound.downgrade_quarantined")
+    callback_downgrade = downgrade.index("conversation.callback.downgrade_quarantined")
+    downgrade_lock = downgrade.index("LOCK TABLE messaging.outbound_requests")
+    protections_removed = downgrade.index(
+        "DROP TRIGGER trg_protect_whatsapp_callback_authorization"
+    )
+    assert downgrade_lock < outbound_downgrade < callback_downgrade < protections_removed
+    assert "messaging.inbound_message_origins" in downgrade[downgrade_lock:outbound_downgrade]
+    assert downgrade.index("messaging.outbound_requests", downgrade_lock) < downgrade.index(
+        "messaging.messages", downgrade_lock
+    )
+    assert "messaging.outbound_requests" in downgrade[downgrade_lock:outbound_downgrade]
+    assert "ops.jobs" in downgrade[downgrade_lock:outbound_downgrade]
+    assert "IN ACCESS EXCLUSIVE MODE" in downgrade[downgrade_lock:outbound_downgrade]
+    assert "recipient_binding_removed_by_downgrade" in downgrade
+    assert "callback binding removed by downgrade" in downgrade
+    assert "status IN ('succeeded', 'dead', 'cancelled')" in upgrade
+    assert "GRANT SELECT ON messaging.inbound_message_origins TO platform_web" in migration
+    assert "REVOKE SELECT ON messaging.inbound_message_origins FROM platform_web" in migration
 
 
 @pytest.mark.parametrize(

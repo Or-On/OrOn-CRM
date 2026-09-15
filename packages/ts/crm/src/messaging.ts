@@ -403,12 +403,13 @@ export async function ingestWhatsAppInbound(
   if (channelId === undefined)
     throw new Error("WhatsApp provider account is unavailable");
 
-  const identityRows = await sql<{ contact_id: string }[]>`
-    SELECT contact_id FROM crm.contact_channel_identities
+  const identityRows = await sql<{ id: string; contact_id: string }[]>`
+    SELECT id, contact_id FROM crm.contact_channel_identities
     WHERE channel = 'whatsapp' AND normalized_value = ${phone}
     LIMIT 1
   `;
   let contactId = identityRows[0]?.contact_id;
+  let senderIdentityId = identityRows[0]?.id;
   if (contactId === undefined) {
     const contactRows = await sql<{ id: string }[]>`
       INSERT INTO crm.contacts (tenant_id, name, last_activity_at)
@@ -419,13 +420,15 @@ export async function ingestWhatsAppInbound(
     contactId = contactRows[0]?.id;
     if (contactId === undefined)
       throw new Error("inbound contact insert failed");
-    await sql`
+    const insertedIdentities = await sql<{ id: string }[]>`
       INSERT INTO crm.contact_channel_identities
         (tenant_id, contact_id, channel, normalized_value, display_value,
          provider, provider_identity_id, validation_status, is_primary)
       VALUES (platform.current_tenant_id(), ${contactId}::uuid, 'whatsapp',
               ${phone}, ${input.from}, 'meta', ${phone}, 'valid', true)
+      RETURNING id
     `;
+    senderIdentityId = insertedIdentities[0]?.id;
   } else {
     await sql`
       UPDATE crm.contacts SET name = ${input.profileName.trim() || phone},
@@ -434,6 +437,8 @@ export async function ingestWhatsAppInbound(
       WHERE id = ${contactId}::uuid
     `;
   }
+  if (senderIdentityId === undefined)
+    throw new Error("inbound WhatsApp identity resolution failed");
 
   await sql`
     UPDATE crm.contacts
@@ -504,6 +509,12 @@ export async function ingestWhatsAppInbound(
   const message = messageRows[0];
   if (message === undefined)
     return { conversationId, contactId, inserted: false };
+  await sql`
+    INSERT INTO messaging.inbound_message_origins
+      (tenant_id, message_id, contact_identity_id, sender_address)
+    VALUES (platform.current_tenant_id(), ${message.id}::uuid,
+            ${senderIdentityId}::uuid, ${phone})
+  `;
   await sql`
     INSERT INTO messaging.message_delivery_events
       (tenant_id, message_id, provider_event_id, status, occurred_at)
