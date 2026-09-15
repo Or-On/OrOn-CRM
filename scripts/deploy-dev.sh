@@ -146,7 +146,15 @@ with tarfile.open(sys.argv[1], "r:gz") as archive:
             raise SystemExit(f"Unable to read release file: {name}")
         with source, target.open("xb") as output:
             shutil.copyfileobj(source, output)
-        os.chmod(target, 0o750 if name.startswith("scripts/") else 0o640)
+        if name.startswith("scripts/"):
+            mode = 0o750
+        elif name == "infra/caddy/Caddyfile.deployment":
+            # The edge container is deliberately unprivileged (UID 65532) and
+            # must be able to read this non-secret bind-mounted configuration.
+            mode = 0o644
+        else:
+            mode = 0o640
+        os.chmod(target, mode)
 PY
 for file in \
   "${STAGING_DIR}/images.env" \
@@ -304,14 +312,20 @@ for service_and_key in \
 done
 
 for _ in {1..48}; do
-  if curl --fail --silent --show-error --max-time 10 \
+  if curl --fail --silent --max-time 10 \
     --resolve "${PLATFORM_HOST}:443:127.0.0.1" "${PLATFORM_ORIGIN}/login" >/dev/null; then
     break
   fi
   sleep 5
 done
-curl --fail --silent --show-error --max-time 10 \
-  --resolve "${PLATFORM_HOST}:443:127.0.0.1" "${PLATFORM_ORIGIN}/login" >/dev/null
+if ! curl --fail --silent --show-error --max-time 10 \
+  --resolve "${PLATFORM_HOST}:443:127.0.0.1" "${PLATFORM_ORIGIN}/login" >/dev/null; then
+  echo "Local edge readiness failed; capturing bounded diagnostics before rollback" >&2
+  compose ps >&2 || true
+  compose logs --no-color --tail 100 caddy >&2 || true
+  ss -ltn '( sport = :80 or sport = :443 )' >&2 || true
+  exit 1
+fi
 http_origin="http://${PLATFORM_HOST}"
 redirect_status="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 \
   --resolve "${PLATFORM_HOST}:80:127.0.0.1" "${http_origin}/")"

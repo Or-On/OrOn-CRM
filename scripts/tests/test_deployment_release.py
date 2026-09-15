@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import re
+import stat
 import subprocess
 import sys
 import tarfile
@@ -90,6 +91,9 @@ def test_release_validator_extracts_only_the_exact_regular_payload(tmp_path: Pat
         for item in destination.rglob("*")
         if item.is_file()
     } == EXPECTED
+    if sys.platform != "win32":
+        caddyfile = destination / "infra" / "caddy" / "Caddyfile.deployment"
+        assert stat.S_IMODE(caddyfile.stat().st_mode) == 0o644
 
 
 @pytest.mark.parametrize(
@@ -148,6 +152,7 @@ def test_deploy_probes_local_edge_without_requiring_public_ip_hairpin() -> None:
     assert "PLATFORM_ORIGIN must be an HTTPS origin" in deploy
     assert '--resolve "${PLATFORM_HOST}:443:127.0.0.1"' in deploy
     assert '--resolve "${PLATFORM_HOST}:80:127.0.0.1"' in deploy
+    assert "compose logs --no-color --tail 100 caddy" in deploy
     workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     assert "https://dev.or-on.io/login" in workflow
 
