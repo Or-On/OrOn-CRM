@@ -122,7 +122,7 @@ function store(fetcher: typeof fetch, report = vi.fn(), enabled = true) {
         enabled,
         accessToken: "fictional-never-log-token",
         graphApiVersion: "v26.0",
-        phoneNumberId: "999999999",
+        phoneNumberId: channelConfiguration.phoneNumberId,
         fetch: fetcher,
         maxAttempts: 1,
       }),
