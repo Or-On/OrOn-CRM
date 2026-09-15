@@ -26,7 +26,7 @@ reported, not counted as passes.
 | `pnpm --filter @or-on/web test -- private-objects customer-document-permissions field-service-attachment-download` | PASS — 11 focused upload/authorization/header regressions |
 | `pnpm --filter @or-on/web test -- oauth-disconnect-route oauth-disconnect tenant-product-workspaces` | PASS — 19 focused OAuth lifecycle/UI tests |
 | `uv run pytest -p no:cacheprovider scripts/tests/test_deployment_release.py scripts/tests/test_db_verify.py` | PASS — 19 focused release/database-contract tests |
-| `uv run pytest -p no:cacheprovider scripts/tests/test_deployment_release.py` after release-preload hardening | PASS — 11 focused release tests |
+| `uv run pytest -p no:cacheprovider scripts/tests/test_deployment_release.py` after release hardening | PASS — 12 focused release tests |
 | GitHub Actions CI `34927297654` on Node 24.20.0 / Python 3.14.7 | PASS — TypeScript, Python, contracts, architecture/security, PostgreSQL/Alembic and all five container builds |
 | CI PostgreSQL 18.6 migration/RLS suite | PASS — 128 passed, 3 explicit readiness-environment skips |
 | CI isolated messaging diagnostic | PASS — 4 passed; provider HTTP mocked |
@@ -82,12 +82,17 @@ worker 30 and web 1.
   previously healthy release. Enabling those profiles still omitted the
   migrator on the actual host, so deployment now explicitly pulls each of the
   five validated immutable references before revision inspection; shell syntax
-  and all 11 release tests pass.
+  and all 12 release tests pass.
 - That retry also proved CI was invoking the previously installed host deployer,
   not the corrected copy packaged in the candidate archive. The handoff now
   transfers the checked-out deployer separately, verifies its SHA-256 on the
   host and executes that exact copy. Regression coverage forbids the stale
   `/opt` deployer entrypoint while preserving archive checksum and exit status.
+- With the candidate deployer active, all five images pulled, backup and Alembic
+  completed, and every container became healthy. The VM's public-IP hairpin probe
+  alone could not connect and correctly triggered rollback. The in-host probe now
+  uses loopback with the real TLS hostname, while CI keeps the independent public
+  HTTP/HTTPS check; the new release regression covers both boundaries.
 - The first focused lint after adding strict UTF-8 validation caught one missing
   error `cause`; it was fixed and the full lint/type/build/test gates were rerun.
 - A first production build during implementation exposed a client import through
