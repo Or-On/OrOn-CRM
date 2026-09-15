@@ -30,6 +30,7 @@ const sourceUrl = process.env.CROSS_CHANNEL_TEST_DATABASE_URL;
 const root = fileURLToPath(new URL("../../../../", import.meta.url));
 const tenantId = "10000000-0000-4000-8000-000000000001";
 const userId = "20000000-0000-4000-8000-000000000001";
+const providerTimestampSeconds = String(Math.floor(Date.now() / 1000));
 
 async function processUntilIdle(
   store: Readonly<{ processAvailable: () => Promise<number> }>,
@@ -154,7 +155,10 @@ describe.skipIf(sourceUrl === undefined)(
                         id: messageId,
                         from: "12025550198",
                         type: "text",
-                        timestamp: String(Math.floor(Date.now() / 1000)),
+                        // Meta timestamps have one-second precision. Keeping
+                        // every fixture event in the same second proves that
+                        // ingestion order, not random UUID order, resolves ties.
+                        timestamp: providerTimestampSeconds,
                         text: { body: text },
                       },
                     ],

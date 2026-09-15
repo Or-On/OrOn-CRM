@@ -335,7 +335,7 @@ async function loadFieldServiceIntakeWork(
       FROM messaging.messages
       WHERE conversation_id=${conversationId}::uuid
         AND direction IN ('inbound','outbound')
-      ORDER BY created_at DESC, id DESC LIMIT 50
+      ORDER BY created_at DESC, updated_at DESC, id DESC LIMIT 50
     `;
     return {
       conversationId,
@@ -1526,7 +1526,8 @@ async function requireCurrentTrigger(
 ): Promise<void> {
   const latest = await transaction<{ id: string }[]>`
     SELECT id FROM messaging.messages WHERE conversation_id=${conversationId}::uuid
-      AND direction='inbound' ORDER BY created_at DESC, id DESC LIMIT 1
+      AND direction='inbound'
+      ORDER BY created_at DESC, updated_at DESC, id DESC LIMIT 1
   `;
   if (latest[0]?.id !== triggerMessageId)
     throw new TypeError("AI inbound trigger superseded");
@@ -1612,7 +1613,7 @@ async function loadAiWork(
       FROM messaging.messages
       WHERE conversation_id = ${row.conversation_id}::uuid
         AND content_type = 'text' AND content_text IS NOT NULL
-      ORDER BY created_at DESC, id DESC LIMIT 50
+      ORDER BY created_at DESC, updated_at DESC, id DESC LIMIT 50
     `;
     const config = row.configuration as Record<string, unknown> | null;
     const channelConfiguration =
@@ -2380,8 +2381,12 @@ async function loadAutomaticCallWork(
       WHERE message.conversation_id = ${payload.conversationId}::uuid
         AND message.content_type = 'text' AND message.content_text IS NOT NULL
         AND (message.created_at < boundary.created_at OR
-             (message.created_at = boundary.created_at AND message.id <= boundary.id))
-      ORDER BY message.created_at DESC, message.id DESC
+             (message.created_at = boundary.created_at AND
+              message.updated_at < boundary.updated_at) OR
+             (message.created_at = boundary.created_at AND
+              message.updated_at = boundary.updated_at AND
+              message.id <= boundary.id))
+      ORDER BY message.created_at DESC, message.updated_at DESC, message.id DESC
       LIMIT 12
     `;
     const notes = await transaction<{ body: string; created_at: Date }[]>`
@@ -2600,7 +2605,7 @@ async function processAutomaticCall(
           FROM messaging.messages
           WHERE conversation_id=${payload.conversationId}::uuid
             AND content_type='text' AND content_text IS NOT NULL
-          ORDER BY created_at DESC, id DESC LIMIT 20
+          ORDER BY created_at DESC, updated_at DESC, id DESC LIMIT 20
         `;
         const callFailureDescription = [
           `Customer: ${contact[0]?.name ?? "Unknown contact"}`,
