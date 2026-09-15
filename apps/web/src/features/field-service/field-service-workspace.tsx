@@ -44,6 +44,12 @@ import {
   instantFromDateTimeLocal,
 } from "../calendar/calendar-time";
 import { crmMutation, crmRead } from "../crm";
+import {
+  appointmentStatusLabel,
+  casePriorityLabel,
+  caseStatusLabel,
+  technicianIdentityLabel,
+} from "./field-service-labels";
 
 type View = "cases" | "schedule" | "technicians";
 
@@ -436,20 +442,6 @@ export function FieldServiceWorkspace({
     });
   }
 
-  const statusLabel = (status: ServiceCaseSummary["status"]) =>
-    he
-      ? (
-          {
-            awaiting_scheduling: "ממתין לתזמון",
-            scheduled: "מתוזמן",
-            in_progress: "בטיפול",
-            completed: "הושלם",
-            closed: "נסגר",
-            cancelled: "בוטל",
-          } as const
-        )[status]
-      : status.replaceAll("_", " ");
-
   return (
     <div className="field-service-workspace">
       <header className="platform-admin-hero field-service-hero">
@@ -626,27 +618,31 @@ export function FieldServiceWorkspace({
                         href={`/field-service/cases/${item.id}`}
                       >
                         <strong dir="ltr">{item.reference}</strong>
-                        <small>{item.priority}</small>
+                        <small>{casePriorityLabel(item.priority, he)}</small>
                       </Link>
                     </td>
                     <td>
-                      <strong>{item.customerName}</strong>
+                      <strong dir="auto">{item.customerName}</strong>
                       <small>
                         <MapPin aria-hidden="true" size={12} />{" "}
-                        {item.serviceLocationName ??
-                          (he ? "ללא מיקום" : "No location")}
+                        <bdi dir="auto">
+                          {item.serviceLocationName ??
+                            (he ? "ללא מיקום" : "No location")}
+                        </bdi>
                       </small>
                     </td>
                     <td>
-                      <strong>{item.title}</strong>
+                      <strong dir="auto">{item.title}</strong>
                       <small>
-                        {item.productModel ??
-                          (he ? "דגם לא צוין" : "Model not supplied")}
+                        <bdi dir="auto">
+                          {item.productModel ??
+                            (he ? "דגם לא צוין" : "Model not supplied")}
+                        </bdi>
                       </small>
                     </td>
                     <td>
                       <Badge
-                        label={statusLabel(item.status)}
+                        label={caseStatusLabel(item.status, he)}
                         tone={caseTone(item.status)}
                       />
                     </td>
@@ -705,12 +701,12 @@ export function FieldServiceWorkspace({
               <Surface as="article" key={item.id} level="raised">
                 <div>
                   <Badge
-                    label={item.status.replaceAll("_", " ")}
+                    label={appointmentStatusLabel(item.status, he)}
                     tone={item.status === "scheduled" ? "positive" : "neutral"}
                   />
                   <span dir="ltr">{item.source}</span>
                 </div>
-                <h3>{item.technicianName}</h3>
+                <h3 dir="auto">{item.technicianName}</h3>
                 <p>
                   <CalendarClock aria-hidden="true" size={15} />{" "}
                   {new Intl.DateTimeFormat(locale, {
@@ -719,7 +715,7 @@ export function FieldServiceWorkspace({
                     timeZone: item.timezone,
                   }).format(new Date(item.startsAt))}
                 </p>
-                <small>
+                <small dir="auto">
                   {item.notes ?? (he ? "ללא הערות" : "No scheduling notes")}
                 </small>
                 {canOperate &&
@@ -769,12 +765,12 @@ export function FieldServiceWorkspace({
                     <UserRoundCog aria-hidden="true" size={19} />
                   </span>
                   <div>
-                    <h3>{item.fullName}</h3>
-                    <p>
+                    <h3 dir="auto">{item.fullName}</h3>
+                    <p dir="auto">
                       {item.employeeIdentifier ??
                         (he ? "ללא מזהה עובד" : "No employee ID")}
                     </p>
-                    <small>
+                    <small dir="auto">
                       {item.phone ??
                         item.email ??
                         (he ? "ללא פרטי קשר" : "No contact details")}
@@ -784,7 +780,10 @@ export function FieldServiceWorkspace({
                     <Badge
                       label={
                         item.active
-                          ? item.identityVerification.replaceAll("_", " ")
+                          ? technicianIdentityLabel(
+                              item.identityVerification,
+                              he,
+                            )
                           : he
                             ? "לא פעיל"
                             : "Inactive"
@@ -1205,7 +1204,7 @@ export function FieldServiceWorkspace({
         {...(manageAppointment === undefined
           ? {}
           : {
-              description: `${manageAppointment.technicianName} · ${manageAppointment.status.replaceAll("_", " ")}`,
+              description: `${manageAppointment.technicianName} · ${appointmentStatusLabel(manageAppointment.status, he)}`,
             })}
         onClose={closeManageAppointmentDialog}
         open={manageAppointment !== undefined}

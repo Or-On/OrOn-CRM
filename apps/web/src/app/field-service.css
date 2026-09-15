@@ -583,6 +583,11 @@
 .service-case-hero h1,
 .service-case-hero p {
   margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.service-case-hero > div:first-child {
+  min-inline-size: 0;
 }
 
 .service-case-hero h1 {
@@ -1080,6 +1085,12 @@
 }
 
 @media (max-width: 48rem) {
+  .service-case-hero {
+    min-block-size: auto;
+    gap: 1rem;
+    padding: 1.1rem;
+  }
+
   .service-case-hero,
   .service-case-hero__actions,
   .service-case-section > header,

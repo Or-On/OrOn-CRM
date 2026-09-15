@@ -43,6 +43,15 @@ import { useRouter } from "next/navigation";
 import { useMemo, useRef, useState, type SyntheticEvent } from "react";
 
 import { crmMutation, csrfToken } from "../crm";
+import {
+  caseStatusLabel,
+  evidenceCategoryLabel,
+  ocrStatusLabel,
+  processingStatusLabel,
+  reportStatusLabel,
+  visitStatusLabel,
+  warrantyStatusLabel,
+} from "./field-service-labels";
 
 type UploadCategory =
   | "fault"
@@ -510,17 +519,20 @@ export function ServiceCaseWorkspace({
           <span className="eyebrow" dir="ltr">
             {serviceCase.reference}
           </span>
-          <h1>{serviceCase.title}</h1>
+          <h1 dir="auto">{serviceCase.title}</h1>
           <p>
-            {serviceCase.customerName}
-            {serviceCase.serviceLocationName
-              ? ` · ${serviceCase.serviceLocationName}`
-              : ""}
+            <bdi dir="auto">{serviceCase.customerName}</bdi>
+            {serviceCase.serviceLocationName ? (
+              <>
+                <span aria-hidden="true"> · </span>
+                <bdi dir="auto">{serviceCase.serviceLocationName}</bdi>
+              </>
+            ) : null}
           </p>
         </div>
         <div className="service-case-hero__actions">
           <Badge
-            label={serviceCase.status.replaceAll("_", " ")}
+            label={caseStatusLabel(serviceCase.status, he)}
             tone={statusTone(serviceCase.status)}
           />
           {canOperate ? (
@@ -544,7 +556,7 @@ export function ServiceCaseWorkspace({
                 <span className="eyebrow">
                   {he ? "קובץ לקוח" : "Customer dossier"}
                 </span>
-                <h2>{serviceCase.customerName}</h2>
+                <h2 dir="auto">{serviceCase.customerName}</h2>
               </div>
               <Link href={`/contacts/${serviceCase.customerContactId}`}>
                 {he ? "פתיחת לקוח" : "Open contact"}
@@ -560,24 +572,35 @@ export function ServiceCaseWorkspace({
               </div>
               <div>
                 <dt>{he ? "אחריות" : "Warranty"}</dt>
-                <dd>{serviceCase.warrantyStatus}</dd>
+                <dd>{warrantyStatusLabel(serviceCase.warrantyStatus, he)}</dd>
               </div>
               <div>
                 <dt>{he ? "דגם" : "Model"}</dt>
-                <dd dir="auto">{serviceCase.productModel ?? "—"}</dd>
+                <dd>
+                  <bdi dir="auto">{serviceCase.productModel ?? "—"}</bdi>
+                </dd>
               </div>
               <div>
                 <dt>{he ? "מספר סידורי" : "Serial"}</dt>
-                <dd dir="ltr">{serviceCase.serialNumber ?? "—"}</dd>
+                <dd>
+                  <bdi dir="auto">{serviceCase.serialNumber ?? "—"}</bdi>
+                </dd>
               </div>
             </dl>
-            <p className="service-case-fault">{serviceCase.faultDescription}</p>
+            <p className="service-case-fault" dir="auto">
+              {serviceCase.faultDescription}
+            </p>
             <div className="service-case-classifications">
               {dossier.customer.classifications.length === 0 ? (
                 <span>{he ? "ללא סיווג" : "No classification"}</span>
               ) : (
                 dossier.customer.classifications.map((item) => (
-                  <Badge key={item.id} label={item.name} tone="neutral" />
+                  <Badge
+                    dir="auto"
+                    key={item.id}
+                    label={item.name}
+                    tone="neutral"
+                  />
                 ))
               )}
             </div>
@@ -613,7 +636,7 @@ export function ServiceCaseWorkspace({
                         {visit.visitNumber}
                       </div>
                       <div>
-                        <h3>
+                        <h3 dir="auto">
                           {technician?.fullName ??
                             (he ? "טכנאי" : "Technician")}
                         </h3>
@@ -634,7 +657,7 @@ export function ServiceCaseWorkspace({
                         </p>
                         <div>
                           <Badge
-                            label={visit.status}
+                            label={visitStatusLabel(visit.status, he)}
                             tone={
                               visit.status === "departed" ||
                               visit.status === "reported"
@@ -741,10 +764,12 @@ export function ServiceCaseWorkspace({
                         <span>
                           <FileImage aria-hidden="true" size={18} />
                         </span>
-                        <strong>{item.category.replaceAll("_", " ")}</strong>
+                        <strong>
+                          {evidenceCategoryLabel(item.category, he)}
+                        </strong>
                         <small>
                           {Math.ceil(item.byteSize / 1024)} KB ·{" "}
-                          {item.processingStatus}
+                          {processingStatusLabel(item.processingStatus, he)}
                         </small>
                         <Download aria-hidden="true" size={15} />
                       </a>
@@ -752,7 +777,7 @@ export function ServiceCaseWorkspace({
                         <details className="service-ocr-review">
                           <summary>
                             <ScanText aria-hidden="true" size={14} />
-                            OCR · {ocr.status.replaceAll("_", " ")}
+                            OCR · {ocrStatusLabel(ocr.status, he)}
                             {ocr.confidence === null
                               ? ""
                               : ` · ${String(Math.round(ocr.confidence * 100))}%`}
@@ -877,7 +902,7 @@ export function ServiceCaseWorkspace({
                         <span>
                           {call.direction} · {call.status}
                         </span>
-                        <p>
+                        <p dir="auto">
                           {call.outcome ??
                             (he ? "ללא תוצאה מתועדת" : "No recorded outcome")}
                         </p>
@@ -932,7 +957,7 @@ export function ServiceCaseWorkspace({
                   >
                     {nextStatuses.map((status) => (
                       <option key={status} value={status}>
-                        {status.replaceAll("_", " ")}
+                        {caseStatusLabel(status, he)}
                       </option>
                     ))}
                   </Select>
@@ -972,8 +997,8 @@ export function ServiceCaseWorkspace({
                     <CheckCircle2 aria-hidden="true" size={14} />
                   </span>
                   <div>
-                    <strong>{item.toStatus.replaceAll("_", " ")}</strong>
-                    <p>
+                    <strong>{caseStatusLabel(item.toStatus, he)}</strong>
+                    <p dir="auto">
                       {item.reason ?? (he ? "שינוי סטטוס" : "Status changed")}
                     </p>
                     <time dateTime={item.changedAt}>
@@ -1015,7 +1040,9 @@ export function ServiceCaseWorkspace({
                       summary.status === "completed" ? "positive" : "neutral"
                     }
                   />
-                  <p>{summary.summary ?? (he ? "אין תוכן" : "No content")}</p>
+                  <p dir="auto">
+                    {summary.summary ?? (he ? "אין תוכן" : "No content")}
+                  </p>
                 </div>
               ))
             )}
@@ -1243,7 +1270,7 @@ export function ServiceCaseWorkspace({
                 tone="neutral"
               />
               <Badge
-                label={latestReport.status}
+                label={reportStatusLabel(latestReport.status, he)}
                 tone={
                   latestReport.status === "finalized" ? "positive" : "warning"
                 }

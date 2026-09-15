@@ -145,6 +145,143 @@ describe("field-service UI contracts", () => {
 
   afterEach(cleanup);
 
+  it("renders every case lifecycle value as a clear English label", () => {
+    const statuses = [
+      "awaiting_scheduling",
+      "scheduled",
+      "in_progress",
+      "completed",
+      "closed",
+      "cancelled",
+    ] as const;
+    const expected = [
+      "Awaiting scheduling",
+      "Scheduled",
+      "In progress",
+      "Completed",
+      "Closed",
+      "Cancelled",
+    ];
+    const { container } = render(
+      localized(
+        <FieldServiceWorkspace
+          appointments={[]}
+          canManage
+          canOperate
+          cases={statuses.map((status, index) => ({
+            ...serviceCase,
+            id: `10000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+            reference: `FS-2026-${String(index + 1).padStart(4, "0")}`,
+            status,
+          }))}
+          contacts={[]}
+          feature={feature}
+          technicians={[]}
+          timezone="Asia/Jerusalem"
+        />,
+      ),
+    );
+
+    const badgeLabels = [...container.querySelectorAll(".or-badge")].map(
+      (element) => element.textContent,
+    );
+    for (const label of expected) expect(badgeLabels).toContain(label);
+    expect(container.textContent).not.toContain("awaiting_scheduling");
+    expect(container.textContent).not.toContain("in_progress");
+  });
+
+  it("localizes case, warranty and OCR states and isolates mixed-direction evidence", () => {
+    const mixedCase = {
+      ...serviceCase,
+      customerName: "יוסי Cohen",
+      serviceLocationName: "סניף Tel Aviv",
+      title: "תקלה בדגם Bosch X-500?",
+      faultDescription: "Error E24 — המכונה לא מנקזת.",
+      productModel: "Bosch דגם X-500",
+      serialNumber: "SN-42/אב",
+    };
+    const { container } = render(
+      localized(
+        <ServiceCaseWorkspace
+          canManage
+          canOperate
+          canReadVoice
+          dossier={{
+            ...dossier,
+            serviceCase: mixedCase,
+            attachments: [
+              {
+                id: "90000000-0000-4000-8000-000000000001",
+                objectId: "91000000-0000-4000-8000-000000000001",
+                visitId: null,
+                reportRevisionId: null,
+                category: "product_label",
+                source: "technician",
+                processingStatus: "available",
+                contentType: "image/jpeg",
+                byteSize: 2048,
+                caption: null,
+                createdAt: "2026-09-14T08:00:00.000Z",
+              },
+            ],
+            ocrResults: [
+              {
+                id: "92000000-0000-4000-8000-000000000001",
+                attachmentId: "90000000-0000-4000-8000-000000000001",
+                status: "review_required",
+                proposedFields: { productModel: "Bosch X-500" },
+                confirmedFields: {},
+                manuallyConfirmedFields: [],
+                confidence: 0.81,
+                errorSafe: null,
+                attempt: 1,
+              },
+            ],
+            statusHistory: [
+              {
+                fromStatus: null,
+                toStatus: "awaiting_scheduling",
+                reason: "נוצר מ-WhatsApp intake",
+                changedAt: "2026-09-14T08:00:00.000Z",
+              },
+            ],
+          }}
+          feature={feature}
+          linkCandidates={{ calls: [], conversations: [] }}
+          technicians={[]}
+          timezone="Asia/Jerusalem"
+        />,
+        "he",
+      ),
+    );
+
+    expect(screen.getAllByText("ממתין לתזמון").length).toBeGreaterThan(0);
+    expect(screen.getByText("לא ידוע")).toBeTruthy();
+    expect(screen.getByText("תווית מוצר")).toBeTruthy();
+    expect(screen.getByText(/OCR · נדרשת בדיקה · 81%/u)).toBeTruthy();
+    expect(screen.getByRole("option", { name: "מתוזמן" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "בוטל" })).toBeTruthy();
+    expect(container.textContent).not.toContain("review_required");
+    expect(container.textContent).not.toContain("awaiting_scheduling");
+
+    expect(
+      screen
+        .getByRole("heading", { level: 1, name: mixedCase.title })
+        .getAttribute("dir"),
+    ).toBe("auto");
+    expect(
+      screen
+        .getAllByText(mixedCase.customerName, { selector: "bdi" })[0]
+        ?.getAttribute("dir"),
+    ).toBe("auto");
+    expect(
+      screen.getByText(mixedCase.faultDescription).getAttribute("dir"),
+    ).toBe("auto");
+    expect(screen.getByText("נוצר מ-WhatsApp intake").getAttribute("dir")).toBe(
+      "auto",
+    );
+  });
+
   it("offers distinct desktop upload and rear-camera capture controls", () => {
     const { container } = render(
       localized(
