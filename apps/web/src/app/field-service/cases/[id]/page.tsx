@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import {
   getFieldServiceFeatureState,
+  getTenantSettings,
   getServiceCaseDossier,
   listServiceCaseLinkCandidates,
   listTechnicians,
@@ -44,19 +45,22 @@ export default async function ServiceCasePage({
           { role: session.tenant.role, isSuperuser: session.isSuperuser },
           "voice:read",
         );
-        const [dossier, technicians, linkCandidates] = await Promise.all([
-          getServiceCaseDossier(sql, id),
-          listTechnicians(sql),
-          canManage
-            ? listServiceCaseLinkCandidates(sql, id)
-            : Promise.resolve(undefined),
-        ]);
+        const [dossier, technicians, linkCandidates, settings] =
+          await Promise.all([
+            getServiceCaseDossier(sql, id),
+            listTechnicians(sql),
+            canManage
+              ? listServiceCaseLinkCandidates(sql, id)
+              : Promise.resolve(undefined),
+            getTenantSettings(sql),
+          ]);
         return {
           dossier:
             dossier === undefined
               ? undefined
               : dossierForVoiceAccess(dossier, canReadVoice),
           technicians,
+          timezone: settings.timezone,
           feature,
           canManage,
           linkCandidates:
@@ -87,6 +91,7 @@ export default async function ServiceCasePage({
         feature={data.feature}
         linkCandidates={data.linkCandidates}
         technicians={data.technicians}
+        timezone={data.timezone}
       />
     </main>
   );

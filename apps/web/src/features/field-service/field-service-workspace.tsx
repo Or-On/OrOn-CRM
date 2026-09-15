@@ -654,6 +654,7 @@ export function FieldServiceWorkspace({
                       <time dateTime={item.updatedAt}>
                         {new Intl.DateTimeFormat(locale, {
                           dateStyle: "medium",
+                          timeZone: timezone,
                         }).format(new Date(item.updatedAt))}
                       </time>
                     </td>

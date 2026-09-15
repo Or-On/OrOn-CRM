@@ -167,6 +167,7 @@ export function ServiceCaseWorkspace({
   feature,
   linkCandidates,
   technicians,
+  timezone,
 }: {
   readonly canManage: boolean;
   readonly canOperate: boolean;
@@ -175,6 +176,7 @@ export function ServiceCaseWorkspace({
   readonly feature: FieldServiceFeatureState;
   readonly linkCandidates: ServiceCaseLinkCandidates | undefined;
   readonly technicians: readonly TechnicianSummary[];
+  readonly timezone: string;
 }) {
   const locale = useLocale();
   const he = locale.startsWith("he");
@@ -621,6 +623,7 @@ export function ServiceCaseWorkspace({
                             ? new Intl.DateTimeFormat(locale, {
                                 dateStyle: "medium",
                                 timeStyle: "short",
+                                timeZone: timezone,
                               }).format(new Date(visit.arrivalAt))
                             : he
                               ? "טרם בוצעה הגעה"
@@ -851,6 +854,7 @@ export function ServiceCaseWorkspace({
                           {new Intl.DateTimeFormat(locale, {
                             dateStyle: "short",
                             timeStyle: "short",
+                            timeZone: timezone,
                           }).format(new Date(message.createdAt))}
                         </time>
                       </li>
@@ -976,6 +980,7 @@ export function ServiceCaseWorkspace({
                       {new Intl.DateTimeFormat(locale, {
                         dateStyle: "medium",
                         timeStyle: "short",
+                        timeZone: timezone,
                       }).format(new Date(item.changedAt))}
                     </time>
                   </div>
@@ -1132,6 +1137,7 @@ export function ServiceCaseWorkspace({
                   {new Intl.DateTimeFormat(locale, {
                     dateStyle: "medium",
                     timeStyle: "short",
+                    timeZone: item.timezone,
                   }).format(new Date(item.startsAt))}{" "}
                   · {item.technicianName}
                 </option>

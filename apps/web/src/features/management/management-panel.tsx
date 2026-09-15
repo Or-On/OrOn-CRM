@@ -1333,6 +1333,7 @@ export function ManagementPanel({
             {fieldServiceFeature === undefined ? null : (
               <FieldServiceSettings
                 initialState={fieldServiceFeature}
+                timezone={settings?.timezone ?? timeZone ?? "UTC"}
                 {...(fieldServiceRuntimeReadiness === undefined
                   ? {}
                   : { runtimeReadiness: fieldServiceRuntimeReadiness })}

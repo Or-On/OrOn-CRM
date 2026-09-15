@@ -34,9 +34,11 @@ export interface FieldServiceRuntimeReadiness {
 export function FieldServiceSettings({
   initialState,
   runtimeReadiness,
+  timezone,
 }: {
   readonly initialState: FieldServiceFeatureState;
   readonly runtimeReadiness?: FieldServiceRuntimeReadiness;
+  readonly timezone: string;
 }) {
   const locale = useLocale();
   const he = locale.startsWith("he");
@@ -332,7 +334,7 @@ export function FieldServiceSettings({
           <div className="field-service-settings__actions">
             <p>
               {feature.changedAt
-                ? `${he ? "עודכן" : "Last changed"}: ${new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(new Date(feature.changedAt))}${feature.changedByDisplayName ? ` · ${feature.changedByDisplayName}` : ""}`
+                ? `${he ? "עודכן" : "Last changed"}: ${new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short", timeZone: timezone }).format(new Date(feature.changedAt))}${feature.changedByDisplayName ? ` · ${feature.changedByDisplayName}` : ""}`
                 : he
                   ? "טרם שונה"
                   : "Not changed yet"}

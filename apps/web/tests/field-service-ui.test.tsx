@@ -156,6 +156,7 @@ describe("field-service UI contracts", () => {
           feature={feature}
           linkCandidates={{ calls: [], conversations: [] }}
           technicians={[]}
+          timezone="Asia/Jerusalem"
         />,
       ),
     );
@@ -275,6 +276,7 @@ describe("field-service UI contracts", () => {
           feature={feature}
           linkCandidates={{ calls: [], conversations: [] }}
           technicians={[]}
+          timezone="Asia/Jerusalem"
         />,
       ),
     );
@@ -323,6 +325,7 @@ describe("field-service UI contracts", () => {
           feature={feature}
           linkCandidates={{ calls: [], conversations: [] }}
           technicians={[]}
+          timezone="Asia/Jerusalem"
         />,
       ),
     );
@@ -413,6 +416,55 @@ describe("field-service UI contracts", () => {
     expect(state.withCurrentTenant).not.toHaveBeenCalled();
   });
 
+  it("renders case timestamps in the tenant timezone instead of the host timezone", () => {
+    const previousTimezone = process.env.TZ;
+    process.env.TZ = "UTC";
+    try {
+      const changedAt = "2026-09-14T23:30:00.000Z";
+      const expected = new Intl.DateTimeFormat("en", {
+        dateStyle: "medium",
+        timeStyle: "short",
+        timeZone: "Asia/Jerusalem",
+      }).format(new Date(changedAt));
+      const hostDefault = new Intl.DateTimeFormat("en", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }).format(new Date(changedAt));
+
+      expect(expected).not.toBe(hostDefault);
+      render(
+        localized(
+          <ServiceCaseWorkspace
+            canManage
+            canOperate
+            canReadVoice
+            dossier={{
+              ...dossier,
+              statusHistory: [
+                {
+                  fromStatus: null,
+                  toStatus: "awaiting_scheduling",
+                  reason: "Case created",
+                  changedAt,
+                },
+              ],
+            }}
+            feature={feature}
+            linkCandidates={{ calls: [], conversations: [] }}
+            technicians={[]}
+            timezone="Asia/Jerusalem"
+          />,
+        ),
+      );
+
+      expect(screen.getByText(expected)).toBeTruthy();
+      expect(screen.queryByText(hostDefault)).toBeNull();
+    } finally {
+      if (previousTimezone === undefined) delete process.env.TZ;
+      else process.env.TZ = previousTimezone;
+    }
+  });
+
   it("provides scoped recovery and a route back to service cases", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const retry = vi.fn();
@@ -470,6 +522,7 @@ describe("field-service UI contracts", () => {
             privateStorageConfigured: false,
             storageBackend: "gcs",
           }}
+          timezone="Asia/Jerusalem"
         />,
       ),
     );
