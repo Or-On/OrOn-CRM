@@ -215,6 +215,9 @@ async def test_whatsapp_binding_upgrade_and_downgrade_quarantine_pending_work(
     legacy_outbound_job_id = uuid4()
     legacy_callback_job_id = uuid4()
     legacy_cancelled_callback_job_id = uuid4()
+    missing_binding_message_id = uuid4()
+    missing_binding_request_id = uuid4()
+    missing_binding_job_id = uuid4()
 
     connection = await asyncpg.connect(isolated_postgres_url)
     try:
@@ -366,7 +369,7 @@ async def test_whatsapp_binding_upgrade_and_downgrade_quarantine_pending_work(
     finally:
         await connection.close()
 
-    await run_alembic(isolated_postgres_url, "upgrade", "head")
+    await run_alembic(isolated_postgres_url, "upgrade", "8d3a9f0c2b71")
     connection = await asyncpg.connect(isolated_postgres_url)
     try:
         assert await connection.fetchval(
@@ -423,6 +426,47 @@ async def test_whatsapp_binding_upgrade_and_downgrade_quarantine_pending_work(
                 tenant_id,
             )
             == 2
+        )
+
+        # The predecessor CHECK accepted NULL as UNKNOWN for an active row.
+        # Seed one such request to prove the follow-up migration quarantines it.
+        await connection.execute(
+            "INSERT INTO messaging.messages"
+            "(id,tenant_id,conversation_id,direction,sender_type,sender_user_id,"
+            "content_type,content_text,provider,status) "
+            "VALUES($1,$2,$3,'outbound','user',$4,'text',"
+            "'Missing recipient snapshot','meta','queued')",
+            missing_binding_message_id,
+            tenant_id,
+            conversation_id,
+            user_id,
+        )
+        await connection.execute(
+            "INSERT INTO messaging.outbound_requests"
+            "(id,tenant_id,conversation_id,message_id,channel_id,recipient_identity_id,"
+            "requested_by_user_id,provider,message_kind,explicitly_confirmed,status,"
+            "idempotency_key) "
+            "VALUES($1,$2,$3,$4,$5,$6,$7,'meta','text',true,'queued',$8)",
+            missing_binding_request_id,
+            tenant_id,
+            conversation_id,
+            missing_binding_message_id,
+            channel_id,
+            identity_id,
+            user_id,
+            f"missing-binding-{missing_binding_request_id}",
+        )
+        await connection.execute(
+            "INSERT INTO ops.jobs"
+            "(id,tenant_id,queue,job_type,reference_type,reference_id,payload,"
+            "idempotency_key) "
+            "VALUES($1,$2,'messaging','whatsapp.outbound.send','outbound_request',"
+            "$3,$4::jsonb,$5)",
+            missing_binding_job_id,
+            tenant_id,
+            missing_binding_request_id,
+            json.dumps({"requestId": str(missing_binding_request_id)}),
+            f"missing-binding-job-{missing_binding_job_id}",
         )
 
         new_trigger_id = uuid4()
@@ -515,6 +559,70 @@ async def test_whatsapp_binding_upgrade_and_downgrade_quarantine_pending_work(
             "WHEN (NEW.action = 'whatsapp.outbound.downgrade_quarantined') "
             "EXECUTE FUNCTION audit.pause_binding_downgrade_test()"
         )
+    finally:
+        await connection.close()
+
+    await run_alembic(isolated_postgres_url, "upgrade", "head")
+    connection = await asyncpg.connect(isolated_postgres_url)
+    try:
+        assert tuple(
+            await connection.fetchrow(
+                "SELECT status,recipient_address,last_error_code "
+                "FROM messaging.outbound_requests WHERE id=$1",
+                missing_binding_request_id,
+            )
+        ) == ("failed", None, "legacy_recipient_binding_unavailable")
+        assert (
+            await connection.fetchval(
+                "SELECT status FROM messaging.messages WHERE id=$1",
+                missing_binding_message_id,
+            )
+            == "failed"
+        )
+        assert (
+            await connection.fetchval(
+                "SELECT status FROM ops.jobs WHERE id=$1", missing_binding_job_id
+            )
+            == "dead"
+        )
+        assert (
+            await connection.fetchval(
+                "SELECT count(*) FROM audit.records WHERE tenant_id=$1 "
+                "AND target_id=$2 "
+                "AND action='whatsapp.outbound.missing_binding_quarantined'",
+                tenant_id,
+                missing_binding_request_id,
+            )
+            == 1
+        )
+
+        rejected_message_id = uuid4()
+        await connection.execute(
+            "INSERT INTO messaging.messages"
+            "(id,tenant_id,conversation_id,direction,sender_type,sender_user_id,"
+            "content_type,content_text,provider,status) "
+            "VALUES($1,$2,$3,'outbound','user',$4,'text',"
+            "'Rejected missing snapshot','meta','queued')",
+            rejected_message_id,
+            tenant_id,
+            conversation_id,
+            user_id,
+        )
+        with pytest.raises(asyncpg.CheckViolationError):
+            await connection.execute(
+                "INSERT INTO messaging.outbound_requests"
+                "(tenant_id,conversation_id,message_id,channel_id,"
+                "recipient_identity_id,requested_by_user_id,provider,message_kind,"
+                "explicitly_confirmed,status,idempotency_key) "
+                "VALUES($1,$2,$3,$4,$5,$6,'meta','text',true,'queued',$7)",
+                tenant_id,
+                conversation_id,
+                rejected_message_id,
+                channel_id,
+                identity_id,
+                user_id,
+                f"rejected-missing-binding-{rejected_message_id}",
+            )
     finally:
         await connection.close()
 

@@ -20,7 +20,7 @@ def test_graph_has_preserved_oron_root_and_one_target_head() -> None:
     assert report.bases == ("0001",)
     assert report.heads == (manifest["alembic_head"],)
     assert report.branch_points == ("8eda5976c920",)
-    assert report.revision_count == 73
+    assert report.revision_count == 74
 
 
 def test_rendered_postgresql_contract_passes_static_security_checks() -> None:
@@ -80,6 +80,23 @@ def test_whatsapp_binding_migration_quarantines_work_in_both_directions() -> Non
     assert "status IN ('succeeded', 'dead', 'cancelled')" in upgrade
     assert "GRANT SELECT ON messaging.inbound_message_origins TO platform_web" in migration
     assert "REVOKE SELECT ON messaging.inbound_message_origins FROM platform_web" in migration
+
+
+def test_active_whatsapp_outbound_requires_a_recipient_snapshot() -> None:
+    migration = (
+        MANIFEST_PATH.parent.parent
+        / "alembic"
+        / "versions"
+        / "9b7e4c2d1a60_require_active_outbound_recipient.py"
+    ).read_text(encoding="utf-8")
+    upgrade, downgrade = migration.split("def downgrade() -> None:", maxsplit=1)
+
+    assert "recipient_address IS NOT NULL" in upgrade
+    assert "AND recipient_address ~" in upgrade
+    assert "whatsapp.outbound.missing_binding_quarantined" in upgrade
+    assert "request.status IN ('queued', 'sending')" in upgrade
+    assert "VALIDATE CONSTRAINT ck_outbound_request_recipient_e164" in upgrade
+    assert "recipient_address IS NOT NULL" not in downgrade
 
 
 @pytest.mark.parametrize(

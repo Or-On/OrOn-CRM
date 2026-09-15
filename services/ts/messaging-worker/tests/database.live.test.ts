@@ -13,6 +13,7 @@ import { createMessagingStore } from "../src/database.js";
 import {
   MetaWhatsAppProvider,
   SimulatorWhatsAppProvider,
+  type WhatsAppSendRequest,
 } from "../src/providers.js";
 
 const databaseUrl = process.env.MESSAGING_WORKER_TEST_DATABASE_URL;
@@ -49,7 +50,7 @@ async function createWhatsAppContactFixture(
   const identityId = identities[0]?.id;
   if (identityId === undefined)
     throw new Error("WhatsApp identity fixture failed");
-  return { contactId, identityId };
+  return { contactId, identityId, phone };
 }
 
 describe.skipIf(databaseUrl === undefined)("durable messaging worker", () => {
@@ -190,10 +191,10 @@ describe.skipIf(databaseUrl === undefined)("durable messaging worker", () => {
         if (message === undefined) throw new Error("message fixture failed");
         const requests = await transaction<{ id: string }[]>`
           INSERT INTO messaging.outbound_requests
-            (tenant_id, conversation_id, message_id, channel_id, recipient_identity_id,
+            (tenant_id, conversation_id, message_id, channel_id, recipient_identity_id, recipient_address,
              requested_by_user_id, provider, message_kind, explicitly_confirmed, idempotency_key)
           VALUES (platform.current_tenant_id(), ${conversation}::uuid, ${message}::uuid,
-                  ${channelId}::uuid, ${contact.identityId}::uuid, ${userId}::uuid,
+                  ${channelId}::uuid, ${contact.identityId}::uuid, ${contact.phone}, ${userId}::uuid,
                   'meta', 'text', true, ${`worker-meta-${fixtureId}`}) RETURNING id
         `;
         const request = requests[0]?.id;
@@ -211,9 +212,10 @@ describe.skipIf(databaseUrl === undefined)("durable messaging worker", () => {
       requestId = seeded.request;
       messageId = seeded.message;
       conversationId = seeded.conversation;
-      const metaSend = vi
-        .fn()
-        .mockResolvedValue({ messageId: providerMessageId });
+      const metaSend = vi.fn(async (request: WhatsAppSendRequest) => {
+        await request.beforeAttempt?.();
+        return { messageId: providerMessageId };
+      });
       const store = createMessagingStore(databaseUrl, "phase6-meta-worker", {
         simulator: new SimulatorWhatsAppProvider(),
         meta: { name: "meta", send: metaSend },
