@@ -3852,20 +3852,14 @@ export async function linkCaseCall(
           service_case.customer_contact_id,
           coalesce(service_case.reporting_contact_id, service_case.customer_contact_id)
         ) OR EXISTS (
-          SELECT 1 FROM public.session_events event
+          SELECT 1
+          FROM service.current_tenant_voice_admission_conversations(
+            session.session_id
+          ) admission
           JOIN service.case_conversations conversation_link
-            ON conversation_link.tenant_id=event.tenant_id
+            ON conversation_link.tenant_id=service_case.tenant_id
            AND conversation_link.case_id=service_case.id
-           AND conversation_link.conversation_id=
-             CASE
-               WHEN event.payload->>'source_conversation_id' ~*
-                 '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-               THEN (event.payload->>'source_conversation_id')::uuid
-               ELSE NULL
-             END
-          WHERE event.tenant_id=session.tenant_id
-            AND event.session_id=session.session_id
-            AND event.event_type='voice.call.admission.v1'
+           AND conversation_link.conversation_id=admission.source_conversation_id
         )
       )
     ON CONFLICT (tenant_id, case_id, session_id) DO UPDATE SET
@@ -3943,22 +3937,17 @@ export async function listServiceCaseLinkCandidates(
            service_case.customer_contact_id,
            coalesce(service_case.reporting_contact_id, service_case.customer_contact_id)
          ) OR EXISTS (
-           SELECT 1 FROM public.session_events event
-           JOIN messaging.conversations conversation
-             ON conversation.tenant_id=event.tenant_id
-            AND conversation.id=CASE
-              WHEN event.payload->>'source_conversation_id' ~*
-                '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-              THEN (event.payload->>'source_conversation_id')::uuid
-              ELSE NULL
-            END
-            AND conversation.contact_id IN (
-              service_case.customer_contact_id,
-              coalesce(service_case.reporting_contact_id, service_case.customer_contact_id)
-            )
-           WHERE event.tenant_id=session.tenant_id
-             AND event.session_id=session.session_id
-             AND event.event_type='voice.call.admission.v1'
+            SELECT 1
+            FROM service.current_tenant_voice_admission_conversations(
+              session.session_id
+            ) admission
+            JOIN messaging.conversations conversation
+              ON conversation.tenant_id=service_case.tenant_id
+             AND conversation.id=admission.source_conversation_id
+             AND conversation.contact_id IN (
+               service_case.customer_contact_id,
+               coalesce(service_case.reporting_contact_id, service_case.customer_contact_id)
+             )
          )
        )
       LEFT JOIN service.case_calls link
@@ -4147,10 +4136,10 @@ async function getServiceCaseDossierRecord(
         changed_at: Date;
       }[]
     >`
-        SELECT from_status, to_status, reason, changed_at
+        SELECT from_status, to_status, reason, occurred_at AS changed_at
         FROM service.case_status_history
         WHERE case_id = ${caseId}::uuid
-        ORDER BY changed_at, id
+        ORDER BY occurred_at, id
       `,
   ]);
   if (customer === undefined)
@@ -4178,7 +4167,8 @@ async function getServiceCaseDossierRecord(
           }[]
         >`
           SELECT session_id, status, direction::text, outcome, answered,
-                 started_at, ended_at, recording_object_id, transcript_object_id
+                 created_at AS started_at, ended_at, recording_object_id,
+                 transcript_object_id
           FROM public.sessions
           WHERE session_id = ANY(${calls.map((row) => row.session_id)}::uuid[])
           ORDER BY started_at, session_id

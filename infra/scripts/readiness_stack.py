@@ -166,6 +166,10 @@ def prepare() -> None:
                 f"AUTH_TOKEN_PEPPER={pepper}",
                 f"AUTH_SERVICE_SECRET={service}",
                 f"AUTH_DUMMY_PASSWORD_HASH={dummy}",
+                f"FIELD_CIPHER_LOCAL_KEY={field_key}",
+                f"BLIND_INDEX_KEY={field_key}",
+                "ARTIFACTS_BACKEND=local",
+                "ARTIFACTS_LOCAL_ROOT=/var/lib/oron/objects",
             ]
         ),
         "control-api.env": "\n".join(
@@ -189,6 +193,10 @@ def prepare() -> None:
             [
                 f"MESSAGING_DATABASE_URL={dsn('platform_messaging')}",
                 f"AUTH_SERVICE_SECRET={service}",
+                f"FIELD_CIPHER_LOCAL_KEY={field_key}",
+                f"BLIND_INDEX_KEY={field_key}",
+                "ARTIFACTS_BACKEND=local",
+                "ARTIFACTS_LOCAL_ROOT=/var/lib/oron/objects",
             ]
         ),
         "bootstrap-owner.env": "\n".join(
@@ -235,6 +243,35 @@ def sql(query: str, database: str = "oron_staging") -> str:
 
 def smoke() -> dict:
     checks = {}
+    compose("exec", "-T", "messaging-worker", "node", "dist/healthcheck.js")
+    checks["messaging_worker"] = "ready"
+    object_path = "/var/lib/oron/objects/.readiness-worker-to-web"
+    compose(
+        "exec",
+        "-T",
+        "messaging-worker",
+        "node",
+        "-e",
+        (
+            "require('node:fs').writeFileSync(process.argv[1],"
+            "'fictional-worker-object',{mode:0o600})"
+        ),
+        object_path,
+    )
+    compose(
+        "exec",
+        "-T",
+        "web",
+        "node",
+        "-e",
+        (
+            "const fs=require('node:fs'),p=process.argv[1];"
+            "if(fs.readFileSync(p,'utf8')!=='fictional-worker-object')process.exit(1);"
+            "fs.unlinkSync(p)"
+        ),
+        object_path,
+    )
+    checks["shared_private_objects"] = "worker-to-web"
     for path in ("/login", "/api/webhooks/whatsapp?hub.mode=subscribe&hub.challenge=fictional"):
         try:
             with urllib.request.urlopen(f"http://127.0.0.1:13880{path}", timeout=10) as response:  # noqa: S310
@@ -391,10 +428,23 @@ def main() -> None:
     if args.action == "start":
         compose("up", "-d", "--wait", "postgres")
         compose("run", "--rm", "--no-deps", "migrator")
-        compose("up", "-d", "--wait", "web", "control-api", "caddy")
+        # Match the production UID/GID contract using only this owned synthetic
+        # object root: Python voice is UID 100; Node web/worker share GID 1000.
+        compose(
+            "run",
+            "--rm",
+            "--no-deps",
+            "--user",
+            "0:0",
+            "messaging-worker",
+            "sh",
+            "-c",
+            "chown 100:1000 /var/lib/oron/objects && chmod 0770 /var/lib/oron/objects",
+        )
+        compose("up", "-d", "--wait", "web", "control-api", "messaging-worker", "caddy")
     if args.action == "restart":
-        compose("restart", "postgres", "control-api", "web")
-        compose("up", "-d", "--wait", "web", "control-api", "caddy")
+        compose("restart", "postgres", "control-api", "messaging-worker", "web")
+        compose("up", "-d", "--wait", "web", "control-api", "messaging-worker", "caddy")
     if args.action == "fault-check":
         try:
             compose("stop", "postgres")
@@ -406,7 +456,16 @@ def main() -> None:
             )
             compose("exec", "-T", "control-api", "python", "-c", check)
         finally:
-            compose("up", "-d", "--wait", "postgres", "control-api", "web", "caddy")
+            compose(
+                "up",
+                "-d",
+                "--wait",
+                "postgres",
+                "control-api",
+                "messaging-worker",
+                "web",
+                "caddy",
+            )
     if args.action == "rollback-check":
         if not args.previous_web_image:
             raise ValueError("An explicit disposable previous web image is required")

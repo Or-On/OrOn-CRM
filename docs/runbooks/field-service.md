@@ -79,6 +79,33 @@ status, and private storage key. Downloads always pass through authenticated,
 tenant-scoped routes. JPEG, PNG, WebP, PDF, and plain text are accepted within
 the server limits; product-label OCR accepts image formats only.
 
+In a multi-process deployment, configure the same absolute root in the web,
+messaging-worker, and voice-dispatcher runtimes and mount the same private
+volume into each of them. The deployment topology prepares that root for the
+unprivileged runtime identities; a readiness indicator is green only when the
+web process can actually read and write the configured path.
+
+For an existing installation created before shared evidence storage was
+introduced, complete a one-time private-configuration upgrade before releasing
+the new containers:
+
+1. Back up the three root-owned runtime environment files without displaying
+   their contents.
+2. Reuse the dispatcher's existing `FIELD_CIPHER_LOCAL_KEY` and
+   `BLIND_INDEX_KEY` in the web and messaging-worker files. Never rotate either
+   key during this upgrade, because retained encrypted fields and indexes must
+   remain readable.
+3. Set `ARTIFACTS_BACKEND=local` and
+   `ARTIFACTS_LOCAL_ROOT=/var/lib/oron/objects` in all three files, retaining
+   root ownership and mode `0600`.
+4. Verify equality and decoded key lengths without printing secret values. The
+   deploy preflight enforces these invariants before it stops the active
+   release.
+5. After restart, write a random, non-customer canary from the web runtime,
+   read and remove it from the messaging runtime, then repeat in the opposite
+   direction. Confirm the settings readiness indicator before accepting
+   evidence uploads.
+
 `ARTIFACTS_BACKEND=gcs` is intentionally rejected until a private cloud-object
 adapter and its credentials are supplied for the target runtime. Do not use a
 public bucket or expose `.objects` through a static file server.

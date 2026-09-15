@@ -4,8 +4,10 @@ import {
   linkCaseConversation,
   listServiceCaseLinkCandidates,
 } from "@or-on/crm";
+import { isAuthorized } from "@or-on/auth";
 
 import {
+  ForbiddenError,
   jsonObject,
   requestId,
   withCurrentTenant,
@@ -14,7 +16,10 @@ import {
   assertCrmMutation,
   crmErrorResponse,
 } from "../../../../../../features/crm-route";
-import { uuid } from "../../../../../../features/field-service";
+import {
+  linkCandidatesForVoiceAccess,
+  uuid,
+} from "../../../../../../features/field-service";
 
 interface Context {
   readonly params: Promise<{ readonly id: string }>;
@@ -23,8 +28,16 @@ interface Context {
 export async function GET(_request: Request, context: Context) {
   try {
     const { id } = await context.params;
-    const candidates = await withCurrentTenant("field-service:manage", (sql) =>
-      listServiceCaseLinkCandidates(sql, uuid(id, "Case")),
+    const candidates = await withCurrentTenant(
+      "field-service:manage",
+      async (sql, session) =>
+        linkCandidatesForVoiceAccess(
+          await listServiceCaseLinkCandidates(sql, uuid(id, "Case")),
+          isAuthorized(
+            { role: session.tenant.role, isSuperuser: session.isSuperuser },
+            "voice:read",
+          ),
+        ),
     );
     return NextResponse.json({ candidates });
   } catch (error) {
@@ -53,7 +66,14 @@ export async function POST(request: Request, context: Context) {
           session.userId,
           requestId(request),
         );
-      else
+      else {
+        if (
+          !isAuthorized(
+            { role: session.tenant.role, isSuperuser: session.isSuperuser },
+            "voice:read",
+          )
+        )
+          throw new ForbiddenError("Voice evidence access is required");
         await linkCaseCall(
           sql,
           session.userId,
@@ -62,6 +82,7 @@ export async function POST(request: Request, context: Context) {
           "resolved_ambiguity",
           requestId(request),
         );
+      }
     });
     return NextResponse.json({ linked: true });
   } catch (error) {

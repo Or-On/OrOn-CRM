@@ -149,6 +149,16 @@ function statusTone(status: ServiceCaseStatus) {
   return "neutral" as const;
 }
 
+function DialogError({ message }: { readonly message: string | undefined }) {
+  return message === undefined ? null : (
+    <InlineFeedback
+      className="field-service-dialog-feedback"
+      description={message}
+      tone="critical"
+    />
+  );
+}
+
 export function ServiceCaseWorkspace({
   canManage,
   canOperate,
@@ -170,7 +180,7 @@ export function ServiceCaseWorkspace({
   const he = locale.startsWith("he");
   const router = useRouter();
   const serviceCase = dossier.serviceCase;
-  const [pending, setPending] = useState(false);
+  const [pendingAction, setPendingAction] = useState<string>();
   const [error, setError] = useState<string>();
   const [visitOpen, setVisitOpen] = useState(false);
   const [identityVisit, setIdentityVisit] = useState<ServiceVisit>();
@@ -186,9 +196,7 @@ export function ServiceCaseWorkspace({
     readonly scope: string;
     readonly key: string;
   }>();
-  const [latestReport, setLatestReport] = useState<ReportRevision | undefined>(
-    dossier.reports[0],
-  );
+  const [latestReport, setLatestReport] = useState<ReportRevision>();
   const [identifiedVisits, setIdentifiedVisits] = useState<ReadonlySet<string>>(
     new Set(),
   );
@@ -198,8 +206,16 @@ export function ServiceCaseWorkspace({
     [dossier.conversations],
   );
 
-  async function run(operation: () => Promise<void>) {
-    setPending(true);
+  const pending = pendingAction !== undefined;
+  const dialogOpen =
+    visitOpen ||
+    identityVisit !== undefined ||
+    reportVisit !== undefined ||
+    uploadOpen ||
+    linkOpen;
+
+  async function run(action: string, operation: () => Promise<void>) {
+    setPendingAction(action);
     setError(undefined);
     try {
       await operation();
@@ -213,14 +229,65 @@ export function ServiceCaseWorkspace({
             : "The operation failed",
       );
     } finally {
-      setPending(false);
+      setPendingAction(undefined);
     }
+  }
+
+  function openVisitDialog() {
+    setError(undefined);
+    setVisitOpen(true);
+  }
+
+  function closeVisitDialog() {
+    setError(undefined);
+    setVisitOpen(false);
+  }
+
+  function openIdentityDialog(visit: ServiceVisit) {
+    setError(undefined);
+    setIdentityVisit(visit);
+  }
+
+  function closeIdentityDialog() {
+    setError(undefined);
+    setIdentityVisit(undefined);
+  }
+
+  function openLinkDialog() {
+    setError(undefined);
+    setLinkOpen(true);
+  }
+
+  function closeLinkDialog() {
+    setError(undefined);
+    setLinkOpen(false);
+  }
+
+  function openUploadDialog(
+    visit: ServiceVisit | undefined,
+    reportRevisionId?: string,
+  ) {
+    setError(undefined);
+    setEvidenceVisit(visit);
+    setEvidenceReportRevisionId(reportRevisionId);
+    setUploadOpen(true);
+  }
+
+  function closeUploadDialog() {
+    setError(undefined);
+    setUploadOpen(false);
+  }
+
+  function closeReportDialog() {
+    setError(undefined);
+    setReportVisit(undefined);
+    setLatestReport(undefined);
   }
 
   async function updateStatus(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    await run(async () => {
+    await run("update-status", async () => {
       await crmMutation(
         `/api/field-service/cases/${serviceCase.id}`,
         { status: form.get("status"), reason: form.get("reason") },
@@ -233,13 +300,13 @@ export function ServiceCaseWorkspace({
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const appointmentId = formText(form, "appointmentId");
-    await run(async () => {
+    await run("create-visit", async () => {
       await crmMutation("/api/field-service/visits", {
         caseId: serviceCase.id,
         technicianId: form.get("technicianId"),
         appointmentId: appointmentId === "" ? null : appointmentId,
       });
-      setVisitOpen(false);
+      closeVisitDialog();
     });
   }
 
@@ -247,18 +314,20 @@ export function ServiceCaseWorkspace({
     event.preventDefault();
     if (identityVisit === undefined) return;
     const form = new FormData(event.currentTarget);
-    await run(async () => {
+    await run("identify-technician", async () => {
       await crmMutation(
         `/api/field-service/visits/${identityVisit.id}/identity`,
         Object.fromEntries(form.entries()),
       );
       setIdentifiedVisits((current) => new Set([...current, identityVisit.id]));
-      setIdentityVisit(undefined);
+      closeIdentityDialog();
     });
   }
 
   async function openReport(visit: ServiceVisit) {
-    await run(async () => {
+    setLatestReport(undefined);
+    setReportVisit(undefined);
+    await run(`open-report:${visit.id}`, async () => {
       const payload = await crmMutation<{ report: ReportRevision }>(
         "/api/field-service/reports",
         { caseId: serviceCase.id, visitId: visit.id },
@@ -275,7 +344,7 @@ export function ServiceCaseWorkspace({
     if (latestReport === undefined) return;
     const form = new FormData(event.currentTarget);
     const partReplaced = form.get("partReplaced");
-    await run(async () => {
+    await run("save-report", async () => {
       const payload = await crmMutation<{ report: ReportRevision }>(
         `/api/field-service/reports/${latestReport.id}`,
         {
@@ -298,7 +367,7 @@ export function ServiceCaseWorkspace({
 
   async function finalizeReport() {
     if (latestReport === undefined) return;
-    await run(async () => {
+    await run("finalize-report", async () => {
       const payload = await crmMutation<{ report: ReportRevision }>(
         `/api/field-service/reports/${latestReport.id}/finalize`,
         {},
@@ -330,7 +399,7 @@ export function ServiceCaseWorkspace({
       );
       return;
     }
-    setPending(true);
+    setPendingAction("upload-evidence");
     setError(undefined);
     setUploadProgress(0);
     try {
@@ -376,12 +445,12 @@ export function ServiceCaseWorkspace({
         },
       );
       setUploadRequest(undefined);
-      setUploadOpen(false);
+      closeUploadDialog();
       router.refresh();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Upload failed");
     } finally {
-      setPending(false);
+      setPendingAction(undefined);
       setUploadProgress(undefined);
     }
   }
@@ -389,7 +458,7 @@ export function ServiceCaseWorkspace({
   function cancelUpload() {
     activeUpload.current?.abort();
     activeUpload.current = undefined;
-    setUploadOpen(false);
+    closeUploadDialog();
   }
 
   async function confirmOcr(
@@ -398,7 +467,7 @@ export function ServiceCaseWorkspace({
   ) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    await run(async () => {
+    await run("confirm-ocr", async () => {
       await crmMutation(
         `/api/field-service/ocr/${ocrResultId}`,
         {
@@ -417,12 +486,12 @@ export function ServiceCaseWorkspace({
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const [sourceKind, sourceId] = formText(form, "source").split(":", 2);
-    await run(async () => {
+    await run("link-evidence", async () => {
       await crmMutation(`/api/field-service/cases/${serviceCase.id}/links`, {
         sourceKind,
         sourceId,
       });
-      setLinkOpen(false);
+      closeLinkDialog();
     });
   }
 
@@ -453,7 +522,7 @@ export function ServiceCaseWorkspace({
             tone={statusTone(serviceCase.status)}
           />
           {canOperate ? (
-            <Button onClick={() => setVisitOpen(true)} variant="secondary">
+            <Button onClick={openVisitDialog} variant="secondary">
               <Plus aria-hidden="true" size={16} />
               {he ? "ביקור נוסף" : "Add visit"}
             </Button>
@@ -461,7 +530,9 @@ export function ServiceCaseWorkspace({
         </div>
       </header>
 
-      {error ? <InlineFeedback description={error} tone="critical" /> : null}
+      {error && !dialogOpen ? (
+        <InlineFeedback description={error} tone="critical" />
+      ) : null}
 
       <div className="service-case-layout">
         <div className="service-case-main">
@@ -585,7 +656,7 @@ export function ServiceCaseWorkspace({
                       {canOperate ? (
                         <div className="service-visit-actions">
                           <Button
-                            onClick={() => setIdentityVisit(visit)}
+                            onClick={() => openIdentityDialog(visit)}
                             size="small"
                             variant="quiet"
                           >
@@ -599,8 +670,9 @@ export function ServiceCaseWorkspace({
                                 : "Identify"}
                           </Button>
                           <Button
+                            busy={pendingAction === `open-report:${visit.id}`}
+                            disabled={pending}
                             onClick={() => {
-                              setReportVisit(visit);
                               void openReport(visit);
                             }}
                             size="small"
@@ -626,11 +698,9 @@ export function ServiceCaseWorkspace({
               </div>
               {canOperate ? (
                 <Button
-                  onClick={() => {
-                    setEvidenceVisit(dossier.visits.at(-1));
-                    setEvidenceReportRevisionId(undefined);
-                    setUploadOpen(true);
-                  }}
+                  onClick={() =>
+                    openUploadDialog(dossier.visits.at(-1), undefined)
+                  }
                   size="small"
                   variant="secondary"
                 >
@@ -714,6 +784,7 @@ export function ServiceCaseWorkspace({
                                 name="serialNumber"
                               />
                               <Button
+                                busy={pendingAction === "confirm-ocr"}
                                 disabled={pending}
                                 size="small"
                                 type="submit"
@@ -750,7 +821,7 @@ export function ServiceCaseWorkspace({
               </div>
               {canManage ? (
                 <Button
-                  onClick={() => setLinkOpen(true)}
+                  onClick={openLinkDialog}
                   size="small"
                   variant="secondary"
                 >
@@ -867,7 +938,11 @@ export function ServiceCaseWorkspace({
                     name="reason"
                     rows={2}
                   />
-                  <Button disabled={pending} type="submit">
+                  <Button
+                    busy={pendingAction === "update-status"}
+                    disabled={pending}
+                    type="submit"
+                  >
                     {he ? "עדכון" : "Update"}
                   </Button>
                 </form>
@@ -950,7 +1025,7 @@ export function ServiceCaseWorkspace({
             ? "ניתן לקשר רק מקורות המשויכים ללקוח או לאיש הקשר המדווח."
             : "Only sources bound to the customer or reporting contact can be linked."
         }
-        onClose={() => setLinkOpen(false)}
+        onClose={closeLinkDialog}
         open={linkOpen}
         title={he ? "קישור מקור לתיק" : "Link source to case"}
       >
@@ -958,6 +1033,7 @@ export function ServiceCaseWorkspace({
           className="field-service-form"
           onSubmit={(event) => void linkEvidence(event)}
         >
+          <DialogError message={error} />
           <Select
             id="case-link-source"
             label={he ? "מקור" : "Source"}
@@ -1004,14 +1080,14 @@ export function ServiceCaseWorkspace({
             }
           />
           <div className="field-service-form__actions">
-            <Button
-              onClick={() => setLinkOpen(false)}
-              type="button"
-              variant="quiet"
-            >
+            <Button onClick={closeLinkDialog} type="button" variant="quiet">
               {he ? "ביטול" : "Cancel"}
             </Button>
-            <Button disabled={pending} type="submit">
+            <Button
+              busy={pendingAction === "link-evidence"}
+              disabled={pending}
+              type="submit"
+            >
               <Link2 aria-hidden="true" size={15} />
               {he ? "קישור" : "Link source"}
             </Button>
@@ -1021,7 +1097,7 @@ export function ServiceCaseWorkspace({
 
       <Dialog
         closeLabel={he ? "סגירה" : "Close"}
-        onClose={() => setVisitOpen(false)}
+        onClose={closeVisitDialog}
         open={visitOpen}
         title={he ? "ביקור נוסף" : "Add visit"}
       >
@@ -1029,6 +1105,7 @@ export function ServiceCaseWorkspace({
           className="field-service-form"
           onSubmit={(event) => void createVisit(event)}
         >
+          <DialogError message={error} />
           <Select
             id="case-visit-technician"
             label={he ? "טכנאי" : "Technician"}
@@ -1061,14 +1138,14 @@ export function ServiceCaseWorkspace({
               ))}
           </Select>
           <div className="field-service-form__actions">
-            <Button
-              onClick={() => setVisitOpen(false)}
-              type="button"
-              variant="quiet"
-            >
+            <Button onClick={closeVisitDialog} type="button" variant="quiet">
               {he ? "ביטול" : "Cancel"}
             </Button>
-            <Button disabled={pending} type="submit">
+            <Button
+              busy={pendingAction === "create-visit"}
+              disabled={pending}
+              type="submit"
+            >
               {he ? "יצירת ביקור" : "Create visit"}
             </Button>
           </div>
@@ -1082,20 +1159,22 @@ export function ServiceCaseWorkspace({
             ? "הזיהוי נשמר לביקור ולסשן הנוכחי בלבד."
             : "Identity is bound only to this visit and current session."
         }
-        onClose={() => setIdentityVisit(undefined)}
+        onClose={closeIdentityDialog}
         open={identityVisit !== undefined}
         title={he ? "זיהוי טכנאי" : "Identify technician"}
       >
         <form
           className="field-service-form"
+          key={identityVisit?.id}
           onSubmit={(event) => void identify(event)}
         >
+          <DialogError message={error} />
           <Select
             id="identity-technician"
             label={he ? "פרופיל טכנאי" : "Technician profile"}
             name="technicianId"
             required
-            value={identityVisit?.technicianId ?? ""}
+            defaultValue={identityVisit?.technicianId ?? ""}
           >
             <option value={identityVisit?.technicianId ?? ""}>
               {technicians.find(
@@ -1120,14 +1199,14 @@ export function ServiceCaseWorkspace({
             name="contactInformation"
           />
           <div className="field-service-form__actions">
-            <Button
-              onClick={() => setIdentityVisit(undefined)}
-              type="button"
-              variant="quiet"
-            >
+            <Button onClick={closeIdentityDialog} type="button" variant="quiet">
               {he ? "ביטול" : "Cancel"}
             </Button>
-            <Button disabled={pending} type="submit">
+            <Button
+              busy={pendingAction === "identify-technician"}
+              disabled={pending}
+              type="submit"
+            >
               <ShieldCheck aria-hidden="true" size={15} />
               {he ? "אישור זהות" : "Confirm identity"}
             </Button>
@@ -1142,7 +1221,7 @@ export function ServiceCaseWorkspace({
           : {
               description: `${he ? "ביקור" : "Visit"} ${String(reportVisit.visitNumber)}`,
             })}
-        onClose={() => setReportVisit(undefined)}
+        onClose={closeReportDialog}
         open={reportVisit !== undefined && latestReport !== undefined}
         title={he ? "דוח טכנאי" : "Technician report"}
       >
@@ -1151,6 +1230,7 @@ export function ServiceCaseWorkspace({
             className="service-report-form"
             onSubmit={(event) => void saveReport(event)}
           >
+            <DialogError message={error} />
             <div className="service-report-meta">
               <Badge
                 label={`${he ? "גרסה" : "Version"} ${String(latestReport.version)}`}
@@ -1234,8 +1314,8 @@ export function ServiceCaseWorkspace({
                 <>
                   <Button
                     onClick={() => {
+                      openUploadDialog(reportVisit, latestReport.id);
                       setReportVisit(undefined);
-                      setUploadOpen(true);
                     }}
                     type="button"
                     variant="quiet"
@@ -1243,10 +1323,16 @@ export function ServiceCaseWorkspace({
                     <UploadCloud aria-hidden="true" size={15} />
                     {he ? "הוספת ראיה" : "Add evidence"}
                   </Button>
-                  <Button disabled={pending} type="submit" variant="secondary">
+                  <Button
+                    busy={pendingAction === "save-report"}
+                    disabled={pending}
+                    type="submit"
+                    variant="secondary"
+                  >
                     {he ? "שמירת טיוטה" : "Save draft"}
                   </Button>
                   <Button
+                    busy={pendingAction === "finalize-report"}
                     disabled={pending}
                     onClick={() => void finalizeReport()}
                     type="button"
@@ -1270,6 +1356,7 @@ export function ServiceCaseWorkspace({
           className="field-service-form"
           onSubmit={(event) => void upload(event)}
         >
+          <DialogError message={error} />
           <Select
             id="evidence-category"
             label={he ? "קטגוריה" : "Category"}
@@ -1338,8 +1425,12 @@ export function ServiceCaseWorkspace({
             <Button onClick={cancelUpload} type="button" variant="quiet">
               {he ? "ביטול" : "Cancel"}
             </Button>
-            <Button disabled={pending} type="submit">
-              {pending
+            <Button
+              busy={pendingAction === "upload-evidence"}
+              disabled={pending}
+              type="submit"
+            >
+              {pendingAction === "upload-evidence"
                 ? he
                   ? "מעלה…"
                   : "Uploading…"

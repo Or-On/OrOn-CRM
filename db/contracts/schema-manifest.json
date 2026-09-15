@@ -1,5 +1,5 @@
 {
-  "alembic_head": "d4e15a9c7b02",
+  "alembic_head": "f22c1b7e9a40",
   "expected_functions": [
     "agents.protect_approved_knowledge",
     "automation.protect_published_flow_version",
@@ -61,6 +61,7 @@
     "service.current_actor_can_access_case",
     "service.current_actor_can_access_object",
     "service.current_actor_can_access_technician",
+    "service.current_tenant_voice_admission_conversations",
     "service.enqueue_call_case_summary",
     "service.enqueue_whatsapp_case_summary",
     "service.field_service_enabled",

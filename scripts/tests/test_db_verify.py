@@ -20,7 +20,7 @@ def test_graph_has_preserved_oron_root_and_one_target_head() -> None:
     assert report.bases == ("0001",)
     assert report.heads == (manifest["alembic_head"],)
     assert report.branch_points == ("8eda5976c920",)
-    assert report.revision_count == 69
+    assert report.revision_count == 70
 
 
 def test_rendered_postgresql_contract_passes_static_security_checks() -> None:

@@ -4,6 +4,7 @@ export interface WorkerDependencies {
   readonly closeDatabase: () => Promise<void>;
   readonly isDatabaseReady: () => Promise<boolean>;
   readonly logger: Logger;
+  readonly recordSuccessfulPoll?: () => Promise<void>;
   readonly processAvailable?: () => Promise<number>;
   readonly wait?: (milliseconds: number) => Promise<void>;
 }
@@ -18,8 +19,8 @@ export async function runWorker(
         "messaging-worker is not ready: PostgreSQL is unavailable",
       );
     }
-    dependencies.logger.info({ messagesSent: 0 }, "worker_ready");
     let signal: string | undefined;
+    let readyLogged = false;
     const stopped = stop.then((value) => {
       signal = value;
     });
@@ -30,6 +31,11 @@ export async function runWorker(
     while (!stopping()) {
       const processed = await (dependencies.processAvailable?.() ??
         Promise.resolve(0));
+      await dependencies.recordSuccessfulPoll?.();
+      if (!readyLogged) {
+        dependencies.logger.info({ messagesSent: 0 }, "worker_ready");
+        readyLogged = true;
+      }
       if (stopping()) break;
       if (processed > 0) {
         dependencies.logger.info({ processed }, "worker_batch_processed");

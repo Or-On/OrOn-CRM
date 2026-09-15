@@ -48,6 +48,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Deployment-contract pytest cases execute the typed configuration
+      # renderer; install its pinned Node runtime and workspace dependencies.
+      - uses: pnpm/action-setup@ebd50bdde86241dd1b03a5b0a54a71aee9a1ca80 # v6.0.1
+        with:
+          version: 11.24.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.20.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - uses: astral-sh/setup-uv@ae62891fec2bb8e7d6c99fc78c9fec3a63790f8d # v10.0.0
         with:
           version: 0.12.7
@@ -110,6 +120,12 @@ jobs:
       # worker's complete dependency closure so this diagnostic is valid from
       # a clean checkout instead of relying on stale local build artifacts.
       - run: pnpm --filter @or-on/messaging-worker... build
+      - name: Field-service web-role acceptance (no providers)
+        env:
+          CRM_TEST_DATABASE_URL: postgresql://platform_migrator:ci-only-password@127.0.0.1:5432/or_on_platform_ci
+        run: >-
+          pnpm --filter @or-on/crm exec vitest run
+          src/field-service.postgres.test.ts
       - name: Isolated WhatsApp diagnostic persistence (mocked HTTP)
         env:
           MIGRATION_DATABASE_URL: ${{ env.DATABASE_URL }}

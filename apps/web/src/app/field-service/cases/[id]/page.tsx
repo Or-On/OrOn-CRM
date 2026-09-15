@@ -13,16 +13,24 @@ import {
   UnauthenticatedError,
   withCurrentTenant,
 } from "../../../../features/auth";
-import { ServiceCaseWorkspace } from "../../../../features/field-service";
+import {
+  dossierForVoiceAccess,
+  linkCandidatesForVoiceAccess,
+  ServiceCaseWorkspace,
+  uuidPattern,
+} from "../../../../features/field-service";
 
 export default async function ServiceCasePage({
   params,
 }: {
   readonly params: Promise<{ readonly id: string }>;
 }) {
+  const { id } = await params;
+  if (!uuidPattern.test(id)) notFound();
+
+  let data;
   try {
-    const { id } = await params;
-    const data = await withCurrentTenant(
+    data = await withCurrentTenant(
       "field-service:read",
       async (sql, session) => {
         const feature = await getFieldServiceFeatureState(sql);
@@ -32,6 +40,10 @@ export default async function ServiceCasePage({
           { role: session.tenant.role, isSuperuser: session.isSuperuser },
           "field-service:manage",
         );
+        const canReadVoice = isAuthorized(
+          { role: session.tenant.role, isSuperuser: session.isSuperuser },
+          "voice:read",
+        );
         const [dossier, technicians, linkCandidates] = await Promise.all([
           getServiceCaseDossier(sql, id),
           listTechnicians(sql),
@@ -40,39 +52,42 @@ export default async function ServiceCasePage({
             : Promise.resolve(undefined),
         ]);
         return {
-          dossier,
+          dossier:
+            dossier === undefined
+              ? undefined
+              : dossierForVoiceAccess(dossier, canReadVoice),
           technicians,
           feature,
           canManage,
-          linkCandidates,
+          linkCandidates:
+            linkCandidates === undefined
+              ? undefined
+              : linkCandidatesForVoiceAccess(linkCandidates, canReadVoice),
           canOperate: isAuthorized(
             { role: session.tenant.role, isSuperuser: session.isSuperuser },
             "field-service:operate",
           ),
-          canReadVoice: isAuthorized(
-            { role: session.tenant.role, isSuperuser: session.isSuperuser },
-            "voice:read",
-          ),
+          canReadVoice,
         };
       },
-    );
-    if (data.dossier === undefined) notFound();
-    return (
-      <main className="page page--wide page--field-service page--workspace-premium">
-        <ServiceCaseWorkspace
-          canOperate={data.canOperate}
-          canManage={data.canManage}
-          canReadVoice={data.canReadVoice}
-          dossier={data.dossier}
-          feature={data.feature}
-          linkCandidates={data.linkCandidates}
-          technicians={data.technicians}
-        />
-      </main>
     );
   } catch (error) {
     if (error instanceof ForbiddenError) return <AccessDenied />;
     if (error instanceof UnauthenticatedError) redirect("/login");
     throw error;
   }
+  if (data.dossier === undefined) notFound();
+  return (
+    <main className="page page--wide page--field-service page--workspace-premium">
+      <ServiceCaseWorkspace
+        canOperate={data.canOperate}
+        canManage={data.canManage}
+        canReadVoice={data.canReadVoice}
+        dossier={data.dossier}
+        feature={data.feature}
+        linkCandidates={data.linkCandidates}
+        technicians={data.technicians}
+      />
+    </main>
+  );
 }

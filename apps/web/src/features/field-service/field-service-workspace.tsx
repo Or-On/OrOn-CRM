@@ -16,6 +16,7 @@ import {
   DataTable,
   Dialog,
   EmptyState,
+  InlineFeedback,
   Input,
   Select,
   Surface,
@@ -51,6 +52,16 @@ function caseTone(status: ServiceCaseSummary["status"]) {
   if (status === "cancelled") return "critical" as const;
   if (status === "in_progress") return "warning" as const;
   return "neutral" as const;
+}
+
+function DialogError({ message }: { readonly message: string | undefined }) {
+  return message === undefined ? null : (
+    <InlineFeedback
+      className="field-service-dialog-feedback"
+      description={message}
+      tone="critical"
+    />
+  );
 }
 
 export function FieldServiceWorkspace({
@@ -97,7 +108,7 @@ export function FieldServiceWorkspace({
   const [technicianOpen, setTechnicianOpen] = useState(false);
   const [editingTechnician, setEditingTechnician] =
     useState<TechnicianSummary>();
-  const [pending, setPending] = useState(false);
+  const [pendingAction, setPendingAction] = useState<string>();
   const [error, setError] = useState<string>();
   useEffect(() => {
     setCases(initialCases);
@@ -124,9 +135,17 @@ export function FieldServiceWorkspace({
             .includes(term),
         );
   }, [cases, locale, query]);
+  const dialogOpen =
+    createOpen ||
+    scheduleCase !== undefined ||
+    technicianOpen ||
+    editingTechnician !== undefined ||
+    manageAppointment !== undefined;
 
-  async function run(operation: () => Promise<void>) {
-    setPending(true);
+  const pending = pendingAction !== undefined;
+
+  async function run(action: string, operation: () => Promise<void>) {
+    setPendingAction(action);
     setError(undefined);
     try {
       await operation();
@@ -140,8 +159,58 @@ export function FieldServiceWorkspace({
             : "The operation failed",
       );
     } finally {
-      setPending(false);
+      setPendingAction(undefined);
     }
+  }
+
+  function openCreateDialog() {
+    setError(undefined);
+    setCreateOpen(true);
+  }
+
+  function closeCreateDialog() {
+    setError(undefined);
+    setCreateOpen(false);
+  }
+
+  function openScheduleDialog(serviceCase: ServiceCaseSummary) {
+    setError(undefined);
+    setScheduleCase(serviceCase);
+  }
+
+  function closeScheduleDialog() {
+    setError(undefined);
+    setScheduleCase(undefined);
+  }
+
+  function openTechnicianDialog() {
+    setError(undefined);
+    setTechnicianOpen(true);
+  }
+
+  function closeTechnicianDialog() {
+    setError(undefined);
+    setTechnicianOpen(false);
+  }
+
+  function openEditTechnicianDialog(technician: TechnicianSummary) {
+    setError(undefined);
+    setEditingTechnician(technician);
+  }
+
+  function closeEditTechnicianDialog() {
+    setError(undefined);
+    setEditingTechnician(undefined);
+  }
+
+  function openManageAppointmentDialog(appointment: ServiceAppointment) {
+    setError(undefined);
+    setManageAppointment(appointment);
+  }
+
+  function closeManageAppointmentDialog() {
+    setError(undefined);
+    setManageAppointment(undefined);
   }
 
   async function fetchCasePage(options: {
@@ -207,12 +276,12 @@ export function FieldServiceWorkspace({
   async function createCase(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    await run(async () => {
+    await run("create-case", async () => {
       await crmMutation(
         "/api/field-service/cases",
         Object.fromEntries(form.entries()),
       );
-      setCreateOpen(false);
+      closeCreateDialog();
     });
   }
 
@@ -228,7 +297,7 @@ export function FieldServiceWorkspace({
     const start = new Date(startsAt);
     const durationMinutes = Number(form.get("durationMinutes"));
     const end = new Date(start.valueOf() + durationMinutes * 60_000);
-    await run(async () => {
+    await run("schedule", async () => {
       await crmMutation(
         "/api/field-service/appointments",
         {
@@ -242,7 +311,7 @@ export function FieldServiceWorkspace({
         },
         { idempotencyKey: crypto.randomUUID() },
       );
-      setScheduleCase(undefined);
+      closeScheduleDialog();
     });
   }
 
@@ -250,7 +319,7 @@ export function FieldServiceWorkspace({
     const formElement = event.currentTarget.form;
     if (scheduleCase === undefined || formElement === null) return;
     const form = new FormData(formElement);
-    await run(async () => {
+    await run("suggest", async () => {
       await crmMutation(
         "/api/field-service/appointments",
         {
@@ -263,7 +332,7 @@ export function FieldServiceWorkspace({
         },
         { idempotencyKey: crypto.randomUUID() },
       );
-      setScheduleCase(undefined);
+      closeScheduleDialog();
     });
   }
 
@@ -271,7 +340,7 @@ export function FieldServiceWorkspace({
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const linkedUserId = form.get("linkedUserId");
-    await run(async () => {
+    await run("create-technician", async () => {
       await crmMutation("/api/field-service/technicians", {
         fullName: form.get("fullName"),
         employeeIdentifier: form.get("employeeIdentifier"),
@@ -283,7 +352,7 @@ export function FieldServiceWorkspace({
             : null,
         verified: form.get("verified") === "true",
       });
-      setTechnicianOpen(false);
+      closeTechnicianDialog();
     });
   }
 
@@ -292,7 +361,7 @@ export function FieldServiceWorkspace({
     if (editingTechnician === undefined) return;
     const form = new FormData(event.currentTarget);
     const linkedUserId = form.get("linkedUserId");
-    await run(async () => {
+    await run("edit-technician", async () => {
       await crmMutation(
         `/api/field-service/technicians/${editingTechnician.id}`,
         {
@@ -309,7 +378,7 @@ export function FieldServiceWorkspace({
         },
         { method: "PATCH" },
       );
-      setEditingTechnician(undefined);
+      closeEditTechnicianDialog();
     });
   }
 
@@ -326,7 +395,7 @@ export function FieldServiceWorkspace({
     const endsAt = new Date(
       Date.parse(startsAt) + durationMinutes * 60_000,
     ).toISOString();
-    await run(async () => {
+    await run("reschedule", async () => {
       await crmMutation(
         `/api/field-service/appointments/${manageAppointment.id}`,
         {
@@ -339,31 +408,31 @@ export function FieldServiceWorkspace({
         },
         { idempotencyKey: crypto.randomUUID(), method: "PATCH" },
       );
-      setManageAppointment(undefined);
+      closeManageAppointmentDialog();
     });
   }
 
   async function approveAppointment() {
     if (manageAppointment === undefined) return;
-    await run(async () => {
+    await run("approve", async () => {
       await crmMutation(
         `/api/field-service/appointments/${manageAppointment.id}`,
         { action: "approve" },
         { method: "PATCH" },
       );
-      setManageAppointment(undefined);
+      closeManageAppointmentDialog();
     });
   }
 
   async function cancelAppointment() {
     if (manageAppointment === undefined) return;
-    await run(async () => {
+    await run("cancel", async () => {
       await crmMutation(
         `/api/field-service/appointments/${manageAppointment.id}`,
         { action: "cancel" },
         { method: "PATCH" },
       );
-      setManageAppointment(undefined);
+      closeManageAppointmentDialog();
     });
   }
 
@@ -398,7 +467,7 @@ export function FieldServiceWorkspace({
         {canOperate ? (
           <Button
             className="platform-admin-hero__action"
-            onClick={() => setCreateOpen(true)}
+            onClick={openCreateDialog}
           >
             <Plus aria-hidden="true" size={16} />
             {he ? "תיק שירות חדש" : "New service case"}
@@ -506,7 +575,7 @@ export function FieldServiceWorkspace({
         ) : null}
       </div>
 
-      {error ? (
+      {error && !dialogOpen ? (
         <p className="form-error" role="alert">
           {error}
         </p>
@@ -581,7 +650,7 @@ export function FieldServiceWorkspace({
                         tone={caseTone(item.status)}
                       />
                     </td>
-                    <td>
+                    <td data-label={he ? "עודכן" : "Updated"}>
                       <time dateTime={item.updatedAt}>
                         {new Intl.DateTimeFormat(locale, {
                           dateStyle: "medium",
@@ -592,7 +661,7 @@ export function FieldServiceWorkspace({
                       <div className="field-service-row-actions">
                         {canOperate && item.status === "awaiting_scheduling" ? (
                           <Button
-                            onClick={() => setScheduleCase(item)}
+                            onClick={() => openScheduleDialog(item)}
                             size="small"
                             variant="secondary"
                           >
@@ -620,7 +689,7 @@ export function FieldServiceWorkspace({
       ) : view === "schedule" ? (
         <div className="field-service-schedule-grid">
           {appointments.length === 0 ? (
-            <Surface level="raised">
+            <Surface className="field-service-grid-empty" level="raised">
               <EmptyState
                 title={he ? "אין ביקורים מתוזמנים" : "No scheduled visits"}
                 description={
@@ -655,7 +724,7 @@ export function FieldServiceWorkspace({
                 {canOperate &&
                 (item.status === "scheduled" || item.status === "suggested") ? (
                   <Button
-                    onClick={() => setManageAppointment(item)}
+                    onClick={() => openManageAppointmentDialog(item)}
                     size="small"
                     variant="secondary"
                   >
@@ -674,10 +743,7 @@ export function FieldServiceWorkspace({
               <h2>{he ? "טכנאים" : "Technicians"}</h2>
             </div>
             {canManage ? (
-              <Button
-                onClick={() => setTechnicianOpen(true)}
-                variant="secondary"
-              >
+              <Button onClick={openTechnicianDialog} variant="secondary">
                 <Plus aria-hidden="true" size={16} />
                 {he ? "טכנאי חדש" : "New technician"}
               </Button>
@@ -685,7 +751,7 @@ export function FieldServiceWorkspace({
           </div>
           <div className="field-service-technician-grid">
             {technicians.length === 0 ? (
-              <Surface level="raised">
+              <Surface className="field-service-grid-empty" level="raised">
                 <EmptyState
                   title={he ? "אין טכנאים" : "No technicians"}
                   description={
@@ -730,7 +796,7 @@ export function FieldServiceWorkspace({
                     />
                     {canManage ? (
                       <Button
-                        onClick={() => setEditingTechnician(item)}
+                        onClick={() => openEditTechnicianDialog(item)}
                         size="small"
                         type="button"
                         variant="quiet"
@@ -767,7 +833,7 @@ export function FieldServiceWorkspace({
 
       <Dialog
         closeLabel={he ? "סגירה" : "Close"}
-        onClose={() => setCreateOpen(false)}
+        onClose={closeCreateDialog}
         open={createOpen}
         title={he ? "תיק שירות חדש" : "New service case"}
       >
@@ -775,6 +841,7 @@ export function FieldServiceWorkspace({
           className="field-service-form"
           onSubmit={(event) => void createCase(event)}
         >
+          <DialogError message={error} />
           <div className="field-service-contact-search">
             <Input
               id="field-case-contact-search"
@@ -840,15 +907,15 @@ export function FieldServiceWorkspace({
             name="serialNumber"
           />
           <div className="field-service-form__actions">
-            <Button
-              onClick={() => setCreateOpen(false)}
-              type="button"
-              variant="quiet"
-            >
+            <Button onClick={closeCreateDialog} type="button" variant="quiet">
               {he ? "ביטול" : "Cancel"}
             </Button>
-            <Button disabled={pending} type="submit">
-              {pending
+            <Button
+              busy={pendingAction === "create-case"}
+              disabled={pending}
+              type="submit"
+            >
+              {pendingAction === "create-case"
                 ? he
                   ? "יוצר…"
                   : "Creating…"
@@ -867,7 +934,7 @@ export function FieldServiceWorkspace({
           : {
               description: `${scheduleCase.reference} · ${scheduleCase.customerName}`,
             })}
-        onClose={() => setScheduleCase(undefined)}
+        onClose={closeScheduleDialog}
         open={scheduleCase !== undefined}
         title={he ? "תזמון ביקור" : "Schedule visit"}
       >
@@ -875,6 +942,7 @@ export function FieldServiceWorkspace({
           className="field-service-form"
           onSubmit={(event) => void schedule(event)}
         >
+          <DialogError message={error} />
           <Select
             id="field-schedule-technician"
             label={he ? "טכנאי" : "Technician"}
@@ -925,16 +993,13 @@ export function FieldServiceWorkspace({
             </p>
           ) : null}
           <div className="field-service-form__actions">
-            <Button
-              onClick={() => setScheduleCase(undefined)}
-              type="button"
-              variant="quiet"
-            >
+            <Button onClick={closeScheduleDialog} type="button" variant="quiet">
               {he ? "ביטול" : "Cancel"}
             </Button>
             {feature.aiSchedulingEnabled &&
             feature.readiness.calendarCanSuggest ? (
               <Button
+                busy={pendingAction === "suggest"}
                 disabled={pending || technicians.length === 0}
                 onClick={(event) => void suggestSchedule(event)}
                 type="button"
@@ -945,6 +1010,7 @@ export function FieldServiceWorkspace({
               </Button>
             ) : null}
             <Button
+              busy={pendingAction === "schedule"}
               disabled={pending || technicians.length === 0}
               type="submit"
             >
@@ -956,7 +1022,7 @@ export function FieldServiceWorkspace({
 
       <Dialog
         closeLabel={he ? "סגירה" : "Close"}
-        onClose={() => setTechnicianOpen(false)}
+        onClose={closeTechnicianDialog}
         open={technicianOpen}
         title={he ? "טכנאי חדש" : "New technician"}
       >
@@ -964,6 +1030,7 @@ export function FieldServiceWorkspace({
           className="field-service-form"
           onSubmit={(event) => void createTechnician(event)}
         >
+          <DialogError message={error} />
           <Input
             id="field-tech-name"
             label={he ? "שם מלא" : "Full name"}
@@ -1011,13 +1078,17 @@ export function FieldServiceWorkspace({
           </label>
           <div className="field-service-form__actions">
             <Button
-              onClick={() => setTechnicianOpen(false)}
+              onClick={closeTechnicianDialog}
               type="button"
               variant="quiet"
             >
               {he ? "ביטול" : "Cancel"}
             </Button>
-            <Button disabled={pending} type="submit">
+            <Button
+              busy={pendingAction === "create-technician"}
+              disabled={pending}
+              type="submit"
+            >
               {he ? "הוספת טכנאי" : "Add technician"}
             </Button>
           </div>
@@ -1026,7 +1097,7 @@ export function FieldServiceWorkspace({
 
       <Dialog
         closeLabel={he ? "סגירה" : "Close"}
-        onClose={() => setEditingTechnician(undefined)}
+        onClose={closeEditTechnicianDialog}
         open={editingTechnician !== undefined}
         title={he ? "עריכת טכנאי" : "Edit technician"}
       >
@@ -1036,6 +1107,7 @@ export function FieldServiceWorkspace({
             key={editingTechnician.id}
             onSubmit={(event) => void editTechnician(event)}
           >
+            <DialogError message={error} />
             <Input
               defaultValue={editingTechnician.fullName}
               id="field-edit-tech-name"
@@ -1109,13 +1181,17 @@ export function FieldServiceWorkspace({
             </p>
             <div className="field-service-form__actions">
               <Button
-                onClick={() => setEditingTechnician(undefined)}
+                onClick={closeEditTechnicianDialog}
                 type="button"
                 variant="quiet"
               >
                 {he ? "ביטול" : "Cancel"}
               </Button>
-              <Button disabled={pending} type="submit">
+              <Button
+                busy={pendingAction === "edit-technician"}
+                disabled={pending}
+                type="submit"
+              >
                 {he ? "שמירת שינוי" : "Save changes"}
               </Button>
             </div>
@@ -1130,7 +1206,7 @@ export function FieldServiceWorkspace({
           : {
               description: `${manageAppointment.technicianName} · ${manageAppointment.status.replaceAll("_", " ")}`,
             })}
-        onClose={() => setManageAppointment(undefined)}
+        onClose={closeManageAppointmentDialog}
         open={manageAppointment !== undefined}
         title={he ? "ניהול תזמון" : "Manage schedule"}
       >
@@ -1139,6 +1215,7 @@ export function FieldServiceWorkspace({
             className="field-service-form"
             onSubmit={(event) => void changeAppointment(event)}
           >
+            <DialogError message={error} />
             <Select
               defaultValue={manageAppointment.technicianId}
               id="field-reschedule-technician"
@@ -1207,6 +1284,7 @@ export function FieldServiceWorkspace({
             ) : null}
             <div className="field-service-form__actions field-service-form__actions--spread">
               <Button
+                busy={pendingAction === "cancel"}
                 disabled={pending}
                 onClick={() => void cancelAppointment()}
                 type="button"
@@ -1217,6 +1295,7 @@ export function FieldServiceWorkspace({
               <span>
                 {manageAppointment.status === "suggested" ? (
                   <Button
+                    busy={pendingAction === "approve"}
                     disabled={pending || !feature.readiness.calendarCanBook}
                     onClick={() => void approveAppointment()}
                     type="button"
@@ -1225,7 +1304,11 @@ export function FieldServiceWorkspace({
                     {he ? "אישור ההצעה" : "Approve suggestion"}
                   </Button>
                 ) : null}
-                <Button disabled={pending} type="submit">
+                <Button
+                  busy={pendingAction === "reschedule"}
+                  disabled={pending}
+                  type="submit"
+                >
                   {he ? "שמירת שינוי" : "Save change"}
                 </Button>
               </span>

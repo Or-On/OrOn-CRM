@@ -17,6 +17,7 @@ import {
 import { OpenAiCompatibleChatProvider } from "./ai-provider.js";
 import { DispatcherAutomaticCallProvider } from "./call-provider.js";
 import { OpenAiCompatibleFieldServiceProvider } from "./field-service-provider.js";
+import { WorkerHealthSignal } from "./health.js";
 
 async function main(): Promise<void> {
   const config = loadConfig(process.env, {
@@ -92,6 +93,8 @@ async function main(): Promise<void> {
     },
   );
   const abortController = new AbortController();
+  const health = new WorkerHealthSignal();
+  await health.clear();
   const stop = Promise.race([
     once(process, "SIGINT", { signal: abortController.signal }).then(
       () => "SIGINT",
@@ -101,15 +104,20 @@ async function main(): Promise<void> {
     ),
   ]).finally(() => abortController.abort());
 
-  await runWorker(
-    {
-      closeDatabase: () => store.close(),
-      isDatabaseReady: () => store.isReady(),
-      logger,
-      processAvailable: () => store.processAvailable(),
-    },
-    stop,
-  );
+  try {
+    await runWorker(
+      {
+        closeDatabase: () => store.close(),
+        isDatabaseReady: () => store.isReady(),
+        logger,
+        processAvailable: () => store.processAvailable(),
+        recordSuccessfulPoll: () => health.recordSuccessfulPoll(),
+      },
+      stop,
+    );
+  } finally {
+    await health.clear();
+  }
 }
 
 main().catch((error: unknown) => {

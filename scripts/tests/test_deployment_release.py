@@ -165,6 +165,62 @@ def test_backup_covers_database_private_objects_and_checksums() -> None:
     assert "*.backup.tar.gz.sha256" in backup
 
 
+def test_private_objects_are_shared_only_with_the_services_that_process_them() -> None:
+    compose = (ROOT / "infra" / "compose" / "deployment.yaml").read_text(encoding="utf-8")
+    deploy = DEPLOY.read_text(encoding="utf-8")
+
+    object_mount = "${DEPLOYMENT_DATA_DIR}/objects:/var/lib/oron/objects"
+    for service in ("dispatcher", "messaging-worker", "web"):
+        block = re.search(
+            rf"^  {re.escape(service)}:\n(?P<body>.*?)(?=^  [a-z][a-z0-9-]*:\n|\Z)",
+            compose,
+            re.MULTILINE | re.DOTALL,
+        )
+        assert block is not None
+        assert object_mount in block.group("body")
+
+    assert 'PRIVATE_OBJECTS_DIR="${SHARED_DIR}/data/objects"' in deploy
+    assert 'install -d -m 0770 -o 100 -g 1000 "${PRIVATE_OBJECTS_DIR}"' in deploy
+    assert "USER node" in (ROOT / "apps" / "web" / "Dockerfile").read_text(encoding="utf-8")
+    assert "USER node" in (ROOT / "infra" / "images" / "messaging-worker.Dockerfile").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_deploy_rejects_inconsistent_field_service_private_storage_configuration() -> None:
+    deploy = DEPLOY.read_text(encoding="utf-8")
+
+    assert "read_private_config_value" in deploy
+    assert "FIELD_CIPHER_LOCAL_KEY must match across field-service runtimes" in deploy
+    assert "BLIND_INDEX_KEY must match across field-service runtimes" in deploy
+    assert "FIELD_CIPHER_LOCAL_KEY must decode to exactly 32 bytes" in deploy
+    assert "BLIND_INDEX_KEY must decode to at least 32 bytes" in deploy
+    assert "ARTIFACTS_BACKEND must be local" in deploy
+    assert "ARTIFACTS_LOCAL_ROOT is invalid" in deploy
+    assert "Private runtime configuration must be owned by root" in deploy
+    assert deploy.index("read_private_config_value") < deploy.index('exec 9>"${LOCK_FILE}"')
+
+
+def test_messaging_worker_health_is_a_release_gate() -> None:
+    compose = (ROOT / "infra" / "compose" / "deployment.yaml").read_text(encoding="utf-8")
+    deploy = DEPLOY.read_text(encoding="utf-8")
+    harness = (ROOT / "infra" / "scripts" / "readiness_stack.py").read_text(encoding="utf-8")
+
+    worker = re.search(
+        r"^  messaging-worker:\n(?P<body>.*?)(?=^  [a-z][a-z0-9-]*:\n|\Z)",
+        compose,
+        re.MULTILINE | re.DOTALL,
+    )
+    assert worker is not None
+    assert '["CMD", "node", "dist/healthcheck.js"]' in worker.group("body")
+    assert "messaging_worker_health" in deploy
+    assert "fresh polling loop and database readiness" in deploy
+    assert '"messaging-worker", "node", "dist/healthcheck.js"' in harness
+    assert harness.count('"ARTIFACTS_LOCAL_ROOT=/var/lib/oron/objects"') == 3
+    assert "chown 100:1000 /var/lib/oron/objects" in harness
+    assert 'checks["shared_private_objects"] = "worker-to-web"' in harness
+
+
 def test_edge_limit_allows_the_largest_content_validated_upload() -> None:
     caddy = (ROOT / "infra" / "caddy" / "Caddyfile.deployment").read_text(encoding="utf-8")
     assert "max_size 22MB" in caddy

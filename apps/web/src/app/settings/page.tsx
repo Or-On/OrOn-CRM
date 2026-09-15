@@ -19,24 +19,7 @@ import {
   withCurrentTenant,
 } from "../../features/auth";
 import { ManagementPanel } from "../../features/management";
-
-function fieldServiceRuntimeReadiness() {
-  const storageBackend =
-    process.env.ARTIFACTS_BACKEND?.trim().toLowerCase() ?? "local";
-  return {
-    aiProviderConfigured:
-      process.env.ENABLE_WHATSAPP_AI?.toLowerCase() === "true" &&
-      process.env.LLM_PROVIDER === "openai-compat" &&
-      Boolean(process.env.LLM_API_KEY) &&
-      Boolean(process.env.LLM_BASE_URL) &&
-      Boolean(process.env.LLM_MODEL),
-    protectedFieldsConfigured:
-      Boolean(process.env.FIELD_CIPHER_LOCAL_KEY) &&
-      Boolean(process.env.BLIND_INDEX_KEY),
-    privateStorageConfigured: storageBackend === "local",
-    storageBackend,
-  };
-}
+import { fieldServiceRuntimeReadiness } from "../../features/field-service-server";
 
 export default async function SettingsPage() {
   try {
@@ -59,7 +42,7 @@ export default async function SettingsPage() {
             ? await getFieldServiceFeatureState(sql)
             : undefined,
           fieldServiceRuntimeReadiness: canManageTenant
-            ? fieldServiceRuntimeReadiness()
+            ? await fieldServiceRuntimeReadiness()
             : undefined,
           canManageMembers,
           canManageTenant,

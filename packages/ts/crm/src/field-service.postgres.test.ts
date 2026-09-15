@@ -12,6 +12,7 @@ import {
   getServiceCaseDossier,
   linkCaseCall,
   linkCaseConversation,
+  listServiceCaseLinkCandidates,
   rescheduleServiceAppointment,
   scheduleServiceAppointment,
   suggestNextServiceAppointment,
@@ -205,6 +206,7 @@ describe.skipIf(databaseUrl === undefined)(
             fixture.technicianId,
           ),
         ).rejects.toThrow(/matching scheduled appointment/u);
+        await sql`SELECT set_config('app.current_role','owner',true)`;
         const visit = await createServiceVisit(
           sql,
           fixture.userId,
@@ -223,16 +225,23 @@ describe.skipIf(databaseUrl === undefined)(
     it("includes only explicitly linked conversations and calls and reports missing media honestly", async () =>
       isolated(async (sql, fixture) => {
         const channelId = randomUUID();
+        const unrelatedChannelId = randomUUID();
         const conversationId = randomUUID();
         const unrelatedConversationId = randomUUID();
         const sessionId = randomUUID();
         const unrelatedSessionId = randomUUID();
+        const crossChannelSessionId = randomUUID();
         await sql`
           INSERT INTO messaging.channels(
             id, tenant_id, kind, provider, provider_account_id, status
-          ) VALUES(
+          ) VALUES
+          (
             ${channelId}::uuid, ${fixture.tenantId}::uuid, 'whatsapp',
             'simulator', ${`field-service-${fixture.tenantId}`}, 'active'
+          ),
+          (
+            ${unrelatedChannelId}::uuid, ${fixture.tenantId}::uuid, 'whatsapp',
+            'simulator', ${`field-service-other-${fixture.tenantId}`}, 'active'
           )
         `;
         await sql`
@@ -242,7 +251,7 @@ describe.skipIf(databaseUrl === undefined)(
             (${conversationId}::uuid, ${fixture.tenantId}::uuid,
              ${channelId}::uuid, ${fixture.contactId}::uuid, 'open'),
             (${unrelatedConversationId}::uuid, ${fixture.tenantId}::uuid,
-             ${channelId}::uuid, ${fixture.contactId}::uuid, 'open')
+             ${unrelatedChannelId}::uuid, ${fixture.contactId}::uuid, 'open')
         `;
         await sql`
           INSERT INTO messaging.messages(
@@ -253,6 +262,10 @@ describe.skipIf(databaseUrl === undefined)(
             'contact', 'text', 'Synthetic linked evidence', 'simulator', 'received'
           )
         `;
+        // Voice-session writes belong to the voice runtime, not platform_web.
+        // Arrange retained call evidence as the fixture owner, then return to
+        // the exact role used by the case-detail page for the assertions.
+        await sql`RESET ROLE`;
         await sql`
           INSERT INTO public.sessions(
             session_id, tenant_id, contact_id, provider, direction, room,
@@ -265,8 +278,43 @@ describe.skipIf(databaseUrl === undefined)(
             (${unrelatedSessionId}::uuid, ${fixture.tenantId}::uuid,
              ${fixture.contactId}::uuid, 'simulator', 'outbound',
              ${`field-service-${unrelatedSessionId}`}, 'ended', 'completed',
+             ${randomUUID()}::uuid),
+            (${crossChannelSessionId}::uuid, ${fixture.tenantId}::uuid,
+             NULL, 'simulator', 'outbound',
+             ${`field-service-${crossChannelSessionId}`}, 'ended', 'completed',
              ${randomUUID()}::uuid)
         `;
+        await sql`
+          INSERT INTO public.session_events(
+            tenant_id, session_id, sequence, event_type, payload
+          ) VALUES(
+            ${fixture.tenantId}::uuid, ${crossChannelSessionId}::uuid, 0,
+            'voice.call.admission.v1',
+            ${sql.json({ source_conversation_id: conversationId })}
+          )
+        `;
+
+        await sql`SET LOCAL ROLE platform_web`;
+        const candidates = await listServiceCaseLinkCandidates(
+          sql,
+          fixture.caseId,
+        );
+        expect(candidates.calls).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              sessionId,
+              linked: false,
+            }),
+            expect.objectContaining({
+              sessionId: unrelatedSessionId,
+              linked: false,
+            }),
+            expect.objectContaining({
+              sessionId: crossChannelSessionId,
+              linked: false,
+            }),
+          ]),
+        );
 
         await linkCaseConversation(
           sql,
@@ -279,7 +327,7 @@ describe.skipIf(databaseUrl === undefined)(
           sql,
           fixture.userId,
           fixture.caseId,
-          sessionId,
+          crossChannelSessionId,
           "diagnostic",
         );
         const dossier = await getServiceCaseDossier(sql, fixture.caseId);
@@ -288,10 +336,10 @@ describe.skipIf(databaseUrl === undefined)(
         expect(dossier?.conversations[0]?.messages[0]?.contentText).toBe(
           "Synthetic linked evidence",
         );
-        expect(dossier?.callSessionIds).toEqual([sessionId]);
+        expect(dossier?.callSessionIds).toEqual([crossChannelSessionId]);
         expect(dossier?.calls).toEqual([
           expect.objectContaining({
-            sessionId,
+            sessionId: crossChannelSessionId,
             recordingObjectId: null,
             transcriptObjectId: null,
             recordingStatus: "missing",
@@ -300,6 +348,7 @@ describe.skipIf(databaseUrl === undefined)(
         ]);
         expect(dossier?.conversationIds).not.toContain(unrelatedConversationId);
         expect(dossier?.callSessionIds).not.toContain(unrelatedSessionId);
+        expect(dossier?.callSessionIds).not.toContain(sessionId);
       }));
 
     it("rejects archived or wrong-customer locations when creating a case", async () =>

@@ -9,6 +9,9 @@ describe("operator navigation", () => {
     expect(activeDestination("/tasks/123")).toBe("/tasks");
     expect(activeDestination("/users/123")).toBe("/users");
     expect(activeDestination("/voice/campaigns")).toBe("/voice");
+    expect(activeDestination("/field-service/cases/123")).toBe(
+      "/field-service",
+    );
     expect(activeDestination("/flows")).toBe("/voice");
     expect(activeDestination("/flows/retained-adapter")).toBe("/voice");
     expect(activeDestination("/contactsmith")).toBeUndefined();

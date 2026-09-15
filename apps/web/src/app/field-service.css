@@ -6,6 +6,74 @@
   margin-inline: auto;
 }
 
+.field-service-loading {
+  display: grid;
+  gap: 1rem;
+  inline-size: 100%;
+  max-inline-size: 96rem;
+  margin-inline: auto;
+}
+
+.field-service-loading > .or-skeleton {
+  min-block-size: 11.5rem;
+  border-radius: 1rem;
+}
+
+.field-service-loading__metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.field-service-loading__metrics .or-skeleton {
+  min-block-size: 5.75rem;
+  border-radius: var(--or-radius-md);
+}
+
+.field-service-loading__toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.field-service-loading__toolbar .or-skeleton:first-child {
+  inline-size: min(22rem, 58%);
+  min-block-size: 2.5rem;
+}
+
+.field-service-loading__toolbar .or-skeleton:last-child {
+  inline-size: min(18rem, 38%);
+  min-block-size: 2.5rem;
+}
+
+.field-service-loading__content {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 1px solid var(--or-border);
+  border-radius: var(--or-radius-md);
+}
+
+.field-service-loading__content .or-skeleton {
+  min-block-size: 3.75rem;
+}
+
+.field-service-route-state {
+  inline-size: min(100%, 52rem);
+}
+
+.field-service-route-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.65rem;
+  margin-block-start: 0.65rem;
+}
+
+[dir="rtl"] .field-service-route-actions a svg {
+  transform: rotate(180deg);
+}
+
 .field-service-hero {
   min-block-size: 11.5rem;
 }
@@ -186,6 +254,10 @@
   gap: 0.75rem;
 }
 
+.field-service-grid-empty {
+  grid-column: 1 / -1;
+}
+
 .field-service-schedule-grid > article {
   display: grid;
   gap: 0.65rem;
@@ -247,6 +319,7 @@
   > :is(
     .or-textarea,
     .field-service-check,
+    .field-service-dialog-feedback,
     .field-service-form__hint,
     .field-service-form__actions
   ) {
@@ -315,7 +388,8 @@
 }
 
 @media (max-width: 70rem) {
-  .field-service-metrics {
+  .field-service-metrics,
+  .field-service-loading__metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -327,6 +401,7 @@
 
 @media (max-width: 40rem) {
   .field-service-metrics,
+  .field-service-loading__metrics,
   .field-service-schedule-grid,
   .field-service-technician-grid,
   .field-service-form {
@@ -352,6 +427,7 @@
     > :is(
       .or-textarea,
       .field-service-check,
+      .field-service-dialog-feedback,
       .field-service-form__hint,
       .field-service-form__actions
     ) {
@@ -369,6 +445,92 @@
 
   .field-service-form__actions .or-button {
     inline-size: 100%;
+  }
+
+  .field-service-loading__toolbar,
+  .field-service-route-actions {
+    flex-direction: column;
+  }
+
+  .field-service-loading__toolbar .or-skeleton:first-child,
+  .field-service-loading__toolbar .or-skeleton:last-child,
+  .field-service-route-actions > :is(a, button) {
+    inline-size: 100%;
+  }
+}
+
+@media (max-width: 48rem) {
+  .field-service-directory {
+    overflow: visible;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .field-service-directory .or-data-table {
+    overflow: visible;
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+  }
+
+  .field-service-directory table,
+  .field-service-directory tbody {
+    display: grid;
+    min-inline-size: 0 !important;
+    gap: 0.75rem;
+  }
+
+  .field-service-directory thead {
+    display: none;
+  }
+
+  .field-service-directory tbody tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.7rem 1rem;
+    padding: 1rem;
+    background: var(--or-surface);
+    border: 1px solid var(--or-border);
+    border-radius: var(--or-radius-md);
+    box-shadow: var(--or-shadow-1);
+  }
+
+  .field-service-directory tbody td {
+    min-inline-size: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  .field-service-directory tbody td:nth-child(2),
+  .field-service-directory tbody td:nth-child(3) {
+    grid-column: 1 / -1;
+    padding-block-start: 0.65rem;
+    border-block-start: 1px solid var(--or-divider);
+  }
+
+  .field-service-directory tbody td:nth-child(4) {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .field-service-directory tbody td:nth-child(5) {
+    align-self: end;
+  }
+
+  .field-service-directory tbody td:nth-child(5)::before {
+    display: block;
+    margin-block-end: 0.2rem;
+    color: var(--or-text-muted);
+    font-size: 0.65rem;
+    content: attr(data-label);
+  }
+
+  .field-service-directory tbody td:nth-child(6) {
+    align-self: end;
+  }
+
+  [dir="rtl"] .field-service-row-actions > a svg {
+    transform: rotate(180deg);
   }
 }
 

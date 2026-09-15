@@ -5,13 +5,18 @@ import {
   transitionServiceCase,
   type ServiceCaseStatus,
 } from "@or-on/crm";
+import { isAuthorized } from "@or-on/auth";
 
 import { jsonObject, withCurrentTenant } from "../../../../../features/auth";
 import {
   assertCrmMutation,
   crmErrorResponse,
 } from "../../../../../features/crm-route";
-import { text, uuid } from "../../../../../features/field-service";
+import {
+  dossierForVoiceAccess,
+  text,
+  uuid,
+} from "../../../../../features/field-service";
 
 interface Context {
   readonly params: Promise<{ readonly id: string }>;
@@ -20,8 +25,17 @@ interface Context {
 export async function GET(_request: Request, context: Context) {
   try {
     const { id } = await context.params;
-    const dossier = await withCurrentTenant("field-service:read", (sql) =>
-      getServiceCaseDossier(sql, uuid(id, "Case")),
+    const dossier = await withCurrentTenant(
+      "field-service:read",
+      async (sql, session) => {
+        const record = await getServiceCaseDossier(sql, uuid(id, "Case"));
+        if (record === undefined) return undefined;
+        const canReadVoice = isAuthorized(
+          { role: session.tenant.role, isSuperuser: session.isSuperuser },
+          "voice:read",
+        );
+        return dossierForVoiceAccess(record, canReadVoice);
+      },
     );
     if (dossier === undefined)
       return NextResponse.json(

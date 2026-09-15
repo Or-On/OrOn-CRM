@@ -51,11 +51,84 @@ for file in \
   chmod 0600 "${file}"
 done
 
+read_private_config_value() {
+  local config_file="$1"
+  local key="$2"
+  local value
+  if ! value="$(awk -v key="${key}" '
+    index($0, key "=") == 1 {
+      count += 1
+      value = substr($0, length(key) + 2)
+    }
+    END {
+      if (count != 1 || length(value) == 0) exit 1
+      print value
+    }
+  ' "${config_file}")"; then
+    echo "Required ${key} configuration is missing or duplicated in ${config_file}" >&2
+    exit 1
+  fi
+  printf '%s' "${value}"
+}
+
+# Field-service evidence crosses the web, messaging, and voice runtimes. Refuse
+# a release when an older host configuration would make those services encrypt
+# or locate the same private object differently.
+readonly DISPATCHER_CONFIG="${SHARED_DIR}/config/dispatcher.env"
+readonly WEB_CONFIG="${SHARED_DIR}/config/web.env"
+readonly MESSAGING_WORKER_CONFIG="${SHARED_DIR}/config/messaging-worker.env"
+for config_file in "${DISPATCHER_CONFIG}" "${WEB_CONFIG}" "${MESSAGING_WORKER_CONFIG}"; do
+  [[ $(stat --format='%u' "${config_file}") -eq 0 ]] || {
+    echo "Private runtime configuration must be owned by root: ${config_file}" >&2
+    exit 1
+  }
+done
+SHARED_FIELD_CIPHER_KEY="$(read_private_config_value "${DISPATCHER_CONFIG}" FIELD_CIPHER_LOCAL_KEY)"
+readonly SHARED_FIELD_CIPHER_KEY
+SHARED_BLIND_INDEX_KEY="$(read_private_config_value "${DISPATCHER_CONFIG}" BLIND_INDEX_KEY)"
+readonly SHARED_BLIND_INDEX_KEY
+for config_file in "${WEB_CONFIG}" "${MESSAGING_WORKER_CONFIG}"; do
+  [[ $(read_private_config_value "${config_file}" FIELD_CIPHER_LOCAL_KEY) == "${SHARED_FIELD_CIPHER_KEY}" ]] || {
+    echo "FIELD_CIPHER_LOCAL_KEY must match across field-service runtimes" >&2
+    exit 1
+  }
+  [[ $(read_private_config_value "${config_file}" BLIND_INDEX_KEY) == "${SHARED_BLIND_INDEX_KEY}" ]] || {
+    echo "BLIND_INDEX_KEY must match across field-service runtimes" >&2
+    exit 1
+  }
+done
+for config_file in "${DISPATCHER_CONFIG}" "${WEB_CONFIG}" "${MESSAGING_WORKER_CONFIG}"; do
+  [[ $(read_private_config_value "${config_file}" ARTIFACTS_BACKEND) == local ]] || {
+    echo "ARTIFACTS_BACKEND must be local in ${config_file}" >&2
+    exit 1
+  }
+  [[ $(read_private_config_value "${config_file}" ARTIFACTS_LOCAL_ROOT) == /var/lib/oron/objects ]] || {
+    echo "ARTIFACTS_LOCAL_ROOT is invalid in ${config_file}" >&2
+    exit 1
+  }
+done
+if ! FIELD_CIPHER_BYTES="$(printf '%s' "${SHARED_FIELD_CIPHER_KEY}" | base64 --decode 2>/dev/null | wc -c)" ||
+  [[ ${FIELD_CIPHER_BYTES} -ne 32 ]]; then
+  echo "FIELD_CIPHER_LOCAL_KEY must decode to exactly 32 bytes" >&2
+  exit 1
+fi
+if ! BLIND_INDEX_BYTES="$(printf '%s' "${SHARED_BLIND_INDEX_KEY}" | base64 --decode 2>/dev/null | wc -c)" ||
+  [[ ${BLIND_INDEX_BYTES} -lt 32 ]]; then
+  echo "BLIND_INDEX_KEY must decode to at least 32 bytes" >&2
+  exit 1
+fi
+
 exec 9>"${LOCK_FILE}"
 if ! flock --nonblock 9; then
   echo "Another deployment is already running" >&2
   exit 1
 fi
+
+# The Python voice runtime uses UID 100 while the Node web and messaging
+# runtimes use GID 1000. The root is private to those principals; each adapter
+# keeps its own descendants at its stricter application-level modes.
+readonly PRIVATE_OBJECTS_DIR="${SHARED_DIR}/data/objects"
+install -d -m 0770 -o 100 -g 1000 "${PRIVATE_OBJECTS_DIR}"
 
 umask 077
 readonly RELEASE_DIR="${RELEASES_DIR}/${COMMIT_SHA}"
@@ -310,6 +383,14 @@ for service_and_key in \
     exit 1
   fi
 done
+
+messaging_worker_id="$(compose ps --quiet messaging-worker)"
+messaging_worker_health="$(docker inspect "${messaging_worker_id}" \
+  --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}')"
+if [[ ${messaging_worker_health} != healthy ]]; then
+  echo "Messaging worker did not prove a fresh polling loop and database readiness" >&2
+  exit 1
+fi
 
 for _ in {1..48}; do
   if curl --fail --silent --max-time 10 \

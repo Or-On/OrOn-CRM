@@ -191,6 +191,121 @@ async def test_feature_change_actor_uses_tenant_safe_identity_lookup(
     )
 
 
+async def test_web_case_dossiers_can_read_only_required_call_evidence(
+    pg: asyncpg.Connection,
+) -> None:
+    tenant_a = await _tenant(pg, "Voice projection tenant A")
+    tenant_b = await _tenant(pg, "Voice projection tenant B")
+    session_a = uuid4()
+    session_b = uuid4()
+    conversation_a = uuid4()
+    conversation_b = uuid4()
+    await pg.execute(
+        """
+        INSERT INTO public.sessions(
+          session_id, tenant_id, contact_id, provider, direction, room,
+          status, outcome, flow_id
+        ) VALUES
+          ($1, $2, $3, 'simulator', 'outbound', $4, 'ended', 'completed', $5),
+          ($6, $7, $8, 'simulator', 'outbound', $9, 'ended', 'completed', $10)
+        """,
+        session_a,
+        tenant_a.tenant_id,
+        tenant_a.contact_id,
+        f"voice-projection-{session_a}",
+        uuid4(),
+        session_b,
+        tenant_b.tenant_id,
+        tenant_b.contact_id,
+        f"voice-projection-{session_b}",
+        uuid4(),
+    )
+    await pg.execute(
+        """
+        INSERT INTO public.session_events(
+          tenant_id, session_id, sequence, event_type, payload
+        ) VALUES
+          ($1, $2, 0, 'voice.call.admission.v1',
+           jsonb_build_object('source_conversation_id', $3::uuid::text)),
+          ($4, $5, 0, 'voice.call.admission.v1',
+           jsonb_build_object('source_conversation_id', $6::uuid::text))
+        """,
+        tenant_a.tenant_id,
+        session_a,
+        conversation_a,
+        tenant_b.tenant_id,
+        session_b,
+        conversation_b,
+    )
+
+    privileges = await pg.fetchrow(
+        """
+        SELECT
+          has_column_privilege(
+            'platform_web', 'public.sessions', 'direction', 'SELECT'
+          ) AS can_read_direction,
+          has_column_privilege(
+            'platform_web', 'public.sessions', 'ended_at', 'SELECT'
+          ) AS can_read_ended_at,
+          has_column_privilege(
+            'platform_web', 'public.sessions', 'recording_object_id', 'SELECT'
+          ) AS can_read_recording_object,
+          has_column_privilege(
+            'platform_web', 'public.sessions', 'transcript_object_id', 'SELECT'
+          ) AS can_read_transcript_object,
+          has_column_privilege(
+            'platform_web', 'public.session_events', 'event_type', 'SELECT'
+          ) AS can_read_event_type,
+          has_column_privilege(
+            'platform_web', 'public.session_events', 'payload', 'SELECT'
+          ) AS can_read_event_payload,
+          has_function_privilege(
+            'platform_web',
+            'service.current_tenant_voice_admission_conversations(uuid)',
+            'EXECUTE'
+          ) AS can_read_admission_projection,
+          has_column_privilege(
+            'platform_web', 'public.sessions', 'from_number', 'SELECT'
+          ) AS can_read_from_number,
+          has_column_privilege(
+            'platform_web', 'public.sessions', 'provider_call_id', 'SELECT'
+          ) AS can_read_provider_call_id
+        """
+    )
+    assert privileges is not None
+    assert privileges["can_read_direction"]
+    assert privileges["can_read_ended_at"]
+    assert privileges["can_read_recording_object"]
+    assert privileges["can_read_transcript_object"]
+    assert not privileges["can_read_event_type"]
+    assert not privileges["can_read_event_payload"]
+    assert privileges["can_read_admission_projection"]
+    assert not privileges["can_read_from_number"]
+    assert not privileges["can_read_provider_call_id"]
+    await _as_web(pg, tenant_a)
+    projection = await pg.fetch(
+        "SELECT voice_session_id, source_conversation_id "
+        "FROM service.current_tenant_voice_admission_conversations($1)",
+        session_a,
+    )
+    assert [(row["voice_session_id"], row["source_conversation_id"]) for row in projection] == [
+        (session_a, conversation_a)
+    ]
+    assert all(row["voice_session_id"] != session_b for row in projection)
+    assert all(row["source_conversation_id"] != conversation_b for row in projection)
+    assert (
+        await pg.fetch(
+            "SELECT voice_session_id, source_conversation_id "
+            "FROM service.current_tenant_voice_admission_conversations($1)",
+            session_b,
+        )
+        == []
+    )
+    with pytest.raises(asyncpg.InsufficientPrivilegeError):
+        async with pg.transaction():
+            await pg.fetch("SELECT payload FROM public.session_events")
+
+
 async def test_platform_admin_can_manage_existing_tenant_entitlement(
     pg: asyncpg.Connection,
 ) -> None:

@@ -286,8 +286,12 @@ async function main(): Promise<void> {
       AUTH_SERVICE_SECRET: authServiceSecret,
       AUTH_DUMMY_PASSWORD_HASH: dummyHash,
       CREDENTIAL_ENCRYPTION_KEY: credentialEncryptionKey,
+      FIELD_CIPHER_LOCAL_KEY: fieldCipherKey,
+      BLIND_INDEX_KEY: blindIndexKey,
       ...whatsapp,
       ...llm,
+      ARTIFACTS_BACKEND: "local",
+      ARTIFACTS_LOCAL_ROOT: "/var/lib/oron/objects",
     }),
   );
   await privateFile(
@@ -298,8 +302,12 @@ async function main(): Promise<void> {
         passwords.messaging,
       ),
       AUTH_SERVICE_SECRET: authServiceSecret,
+      FIELD_CIPHER_LOCAL_KEY: fieldCipherKey,
+      BLIND_INDEX_KEY: blindIndexKey,
       ...whatsapp,
       ...llm,
+      ARTIFACTS_BACKEND: "local",
+      ARTIFACTS_LOCAL_ROOT: "/var/lib/oron/objects",
     }),
   );
   await privateFile(
