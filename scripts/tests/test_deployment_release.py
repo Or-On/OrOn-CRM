@@ -123,7 +123,12 @@ def test_release_images_carry_and_enforce_source_revision() -> None:
     deploy = DEPLOY.read_text(encoding="utf-8")
     assert workflow.count('--build-arg ORON_SOURCE_REVISION="$GITHUB_SHA"') == 5
     assert "org.opencontainers.image.revision" in deploy
-    pull = "compose --profile release --profile workers --profile voice pull"
+    pull = 'docker pull "${release_images[${key}]}"'
+    expected_keys = (
+        "for key in WEB_IMAGE CONTROL_API_IMAGE MESSAGING_WORKER_IMAGE "
+        "DISPATCHER_IMAGE MIGRATOR_IMAGE"
+    )
+    assert expected_keys in deploy
     assert pull in deploy
     assert deploy.index(pull) < deploy.index('revision="$(docker image inspect')
     for dockerfile in (

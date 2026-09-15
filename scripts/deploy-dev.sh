@@ -225,12 +225,14 @@ if [[ -n ${previous_release} ]]; then
   done
 fi
 compose config --quiet
-# Pull every image that can participate in this release before inspecting its
-# immutable digest or stopping the currently running application. Services in
-# the release, workers, and voice profiles are otherwise omitted by the default
-# `compose pull`, which can leave the one-shot migrator unavailable on a clean
-# deployment host.
-compose --profile release --profile workers --profile voice pull
+# Pull each immutable application image explicitly before inspecting its digest
+# or stopping the currently running application. Compose can omit profiled
+# one-shot services such as the migrator from an aggregate pull even when their
+# profiles are enabled, so release admission must not rely on profile selection.
+for key in WEB_IMAGE CONTROL_API_IMAGE MESSAGING_WORKER_IMAGE DISPATCHER_IMAGE MIGRATOR_IMAGE; do
+  docker pull "${release_images[${key}]}"
+done
+compose pull postgres caddy
 for image in "${release_images[@]}"; do
   revision="$(docker image inspect "${image}" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')"
   if [[ ${revision} != "${COMMIT_SHA}" ]]; then
