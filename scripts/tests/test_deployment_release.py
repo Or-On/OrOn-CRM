@@ -147,6 +147,17 @@ def test_release_images_carry_and_enforce_source_revision() -> None:
         assert "org.opencontainers.image.revision" in dockerfile.read_text(encoding="utf-8")
 
 
+def test_deploy_reclaims_obsolete_tagged_images_before_pulling_release() -> None:
+    deploy = DEPLOY.read_text(encoding="utf-8")
+    pull = 'docker pull "${release_images[${key}]}"'
+    prune = "docker image prune --all --force"
+
+    assert deploy.count(prune) == 2
+    assert deploy.index(prune) < deploy.index(pull)
+    assert "docker system prune" not in deploy
+    assert "referenced by a running or stopped" in deploy
+
+
 def test_control_api_image_contains_the_opt_in_voice_evaluation_runtime() -> None:
     dockerfile = (ROOT / "services" / "py" / "control-api" / "Dockerfile").read_text(
         encoding="utf-8"

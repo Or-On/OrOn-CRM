@@ -315,6 +315,11 @@ if [[ -n ${previous_release} ]]; then
   done
 fi
 compose config --quiet
+# Immutable commit tags otherwise accumulate until the host cannot extract the
+# next release. Docker never prunes an image referenced by a running or stopped
+# container, so the live release and its rollback path remain available while
+# obsolete, unreferenced release images are reclaimed before the pull.
+docker image prune --all --force >/dev/null
 # Pull each immutable application image explicitly before inspecting its digest
 # or stopping the currently running application. Compose can omit profiled
 # one-shot services such as the migrator from an aggregate pull even when their
@@ -443,5 +448,5 @@ for old_release in "${old_releases[@]}"; do
     rm -rf -- "${resolved}"
   fi
 done
-docker image prune --force --filter 'until=168h' >/dev/null
+docker image prune --all --force >/dev/null
 echo "Successfully deployed ${COMMIT_SHA}"
