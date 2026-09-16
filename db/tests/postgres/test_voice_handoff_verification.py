@@ -135,19 +135,30 @@ async def test_verification_locks_context_and_denies_cross_tenant_ids(
             )
         )
 
+    async def assert_insufficient_privilege(query: str, *args: object) -> None:
+        savepoint = pg.transaction()
+        await savepoint.start()
+        try:
+            with pytest.raises(asyncpg.InsufficientPrivilegeError):
+                await pg.fetchval(query, *args)
+        finally:
+            await savepoint.rollback()
+
     await set_tenant(tenant_a["tenant"])
     profile = json.loads(
         await pg.fetchval("SELECT platform.current_voice_tenant_support_profile()")
     )
     assert profile["tenantName"] == "A Property"
     assert profile["supportProfile"]["supportDisplayName"] == "A Property Support"
-    with pytest.raises(asyncpg.InsufficientPrivilegeError):
-        await pg.fetchval("SELECT count(*) FROM automation.voice_identity_verifications")
+    await assert_insufficient_privilege(
+        "SELECT count(*) FROM automation.voice_identity_verifications"
+    )
     receipt = await initialize(tenant_a)
     assert receipt["state"] == "identity_required"
     assert receipt["factors"] == ["fullName", "phone", "nationalId"]
-    with pytest.raises(asyncpg.InsufficientPrivilegeError):
-        await pg.fetchval("SELECT platform.verified_voice_handoff_context($1)", tenant_a["session"])
+    await assert_insufficient_privilege(
+        "SELECT platform.verified_voice_handoff_context($1)", tenant_a["session"]
+    )
     wrong = json.loads(
         await pg.fetchval(
             "SELECT platform.verify_voice_caller_identity($1,$2,$3,$4,NULL)",
@@ -202,11 +213,11 @@ async def test_verification_locks_context_and_denies_cross_tenant_ids(
     await initialize(tenant_b)
     await verify(tenant_b)
     await set_tenant(tenant_a["tenant"])
-    with pytest.raises(asyncpg.InsufficientPrivilegeError):
-        await pg.fetchval("SELECT platform.verified_voice_handoff_context($1)", tenant_b["session"])
-    with pytest.raises(asyncpg.InsufficientPrivilegeError):
-        await pg.fetchval(
-            "SELECT platform.initialize_voice_identity_verification($1,$2)",
-            tenant_a["session"],
-            tenant_b["handoff"],
-        )
+    await assert_insufficient_privilege(
+        "SELECT platform.verified_voice_handoff_context($1)", tenant_b["session"]
+    )
+    await assert_insufficient_privilege(
+        "SELECT platform.initialize_voice_identity_verification($1,$2)",
+        tenant_a["session"],
+        tenant_b["handoff"],
+    )

@@ -807,11 +807,13 @@ describe.skipIf(sourceUrl === undefined)(
         WHERE id=${conversationId}::uuid
       `;
       expect(retainedAttention[0]?.unread_count).toBe(0);
-      const handoffs = await admin<{ count: number }[]>`
-      SELECT count(*)::integer AS count FROM automation.handoffs
-      WHERE conversation_id=${conversationId}::uuid AND status='pending'
-    `;
-      expect(handoffs[0]?.count).toBe(0);
+      const handoffs = await admin<{ id: string; status: string }[]>`
+        SELECT id, status FROM automation.handoffs
+        WHERE conversation_id=${conversationId}::uuid AND status='pending'
+      `;
+      expect(handoffs).toEqual([
+        { id: callRequest?.handoffId, status: "pending" },
+      ]);
       const voiceJobs = await admin<{ count: number }[]>`
       SELECT count(*)::integer AS count FROM ops.jobs
       WHERE reference_id=${conversationId}::uuid

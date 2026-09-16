@@ -118,7 +118,10 @@ class Session(SessionBase, TenantScoped, CallUsage, table=True):
     # Structured cross-channel result. It contains canonical references and
     # operational state only; transcripts and sensitive identity values remain
     # in their dedicated protected stores.
-    outcome_detail: dict | None = Field(default=None, sa_type=JSONB)
+    outcome_detail: dict | None = Field(
+        default=None,
+        sa_column=sa.Column(JSONB(none_as_null=True), nullable=True),
+    )
     # Transcript and recording are blob-store artifacts under one prefix per
     # session; the row holds pointers, not the payloads.
     recording_uri: NonEmptyStr | None = None

@@ -15,14 +15,14 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
-_DEFAULT_POLICY = """'{
-  "schemaVersion":"1.0",
-  "enabled":true,
-  "requiredFactors":["fullName","phone","nationalId"],
-  "maxAttempts":3,
-  "onFailure":"human_handoff",
-  "contextDisclosure":"after_verification"
-}'::jsonb"""
+_DEFAULT_POLICY = """jsonb_build_object(
+  'schemaVersion', '1.0',
+  'enabled', true,
+  'requiredFactors', jsonb_build_array('fullName', 'phone', 'nationalId'),
+  'maxAttempts', 3,
+  'onFailure', 'human_handoff',
+  'contextDisclosure', 'after_verification'
+)"""
 
 
 def upgrade() -> None:
@@ -180,10 +180,10 @@ def upgrade() -> None:
         )
         """
     )
+    op.execute("ALTER TABLE automation.voice_identity_verifications ENABLE ROW LEVEL SECURITY")
+    op.execute("ALTER TABLE automation.voice_identity_verifications FORCE ROW LEVEL SECURITY")
     op.execute(
         """
-        ALTER TABLE automation.voice_identity_verifications ENABLE ROW LEVEL SECURITY;
-        ALTER TABLE automation.voice_identity_verifications FORCE ROW LEVEL SECURITY;
         CREATE POLICY tenant_isolation_voice_identity_verifications
         ON automation.voice_identity_verifications
         USING (tenant_id=platform.current_tenant_id())
@@ -757,38 +757,33 @@ def upgrade() -> None:
         """
     )
 
-    op.execute(
-        """
-        REVOKE ALL ON FUNCTION platform.normalize_identity_name(text) FROM PUBLIC;
-        REVOKE ALL ON FUNCTION platform.current_voice_tenant_support_profile() FROM PUBLIC;
-        REVOKE ALL ON FUNCTION platform.initialize_voice_identity_verification(uuid,uuid)
-          FROM PUBLIC;
-        REVOKE ALL ON FUNCTION platform.voice_identity_verification_requirements(uuid)
-          FROM PUBLIC;
-        REVOKE ALL ON FUNCTION platform.verify_voice_caller_identity(
-          uuid,text,text,text,text
-        ) FROM PUBLIC;
-        REVOKE ALL ON FUNCTION platform.verified_voice_handoff_context(uuid) FROM PUBLIC;
-        REVOKE ALL ON FUNCTION platform.write_voice_session_outcome(uuid) FROM PUBLIC;
-        GRANT EXECUTE ON FUNCTION platform.normalize_identity_name(text) TO platform_voice;
-        GRANT EXECUTE ON FUNCTION platform.current_voice_tenant_support_profile()
-          TO platform_voice;
-        GRANT EXECUTE ON FUNCTION platform.initialize_voice_identity_verification(uuid,uuid)
-          TO platform_voice;
-        GRANT EXECUTE ON FUNCTION platform.voice_identity_verification_requirements(uuid)
-          TO platform_voice;
-        GRANT EXECUTE ON FUNCTION platform.verify_voice_caller_identity(
-          uuid,text,text,text,text
-        ) TO platform_voice;
-        GRANT EXECUTE ON FUNCTION platform.verified_voice_handoff_context(uuid)
-          TO platform_voice;
-        GRANT EXECUTE ON FUNCTION platform.write_voice_session_outcome(uuid)
-          TO platform_voice;
-        GRANT SELECT (tenant_id,session_id,contact_id,status,outcome,outcome_detail,
-                      answered,created_at,ended_at)
-          ON public.sessions TO platform_web,platform_readonly;
-        """
-    )
+    for statement in (
+        "REVOKE ALL ON FUNCTION platform.normalize_identity_name(text) FROM PUBLIC",
+        "REVOKE ALL ON FUNCTION platform.current_voice_tenant_support_profile() FROM PUBLIC",
+        "REVOKE ALL ON FUNCTION "
+        "platform.initialize_voice_identity_verification(uuid,uuid) FROM PUBLIC",
+        "REVOKE ALL ON FUNCTION "
+        "platform.voice_identity_verification_requirements(uuid) FROM PUBLIC",
+        "REVOKE ALL ON FUNCTION platform.verify_voice_caller_identity("
+        "uuid,text,text,text,text) FROM PUBLIC",
+        "REVOKE ALL ON FUNCTION platform.verified_voice_handoff_context(uuid) FROM PUBLIC",
+        "REVOKE ALL ON FUNCTION platform.write_voice_session_outcome(uuid) FROM PUBLIC",
+        "GRANT EXECUTE ON FUNCTION platform.normalize_identity_name(text) TO platform_voice",
+        "GRANT EXECUTE ON FUNCTION platform.current_voice_tenant_support_profile() "
+        "TO platform_voice",
+        "GRANT EXECUTE ON FUNCTION "
+        "platform.initialize_voice_identity_verification(uuid,uuid) TO platform_voice",
+        "GRANT EXECUTE ON FUNCTION "
+        "platform.voice_identity_verification_requirements(uuid) TO platform_voice",
+        "GRANT EXECUTE ON FUNCTION platform.verify_voice_caller_identity("
+        "uuid,text,text,text,text) TO platform_voice",
+        "GRANT EXECUTE ON FUNCTION platform.verified_voice_handoff_context(uuid) TO platform_voice",
+        "GRANT EXECUTE ON FUNCTION platform.write_voice_session_outcome(uuid) TO platform_voice",
+        "GRANT SELECT (tenant_id,session_id,contact_id,status,outcome,outcome_detail,"
+        "answered,created_at,ended_at) ON public.sessions "
+        "TO platform_web,platform_readonly",
+    ):
+        op.execute(statement)
 
     op.execute(
         """
@@ -885,22 +880,23 @@ def downgrade() -> None:
         FROM automation.handoffs h
         """
     )
-    op.execute(
+    for statement in (
+        "DROP FUNCTION platform.verified_voice_handoff_context(uuid)",
+        "DROP FUNCTION platform.write_voice_session_outcome(uuid)",
+        "DROP FUNCTION platform.verify_voice_caller_identity(uuid,text,text,text,text)",
+        "DROP FUNCTION platform.voice_identity_verification_requirements(uuid)",
+        "DROP FUNCTION platform.initialize_voice_identity_verification(uuid,uuid)",
+        "DROP FUNCTION platform.current_voice_tenant_support_profile()",
+        "DROP FUNCTION platform.normalize_identity_name(text)",
+        "DROP TABLE automation.voice_identity_verifications",
+        "ALTER TABLE public.sessions DROP CONSTRAINT ck_sessions_outcome_detail_object",
+        "ALTER TABLE public.sessions DROP COLUMN outcome_detail",
         """
-        DROP FUNCTION platform.verified_voice_handoff_context(uuid);
-        DROP FUNCTION platform.write_voice_session_outcome(uuid);
-        DROP FUNCTION platform.verify_voice_caller_identity(uuid,text,text,text,text);
-        DROP FUNCTION platform.voice_identity_verification_requirements(uuid);
-        DROP FUNCTION platform.initialize_voice_identity_verification(uuid,uuid);
-        DROP FUNCTION platform.current_voice_tenant_support_profile();
-        DROP FUNCTION platform.normalize_identity_name(text);
-        DROP TABLE automation.voice_identity_verifications;
-        ALTER TABLE public.sessions DROP CONSTRAINT ck_sessions_outcome_detail_object;
-        ALTER TABLE public.sessions DROP COLUMN outcome_detail;
         ALTER TABLE crm.tenant_settings
           DROP CONSTRAINT ck_tenant_identity_verification_policy,
           DROP CONSTRAINT ck_tenant_support_profile_shape,
           DROP COLUMN identity_verification_policy,
-          DROP COLUMN support_profile;
-        """
-    )
+          DROP COLUMN support_profile
+        """,
+    ):
+        op.execute(statement)

@@ -254,6 +254,34 @@ class PostgresVoiceRuntime:
             )
         async with self._sessionmaker() as database, database.begin():
             await set_tenant(database, str(context.tenant_id))
+            if idempotency_key is not None:
+                # Serialize same deterministic session admission across dispatcher
+                # processes. The lease lasts only for this DB transaction; no
+                # room/provider request occurs while it is held.
+                await database.execute(
+                    text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+                    {"key": f"voice-admission:{context.tenant_id}:{context.session_id}"},
+                )
+            existing = await database.get(Session, context.session_id)
+            if existing is not None:
+                if idempotency_key is not None:
+                    recorded = (
+                        await database.execute(
+                            text("""
+                        SELECT payload->>'fingerprint' FROM session_events
+                        WHERE tenant_id=:tenant AND session_id=:session
+                          AND event_type='voice.call.admission.v1' LIMIT 1
+                    """),
+                            {"tenant": str(context.tenant_id), "session": str(context.session_id)},
+                        )
+                    ).scalar_one_or_none()
+                    if not isinstance(recorded, str) or not hmac.compare_digest(
+                        recorded, fingerprint
+                    ):
+                        raise IdempotencyConflict(
+                            "existing call binding cannot be matched to this key"
+                        )
+                return False
             resolved_contact_id = context.contact_id
             if context.contact_id is not None:
                 contact_found = (
@@ -295,34 +323,6 @@ class PostgresVoiceRuntime:
                 ):
                     raise ValueError("call conversation binding is unavailable")
                 resolved_contact_id = conversation_contact
-            if idempotency_key is not None:
-                # Serialize same deterministic session admission across dispatcher
-                # processes. The lease lasts only for this DB transaction; no
-                # room/provider request occurs while it is held.
-                await database.execute(
-                    text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
-                    {"key": f"voice-admission:{context.tenant_id}:{context.session_id}"},
-                )
-            existing = await database.get(Session, context.session_id)
-            if existing is not None:
-                if idempotency_key is not None:
-                    recorded = (
-                        await database.execute(
-                            text("""
-                        SELECT payload->>'fingerprint' FROM session_events
-                        WHERE tenant_id=:tenant AND session_id=:session
-                          AND event_type='voice.call.admission.v1' LIMIT 1
-                    """),
-                            {"tenant": str(context.tenant_id), "session": str(context.session_id)},
-                        )
-                    ).scalar_one_or_none()
-                    if not isinstance(recorded, str) or not hmac.compare_digest(
-                        recorded, fingerprint
-                    ):
-                        raise IdempotencyConflict(
-                            "existing call binding cannot be matched to this key"
-                        )
-                return False
             row = await session_crud.create_session(
                 session=database,
                 session_in=SessionCreate(
