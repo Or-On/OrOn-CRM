@@ -721,7 +721,7 @@ async def run_bot(
     async def on_audio_data(_buffer, audio, sample_rate, num_channels):
         await save_audio_file(audio, session_dir.recording, sample_rate, num_channels)
 
-    async def finalize(status: SessionStatus) -> bool:
+    async def finalize_once(status: SessionStatus) -> bool:
         """Flush artifacts, upload them, then close the session row. Runs once —
         both exit paths funnel through here."""
         nonlocal finalized
@@ -740,21 +740,19 @@ async def run_bot(
                     await text_diagnostics.finalize(quality_observer.snapshot())
                 except OSError:
                     logger.warning("voice text diagnostics could not be persisted")
-            quality_writer = getattr(sessions, "record_voice_quality", None)
-            if quality_writer is not None:
-                try:
-                    async with asyncio.timeout(2.0):
-                        await quality_writer(
-                            ctx, quality_observer.finalize(), agent_version_id=agent_version_id
-                        )
-                except Exception:
-                    logger.warning("voice quality summary persistence unavailable")
-            await store.upload_dir(str(session_dir.path), ctx.session_id)
             turn_taking_observer.settle_open_interruption()
             logger.info(
                 f"interruptions={turn_taking.interruptions} "
                 f"wordless={turn_taking.wordless_interruptions} (session={ctx.session_id})"
             )
+            # Commit the customer-visible recording, transcript, outcome and
+            # answered state before optional diagnostics. Every retained live
+            # call had a quality event but NULL artifact pointers because the
+            # room-finished cancellation could land between these two writes.
+            # Upload first so the database never advertises a missing object.
+            if not await store.upload_dir(str(session_dir.path), ctx.session_id):
+                logger.error("canonical voice artifacts were not persisted")
+                return False
             # The node the flow was sitting on when the call ended. On a terminal
             # node that is the business result — the flow names its own endings, so
             # nothing has to be inferred from the transcript later. On any other node
@@ -765,7 +763,30 @@ async def run_bot(
                 answered=pickup.get("answered"),
                 outcome=flow_manager.current_node,
             )
+            if not finalized:
+                logger.error("canonical voice session finalization was not persisted")
+                return False
+            # Quality is valuable but derived. It must never be able to win a
+            # race while the canonical conversation record is still incomplete.
+            quality_writer = getattr(sessions, "record_voice_quality", None)
+            if quality_writer is not None:
+                try:
+                    async with asyncio.timeout(2.0):
+                        await quality_writer(
+                            ctx, quality_observer.finalize(), agent_version_id=agent_version_id
+                        )
+                except Exception:
+                    logger.warning("voice quality summary persistence unavailable")
             return finalized
+
+    async def finalize(status: SessionStatus) -> bool:
+        """Shield every teardown source, including transport callback tasks.
+
+        The dispatcher, participant-left callback and pipeline-finished callback
+        can all race. Shielding only ``runner.run()`` left callback-owned
+        finalization cancellable before artifact pointers reached Postgres.
+        """
+        return await finish_after_cancellation(lambda: finalize_once(status))
 
     # Canonical LiveKit handlers: start when the first human joins; tear down on disconnect.
     @transport.event_handler("on_first_participant_joined")
@@ -887,7 +908,7 @@ async def run_bot(
         # A room-finished webhook can cancel this task before the transport's
         # participant-left callback completes. Preserve the call's private
         # artifacts and usage before propagating cancellation to the dispatcher.
-        await finish_after_cancellation(lambda: finalize(SessionStatus.ENDED))
+        await finalize(SessionStatus.ENDED)
         raise
     except Exception:
         # The agent knows the call failed right now. Without this the row sits at

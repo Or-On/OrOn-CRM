@@ -204,6 +204,26 @@ async def test_rejected_database_finalize_remains_retryable():
     assert await recorder.finish(SessionStatus.ENDED, CallUsage()) is True
 
 
+async def test_failed_database_finalize_remains_retryable():
+    client, _ctx, recorder = make_recorder()
+    attempts = 0
+
+    async def retryable_finalize(*args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("temporary persistence failure")
+        return True
+
+    client.finalize = retryable_finalize
+    await recorder.start(room="r1")
+
+    with pytest.raises(RuntimeError, match="temporary persistence failure"):
+        await recorder.finish(SessionStatus.ENDED, CallUsage())
+    assert await recorder.finish(SessionStatus.ENDED, CallUsage()) is True
+    assert attempts == 2
+
+
 async def test_call_finalization_is_shielded_from_repeated_cancellation():
     entered = asyncio.Event()
     release = asyncio.Event()
@@ -224,6 +244,29 @@ async def test_call_finalization_is_shielded_from_repeated_cancellation():
     release.set()
     await task
     assert completed is True
+
+
+async def test_call_finalization_retries_a_transient_failure():
+    attempts = 0
+
+    async def finalize():
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("temporary persistence failure")
+        return True
+
+    assert await finish_after_cancellation(finalize, retry_delay_seconds=0) is True
+    assert attempts == 2
+
+
+async def test_call_finalization_retries_a_rejected_write():
+    results = iter((False, True))
+
+    async def finalize():
+        return next(results)
+
+    assert await finish_after_cancellation(finalize, retry_delay_seconds=0) is True
 
 
 async def test_call_finalization_has_a_hard_timeout():

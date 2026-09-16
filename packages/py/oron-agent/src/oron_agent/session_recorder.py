@@ -141,6 +141,8 @@ async def finish_after_cancellation(
     finalize: Callable[[], Awaitable[bool]],
     *,
     timeout_seconds: float = 30.0,
+    attempts: int = 3,
+    retry_delay_seconds: float = 0.25,
 ) -> bool:
     """Complete bounded teardown even after the owning call task is cancelled.
 
@@ -153,7 +155,20 @@ async def finish_after_cancellation(
     """
 
     async def run_finalize() -> bool:
-        return await finalize()
+        for attempt in range(max(1, attempts)):
+            try:
+                if await finalize():
+                    return True
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception(
+                    "voice call finalization attempt %d failed",
+                    attempt + 1,
+                )
+            if attempt + 1 < max(1, attempts):
+                await asyncio.sleep(max(0.0, retry_delay_seconds))
+        return False
 
     cleanup = asyncio.create_task(run_finalize(), name="voice-call-finalization")
     deadline = asyncio.get_running_loop().time() + max(0.0, timeout_seconds)
