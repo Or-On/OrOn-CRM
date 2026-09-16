@@ -75,8 +75,7 @@ describe("removed Inbox conversation guardrails", () => {
     expect(activeWork).toContain(
       "flow_run.trigger_metadata ->> 'conversationId'",
     );
-    expect(activeWork).toContain("FROM automation.handoffs handoff");
-    expect(activeWork).toContain("handoff.status IN ('pending', 'accepted')");
+    expect(activeWork).not.toContain("FROM automation.handoffs handoff");
   });
 
   it("makes normal message and conversation mutations resolve as unavailable", async () => {

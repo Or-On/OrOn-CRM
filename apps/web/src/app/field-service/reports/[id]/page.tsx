@@ -37,6 +37,7 @@ const imageCategories = new Set([
   "arrival_signature",
   "departure_signature",
 ]);
+const legacyBlankPngByteSize = 68;
 
 export default async function ServiceReportPage({
   params,
@@ -62,11 +63,19 @@ export default async function ServiceReportPage({
       ["image/png", "image/jpeg", "image/webp"].includes(logoMime)
         ? `data:${logoMime};base64,${report.branding.logoData.replaceAll(/\s/gu, "")}`
         : null;
-    const visibleAttachments = report.attachments.filter(
+    const reportImages = report.attachments.filter(
       (attachment) =>
         attachment.processingStatus === "available" &&
         imageCategories.has(attachment.category) &&
         attachment.contentType.startsWith("image/"),
+    );
+    const invalidLegacyAttachments = reportImages.filter(
+      (attachment) =>
+        attachment.contentType === "image/png" &&
+        attachment.byteSize <= legacyBlankPngByteSize,
+    );
+    const visibleAttachments = reportImages.filter(
+      (attachment) => !invalidLegacyAttachments.includes(attachment),
     );
     const warranty =
       report.serviceCase.warrantyStatus === "unknown"
@@ -286,6 +295,35 @@ export default async function ServiceReportPage({
                     </figcaption>
                   </figure>
                 ))}
+              </div>
+            </section>
+          )}
+
+          {invalidLegacyAttachments.length === 0 ? null : (
+            <section className="service-report-document__section">
+              <h2>{he ? "ראיות שלא נקלטו" : "Evidence unavailable"}</h2>
+              <div
+                className="service-report-document__evidence-warning"
+                role="status"
+              >
+                <strong>
+                  {he
+                    ? "הקבצים הישנים האלה ריקים ולא יוצגו כעמוד לבן."
+                    : "These legacy files are empty and will not be shown as blank pages."}
+                </strong>
+                <p>
+                  {he
+                    ? "יש להעלות מחדש את תמונות הראיות מתוך תיק השירות."
+                    : "Upload the evidence photos again from the service case."}
+                </p>
+                <ul>
+                  {invalidLegacyAttachments.map((attachment) => (
+                    <li key={attachment.id} dir="auto">
+                      {attachment.caption ??
+                        attachment.category.replaceAll("_", " ")}
+                    </li>
+                  ))}
+                </ul>
               </div>
             </section>
           )}

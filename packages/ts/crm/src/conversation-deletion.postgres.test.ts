@@ -251,10 +251,10 @@ describe.skipIf(databaseUrl === undefined)(
       });
     });
 
-    it("refuses deletion while a conversation handoff is unresolved", async () => {
+    it("cancels an unresolved handoff and removes the conversation", async () => {
       await isolated(async (transaction) => {
         const record = await fixture(transaction);
-        await transaction`
+        const handoffs = await transaction<{ id: string }[]>`
           INSERT INTO automation.handoffs
             (tenant_id, contact_id, conversation_id, requested_by_user_id,
              source_channel, reason_safe, status, idempotency_key)
@@ -262,15 +262,34 @@ describe.skipIf(databaseUrl === undefined)(
                   ${record.conversationId}::uuid, ${userId}::uuid,
                   'whatsapp', 'Fictional pending handoff', 'pending',
                   ${`delete-pending-handoff:${randomUUID()}`})
+          RETURNING id
         `;
+        const handoffId = handoffs[0]?.id;
+        if (handoffId === undefined)
+          throw new Error("pending handoff fixture could not be created");
 
         expect(
           await deleteConversation(transaction, record.conversationId, userId),
-        ).toEqual({ status: "active_work" });
+        ).toEqual({ status: "deleted", privateObjects: [] });
+        const retained = await transaction<
+          {
+            status: string;
+            resolvedAt: Date | null;
+            conversationId: string | null;
+          }[]
+        >`
+          SELECT status, resolved_at AS "resolvedAt",
+                 conversation_id AS "conversationId"
+          FROM automation.handoffs WHERE id=${handoffId}::uuid
+        `;
+        expect(retained[0]?.status).toBe("cancelled");
+        expect(retained[0]?.resolvedAt).toBeInstanceOf(Date);
+        expect(retained[0]?.conversationId).toBeNull();
         expect(
           await transaction`
-            SELECT id FROM messaging.conversations
-            WHERE id = ${record.conversationId}::uuid
+            SELECT id FROM audit.records
+            WHERE action='handoff.cancelled_by_conversation_removal'
+              AND target_id=${handoffId}::uuid
           `,
         ).toHaveLength(1);
       });

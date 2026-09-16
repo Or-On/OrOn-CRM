@@ -190,6 +190,7 @@ async def run_bot(
     st = st or load_settings()
     logger.info(f"Starting oron-agent (session={ctx.session_id}, room={room})")
 
+    uses_http_sessions = sessions is None
     sessions = sessions or SessionsClient(
         st.sessions_api_url,
         api_key=st.sessions_api_key.get_secret_value() if st.sessions_api_key else None,
@@ -604,7 +605,7 @@ async def run_bot(
         bucket=st.artifacts_bucket,
         local_root=st.artifacts_local_root,
     )
-    if not st.sessions_api_key:
+    if uses_http_sessions and not st.sessions_api_key:
         logger.warning(
             "SESSIONS_API_KEY is unset — the sessions API enforces tenancy, so writes "
             "will 401 and no session rows will be recorded for this call."

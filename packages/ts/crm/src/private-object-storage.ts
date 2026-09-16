@@ -65,13 +65,17 @@ function contentType(value: string): PrivateObjectContentType {
 
 const maximumImageDimension = 16_384;
 const maximumImagePixels = 40_000_000;
+const minimumImageDimension = 16;
 
 function assertImageDimensions(width: number, height: number): void {
   if (
     !Number.isSafeInteger(width) ||
     !Number.isSafeInteger(height) ||
-    width < 1 ||
-    height < 1 ||
+    width < minimumImageDimension ||
+    height < minimumImageDimension
+  )
+    throw new TypeError("Image must be at least 16 by 16 pixels");
+  if (
     width > maximumImageDimension ||
     height > maximumImageDimension ||
     width * height > maximumImagePixels

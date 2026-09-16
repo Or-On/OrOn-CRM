@@ -55,7 +55,7 @@ describe("field-service attachment response safety", () => {
       status: "available",
       storageBackend: "local",
       storageKey: "tenant/case/evidence",
-      byteSize: 4,
+      byteSize: contentType === "image/png" ? 136 : 4,
       contentType,
       checksum: "checksum",
     });
@@ -75,5 +75,29 @@ describe("field-service attachment response safety", () => {
     );
     expect(response.headers.get("x-frame-options")).toBe("DENY");
     expect(state.permissions).toEqual(["field-service:read"]);
+  });
+
+  it("refuses a legacy one-pixel placeholder instead of rendering a blank page", async () => {
+    state.metadata.mockResolvedValue({
+      id: "30000000-0000-4000-8000-000000000001",
+      status: "available",
+      storageBackend: "local",
+      storageKey: "tenant/case/empty-evidence",
+      byteSize: 68,
+      contentType: "image/png",
+      checksum: "checksum",
+    });
+
+    const response = await GET(
+      new Request("http://localhost/evidence"),
+      context,
+    );
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({
+      error:
+        "This legacy attachment contains no usable image. Upload the evidence again.",
+    });
+    expect(state.read).not.toHaveBeenCalled();
   });
 });

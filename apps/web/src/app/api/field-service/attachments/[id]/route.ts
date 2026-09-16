@@ -26,6 +26,14 @@ export async function GET(_request: Request, context: Context) {
         { error: "The configured private object adapter is unavailable" },
         { status: 503 },
       );
+    if (metadata.contentType === "image/png" && metadata.byteSize <= 68)
+      return NextResponse.json(
+        {
+          error:
+            "This legacy attachment contains no usable image. Upload the evidence again.",
+        },
+        { status: 422 },
+      );
     const bytes = await readPrivateObject(metadata.storageKey, metadata);
     const disposition = metadata.contentType.startsWith("image/")
       ? "inline"

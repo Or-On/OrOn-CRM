@@ -14,6 +14,12 @@ import {
 
 const png = Uint8Array.from(
   Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAAdSURBVDhPY5Cb8P8/JZgBXYBUPGrAqAGjBgwWAwAsZKwfgyie3AAAAABJRU5ErkJggg==",
+    "base64",
+  ),
+);
+const onePixelPng = Uint8Array.from(
+  Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
     "base64",
   ),
@@ -95,6 +101,16 @@ describe("field-service private object storage", () => {
         bytes: png.subarray(0, 12),
       }),
     ).rejects.toThrow(/incomplete/u);
+
+    await expect(
+      stagePrivateObject({
+        tenantId: "tenant",
+        caseId: "case",
+        category: "fault_photo",
+        declaredContentType: "image/png",
+        bytes: onePixelPng,
+      }),
+    ).rejects.toThrow(/at least 16 by 16/u);
 
     const oversized = Uint8Array.from(png);
     new DataView(oversized.buffer).setUint32(16, 20_000);

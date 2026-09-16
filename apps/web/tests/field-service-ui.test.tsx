@@ -726,7 +726,21 @@ describe("field-service UI contracts", () => {
         locale: "he-IL",
         timezone: "Asia/Jerusalem",
       },
-      attachments: [],
+      attachments: [
+        {
+          id: "90000000-0000-4000-8000-000000000001",
+          objectId: "91000000-0000-4000-8000-000000000001",
+          visitId: null,
+          reportRevisionId: "30000000-0000-4000-8000-000000000001",
+          category: "fault",
+          source: "technician",
+          processingStatus: "available",
+          contentType: "image/png",
+          byteSize: 68,
+          caption: "צילום תקלה ישן",
+          createdAt: "2026-09-14T09:00:00.000Z",
+        },
+      ],
     };
     const { default: ServiceReportPage } =
       await import("../src/app/field-service/reports/[id]/page");
@@ -743,6 +757,9 @@ describe("field-service UI contracts", () => {
     expect(screen.getByText("שירות מקצועי בכל ביקור")).toBeTruthy();
     expect(screen.getByText("תודה שבחרתם בנו")).toBeTruthy();
     expect(screen.getByText("••••••567")).toBeTruthy();
+    expect(screen.getByText("ראיות שלא נקלטו")).toBeTruthy();
+    expect(screen.getByText("צילום תקלה ישן")).toBeTruthy();
+    expect(screen.queryByRole("img", { name: "צילום תקלה ישן" })).toBeNull();
     expect(
       screen.getByRole("link", { name: "הורדת Excel" }).getAttribute("href"),
     ).toBe(

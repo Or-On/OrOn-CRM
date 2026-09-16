@@ -1661,6 +1661,27 @@
   font-size: 0.7rem;
 }
 
+.service-report-document__evidence-warning {
+  padding: 1rem;
+  color: var(--or-text-secondary);
+  background: color-mix(
+    in srgb,
+    var(--or-warning) 8%,
+    var(--or-surface-subtle)
+  );
+  border: 1px solid color-mix(in srgb, var(--or-warning) 38%, var(--or-divider));
+  border-radius: var(--or-radius-md);
+}
+
+.service-report-document__evidence-warning p,
+.service-report-document__evidence-warning ul {
+  margin-block: 0.45rem 0;
+}
+
+.service-report-document__evidence-warning ul {
+  padding-inline-start: 1.2rem;
+}
+
 .service-report-document__footer {
   color: var(--or-text-muted);
   background: var(--or-surface-subtle);

@@ -1161,8 +1161,10 @@ export type ConversationDeletionResult =
  * audit history intentionally remain in both cases.
  *
  * The row lock serializes this operation with other conversation mutations.
- * Active durable work is never cancelled implicitly: an operator must wait for
- * delivery/AI processing to reach a terminal state before deleting the thread.
+ * Active delivery/AI work is never cancelled implicitly: an operator must wait
+ * for it to reach a terminal state before deleting the thread. A pending human
+ * handoff is different: explicitly removing the conversation cancels that
+ * internal queue item atomically so it cannot leave the thread undeletable.
  * A conversation that became part of a technician case is retained because its
  * original messages and media are case evidence, not disposable Inbox state.
  * Unshared message-owned objects are tombstoned in the same transaction; the
@@ -1210,11 +1212,6 @@ export async function deleteConversation(
           AND request.status IN ('queued', 'sending')
       ) OR EXISTS (
         SELECT 1
-        FROM automation.handoffs handoff
-        WHERE handoff.conversation_id = ${conversationId}::uuid
-          AND handoff.status IN ('pending', 'accepted')
-      ) OR EXISTS (
-        SELECT 1
         FROM ops.jobs job
         WHERE job.tenant_id = platform.current_tenant_id()
           AND job.status IN ('queued', 'running', 'retry')
@@ -1259,6 +1256,27 @@ export async function deleteConversation(
     ) AS active
   `;
   if (work[0]?.active === true) return { status: "active_work" };
+
+  const cancelledHandoffs = await sql<{ id: string }[]>`
+    UPDATE automation.handoffs
+    SET status = 'cancelled',
+        resolved_at = COALESCE(resolved_at, CURRENT_TIMESTAMP),
+        updated_at = CURRENT_TIMESTAMP
+    WHERE conversation_id = ${conversationId}::uuid
+      AND status IN ('pending', 'accepted')
+    RETURNING id
+  `;
+  if (cancelledHandoffs.length > 0)
+    await sql`
+      INSERT INTO audit.records
+        (tenant_id, actor_user_id, action, target_type, target_id, metadata)
+      SELECT platform.current_tenant_id(), ${actorUserId}::uuid,
+             'handoff.cancelled_by_conversation_removal', 'handoff',
+             handoff.id,
+             ${sql.json({ conversationId })}
+      FROM unnest(${cancelledHandoffs.map((handoff) => handoff.id)}::uuid[])
+           AS handoff(id)
+    `;
 
   const evidence = await sql<{ retained: boolean }[]>`
     SELECT (
@@ -1333,7 +1351,10 @@ export async function deleteConversation(
         VALUES (platform.current_tenant_id(), ${actorUserId}::uuid,
                 'conversation.removed_from_inbox', 'conversation',
                 ${conversationId}::uuid,
-                ${sql.json({ retainedTechnicianEvidence: true })})
+                ${sql.json({
+                  retainedTechnicianEvidence: true,
+                  cancelledHandoffCount: cancelledHandoffs.length,
+                })})
       `;
     return { status: "removed_retained_evidence" };
   }
@@ -1417,6 +1438,7 @@ export async function deleteConversation(
             ${sql.json({
               retainedContact: true,
               tombstonedPrivateObjectCount: privateObjects.length,
+              cancelledHandoffCount: cancelledHandoffs.length,
             })})
   `;
   return {
