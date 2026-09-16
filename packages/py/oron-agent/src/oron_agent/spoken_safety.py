@@ -25,7 +25,7 @@ _UNVERIFIED_BUSINESS_CLAIM_RE = re.compile(
     r"(?:שלחתי|אשלח)\s+[^.?!]{0,60}(?:ווטסאפ|וואטסאפ|WhatsApp)|"
     r"קריאת\s+השירות\s+(?:נפתחה|פתוחה)|"
     r"הטכנאי\s+יגיע|"
-    r"\b(?:i|we)\s+(?:checked|found|opened|created|scheduled|booked|confirmed|"
+    r"\b(?:i|we)\s+(?:(?:have|just)\s+)?(?:checked|found|opened|created|scheduled|booked|confirmed|"
     r"refunded|processed|sent)\b[^.?!]{0,80}\b(?:account|subscriber|ticket|"
     r"service\s+request|appointment|technician|refund|payment|whatsapp|message)\b|"
     r"\b(?:your\s+)?(?:appointment|technician|refund|payment|booking|ticket|"

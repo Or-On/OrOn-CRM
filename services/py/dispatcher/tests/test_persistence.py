@@ -102,12 +102,18 @@ async def test_published_agent_prompt_is_applied_to_flow_and_node_roles() -> Non
 
     assert resolved is not None
     assert resolved.persona_gender == "neutral"
-    assert resolved.role_message.startswith("You are the published agent\n\nVoice-channel safety")
+    assert resolved.role_message.startswith(
+        "You are the published agent\n\nNatural live-conversation policy"
+    )
     assert "Retained flow persona" not in resolved.role_message
+    assert "Every\n  completed user turn is part of a real conversation" in resolved.role_message
+    assert "greetings, small talk, jokes, acknowledgements" in resolved.role_message
+    assert "Address every meaningful part of a turn" in resolved.role_message
+    assert "Use the language the caller is currently communicating in" in resolved.role_message
     assert "Never use technical self-reference" in resolved.role_message
     assert "Do not guess the caller's gender" in resolved.role_message
     assert "never alternate masculine and" in resolved.role_message
-    assert "roughly 8-24 spoken" in resolved.role_message
+    assert "usually one to three sentences" in resolved.role_message
     assert "Never join an answer and its follow-up question" in resolved.role_message
     assert 'Do not use "אני מבינה" or "אני מבין" as automatic filler' in resolved.role_message
     assert "unless a tool shown in the" in resolved.role_message

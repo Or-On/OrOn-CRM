@@ -26,3 +26,14 @@ async def test_general_troubleshooting_guidance_is_preserved():
     text = "נתק את הממיר מהחשמל וחבר אותו מחדש. האם התקלה נפתרה?"
 
     assert await BusinessClaimGuardFilter().filter(text) == text
+
+
+@pytest.mark.asyncio
+async def test_perfect_tense_unverified_action_claim_is_suppressed():
+    output = await BusinessClaimGuardFilter(lambda: "en").filter(
+        "Private reasoning: I have refunded your payment secret-token."
+    )
+
+    assert output == (
+        "I don't have verified access to that system in this call, so I can't confirm that action."
+    )
