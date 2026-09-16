@@ -60,7 +60,11 @@ export async function overviewInsights(
     FROM days LEFT JOIN counts USING (day) ORDER BY days.day
   `;
   const conversationStates = await sql<{ status: string; count: number }[]>`
-    SELECT status, count(*)::int AS count FROM messaging.conversations GROUP BY status ORDER BY status
+    SELECT status, count(*)::int AS count
+    FROM messaging.conversations
+    WHERE removed_from_inbox_at IS NULL
+    GROUP BY status
+    ORDER BY status
   `;
   return { dailyMessages, conversationStates };
 }
@@ -150,7 +154,9 @@ export async function overviewMetrics(
   >`
     SELECT
       (SELECT count(*)::int FROM crm.contacts WHERE lifecycle_status = 'active') AS contacts,
-      (SELECT count(*)::int FROM messaging.conversations WHERE status IN ('open', 'pending')) AS open_conversations,
+      (SELECT count(*)::int FROM messaging.conversations
+       WHERE removed_from_inbox_at IS NULL
+         AND status IN ('open', 'pending')) AS open_conversations,
       (SELECT count(*)::int FROM automation.handoffs WHERE status = 'pending') AS pending_handoffs
   `;
   const row = rows[0];
@@ -176,8 +182,11 @@ export async function dashboardMetrics(
   const rows = await sql<MetricRow[]>`
     SELECT
       (SELECT count(*)::int FROM crm.contacts WHERE lifecycle_status = 'active') AS contacts,
-      (SELECT count(*)::int FROM messaging.conversations WHERE status IN ('open', 'pending')) AS open_conversations,
-      (SELECT COALESCE(sum(unread_count), 0)::int FROM messaging.conversations) AS unread_messages,
+      (SELECT count(*)::int FROM messaging.conversations
+       WHERE removed_from_inbox_at IS NULL
+         AND status IN ('open', 'pending')) AS open_conversations,
+      (SELECT COALESCE(sum(unread_count), 0)::int FROM messaging.conversations
+       WHERE removed_from_inbox_at IS NULL) AS unread_messages,
       (SELECT COALESCE(sum(value), 0)::text FROM crm.deals WHERE status = 'open') AS open_pipeline_value,
       (SELECT count(*)::int FROM messaging.messages WHERE created_at >= date_trunc('day', CURRENT_TIMESTAMP)) AS messages_today
   `;

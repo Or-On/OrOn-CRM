@@ -410,7 +410,10 @@ export function InboxWorkspace({
     };
   }, [refreshItems, selectedId]);
 
-  async function conversationDeleted(conversationId: string) {
+  async function conversationDeleted(
+    conversationId: string,
+    retainedAsEvidence: boolean,
+  ) {
     const remaining = items.filter((item) => item.id !== conversationId);
     const replacementId = remaining[0]?.id;
     setItems(remaining);
@@ -423,7 +426,9 @@ export function InboxWorkspace({
       ),
     );
     replaceInboxParam("conversation", replacementId);
-    setNotice(t("inbox.deleted"));
+    setNotice(
+      t(retainedAsEvidence ? "inbox.removedRetainedEvidence" : "inbox.deleted"),
+    );
     try {
       await refreshItems();
     } catch {

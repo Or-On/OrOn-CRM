@@ -469,7 +469,7 @@ describe("Inbox interaction safety (no provider network)", () => {
     expect(screen.getAllByRole("alert")).toHaveLength(1);
   });
 
-  it("requires confirmation before permanently deleting only the selected conversation", async () => {
+  it("requires confirmation before removing only the selected conversation", async () => {
     transport.read.mockImplementation((url: string) =>
       Promise.resolve(
         url === "/api/messaging/conversations"
@@ -485,10 +485,10 @@ describe("Inbox interaction safety (no provider network)", () => {
       name: "Conversation controls",
     });
     fireEvent.click(
-      within(controls).getByRole("button", { name: "Delete conversation" }),
+      within(controls).getByRole("button", { name: "Remove conversation" }),
     );
     const confirmation = screen.getByRole("dialog", {
-      name: "Delete this conversation?",
+      name: "Remove this conversation?",
     });
     expect(transport.mutate).not.toHaveBeenCalled();
     fireEvent.click(
@@ -497,12 +497,12 @@ describe("Inbox interaction safety (no provider network)", () => {
     expect(transport.mutate).not.toHaveBeenCalled();
 
     fireEvent.click(
-      within(controls).getByRole("button", { name: "Delete conversation" }),
+      within(controls).getByRole("button", { name: "Remove conversation" }),
     );
     fireEvent.click(
       within(
-        screen.getByRole("dialog", { name: "Delete this conversation?" }),
-      ).getByRole("button", { name: "Delete permanently" }),
+        screen.getByRole("dialog", { name: "Remove this conversation?" }),
+      ).getByRole("button", { name: "Remove from Inbox" }),
     );
 
     await waitFor(() =>
@@ -521,6 +521,44 @@ describe("Inbox interaction safety (no provider network)", () => {
     expect(screen.getByText("Conversation deleted.")).toBeTruthy();
   });
 
+  it("removes protected technician evidence from the Inbox with an honest notice", async () => {
+    transport.read.mockImplementation((url: string) =>
+      Promise.resolve(
+        url === "/api/messaging/conversations"
+          ? { conversations: [beta] }
+          : { messages: messagesB, nextCursor: null },
+      ),
+    );
+    transport.mutate.mockResolvedValueOnce({
+      ok: true,
+      retainedAsEvidence: true,
+      storageCleanupPending: 0,
+    });
+    mount();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Conversation controls" }),
+    );
+    fireEvent.click(
+      within(
+        screen.getByRole("dialog", { name: "Conversation controls" }),
+      ).getByRole("button", { name: "Remove conversation" }),
+    );
+    fireEvent.click(
+      within(
+        screen.getByRole("dialog", { name: "Remove this conversation?" }),
+      ).getByRole("button", { name: "Remove from Inbox" }),
+    );
+
+    expect(
+      await screen.findByText(
+        "Conversation removed from the Inbox. Technician-case evidence was preserved in the case dossier.",
+      ),
+    ).toBeTruthy();
+    expect(
+      await screen.findByRole("heading", { name: "Fictional Beta" }),
+    ).toBeTruthy();
+  });
+
   it("keeps the confirmation open when active messaging work blocks deletion", async () => {
     transport.mutate.mockRejectedValueOnce(
       new Error(
@@ -534,14 +572,14 @@ describe("Inbox interaction safety (no provider network)", () => {
     fireEvent.click(
       within(
         screen.getByRole("dialog", { name: "Conversation controls" }),
-      ).getByRole("button", { name: "Delete conversation" }),
+      ).getByRole("button", { name: "Remove conversation" }),
     );
     const confirmation = screen.getByRole("dialog", {
-      name: "Delete this conversation?",
+      name: "Remove this conversation?",
     });
     fireEvent.click(
       within(confirmation).getByRole("button", {
-        name: "Delete permanently",
+        name: "Remove from Inbox",
       }),
     );
     expect(
@@ -563,7 +601,7 @@ describe("Inbox interaction safety (no provider network)", () => {
     expect(
       within(
         screen.getByRole("dialog", { name: "Conversation controls" }),
-      ).queryByRole("button", { name: "Delete conversation" }),
+      ).queryByRole("button", { name: "Remove conversation" }),
     ).toBeNull();
   });
 

@@ -36,8 +36,7 @@ export async function PATCH(
       "messaging:operate",
       async (sql, session) => {
         if (body.read === true) {
-          await markConversationRead(sql, id, session.userId);
-          return true;
+          return markConversationRead(sql, id, session.userId);
         }
         if (body.ownershipMode === "ai" || body.ownershipMode === "human") {
           if (
@@ -112,14 +111,12 @@ export async function DELETE(
         },
         { status: 409 },
       );
-    if (result.status === "retained_evidence")
-      return NextResponse.json(
-        {
-          error:
-            "This conversation is retained as technician case evidence and cannot be deleted from the Inbox.",
-        },
-        { status: 409 },
-      );
+    if (result.status === "removed_retained_evidence")
+      return NextResponse.json({
+        ok: true,
+        retainedAsEvidence: true,
+        storageCleanupPending: 0,
+      });
 
     const localObjects = result.privateObjects.filter(
       (object) => object.storageBackend === "local",
@@ -139,7 +136,11 @@ export async function DELETE(
         (outcome) => outcome.status === "rejected",
       ).length;
     }
-    return NextResponse.json({ ok: true, storageCleanupPending });
+    return NextResponse.json({
+      ok: true,
+      retainedAsEvidence: false,
+      storageCleanupPending,
+    });
   } catch (error) {
     return crmErrorResponse(error);
   }

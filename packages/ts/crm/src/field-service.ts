@@ -4770,7 +4770,9 @@ async function getServiceCaseDossierRecord(
     Promise.all(
       conversations.map(async (row) => ({
         conversationId: row.conversation_id,
-        messages: await listMessages(sql, row.conversation_id),
+        messages: await listMessages(sql, row.conversation_id, {
+          includeRemoved: true,
+        }),
       })),
     ),
     calls.length === 0

@@ -141,7 +141,25 @@ export async function queueWhatsAppOutbound(
       }),
     )
     .digest("hex");
-  // Serialize only equal tenant/key admissions; no network I/O in this transaction.
+  // Serialize outbound admission with Inbox removal. The availability predicate
+  // is evaluated while acquiring the row lock, so a sender waiting behind a
+  // removal observes the committed removed/deleted state instead of queuing a
+  // message from a stale pre-removal read. Holding the lock through request/job
+  // creation also makes a concurrent removal observe the newly queued work and
+  // return active_work rather than hiding or deleting the conversation.
+  const availableConversations = await sql<{ id: string }[]>`
+    SELECT id
+    FROM messaging.conversations
+    WHERE id = ${input.conversationId}::uuid
+      AND removed_from_inbox_at IS NULL
+    FOR UPDATE
+  `;
+  if (availableConversations[0] === undefined)
+    throw new TypeError("conversation is no longer available in the Inbox");
+  // Keep the global lock order consistent with Inbox removal and every caller
+  // that already owns the conversation row: conversation first, idempotency
+  // key second. Reversing this order can deadlock an AI/flow transaction that
+  // holds the row while a retry holds the advisory lock.
   await sql`SELECT pg_advisory_xact_lock(hashtextextended(platform.current_tenant_id()::text || ':' || ${input.idempotencyKey}, 0))`;
   const existing = await sql<
     {
@@ -150,14 +168,22 @@ export async function queueWhatsAppOutbound(
       conversation_id: string;
       provider: "simulator" | "meta";
       request_fingerprint: string | null;
+      removed_from_inbox_at: Date | null;
     }[]
   >`
-    SELECT id, message_id, conversation_id, provider, request_fingerprint
-    FROM messaging.outbound_requests
-    WHERE tenant_id = platform.current_tenant_id()
-      AND idempotency_key = ${input.idempotencyKey}
+    SELECT outbound.id, outbound.message_id, outbound.conversation_id,
+           outbound.provider, outbound.request_fingerprint,
+           conversation.removed_from_inbox_at
+    FROM messaging.outbound_requests outbound
+    JOIN messaging.conversations conversation
+      ON conversation.id=outbound.conversation_id
+     AND conversation.tenant_id=outbound.tenant_id
+    WHERE outbound.tenant_id = platform.current_tenant_id()
+      AND outbound.idempotency_key = ${input.idempotencyKey}
   `;
   if (existing[0] !== undefined) {
+    if (existing[0].removed_from_inbox_at !== null)
+      throw new TypeError("conversation is no longer available in the Inbox");
     if (existing[0].request_fingerprint !== fingerprint)
       throw new TypeError(
         "idempotency key belongs to a different outbound request",
@@ -210,6 +236,7 @@ export async function queueWhatsAppOutbound(
            AND identity.validation_status='valid'
            AND identity.normalized_value=origin.sender_address
           WHERE conversation.id=${input.conversationId}::uuid
+            AND conversation.removed_from_inbox_at IS NULL
             AND channel.provider_account_id=${channelConfiguration?.phoneNumberId ?? null}
             AND channel.configuration->>'phoneNumberId'=${channelConfiguration?.phoneNumberId ?? null}
             AND channel.configuration->>'wabaId'=${channelConfiguration?.wabaId ?? null}
@@ -249,6 +276,7 @@ export async function queueWhatsAppOutbound(
             LIMIT 1
           ) identity ON true
           WHERE conversation.id=${input.conversationId}::uuid
+            AND conversation.removed_from_inbox_at IS NULL
           LIMIT 1
         `;
   const contact = contacts[0];

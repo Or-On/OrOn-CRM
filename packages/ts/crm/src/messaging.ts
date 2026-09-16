@@ -343,6 +343,7 @@ export async function listConversationPage(
           LIMIT 1
        ) recipient ON true
       WHERE c.tenant_id = platform.current_tenant_id()
+        AND c.removed_from_inbox_at IS NULL
         AND ($1::uuid IS NULL OR c.id = $1::uuid)
         AND ($2 = '' OR position(lower($2) in lower(concat_ws(' ',
           contact.name, recipient.normalized_value, channel.display_address,
@@ -404,8 +405,14 @@ export async function listConversations(
 export async function listMessages(
   sql: postgres.TransactionSql,
   conversationId: string,
+  options: { readonly includeRemoved?: boolean } = {},
 ): Promise<readonly Message[]> {
-  return (await listMessagePage(sql, conversationId, { limit: 250 })).messages;
+  return (
+    await listMessagePage(sql, conversationId, {
+      limit: 250,
+      includeRemoved: options.includeRemoved === true,
+    })
+  ).messages;
 }
 
 export async function listMessagePage(
@@ -414,6 +421,8 @@ export async function listMessagePage(
   options: {
     readonly before?: MessageCursor;
     readonly includeMedia?: boolean;
+    /** Retention/evidence readers only. Inbox callers must use the default. */
+    readonly includeRemoved?: boolean;
     readonly limit?: number;
   } = {},
 ): Promise<MessagePage> {
@@ -444,9 +453,14 @@ export async function listMessagePage(
                      FROM messaging.message_delivery_events delivery
                      WHERE delivery.message_id = message.id), '[]') AS delivery_events
     FROM messaging.messages message
+    JOIN messaging.conversations conversation
+      ON conversation.id = message.conversation_id
+     AND conversation.tenant_id = message.tenant_id
     LEFT JOIN messaging.outbound_requests outbound
       ON outbound.message_id = message.id AND outbound.tenant_id = message.tenant_id
     WHERE message.conversation_id = ${conversationId}::uuid
+      AND (${options.includeRemoved === true}
+           OR conversation.removed_from_inbox_at IS NULL)
       AND (${before?.createdAt ?? null}::text::timestamptz IS NULL OR
            (message.created_at, message.id) < (${before?.createdAt ?? null}::text::timestamptz, ${before?.id ?? null}::uuid))
     ORDER BY message.created_at DESC, message.id DESC
@@ -502,9 +516,17 @@ export async function getMessageMediaObjectMetadata(
       file_name: string | null;
     }[]
   >`
-    SELECT id, message_id, content_type, byte_size, checksum,
-           storage_backend, storage_key, status, file_name
-    FROM messaging.current_tenant_message_media(${messageId}::uuid)
+    SELECT media.id, media.message_id, media.content_type, media.byte_size,
+           media.checksum, media.storage_backend, media.storage_key,
+           media.status, media.file_name
+    FROM messaging.current_tenant_message_media(${messageId}::uuid) media
+    JOIN messaging.messages message
+      ON message.id = media.message_id
+     AND message.tenant_id = platform.current_tenant_id()
+    JOIN messaging.conversations conversation
+      ON conversation.id = message.conversation_id
+     AND conversation.tenant_id = message.tenant_id
+    WHERE conversation.removed_from_inbox_at IS NULL
   `;
   const row = rows[0];
   return row === undefined
@@ -632,6 +654,8 @@ export async function ingestSimulatedInbound(
     SET unread_count = unread_count + 1,
         last_message_at = ${occurredAt},
         last_message_preview = ${input.text.trim()},
+        removed_from_inbox_at = NULL,
+        removed_from_inbox_by_user_id = NULL,
         updated_at = CURRENT_TIMESTAMP
     WHERE id = ${conversationId}::uuid
   `;
@@ -812,6 +836,8 @@ export async function ingestWhatsAppInbound(
             THEN ${preview}
           ELSE last_message_preview END,
         last_message_at = GREATEST(last_message_at, ${message.created_at}),
+        removed_from_inbox_at = NULL,
+        removed_from_inbox_by_user_id = NULL,
         updated_at = CURRENT_TIMESTAMP
     WHERE id = ${conversationId}::uuid
   `;
@@ -832,6 +858,22 @@ export async function assignDefaultWhatsAppAi(
   sql: postgres.TransactionSql,
   conversationId: string,
 ): Promise<boolean> {
+  const profiles = await sql<{ id: string }[]>`
+    SELECT profile.id
+    FROM crm.tenant_settings settings
+    JOIN agents.agent_profiles profile
+      ON profile.id=settings.whatsapp_ai_agent_profile_id
+     AND profile.tenant_id=settings.tenant_id
+    WHERE settings.tenant_id=platform.current_tenant_id()
+      AND profile.archived_at IS NULL
+  `;
+  const profileId = profiles[0]?.id;
+  if (profileId === undefined) return false;
+  await sql`
+    SELECT pg_advisory_xact_lock(hashtextextended(
+      platform.current_tenant_id()::text || ':agent-profile:' || ${profileId}, 11
+    ))
+  `;
   const rows = await sql<{ id: string }[]>`
     UPDATE messaging.conversations conversation
     SET ownership_mode='ai',
@@ -859,6 +901,7 @@ export async function assignDefaultWhatsAppAi(
     WHERE conversation.id=${conversationId}::uuid
       AND conversation.tenant_id=platform.current_tenant_id()
       AND settings.tenant_id=conversation.tenant_id
+      AND profile.id=${profileId}::uuid
       AND conversation.ownership_mode='human'
       AND conversation.assigned_user_id IS NULL
       AND conversation.handoff_reason_safe IS NULL
@@ -1029,6 +1072,14 @@ export async function sendSimulatedReply(
 ): Promise<Message> {
   const text = input.text.trim();
   if (text === "") throw new TypeError("reply text is required");
+  const conversations = await sql<{ id: string }[]>`
+    SELECT id FROM messaging.conversations
+    WHERE id = ${input.conversationId}::uuid
+      AND removed_from_inbox_at IS NULL
+    FOR SHARE
+  `;
+  if (conversations[0] === undefined)
+    throw new TypeError("conversation is unavailable");
   const digest = createHash("sha256")
     .update(`simulator:${input.idempotencyKey}`)
     .digest("hex");
@@ -1080,7 +1131,10 @@ export async function setConversationStatus(
 ): Promise<boolean> {
   const rows = await sql<{ id: string }[]>`
     UPDATE messaging.conversations SET status = ${status},
-      updated_at = CURRENT_TIMESTAMP WHERE id = ${conversationId}::uuid RETURNING id
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = ${conversationId}::uuid
+      AND removed_from_inbox_at IS NULL
+    RETURNING id
   `;
   return rows.length === 1;
 }
@@ -1098,11 +1152,13 @@ export type ConversationDeletionResult =
     }
   | { readonly status: "not_found" }
   | { readonly status: "active_work" }
-  | { readonly status: "retained_evidence" };
+  | { readonly status: "removed_retained_evidence" };
 
 /**
- * Permanently remove one tenant-visible conversation and its dependent
- * messaging records. Contacts and audit history intentionally remain.
+ * Remove one tenant-visible conversation from the Inbox. Ordinary conversations
+ * are permanently deleted with their dependent messaging records; technician
+ * case evidence is retained and hidden from the Inbox instead. Contacts and
+ * audit history intentionally remain in both cases.
  *
  * The row lock serializes this operation with other conversation mutations.
  * Active durable work is never cancelled implicitly: an operator must wait for
@@ -1117,12 +1173,15 @@ export async function deleteConversation(
   conversationId: string,
   actorUserId: string,
 ): Promise<ConversationDeletionResult> {
-  const conversations = await sql<{ id: string }[]>`
-    SELECT id FROM messaging.conversations
+  const conversations = await sql<
+    { id: string; removed_from_inbox_at: Date | null }[]
+  >`
+    SELECT id, removed_from_inbox_at FROM messaging.conversations
     WHERE id = ${conversationId}::uuid
     FOR UPDATE
   `;
-  if (conversations[0] === undefined) return { status: "not_found" };
+  const conversation = conversations[0];
+  if (conversation === undefined) return { status: "not_found" };
 
   // Prevent a worker from attaching new durable case evidence between the
   // retention check and the cascading conversation delete. The object lock
@@ -1151,6 +1210,11 @@ export async function deleteConversation(
           AND request.status IN ('queued', 'sending')
       ) OR EXISTS (
         SELECT 1
+        FROM automation.handoffs handoff
+        WHERE handoff.conversation_id = ${conversationId}::uuid
+          AND handoff.status IN ('pending', 'accepted')
+      ) OR EXISTS (
+        SELECT 1
         FROM ops.jobs job
         WHERE job.tenant_id = platform.current_tenant_id()
           AND job.status IN ('queued', 'running', 'retry')
@@ -1171,6 +1235,23 @@ export async function deleteConversation(
                 SELECT 1 FROM messaging.messages message
                 WHERE message.id = job.reference_id
                   AND message.conversation_id = ${conversationId}::uuid
+              )
+            )
+            OR EXISTS (
+              SELECT 1 FROM messaging.messages callback_message
+              WHERE callback_message.id = job.callback_trigger_message_id
+                AND callback_message.tenant_id = job.tenant_id
+                AND callback_message.conversation_id = ${conversationId}::uuid
+            )
+            OR job.payload ->> 'conversationId' = ${conversationId}::uuid::text
+            OR (
+              job.reference_type = 'flow_run'
+              AND EXISTS (
+                SELECT 1 FROM automation.flow_runs flow_run
+                WHERE flow_run.id = job.reference_id
+                  AND flow_run.tenant_id = job.tenant_id
+                  AND flow_run.trigger_metadata ->> 'conversationId' =
+                    ${conversationId}::uuid::text
               )
             )
           )
@@ -1210,7 +1291,52 @@ export async function deleteConversation(
       )
     ) AS retained
   `;
-  if (evidence[0]?.retained === true) return { status: "retained_evidence" };
+  if (evidence[0]?.retained === true) {
+    const firstRemoval = conversation.removed_from_inbox_at === null;
+    await sql`
+      UPDATE messaging.conversations
+      SET removed_from_inbox_at = COALESCE(removed_from_inbox_at, CURRENT_TIMESTAMP),
+          removed_from_inbox_by_user_id = CASE
+            WHEN removed_from_inbox_at IS NULL THEN ${actorUserId}::uuid
+            ELSE removed_from_inbox_by_user_id
+          END,
+          unread_count = 0,
+          ownership_mode = CASE
+            WHEN ownership_mode = 'ai' THEN 'human'
+            ELSE ownership_mode
+          END,
+          ai_agent_profile_version_id = CASE
+            WHEN ownership_mode = 'ai' THEN NULL
+            ELSE ai_agent_profile_version_id
+          END,
+          ai_enabled_by_user_id = CASE
+            WHEN ownership_mode = 'ai' THEN NULL
+            ELSE ai_enabled_by_user_id
+          END,
+          ai_enabled_at = CASE
+            WHEN ownership_mode = 'ai' THEN NULL
+            ELSE ai_enabled_at
+          END,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ${conversationId}::uuid
+    `;
+    await sql`
+      DELETE FROM messaging.notifications
+      WHERE tenant_id = platform.current_tenant_id()
+        AND reference_type = 'conversation'
+        AND reference_id = ${conversationId}::uuid
+    `;
+    if (firstRemoval)
+      await sql`
+        INSERT INTO audit.records
+          (tenant_id, actor_user_id, action, target_type, target_id, metadata)
+        VALUES (platform.current_tenant_id(), ${actorUserId}::uuid,
+                'conversation.removed_from_inbox', 'conversation',
+                ${conversationId}::uuid,
+                ${sql.json({ retainedTechnicianEvidence: true })})
+      `;
+    return { status: "removed_retained_evidence" };
+  }
 
   const privateObjects = await sql<
     {
@@ -1277,6 +1403,13 @@ export async function deleteConversation(
   if (deleted[0] === undefined) return { status: "not_found" };
 
   await sql`
+    DELETE FROM messaging.notifications
+    WHERE tenant_id = platform.current_tenant_id()
+      AND reference_type = 'conversation'
+      AND reference_id = ${conversationId}::uuid
+  `;
+
+  await sql`
     INSERT INTO audit.records
       (tenant_id, actor_user_id, action, target_type, target_id, metadata)
     VALUES (platform.current_tenant_id(), ${actorUserId}::uuid,
@@ -1314,7 +1447,9 @@ export async function assignConversation(
   const rows = await sql<{ id: string }[]>`
     UPDATE messaging.conversations SET assigned_user_id = ${userId}::uuid,
       updated_at = CURRENT_TIMESTAMP
-    WHERE id = ${conversationId}::uuid RETURNING id
+    WHERE id = ${conversationId}::uuid
+      AND removed_from_inbox_at IS NULL
+    RETURNING id
   `;
   return rows.length === 1;
 }
@@ -1330,12 +1465,32 @@ export async function setConversationOwnership(
   if (ownershipMode === "ai") {
     if (agentProfileVersionId === undefined)
       throw new TypeError("a published WhatsApp agent is required");
+    const candidates = await sql<{ agent_profile_id: string }[]>`
+      SELECT agent_profile_id
+      FROM agents.agent_profile_versions
+      WHERE id=${agentProfileVersionId}::uuid
+        AND tenant_id=platform.current_tenant_id()
+    `;
+    const profileId = candidates[0]?.agent_profile_id;
+    if (profileId === undefined)
+      throw new TypeError("a published WhatsApp agent is required");
+    await sql`
+      SELECT pg_advisory_xact_lock(hashtextextended(
+        platform.current_tenant_id()::text || ':agent-profile:' || ${profileId}, 11
+      ))
+    `;
     const agents = await sql<{ id: string }[]>`
-      SELECT id FROM agents.agent_profile_versions
-      WHERE id = ${agentProfileVersionId}::uuid
-        AND tenant_id = platform.current_tenant_id()
-        AND published_at IS NOT NULL AND validation_status = 'valid'
-        AND channel_capabilities @> ARRAY['whatsapp']::text[]
+      SELECT version.id
+      FROM agents.agent_profile_versions version
+      JOIN agents.agent_profiles profile
+        ON profile.id=version.agent_profile_id
+       AND profile.tenant_id=version.tenant_id
+      WHERE version.id = ${agentProfileVersionId}::uuid
+        AND version.tenant_id = platform.current_tenant_id()
+        AND version.published_at IS NOT NULL
+        AND version.validation_status = 'valid'
+        AND version.channel_capabilities @> ARRAY['whatsapp']::text[]
+        AND profile.archived_at IS NULL
       LIMIT 1
     `;
     if (agents[0] === undefined)
@@ -1350,6 +1505,7 @@ export async function setConversationOwnership(
           handoff_reason_safe = NULL,
           updated_at = CURRENT_TIMESTAMP
       WHERE id = ${conversationId}::uuid
+        AND removed_from_inbox_at IS NULL
       RETURNING id
     `;
     return rows.length === 1;
@@ -1370,6 +1526,7 @@ export async function setConversationOwnership(
         handoff_reason_safe = ${safeReason},
         updated_at = CURRENT_TIMESTAMP
     WHERE id = ${conversationId}::uuid
+      AND removed_from_inbox_at IS NULL
     RETURNING id, contact_id
   `;
   const updated = rows[0];
@@ -1409,32 +1566,54 @@ export async function addMessageReaction(
   messageId: string,
   actorUserId: string,
   emoji: string,
-): Promise<void> {
+): Promise<boolean> {
   const normalized = emoji.trim();
   if (!normalized || normalized.length > 16)
     throw new TypeError("reaction must be a short emoji");
-  await sql`
+  const rows = await sql<{ id: string }[]>`
+    WITH eligible_conversation AS MATERIALIZED (
+      SELECT conversation.id
+      FROM messaging.conversations conversation
+      JOIN messaging.messages message
+        ON message.conversation_id = conversation.id
+       AND message.tenant_id = conversation.tenant_id
+      WHERE message.id = ${messageId}::uuid
+        AND conversation.removed_from_inbox_at IS NULL
+      FOR UPDATE OF conversation
+    )
     INSERT INTO messaging.message_reactions
       (tenant_id, message_id, actor_type, actor_id, emoji)
-    VALUES (platform.current_tenant_id(), ${messageId}::uuid, 'user', ${actorUserId}::uuid, ${normalized})
+    SELECT platform.current_tenant_id(), message.id, 'user',
+           ${actorUserId}::uuid, ${normalized}
+    FROM eligible_conversation
+    JOIN messaging.messages message
+      ON message.conversation_id = eligible_conversation.id
+     AND message.id = ${messageId}::uuid
     ON CONFLICT (tenant_id, message_id, actor_type, actor_id)
     DO UPDATE SET emoji = EXCLUDED.emoji
+    RETURNING id
   `;
+  return rows.length === 1;
 }
 
 export async function markConversationRead(
   sql: postgres.TransactionSql,
   conversationId: string,
   userId: string,
-): Promise<void> {
-  await sql`
+): Promise<boolean> {
+  const rows = await sql<{ id: string }[]>`
     UPDATE messaging.conversations SET unread_count = 0,
-      updated_at = CURRENT_TIMESTAMP WHERE id = ${conversationId}::uuid
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = ${conversationId}::uuid
+      AND removed_from_inbox_at IS NULL
+    RETURNING id
   `;
+  if (rows[0] === undefined) return false;
   await sql`
     UPDATE messaging.notifications
     SET read_at=COALESCE(read_at, CURRENT_TIMESTAMP)
     WHERE user_id=${userId}::uuid AND reference_type='conversation'
       AND reference_id=${conversationId}::uuid
   `;
+  return true;
 }

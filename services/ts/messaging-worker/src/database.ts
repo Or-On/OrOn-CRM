@@ -1743,6 +1743,10 @@ async function loadAiWork(
       JOIN agents.agent_profile_versions agent
         ON agent.id = conversation.ai_agent_profile_version_id
        AND agent.tenant_id = conversation.tenant_id
+      JOIN agents.agent_profiles profile
+        ON profile.id = agent.agent_profile_id
+       AND profile.tenant_id = agent.tenant_id
+       AND profile.archived_at IS NULL
       JOIN messaging.channels channel ON channel.id = conversation.channel_id
       WHERE conversation.id = ${job.reference_id}::uuid
         AND conversation.ownership_mode = 'ai'

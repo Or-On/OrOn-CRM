@@ -51,7 +51,11 @@ export async function createSimulatorBroadcast(
   if (!normalizedName || !normalizedBody)
     throw new TypeError("campaign name and message are required");
   const channels = await sql<{ id: string }[]>`
-    SELECT id FROM messaging.channels WHERE provider = 'simulator' ORDER BY created_at LIMIT 1
+    SELECT id FROM messaging.channels
+    WHERE tenant_id = platform.current_tenant_id()
+      AND provider = 'simulator'
+    ORDER BY created_at
+    LIMIT 1
   `;
   const channelId = channels[0]?.id;
   if (channelId === undefined)
@@ -89,9 +93,12 @@ export async function createSimulatorBroadcast(
       (tenant_id, broadcast_id, contact_id, template_params)
     SELECT platform.current_tenant_id(), ${broadcastId}::uuid, contact.id, '[]'::jsonb
     FROM crm.contacts contact
-    WHERE contact.lifecycle_status = 'active'
+    WHERE contact.tenant_id = platform.current_tenant_id()
+      AND contact.lifecycle_status = 'active'
       AND EXISTS (SELECT 1 FROM crm.contact_channel_identities identity
-                  WHERE identity.contact_id = contact.id AND identity.channel = 'whatsapp')
+                  WHERE identity.tenant_id = platform.current_tenant_id()
+                    AND identity.contact_id = contact.id
+                    AND identity.channel = 'whatsapp')
     ON CONFLICT DO NOTHING
   `;
   await sql`

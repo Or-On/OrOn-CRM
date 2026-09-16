@@ -1,5 +1,5 @@
 {
-  "alembic_head": "7d91e4a3c620",
+  "alembic_head": "a84f9c2e6d31",
   "expected_functions": [
     "agents.protect_approved_knowledge",
     "automation.protect_published_flow_version",
@@ -83,6 +83,7 @@
     "ix_billing_topups_tenant_created",
     "ix_conversations_ai_ownership",
     "ix_conversations_tenant_cursor",
+    "ix_conversations_visible_inbox",
     "ix_contacts_tenant_activity",
     "ix_contacts_voice_campaign_eligibility",
     "ix_conversations_inbox",

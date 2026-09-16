@@ -18,10 +18,14 @@ export async function POST(
     if (typeof body.emoji !== "string")
       throw new TypeError("emoji is required");
     const { id } = await context.params;
-    await withCurrentTenant("messaging:operate", (sql, session) =>
-      addMessageReaction(sql, id, session.userId, body.emoji as string),
+    const updated = await withCurrentTenant(
+      "messaging:operate",
+      (sql, session) =>
+        addMessageReaction(sql, id, session.userId, body.emoji as string),
     );
-    return NextResponse.json({ ok: true });
+    return updated
+      ? NextResponse.json({ ok: true })
+      : NextResponse.json({ error: "Not found" }, { status: 404 });
   } catch (error) {
     return crmErrorResponse(error);
   }

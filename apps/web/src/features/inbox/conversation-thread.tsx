@@ -224,7 +224,10 @@ export function ConversationThread({
   readonly onShowContact: (trigger: HTMLButtonElement) => void;
   readonly onQueued: (result: QueuedWhatsAppOutbound) => Promise<void>;
   readonly onChanged: () => Promise<void>;
-  readonly onDeleted: (conversationId: string) => Promise<void>;
+  readonly onDeleted: (
+    conversationId: string,
+    retainedAsEvidence: boolean,
+  ) => Promise<void>;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -422,14 +425,14 @@ export function ConversationThread({
     setPending(true);
     setActionError(undefined);
     try {
-      await crmMutation(
+      const result = await crmMutation<{ retainedAsEvidence?: boolean }>(
         `/api/messaging/conversations/${conversation.id}`,
         {},
         { method: "DELETE" },
       );
       setDeleteOpen(false);
       setControlsOpen(false);
-      await onDeleted(conversation.id);
+      await onDeleted(conversation.id, result.retainedAsEvidence === true);
     } catch (error) {
       setActionError(errorMessage(error, t, "inbox.deleteFailed"));
     } finally {

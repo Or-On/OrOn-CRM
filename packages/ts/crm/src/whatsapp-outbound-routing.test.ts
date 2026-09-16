@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type postgres from "postgres";
 import { describe, expect, it, vi } from "vitest";
 
@@ -50,8 +52,63 @@ function manualInput() {
 }
 
 describe("WhatsApp manual outbound routing", () => {
+  it("does not expose an idempotent outbound result after Inbox removal", async () => {
+    const fixture = transaction([[]]);
+
+    await expect(
+      queueWhatsAppOutbound(fixture.sql, manualInput(), configuredSecondSender),
+    ).rejects.toThrow("conversation is no longer available in the Inbox");
+    expect(fixture.statements).toHaveLength(1);
+    expect(fixture.statements[0]).toContain("removed_from_inbox_at");
+    expect(fixture.statements[0]).toContain("FOR UPDATE");
+  });
+
+  it("locks the available conversation before replaying an idempotent request", async () => {
+    const input = manualInput();
+    const requestFingerprint = createHash("sha256")
+      .update(
+        JSON.stringify({
+          conversationId: input.conversationId,
+          provider: input.provider,
+          senderUserId: input.senderUserId,
+          senderType: "user",
+          delivery: { kind: "text", text: input.text },
+        }),
+      )
+      .digest("hex");
+    const fixture = transaction([
+      [{ id: conversationId }],
+      [],
+      [
+        {
+          id: "60000000-0000-4000-8000-000000000001",
+          message_id: "70000000-0000-4000-8000-000000000001",
+          conversation_id: conversationId,
+          provider: "meta",
+          request_fingerprint: requestFingerprint,
+          removed_from_inbox_at: null,
+        },
+      ],
+    ]);
+
+    await expect(
+      queueWhatsAppOutbound(fixture.sql, input, configuredSecondSender),
+    ).resolves.toEqual({
+      requestId: "60000000-0000-4000-8000-000000000001",
+      messageId: "70000000-0000-4000-8000-000000000001",
+      conversationId,
+      provider: "meta",
+      queued: false,
+    });
+    expect(fixture.statements).toHaveLength(3);
+    expect(fixture.statements[0]).toContain("FOR UPDATE");
+    expect(fixture.statements[1]).toContain("pg_advisory_xact_lock");
+    expect(fixture.statements[2]).toContain("messaging.outbound_requests");
+  });
+
   it("binds a reply to the selected channel and latest inbound origin, never the primary identity", async () => {
     const fixture = transaction([
+      [{ id: conversationId }],
       [],
       [],
       [
@@ -85,23 +142,23 @@ describe("WhatsApp manual outbound routing", () => {
       queued: true,
     });
 
-    const routing = fixture.statements[2] ?? "";
+    const routing = fixture.statements[3] ?? "";
     expect(routing).toContain("messaging.inbound_message_origins");
     expect(routing).toContain("inbound.id DESC");
     expect(routing).toContain("channel.provider_account_id=?");
     expect(routing).not.toContain("candidate.is_primary");
-    expect(fixture.values[2]).toContain(configuredSecondSender.phoneNumberId);
+    expect(fixture.values[3]).toContain(configuredSecondSender.phoneNumberId);
     expect(fixture.statements.join("\n")).not.toContain(
       "INSERT INTO messaging.conversations",
     );
-    expect(fixture.values[4]).toContain(conversationId);
-    expect(fixture.values[4]).toContain(channelId);
-    expect(fixture.values[4]).toContain(latestSenderIdentityId);
-    expect(fixture.values[4]).toContain(latestSenderAddress);
+    expect(fixture.values[5]).toContain(conversationId);
+    expect(fixture.values[5]).toContain(channelId);
+    expect(fixture.values[5]).toContain(latestSenderIdentityId);
+    expect(fixture.values[5]).toContain(latestSenderAddress);
   });
 
   it("fails before writes when the selected conversation sender or latest origin does not match", async () => {
-    const fixture = transaction([[], [], []]);
+    const fixture = transaction([[{ id: conversationId }], [], [], []]);
 
     await expect(
       // The selected conversation belongs to the second sender channel, while
@@ -110,10 +167,10 @@ describe("WhatsApp manual outbound routing", () => {
       queueWhatsAppOutbound(fixture.sql, manualInput(), configuredFirstSender),
     ).rejects.toThrow("conversation has no valid WhatsApp recipient");
 
-    expect(fixture.statements).toHaveLength(3);
+    expect(fixture.statements).toHaveLength(4);
     expect(
       fixture.statements.some((statement) =>
-        /\b(?:INSERT|UPDATE|DELETE)\b/u.test(statement),
+        /^\s*(?:INSERT|UPDATE|DELETE)\b/u.test(statement),
       ),
     ).toBe(false);
   });

@@ -68,6 +68,7 @@ describe("conversation list pagination", () => {
     expect(statement).toContain(
       "WHERE c.tenant_id = platform.current_tenant_id()",
     );
+    expect(statement).toContain("AND c.removed_from_inbox_at IS NULL");
     expect(statement).toContain(
       "JOIN crm.contacts contact\n         ON contact.id = c.contact_id AND contact.tenant_id = c.tenant_id",
     );

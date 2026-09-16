@@ -209,7 +209,10 @@ export async function queueCanonicalSimulation(
   await validateRetainedReferences(sql, flow);
   const contacts = await sql<
     { contact_id: string }[]
-  >`SELECT contact_id FROM messaging.conversations WHERE id=${conversationId}::uuid`;
+  >`SELECT contact_id FROM messaging.conversations
+    WHERE id=${conversationId}::uuid
+      AND removed_from_inbox_at IS NULL
+    FOR SHARE`;
   if (!contacts[0]) throw new TypeError("conversation is unavailable");
   const metadata = {
     mode: "simulator",
@@ -269,6 +272,14 @@ export async function advanceCanonicalSimulation(
     )[0]?.allowed
   )
     throw new TypeError("flow actor no longer authorized");
+  const conversations = await sql<{ id: string }[]>`
+    SELECT id FROM messaging.conversations
+    WHERE id = ${conversation}::uuid
+      AND removed_from_inbox_at IS NULL
+    FOR UPDATE
+  `;
+  if (conversations[0] === undefined)
+    throw new TypeError("conversation is unavailable");
   const path = executablePath(
     parseCanonicalFlow(run.definition),
     channel as SupportedChannel,

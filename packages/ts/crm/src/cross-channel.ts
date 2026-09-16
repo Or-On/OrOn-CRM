@@ -348,6 +348,11 @@ export async function setDefaultWhatsAppAgent(
   actorUserId: string,
   profileId: string,
 ): Promise<boolean> {
+  await sql`
+    SELECT pg_advisory_xact_lock(hashtextextended(
+      platform.current_tenant_id()::text || ':agent-profile:' || ${profileId}, 11
+    ))
+  `;
   const rows = await sql<{ tenant_id: string }[]>`
     SELECT profile.tenant_id
     FROM agents.agent_profiles profile
@@ -358,7 +363,7 @@ export async function setDefaultWhatsAppAgent(
           AND version.published_at IS NOT NULL
           AND version.validation_status='valid'
           AND version.channel_capabilities @> ARRAY['whatsapp']::text[]
-      )
+    )
     LIMIT 1
   `;
   if (rows[0] === undefined)
@@ -388,6 +393,19 @@ export async function archiveAgentProfile(
   actorUserId: string,
   profileId: string,
 ): Promise<"archived" | "active" | "not_found"> {
+  // The messaging worker has read-only access to agent profiles, so archive and
+  // assignment share a transaction-scoped advisory lock instead of requiring a
+  // broad UPDATE grant merely to lock a row.
+  await sql`
+    SELECT pg_advisory_xact_lock(hashtextextended(
+      platform.current_tenant_id()::text || ':agent-profile:' || ${profileId}, 11
+    ))
+  `;
+  const profiles = await sql<{ id: string }[]>`
+    SELECT id FROM agents.agent_profiles
+    WHERE id=${profileId}::uuid AND archived_at IS NULL
+  `;
+  if (profiles[0] === undefined) return "not_found";
   const active = await sql<{ present: boolean }[]>`
     SELECT EXISTS(
       SELECT 1 FROM messaging.conversations conversation
@@ -395,6 +413,7 @@ export async function archiveAgentProfile(
         ON version.id=conversation.ai_agent_profile_version_id
       WHERE version.agent_profile_id=${profileId}::uuid
         AND conversation.ownership_mode='ai'
+        AND conversation.removed_from_inbox_at IS NULL
     ) AS present
   `;
   if (active[0]?.present === true) return "active";
@@ -777,6 +796,7 @@ export async function queueWhatsAppTriggeredCall(
     FROM messaging.conversations conversation
     JOIN crm.contacts contact ON contact.id = conversation.contact_id
     WHERE conversation.id = ${conversationId}::uuid
+      AND conversation.removed_from_inbox_at IS NULL
     FOR SHARE OF contact, conversation
   `;
   const candidate = eligible[0];
@@ -922,6 +942,7 @@ export async function queueWhatsAppAutomaticCall(
        OR node #>> '{configuration,agentVersionId}'=voice_agent.id::text
      )
     WHERE conversation.id = ${conversationId}::uuid
+      AND conversation.removed_from_inbox_at IS NULL
       AND conversation.ownership_mode = 'ai'
       AND conversation.ai_enabled_by_user_id = ${actorUserId}::uuid
       AND contact.lifecycle_status = 'active'
@@ -1093,6 +1114,20 @@ export async function requestHandoff(
   const reason = reasonSafe.trim();
   if (!reason || reason.length > 500)
     throw new TypeError("handoff reason must contain 1-500 safe characters");
+  if (
+    references.conversationId !== null &&
+    references.conversationId !== undefined
+  ) {
+    const conversations = await sql<{ id: string }[]>`
+      SELECT id FROM messaging.conversations
+      WHERE id = ${references.conversationId}::uuid
+        AND contact_id = ${contactId}::uuid
+        AND removed_from_inbox_at IS NULL
+      FOR SHARE
+    `;
+    if (conversations[0] === undefined)
+      throw new TypeError("conversation is unavailable");
+  }
   const rows = await sql<HandoffRow[]>`
     INSERT INTO automation.handoffs
       (tenant_id, contact_id, requested_by_user_id, source_channel,
@@ -1147,6 +1182,11 @@ export async function transitionHandoff(
           THEN CURRENT_TIMESTAMP ELSE resolved_at END,
         updated_at = CURRENT_TIMESTAMP
     WHERE id = ${handoffId}::uuid
+      AND (conversation_id IS NULL OR EXISTS (
+        SELECT 1 FROM messaging.conversations conversation
+        WHERE conversation.id = automation.handoffs.conversation_id
+          AND conversation.removed_from_inbox_at IS NULL
+      ))
       AND ((${action} = 'accept' AND status = 'pending')
         OR (${action} IN ('resolve', 'cancel') AND status IN ('pending','accepted')))
     RETURNING id, contact_id, source_channel, reason_safe, status,
@@ -1165,6 +1205,11 @@ export async function listHandoffs(
     SELECT id, contact_id, source_channel, reason_safe, status,
            assigned_user_id, requested_at
     FROM automation.handoffs
+    WHERE conversation_id IS NULL OR EXISTS (
+      SELECT 1 FROM messaging.conversations conversation
+      WHERE conversation.id = automation.handoffs.conversation_id
+        AND conversation.removed_from_inbox_at IS NULL
+    )
     ORDER BY requested_at DESC, id DESC LIMIT 100
   `;
   return rows.map(mapHandoff);

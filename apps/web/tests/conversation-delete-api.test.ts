@@ -68,6 +68,7 @@ describe("conversation deletion API", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       ok: true,
+      retainedAsEvidence: false,
       storageCleanupPending: 0,
     });
     expect(state.assertMutation).toHaveBeenCalledOnce();
@@ -82,7 +83,6 @@ describe("conversation deletion API", () => {
   it.each([
     ["not_found", 404],
     ["active_work", 409],
-    ["retained_evidence", 409],
   ] as const)("maps %s without hiding the result", async (result, status) => {
     state.deleteConversation.mockResolvedValue({ status: result });
     const response = await DELETE(
@@ -98,6 +98,27 @@ describe("conversation deletion API", () => {
     expect((await response.json()) as { error: string }).toHaveProperty(
       "error",
     );
+  });
+
+  it("removes protected technician evidence from the Inbox without deleting it", async () => {
+    state.deleteConversation.mockResolvedValue({
+      status: "removed_retained_evidence",
+    });
+    const response = await DELETE(
+      new Request(
+        `http://localhost/api/messaging/conversations/${conversationId}`,
+        { method: "DELETE" },
+      ),
+      context,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      ok: true,
+      retainedAsEvidence: true,
+      storageCleanupPending: 0,
+    });
+    expect(state.deletePrivateObject).not.toHaveBeenCalled();
   });
 
   it("removes committed local files after the tenant transaction and reports deferred cleanup", async () => {
@@ -131,6 +152,7 @@ describe("conversation deletion API", () => {
     );
     expect(await response.json()).toEqual({
       ok: true,
+      retainedAsEvidence: false,
       storageCleanupPending: 1,
     });
   });
@@ -159,6 +181,7 @@ describe("conversation deletion API", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       ok: true,
+      retainedAsEvidence: false,
       storageCleanupPending: 1,
     });
   });
