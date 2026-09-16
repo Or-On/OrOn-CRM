@@ -1114,7 +1114,18 @@ export async function requestHandoff(
   const reason = reasonSafe.trim();
   if (!reason || reason.length > 500)
     throw new TypeError("handoff reason must contain 1-500 safe characters");
+  // Preserve the handoff receipt's idempotency contract before validating a
+  // conversation reference. A conflicting replay must still be rejected as an
+  // idempotency conflict, even when one of its altered references is invalid.
+  // The INSERT below remains the authority for exact replay versus conflict;
+  // this read only determines whether we are admitting genuinely new work.
+  const existingReceipts = await sql<{ id: string }[]>`
+    SELECT id FROM automation.handoffs
+    WHERE idempotency_key = ${idempotencyKey}
+    LIMIT 1
+  `;
   if (
+    existingReceipts[0] === undefined &&
     references.conversationId !== null &&
     references.conversationId !== undefined
   ) {

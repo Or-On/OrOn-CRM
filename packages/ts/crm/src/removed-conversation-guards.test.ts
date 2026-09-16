@@ -146,8 +146,9 @@ describe("removed Inbox conversation guardrails", () => {
         { conversationId },
       ),
     ).rejects.toThrow("conversation is unavailable");
-    expect(handoff.statements).toHaveLength(1);
-    expect(handoff.statements[0]).toContain("removed_from_inbox_at IS NULL");
+    expect(handoff.statements).toHaveLength(2);
+    expect(handoff.statements[0]).toContain("automation.handoffs");
+    expect(handoff.statements[1]).toContain("removed_from_inbox_at IS NULL");
   });
 
   it("excludes removed conversation handoffs from queue reads and transitions", async () => {
