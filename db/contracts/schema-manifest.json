@@ -1,5 +1,5 @@
 {
-  "alembic_head": "a84f9c2e6d31",
+  "alembic_head": "c41e7d9a5b20",
   "expected_functions": [
     "agents.protect_approved_knowledge",
     "automation.protect_published_flow_version",
@@ -111,6 +111,7 @@
     "ix_service_cases_queue",
     "ix_service_locations_customer",
     "ix_service_locations_active_customer",
+    "ix_service_reports_active_case",
     "ix_customer_documents_contact",
     "ix_appointment_technician_time",
     "ix_report_attachments_context",

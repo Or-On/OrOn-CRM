@@ -38,7 +38,7 @@ from pipecat.services.tts_service import TextAggregationMode, TTSService
 from pipecat.utils.asyncio.task_manager import TaskManager
 
 from oron_agent.config import Settings
-from oron_agent.conversation_language import resolve_conversation_language, tts_language
+from oron_agent.conversation_language import normalize_language, tts_language
 from oron_agent.tts import TtsProvider, build_tts
 from oron_agent.voice_quality import VoiceQualityConfig, make_speech_transformer
 
@@ -216,7 +216,9 @@ class RealPreviewProvider:
         if not settings.enable_real_voice_providers:
             raise PermissionError("real voice providers are disabled")
         config = VoiceQualityConfig.model_validate(quality)
-        language = resolve_conversation_language(text, config.language).value
+        # A typed preview has no Soniox language metadata; honor the explicit
+        # profile selection instead of guessing from the text's script.
+        language = normalize_language(config.language, "en") or "en"
         # Preview text is a synthetic caller turn. Route its normalization and
         # provider language exactly like a live accepted turn while retaining
         # every other immutable published quality setting, including voice.
@@ -235,7 +237,7 @@ class RealPreviewProvider:
         )
         tts = self._tts_factory(
             settings.tts_provider,
-            language=tts_language(resolve_conversation_language(text, language)),
+            language=tts_language(language),
             voice=voice,
             text_filters=[],
             text_aggregation_mode=TextAggregationMode.SENTENCE,

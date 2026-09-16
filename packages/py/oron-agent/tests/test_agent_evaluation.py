@@ -9,7 +9,6 @@ from oron_agent.agent_evaluation import (
     render_evaluation,
 )
 from oron_agent.config import Settings
-from oron_agent.grounding import CONVERSATION
 from pydantic import ValidationError
 
 
@@ -20,7 +19,7 @@ class LLM:
 
     async def run_inference(self, context, **kwargs):
         self.context = context
-        return '{"kind":"conversation","intent":"clarify"}'
+        return "Could you tell me a little more?"
 
     async def cleanup(self):
         self.closed = True
@@ -57,15 +56,9 @@ async def test_uses_installed_llm_factory_pinned_bounds_with_no_tools():
     assert llm.context.messages[1]["content"] == "Fictional scenario"
 
 
-@pytest.mark.parametrize(
-    ("caller_text", "configured_language", "expected_protocol_language"),
-    [
-        ("Can you help me?", "he", "accepted caller turn is in English"),
-        ("אפשר לעזור לי?", "en", "accepted caller turn is in Hebrew"),
-    ],
-)
-async def test_provider_protocol_follows_current_typed_turn_language(
-    caller_text, configured_language, expected_protocol_language
+@pytest.mark.parametrize("configured_language", ["he", "en"])
+async def test_typed_provider_uses_explicit_profile_language_without_script_guessing(
+    configured_language,
 ):
     settings = Settings(
         _env_file=None,
@@ -82,7 +75,7 @@ async def test_provider_protocol_follows_current_typed_turn_language(
     )
 
     await provider.evaluate(
-        caller_text,
+        "Mixed עברית and English",
         {
             "system_prompt": "Tenant style",
             "quality": {"language": configured_language},
@@ -92,32 +85,23 @@ async def test_provider_protocol_follows_current_typed_turn_language(
         confirmed=True,
     )
 
-    assert expected_protocol_language in llm.context.messages[0]["content"]
+    assert f"language code is '{configured_language}'" in llm.context.messages[0]["content"]
 
 
-@pytest.mark.parametrize(
-    ("caller_text", "configured_language", "expected"),
-    [
-        ("blorp zangle froop", "he", CONVERSATION["en"]["clarify"]),
-        ("בלה קשקוש פלופ", "en", CONVERSATION["he"]["clarify"]),
-    ],
-)
-def test_evaluation_nonsense_is_clarified_in_the_callers_language(
-    caller_text, configured_language, expected
-):
+def test_evaluation_preserves_natural_model_text_without_an_intent_table():
     reply = render_evaluation(
-        '{"kind":"conversation","intent":"unverified"}',
+        "That sounds like a long day.",
         {
             "system_prompt": "Tenant style",
-            "quality": {"language": configured_language},
+            "quality": {"language": "he"},
             "knowledge": [],
         },
         "fictional",
-        caller_text=caller_text,
+        caller_text="I had a long day.",
     )
 
-    assert reply.text == expected
-    assert reply.decision == "clarify"
+    assert reply.text == "That sounds like a long day."
+    assert reply.decision == "natural_conversation"
 
 
 async def test_existing_kill_flag_blocks_before_any_provider_construction():

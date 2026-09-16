@@ -1,11 +1,9 @@
 import pytest
 from oron_agent.conversation_language import (
     CallerLanguageContextProcessor,
-    ConversationLanguage,
     ConversationLanguageState,
     ResponseLanguageTTSProcessor,
-    detect_conversation_language,
-    resolve_conversation_language,
+    normalize_language,
 )
 from pipecat.frames.frames import (
     AggregatedTextFrame,
@@ -19,50 +17,24 @@ from pipecat.utils.text.base_text_aggregator import AggregationType
 
 
 @pytest.mark.parametrize(
-    ("text", "provider", "expected"),
+    ("provider", "expected"),
     [
-        ("אני צריך עזרה", None, ConversationLanguage.HEBREW),
-        ("I need help", None, ConversationLanguage.ENGLISH),
-        (
-            "לא עובד https://support.example.com/products/router/setup/troubleshooting",
-            None,
-            ConversationLanguage.HEBREW,
-        ),
-        ("המסך מציג ERR-502 ומבקש לנסות שוב", None, ConversationLanguage.HEBREW),
-        ("Please email person@example.com", None, ConversationLanguage.ENGLISH),
-        ("לא עובד Samsung Smart TV", None, ConversationLanguage.HEBREW),
-        ("לא עובד Samsung Smart TV", Language.EN, ConversationLanguage.HEBREW),
-        ("Please Help", None, ConversationLanguage.ENGLISH),
-        ("Can You Help?", None, ConversationLanguage.ENGLISH),
-        ("Need Help Now", None, ConversationLanguage.ENGLISH),
-        ("HELP", None, ConversationLanguage.ENGLISH),
-        ("PLEASE HELP", None, ConversationLanguage.ENGLISH),
-        ("ERROR", None, ConversationLanguage.ENGLISH),
-        ("NOT WORKING", None, ConversationLanguage.ENGLISH),
-        ("WhatsApp לא עובד", Language.HE, ConversationLanguage.HEBREW),
-        ("OK", Language.EN, ConversationLanguage.ENGLISH),
-        ("x", Language.EN, None),
-        ("א", Language.HE, None),
-        ("1234", None, None),
+        (Language.HE, "he"),
+        (Language.EN_US, "en"),
+        (Language.FR, "fr"),
+        ("es-MX", "es"),
+        (None, None),
+        ("unknown-language", None),
     ],
 )
-def test_language_detection_uses_script_then_provider(text, provider, expected):
-    assert detect_conversation_language(text, provider) is expected
+def test_language_comes_from_provider_metadata(provider, expected):
+    assert normalize_language(provider) == expected
 
 
-@pytest.mark.parametrize(
-    ("text", "fallback", "expected"),
-    [
-        ("Can you help me?", "he-IL", ConversationLanguage.ENGLISH),
-        ("אפשר לעזור לי?", "en-US", ConversationLanguage.HEBREW),
-        ("1234", "he-IL", ConversationLanguage.HEBREW),
-        ("...", "en-US", ConversationLanguage.ENGLISH),
-        ("x", "he-IL", ConversationLanguage.HEBREW),
-        ("א", "en-US", ConversationLanguage.ENGLISH),
-    ],
-)
-def test_turn_language_uses_authored_fallback_only_for_ambiguous_text(text, fallback, expected):
-    assert resolve_conversation_language(text, fallback) is expected
+def test_transcript_script_never_changes_language_without_provider_metadata():
+    state = ConversationLanguageState("he")
+    assert not state.observe(TranscriptionFrame("This is English", "caller", "", None))
+    assert state.current == "he"
 
 
 @pytest.mark.asyncio
@@ -75,20 +47,22 @@ async def test_language_switch_reaches_context_before_transcription(monkeypatch)
         pushed.append((frame, direction))
 
     monkeypatch.setattr(processor, "push_frame", capture)
-    transcript = TranscriptionFrame("Can you help me?", "caller", "", Language.EN)
+    transcript = TranscriptionFrame("Bonjour", "caller", "", Language.FR, finalized=True)
     await processor.process_frame(transcript, FrameDirection.DOWNSTREAM)
 
-    assert state.current is ConversationLanguage.ENGLISH
+    assert state.current == "fr"
     assert isinstance(pushed[0][0], LLMMessagesAppendFrame)
     assert pushed[0][0].run_llm is False
-    assert "respond entirely" in pushed[0][0].messages[0]["content"]
+    instruction = pushed[0][0].messages[0]["content"]
+    assert "language code 'fr'" in instruction
+    assert "must not route, classify, reject, or replace" in instruction
     assert pushed[1][0] is transcript
 
 
 @pytest.mark.asyncio
-async def test_tts_language_switch_precedes_spoken_frame(monkeypatch):
+async def test_tts_primary_language_switch_precedes_spoken_frame(monkeypatch):
     state = ConversationLanguageState("he")
-    state.current = ConversationLanguage.ENGLISH
+    state.current = "fr"
     processor = ResponseLanguageTTSProcessor(state)
     pushed = []
 
@@ -96,12 +70,34 @@ async def test_tts_language_switch_precedes_spoken_frame(monkeypatch):
         pushed.append((frame, direction))
 
     monkeypatch.setattr(processor, "push_frame", capture)
-    spoken = AggregatedTextFrame("How can I help?", AggregationType.SENTENCE)
+    spoken = AggregatedTextFrame("<lang:fr> Bonjour.", AggregationType.SENTENCE)
     await processor.process_frame(spoken, FrameDirection.DOWNSTREAM)
 
     assert isinstance(pushed[0][0], TTSUpdateSettingsFrame)
-    assert pushed[0][0].settings["language"] == Language.EN_US
+    assert pushed[0][0].settings["language"] == Language.FR
     assert pushed[1][0] is spoken
+    assert spoken.text == "Bonjour."
+
+
+@pytest.mark.asyncio
+async def test_explicit_response_language_overrides_caller_language(monkeypatch):
+    state = ConversationLanguageState("en")
+    processor = ResponseLanguageTTSProcessor(state)
+    pushed = []
+
+    async def capture(frame, _direction):
+        pushed.append(frame)
+
+    monkeypatch.setattr(processor, "push_frame", capture)
+    spoken = AggregatedTextFrame(
+        "<lang:fr> Bien sûr, continuons en français.",
+        AggregationType.SENTENCE,
+    )
+    await processor.process_frame(spoken, FrameDirection.DOWNSTREAM)
+
+    assert isinstance(pushed[0], TTSUpdateSettingsFrame)
+    assert pushed[0].settings["language"] == Language.FR
+    assert pushed[1].text == "Bien sûr, continuons en français."
 
 
 @pytest.mark.asyncio
@@ -110,7 +106,7 @@ async def test_tts_does_not_repeat_same_language_setting(monkeypatch):
     processor = ResponseLanguageTTSProcessor(state)
     pushed = []
 
-    async def capture(frame, direction):
+    async def capture(frame, _direction):
         pushed.append(frame)
 
     monkeypatch.setattr(processor, "push_frame", capture)

@@ -208,7 +208,7 @@ def test_soniox_prices_at_its_published_hourly_rate():
     an hour of generated speech is ~$0.70. Characters must not move it — the
     text Soniox tokenizes is the pointed text, which nothing here counts."""
     book = PriceBook()
-    an_hour = CallUsage(tts_model="tts-rt-v1", tts_audio_seconds=3600, tts_characters=0)
+    an_hour = CallUsage(tts_model="tts-rt-v2", tts_audio_seconds=3600, tts_characters=0)
     with_text = an_hour.model_copy(update={"tts_characters": 50_000})
 
     assert price(an_hour, book).tts == pytest.approx(0.70, abs=0.01)

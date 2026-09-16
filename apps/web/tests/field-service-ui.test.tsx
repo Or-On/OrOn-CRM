@@ -765,6 +765,7 @@ describe("field-service UI contracts", () => {
     ).toBe(
       "/api/field-service/reports/30000000-0000-4000-8000-000000000001/export?format=xlsx",
     );
+    expect(screen.getByRole("button", { name: "מחיקת דוח" })).toBeTruthy();
     expect(screen.queryByText(/Brimag|Pro Touch/iu)).toBeNull();
   });
 });

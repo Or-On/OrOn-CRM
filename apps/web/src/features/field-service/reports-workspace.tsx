@@ -3,23 +3,31 @@
 import type {
   ServiceReportCursor,
   ServiceReportPage,
+  ServiceReportSummary,
   ServiceReportStatus,
 } from "@or-on/crm";
 import {
   Badge,
   Button,
+  ConfirmDialog,
   DataTable,
   EmptyState,
   Input,
   Select,
   Surface,
 } from "@or-on/ui";
-import { ArrowLeft, ChevronRight, FileCheck2, Search } from "lucide-react";
+import {
+  ArrowLeft,
+  ChevronRight,
+  FileCheck2,
+  Search,
+  Trash2,
+} from "lucide-react";
 import Link from "next/link";
 import { useLocale } from "next-intl";
 import { useEffect, useRef, useState, type SyntheticEvent } from "react";
 
-import { crmRead } from "../crm";
+import { crmMutation, crmRead } from "../crm";
 import { reportStatusLabel } from "./field-service-labels";
 import { FieldServiceNavigation } from "./field-service-navigation";
 
@@ -69,6 +77,10 @@ export function ReportsWorkspace({
   );
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
+  const [notice, setNotice] = useState<string>();
+  const [deleteTarget, setDeleteTarget] = useState<ServiceReportSummary>();
+  const [deletePending, setDeletePending] = useState(false);
+  const [deleteError, setDeleteError] = useState<string>();
   const request = useRef<AbortController | undefined>(undefined);
 
   useEffect(
@@ -129,6 +141,39 @@ export function ReportsWorkspace({
     setQuery("");
     setStatus("");
     void load({ append: false, query: "", status: "" });
+  }
+
+  async function removeReport() {
+    if (deleteTarget === undefined || deletePending) return;
+    const selected = deleteTarget;
+    setDeletePending(true);
+    setDeleteError(undefined);
+    try {
+      await crmMutation(
+        `/api/field-service/reports/${selected.id}`,
+        {},
+        { method: "DELETE" },
+      );
+      setReports((current) =>
+        current.filter((report) => report.reportId !== selected.reportId),
+      );
+      setDeleteTarget(undefined);
+      setNotice(
+        he
+          ? `הדוח ${selected.caseReference} נמחק.`
+          : `Report ${selected.caseReference} was deleted.`,
+      );
+    } catch (cause) {
+      setDeleteError(
+        cause instanceof Error
+          ? cause.message
+          : he
+            ? "לא ניתן למחוק את הדוח. נסו שוב."
+            : "The report could not be deleted. Try again.",
+      );
+    } finally {
+      setDeletePending(false);
+    }
   }
 
   const date = new Intl.DateTimeFormat(locale, {
@@ -217,6 +262,11 @@ export function ReportsWorkspace({
           {error}
         </p>
       )}
+      {notice === undefined ? null : (
+        <p className="form-success" role="status">
+          {notice}
+        </p>
+      )}
 
       {reports.length === 0 ? (
         <EmptyState
@@ -279,7 +329,6 @@ export function ReportsWorkspace({
                           <FileCheck2 aria-hidden="true" size={14} />
                           {he ? "גרסה" : "Version"} {report.version}
                         </strong>
-                        <small dir="ltr">{report.id.slice(0, 8)}</small>
                       </Link>
                     </td>
                     <td>
@@ -322,6 +371,24 @@ export function ReportsWorkspace({
                     </td>
                     <td>
                       <div className="field-service-row-actions">
+                        <Button
+                          aria-label={
+                            he
+                              ? `מחיקת דוח ${report.caseReference}, כל הגרסאות`
+                              : `Delete report ${report.caseReference}, all versions`
+                          }
+                          onClick={() => {
+                            setNotice(undefined);
+                            setDeleteError(undefined);
+                            setDeleteTarget(report);
+                          }}
+                          size="small"
+                          title={he ? "מחיקת דוח" : "Delete report"}
+                          type="button"
+                          variant="quiet"
+                        >
+                          <Trash2 aria-hidden="true" size={16} />
+                        </Button>
                         <Link
                           aria-label={
                             immutable
@@ -358,6 +425,32 @@ export function ReportsWorkspace({
           </Button>
         </div>
       )}
+
+      <ConfirmDialog
+        busy={deletePending}
+        cancelLabel={he ? "ביטול" : "Cancel"}
+        confirmLabel={he ? "מחיקת הדוח" : "Delete report"}
+        destructive
+        description={
+          he
+            ? `הדוח ${deleteTarget?.caseReference ?? ""} וכל הגרסאות שלו יוסרו מתצוגות השירות. לא ניתן לבטל פעולה זו.`
+            : `Report ${deleteTarget?.caseReference ?? ""} and all of its versions will be removed from service views. This cannot be undone.`
+        }
+        onCancel={() => {
+          if (deletePending) return;
+          setDeleteTarget(undefined);
+          setDeleteError(undefined);
+        }}
+        onConfirm={() => void removeReport()}
+        open={deleteTarget !== undefined}
+        title={he ? "למחוק את הדוח?" : "Delete this report?"}
+      >
+        {deleteError === undefined ? null : (
+          <p className="form-error" role="alert">
+            {deleteError}
+          </p>
+        )}
+      </ConfirmDialog>
     </div>
   );
 }

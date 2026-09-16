@@ -14,11 +14,10 @@ from oron_agent.spoken_safety import BusinessClaimGuardFilter
     ],
 )
 async def test_unverified_business_claims_are_suppressed(claim):
-    output = await BusinessClaimGuardFilter().filter(claim)
+    output = await BusinessClaimGuardFilter(lambda: "he").filter(claim)
 
-    assert output == (
-        "אין לי גישה למערכת המנויים או אפשרות לפתוח קריאת שירות בשיחה הזאת. "
-        "אפשר להעביר את הפרטים לנציג אנושי?"
+    assert (
+        output == "אין לי גישה מאומתת למערכת הזאת בשיחה הנוכחית, ולכן איני יכול לאשר שבוצעה פעולה."
     )
 
 

@@ -2,6 +2,7 @@ import type postgres from "postgres";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  deleteServiceReport,
   getServiceReportDocument,
   listServiceReportPage,
 } from "./field-service.js";
@@ -118,6 +119,7 @@ describe("field-service report history", () => {
     expect(statement).toContain(
       "revision.tenant_id = platform.current_tenant_id()",
     );
+    expect(statement).toContain("report.deleted_at IS NULL");
     expect(parameters).toEqual([
       "finalized",
       "Fictional",
@@ -162,6 +164,72 @@ describe("field-service report history", () => {
     expect(statements[1]).toContain(
       "revision.status IN ('finalized', 'superseded')",
     );
+    expect(statements[1]).toContain("report.deleted_at IS NULL");
     expect(statements[1]).not.toContain("revision.status='draft'");
+  });
+
+  it("tombstones the tenant-visible report aggregate and records its audit event", async () => {
+    const statements: string[] = [];
+    const results: readonly unknown[][] = [
+      [{ available: true, enabled: true }],
+      [
+        {
+          report_id: "20000000-0000-4000-8000-000000000001",
+          case_id: "30000000-0000-4000-8000-000000000001",
+        },
+      ],
+      [],
+    ];
+    const execute = vi.fn((parts: TemplateStringsArray) => {
+      statements.push(parts.join("?"));
+      return Promise.resolve(results[statements.length - 1] ?? []);
+    });
+    const json = vi.fn((value: unknown) => value);
+    const sql = Object.assign(execute, {
+      json,
+    }) as unknown as postgres.TransactionSql;
+
+    await expect(
+      deleteServiceReport(
+        sql,
+        "40000000-0000-4000-8000-000000000001",
+        "10000000-0000-4000-8000-000000000001",
+        "delete-report-request",
+      ),
+    ).resolves.toEqual({
+      reportId: "20000000-0000-4000-8000-000000000001",
+      caseId: "30000000-0000-4000-8000-000000000001",
+    });
+
+    expect(statements[1]).toContain(
+      "revision.tenant_id = platform.current_tenant_id()",
+    );
+    expect(statements[1]).toContain("report.deleted_at IS NULL");
+    expect(statements[1]).toContain("deleted_by_user_id");
+    expect(statements[2]).toContain("field_service.report.deleted");
+    expect(json).toHaveBeenCalledWith({
+      caseId: "30000000-0000-4000-8000-000000000001",
+      revisionId: "10000000-0000-4000-8000-000000000001",
+    });
+  });
+
+  it("returns a not-found code for missing, cross-tenant, or already deleted reports", async () => {
+    const results: readonly unknown[][] = [
+      [{ available: true, enabled: true }],
+      [],
+    ];
+    let call = 0;
+    const execute = vi.fn(() => Promise.resolve(results[call++] ?? []));
+    const sql = Object.assign(execute, {
+      json: (value: unknown) => value,
+    }) as unknown as postgres.TransactionSql;
+
+    await expect(
+      deleteServiceReport(
+        sql,
+        "40000000-0000-4000-8000-000000000001",
+        "10000000-0000-4000-8000-000000000099",
+      ),
+    ).rejects.toMatchObject({ code: "P0002" });
   });
 });

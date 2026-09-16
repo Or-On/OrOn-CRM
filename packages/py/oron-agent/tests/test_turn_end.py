@@ -80,6 +80,7 @@ def test_the_stt_service_is_built_from_the_setting_not_a_constant():
     source = inspect.getsource(bot.run_bot)
     assert "vad_force_turn_endpoint=st.turn_end is TurnEnd.VAD" in source
     assert "model=st.soniox_stt_model" in source
+    assert "enable_language_identification=True" in source
     assert "endpoint_latency_adjustment_level=" in source
     assert "endpoint_sensitivity=" in source
     assert "max_endpoint_delay_ms=" in source

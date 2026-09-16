@@ -33,7 +33,7 @@ def _build(provider: TtsProvider, voice: str, speed: float = 1.0, first_clause: 
         first_clause=first_clause,
         speed=speed,
         soniox_api_key="sx",
-        soniox_model="tts-rt-v1",
+        soniox_model="tts-rt-v2",
         gemini_model="gemini-3.1-flash-tts-preview",
         google_credentials_path=None,
     )
@@ -91,6 +91,7 @@ def test_soniox_uses_the_proven_original_text_audio_path():
 
     assert tts._push_text_frames is True
     assert tts._build_config_msg("ctx-1")["return_timestamps"] is False
+    assert tts._build_config_msg("ctx-1")["reduce_silence"] is False
 
     # Both defaults on together, which is how production runs: the guard is a
     # service-level flag, so swapping the aggregator must not reach it.

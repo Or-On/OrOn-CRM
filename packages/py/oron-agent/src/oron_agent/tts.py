@@ -50,7 +50,14 @@ class SonioxUnpointedContextTTSService(SonioxTTSService):
         self._push_text_frames = True
 
     def _build_config_msg(self, context_id: str) -> dict[str, Any]:
-        return {**super()._build_config_msg(context_id), "return_timestamps": False}
+        return {
+            **super()._build_config_msg(context_id),
+            "return_timestamps": False,
+            # Soniox documents false as the natural-pacing default. Keep it
+            # explicit until call-quality evidence shows that tightening only
+            # inter-word pauses improves this voice without sounding rushed.
+            "reduce_silence": False,
+        }
 
 
 def build_tts(

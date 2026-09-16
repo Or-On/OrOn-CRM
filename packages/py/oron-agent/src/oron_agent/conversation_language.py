@@ -1,13 +1,22 @@
-"""Call-local Hebrew/English routing for model context and speech synthesis."""
+"""Provider-backed conversation language for STT context and TTS delivery.
+
+Language is transport metadata, never a conversational intent. Soniox v5
+identifies the dominant language of each finalized utterance from token-level
+labels; this module carries that value to the model and synthesizer without
+guessing from scripts, keywords, browser locale, or a Hebrew/English state
+machine.
+"""
 
 from __future__ import annotations
 
 import re
-from enum import StrEnum
 
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     Frame,
+    InterruptionFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
     TranscriptionFrame,
     TTSUpdateSettingsFrame,
@@ -15,155 +24,60 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transcriptions.language import Language
 
-_HEBREW_LETTER = re.compile(r"[\u05d0-\u05ea]")
-_LATIN_LETTER = re.compile(r"[A-Za-z]")
-_URL = re.compile(r"https?://\S+", re.IGNORECASE)
-_EMAIL = re.compile(r"\b[^\s@]+@[^\s@]+\.[^\s@]+\b", re.IGNORECASE)
-_MACHINE_IDENTIFIER = re.compile(
-    r"(?<!\w)(?=\S*[A-Za-z\u05d0-\u05ea])(?=\S*\d)"
-    r"[A-Za-z\u05d0-\u05ea0-9._/-]+(?!\w)",
+_LANGUAGE_MARKER = re.compile(
+    r"<lang:(?P<language>[a-z]{2,3}(?:-[a-z0-9]{2,8})?)>",
     re.IGNORECASE,
 )
-_LANGUAGE_WORD = re.compile(r"[\u05d0-\u05ea]+|[A-Za-z]+")
-_TITLE_CASE_LATIN = re.compile(r"[A-Z][A-Za-z0-9]*")
-_LATIN_ACRONYM = re.compile(r"[A-Z]{2,}[A-Z0-9]*")
 
 
-class ConversationLanguage(StrEnum):
-    HEBREW = "he"
-    ENGLISH = "en"
+def normalize_language(value: object, fallback: str | None = None) -> str | None:
+    """Return a supported base ISO language code supplied by the provider."""
 
-
-def _language_from_provider(value: object) -> ConversationLanguage | None:
-    normalized = str(value or "").lower().replace("_", "-")
-    if normalized == "he" or normalized.startswith("he-"):
-        return ConversationLanguage.HEBREW
-    if normalized == "en" or normalized.startswith("en-"):
-        return ConversationLanguage.ENGLISH
-    return None
-
-
-def detect_conversation_language(
-    text: str,
-    provider_language: object = None,
-) -> ConversationLanguage | None:
-    """Resolve a meaningful Hebrew/English turn without guessing from punctuation.
-
-    Soniox identifies language at token level, but Pipecat exposes one language on
-    the accepted turn. Script counts are authoritative for clear text; the
-    provider value breaks ties and handles short Latin/Hebrew utterances.
-    """
-
-    # Links, email addresses and machine identifiers are evidence, not a
-    # reliable language signal. A Hebrew caller pasting a long support URL or
-    # saying an English-looking error code must still receive a Hebrew turn.
-    natural_text = _MACHINE_IDENTIFIER.sub(
-        " ",
-        _EMAIL.sub(" ", _URL.sub(" ", text)),
-    )
-    words = _LANGUAGE_WORD.findall(natural_text)
-    technical_indexes: set[int] = set()
-    index = 0
-    while index < len(words):
-        if not _TITLE_CASE_LATIN.fullmatch(words[index]):
-            index += 1
-            continue
-        end = index + 1
-        while end < len(words) and _TITLE_CASE_LATIN.fullmatch(words[end]):
-            end += 1
-        if end - index >= 2:
-            technical_indexes.update(range(index, end))
-        index = end
-    words_without_technical_names = [
-        word
-        for word_index, word in enumerate(words)
-        if word_index not in technical_indexes and not _LATIN_ACRONYM.fullmatch(word)
-    ]
-    words_without_acronyms = [word for word in words if not _LATIN_ACRONYM.fullmatch(word)]
-    # A multi-word Title Case sequence is treated as a probable product/person
-    # name only when some surrounding language remains. This preserves ordinary
-    # short utterances such as "Please Help". Likewise, restore all-uppercase
-    # words when they are the only signal so urgent messages such as "HELP" and
-    # "NOT WORKING" are still recognized as English.
-    language_words = words_without_technical_names or words_without_acronyms or words
-    meaningful_letters = sum(
-        len(_HEBREW_LETTER.findall(word)) + len(_LATIN_LETTER.findall(word))
-        for word in language_words
-    )
-    # A single isolated letter is usually noise, an initial, or a partial STT
-    # token. It must not flip an established bilingual conversation.
-    if meaningful_letters < 2:
+    raw = value.value if isinstance(value, Language) else value
+    normalized = str(raw or "").strip().lower().replace("_", "-")
+    if normalized:
+        base = normalized.split("-", 1)[0]
+        try:
+            Language(base)
+        except ValueError:
+            pass
+        else:
+            return base
+    if fallback is None:
         return None
-    hebrew = sum(bool(_HEBREW_LETTER.search(word)) for word in language_words)
-    latin = sum(bool(_LATIN_LETTER.search(word)) for word in language_words)
-    provider = _language_from_provider(provider_language)
-    # Product and person names often use the other script and can be longer
-    # than the surrounding utterance. Soniox's turn-level identification is the
-    # better tie-breaker when both scripts are genuinely present.
-    if hebrew == latin and hebrew > 0 and provider is not None:
-        return provider
-    if hebrew > latin:
-        return ConversationLanguage.HEBREW
-    if latin > hebrew:
-        return ConversationLanguage.ENGLISH
-    return None
+    return normalize_language(fallback)
 
 
-def resolve_conversation_language(
-    text: str,
-    fallback: str,
-    provider_language: object = None,
-) -> ConversationLanguage:
-    """Resolve one turn, retaining the authored language only when it is ambiguous.
+def conversation_language_instruction(language: str) -> str:
+    """Describe speech metadata without deciding what the assistant may say."""
 
-    Typed evaluations do not carry Soniox metadata, while live calls do. Keeping
-    the fallback in this shared helper makes both paths apply the same script
-    rules without treating digits, punctuation, or silence as a language switch.
-    """
-
-    detected = detect_conversation_language(text, provider_language)
-    if detected is not None:
-        return detected
     return (
-        ConversationLanguage.HEBREW
-        if str(fallback).lower().startswith("he")
-        else ConversationLanguage.ENGLISH
-    )
-
-
-def conversation_language_instruction(language: ConversationLanguage) -> str:
-    if language is ConversationLanguage.ENGLISH:
-        return (
-            "CURRENT TURN LANGUAGE: The caller's latest accepted turn is English. "
-            "Understand it and respond entirely in concise, natural English. This "
-            "per-turn rule overrides a Hebrew flow default for this reply. Keep "
-            "names in their normal form and ask at most one question."
-        )
-    return (
-        "CURRENT TURN LANGUAGE: The caller's latest accepted turn is Hebrew. "
-        "Understand it and respond entirely in concise, natural Israeli Hebrew. "
-        "This per-turn rule overrides an English flow default for this reply. Do "
-        "not add niqqud or transliterate Hebrew, and ask at most one question."
+        f"SPEECH LANGUAGE METADATA: Soniox identified the latest completed caller "
+        f"utterance as language code '{language}'. Treat the full utterance as a "
+        "normal user message and respond to every meaningful part. Normally reply "
+        "in the language the caller is currently using; if they request another "
+        "language, follow that request. This metadata controls delivery only and "
+        "must not route, classify, reject, or replace the caller's message."
     )
 
 
 class ConversationLanguageState:
-    """Mutable state scoped to one call; the authored flow language is the fallback."""
+    """Call-local primary language, updated only from finalized Soniox metadata."""
 
     def __init__(self, default: str):
-        self.default = resolve_conversation_language("", default)
+        self.default = normalize_language(default, "en") or "en"
         self.current = self.default
 
     def observe(self, frame: TranscriptionFrame) -> bool:
-        detected = detect_conversation_language(frame.text, frame.language)
-        if detected is None or detected is self.current:
+        detected = normalize_language(frame.language)
+        if detected is None or detected == self.current:
             return False
         self.current = detected
         return True
 
 
 class CallerLanguageContextProcessor(FrameProcessor):
-    """Place a language switch in context before its triggering user turn."""
+    """Place final provider language metadata before its triggering user turn."""
 
     def __init__(self, state: ConversationLanguageState, **kwargs):
         super().__init__(**kwargs)
@@ -174,6 +88,7 @@ class CallerLanguageContextProcessor(FrameProcessor):
         if (
             direction is FrameDirection.DOWNSTREAM
             and isinstance(frame, TranscriptionFrame)
+            and frame.finalized
             and self._state.observe(frame)
         ):
             await self.push_frame(
@@ -191,28 +106,63 @@ class CallerLanguageContextProcessor(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
-def tts_language(language: ConversationLanguage) -> Language:
-    return Language.HE_IL if language is ConversationLanguage.HEBREW else Language.EN_US
+def tts_language(language: str) -> Language:
+    """Convert provider metadata to Pipecat's generic TTS language value."""
+
+    try:
+        return Language(language)
+    except ValueError:
+        return Language.EN
+
+
+def response_language(text: str, fallback: str) -> tuple[str, str]:
+    """Read the model's leading delivery marker and remove all marker text."""
+
+    leading = _LANGUAGE_MARKER.match(text.lstrip())
+    requested = normalize_language(leading.group("language")) if leading else None
+    cleaned = " ".join(_LANGUAGE_MARKER.sub(" ", text).split())
+    return requested or normalize_language(fallback, "en") or "en", cleaned
 
 
 class ResponseLanguageTTSProcessor(FrameProcessor):
-    """Switch the TTS primary language immediately before each spoken response."""
+    """Apply and remove the model's per-response primary-language metadata."""
 
     def __init__(self, state: ConversationLanguageState, **kwargs):
         super().__init__(**kwargs)
         self._state = state
         self._applied = state.default
+        self._awaiting_primary = True
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
-        if (
-            direction is FrameDirection.DOWNSTREAM
-            and isinstance(frame, AggregatedTextFrame)
-            and self._state.current is not self._applied
-        ):
-            self._applied = self._state.current
-            await self.push_frame(
-                TTSUpdateSettingsFrame(settings={"language": tts_language(self._applied)}),
-                direction,
-            )
+        if direction is not FrameDirection.DOWNSTREAM:
+            await self.push_frame(frame, direction)
+            return
+        if isinstance(frame, (LLMFullResponseStartFrame, InterruptionFrame)):
+            self._awaiting_primary = True
+            await self.push_frame(frame, direction)
+            return
+        if isinstance(frame, LLMFullResponseEndFrame):
+            self._awaiting_primary = True
+            await self.push_frame(frame, direction)
+            return
+        if isinstance(frame, AggregatedTextFrame) and self._awaiting_primary:
+            primary, frame.text = response_language(frame.text, self._state.current)
+            if frame.raw_text is not None:
+                _, frame.raw_text = response_language(frame.raw_text, self._state.current)
+            self._awaiting_primary = False
+            if primary != self._applied:
+                self._applied = primary
+                await self.push_frame(
+                    TTSUpdateSettingsFrame(settings={"language": tts_language(primary)}),
+                    direction,
+                )
+            if not frame.text.strip():
+                return
+        elif isinstance(frame, AggregatedTextFrame):
+            _, frame.text = response_language(frame.text, self._state.current)
+            if frame.raw_text is not None:
+                _, frame.raw_text = response_language(frame.raw_text, self._state.current)
+            if not frame.text.strip():
+                return
         await self.push_frame(frame, direction)

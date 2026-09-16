@@ -14,9 +14,12 @@ import type { ServiceReportSummary } from "@or-on/crm";
 import { ReportsWorkspace } from "../src/features/field-service";
 import { localized } from "./localized";
 
-const state = vi.hoisted(() => ({ crmRead: vi.fn() }));
+const state = vi.hoisted(() => ({ crmMutation: vi.fn(), crmRead: vi.fn() }));
 
-vi.mock("../src/features/crm", () => ({ crmRead: state.crmRead }));
+vi.mock("../src/features/crm", () => ({
+  crmMutation: state.crmMutation,
+  crmRead: state.crmRead,
+}));
 
 const finalizedReport: ServiceReportSummary = {
   id: "10000000-0000-4000-8000-000000000001",
@@ -68,7 +71,11 @@ const supersededReport: ServiceReportSummary = {
 };
 
 describe("field-service report history UI", () => {
-  beforeEach(() => state.crmRead.mockReset());
+  beforeEach(() => {
+    state.crmMutation.mockReset();
+    state.crmMutation.mockResolvedValue({ deleted: true });
+    state.crmRead.mockReset();
+  });
   afterEach(cleanup);
 
   it("makes finalized history and active drafts discoverable without mutating them", () => {
@@ -113,7 +120,53 @@ describe("field-service report history UI", () => {
         .getByRole("link", { name: "Reports" })
         .getAttribute("aria-current"),
     ).toBe("page");
+    expect(screen.queryByText(finalizedReport.id.slice(0, 8))).toBeNull();
     expect(state.crmRead).not.toHaveBeenCalled();
+  });
+
+  it("confirms deletion and immediately removes every version of the report", async () => {
+    render(
+      localized(
+        <ReportsWorkspace
+          initialPage={{
+            reports: [finalizedReport, supersededReport, draftReport],
+            nextCursor: null,
+          }}
+          timezone="UTC"
+        />,
+      ),
+    );
+
+    function deleteButton() {
+      const button = screen.getAllByRole("button", {
+        name: "Delete report FS-2026-0021, all versions",
+      })[0];
+      if (button === undefined)
+        throw new Error("Delete action was not rendered");
+      return button;
+    }
+
+    fireEvent.click(deleteButton());
+    expect(screen.getByText("Delete this report?")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(state.crmMutation).not.toHaveBeenCalled();
+    expect(screen.getAllByText("Synthetic control-board fault")).toHaveLength(
+      2,
+    );
+
+    fireEvent.click(deleteButton());
+    fireEvent.click(screen.getByRole("button", { name: "Delete report" }));
+
+    await waitFor(() =>
+      expect(state.crmMutation).toHaveBeenCalledWith(
+        `/api/field-service/reports/${finalizedReport.id}`,
+        {},
+        { method: "DELETE" },
+      ),
+    );
+    await screen.findByText("Report FS-2026-0021 was deleted.");
+    expect(screen.queryByText("Synthetic control-board fault")).toBeNull();
+    expect(screen.getByText("Synthetic refrigeration fault")).toBeTruthy();
   });
 
   it("appends the next stable page without replacing visible history", async () => {

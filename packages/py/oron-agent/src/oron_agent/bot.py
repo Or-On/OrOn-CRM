@@ -254,6 +254,11 @@ async def run_bot(
             # This platform is bilingual. Hints keep the authored language
             # preferred while Soniox can still identify a language switch.
             language_hints_strict=False,
+            # Soniox v5 labels finalized tokens and Pipecat resolves their
+            # dominant language onto the accepted TranscriptionFrame. This is
+            # the sole live language signal; conversational meaning stays with
+            # the LLM.
+            enable_language_identification=True,
             context=build_soniox_context(quality_config),
             endpoint_latency_adjustment_level=(
                 st.soniox_endpoint_latency_adjustment_level
@@ -396,7 +401,7 @@ async def run_bot(
         # HebrewNormalizeFilter then does the spoken-form rules and drops emoji.
         text_filters=[
             MarkdownTextFilter(),
-            BusinessClaimGuardFilter(),
+            BusinessClaimGuardFilter(lambda: conversation_language.current),
         ],
         text_aggregation_mode=st.tts_text_aggregation,
         first_clause=st.tts_first_clause,
@@ -410,7 +415,7 @@ async def run_bot(
         make_speech_transformer(
             quality_config,
             lambda: caller_gender.tts_value,
-            get_language=lambda: conversation_language.current.value,
+            get_language=lambda: conversation_language.current,
         )
     )
     tts.add_text_transformer(
@@ -483,10 +488,8 @@ async def run_bot(
         voice_control.track_producer(tts, synthesis=True)
     evidence_gate = VoiceEvidenceGate(
         tenant_id=str(ctx.tenant_id),
-        language=lambda: conversation_language.current.value,
+        language=lambda: conversation_language.current,
         load_records=load_knowledge,
-        speaking_style=quality_config.speakingStyle,
-        fallback_behavior=quality_config.fallbackBehavior,
     )
     processors = build_agent_processors(
         transport.input(),
@@ -502,7 +505,7 @@ async def run_bot(
         turn_planner=turn_planner,
         evidence_context=VoiceEvidenceContext(
             tenant_id=str(ctx.tenant_id),
-            language=lambda: conversation_language.current.value,
+            language=lambda: conversation_language.current,
             load_records=load_knowledge,
             on_caller_text=evidence_gate.observe_caller_text,
         ),

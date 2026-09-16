@@ -58,7 +58,10 @@ async def test_unadvertised_intent_tool_is_removed_and_empty_turn_recovers(name)
     await guard.process_frame(LLMFullResponseEndFrame(), FrameDirection.DOWNSTREAM)
 
     recoveries = [frame for frame in planned if isinstance(frame, AggregatedTextFrame)]
-    assert [frame.text for frame in recoveries] == ['{"kind":"conversation","intent":"clarify"}']
+    assert [frame.text for frame in recoveries] == [
+        "Sorry, I lost the thread for a moment.",
+        "Could you say that again?",
+    ]
     assert not any(isinstance(frame, FunctionCallsStartedFrame) for frame in planned)
 
 

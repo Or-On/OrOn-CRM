@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { saveReportDraft } from "@or-on/crm";
+import { deleteServiceReport, saveReportDraft } from "@or-on/crm";
 
 import {
   jsonObject,
@@ -61,6 +61,26 @@ export async function PATCH(request: Request, context: Context) {
         ),
     );
     return NextResponse.json({ report });
+  } catch (error) {
+    return crmErrorResponse(error);
+  }
+}
+
+export async function DELETE(request: Request, context: Context) {
+  try {
+    await assertCrmMutation(request);
+    const { id } = await context.params;
+    const deleted = await withCurrentTenant(
+      "field-service:operate",
+      (sql, session) =>
+        deleteServiceReport(
+          sql,
+          session.userId,
+          uuid(id, "Report revision"),
+          requestId(request),
+        ),
+    );
+    return NextResponse.json({ deleted: true, reportId: deleted.reportId });
   } catch (error) {
     return crmErrorResponse(error);
   }

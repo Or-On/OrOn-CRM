@@ -15,23 +15,26 @@ __all__ = ["initial_node_from_composition", "initial_node_from_spec"]
 
 
 def _with_safe_entry_opener(node: NodeConfig, language: str) -> NodeConfig:
-    """Ensure a stored flow never asks the LLM to invent the call opener."""
+    """Give unscripted entries one model policy instead of localized canned text."""
     terminal = any(
         action.get("type") in {"end_conversation", "transfer"}
         for action in node.get("post_actions", [])
     )
     if terminal or node.get("pre_actions") or node.get("respond_immediately") is False:
         return node
-    fallback = create_greeting_node(language)
-    node["pre_actions"] = fallback["pre_actions"]
-    node["respond_immediately"] = False
+    opener = create_greeting_node(language)
+    node["task_messages"] = [
+        *node.get("task_messages", []),
+        *opener["task_messages"],
+    ]
+    node["respond_immediately"] = True
     return node
 
 
 def initial_node_from_spec(
     spec: FlowSpec, *, action_guard: Callable[..., Awaitable[Any]] | None = None
 ) -> NodeConfig:
-    """Entry NodeConfig for a stored spec, or a localized greeting on any failure —
+    """Entry NodeConfig for a stored spec, or a safe model opener on any failure —
     a bad flow must never kill a call."""
     try:
         node = bind_flow(
@@ -52,4 +55,4 @@ def initial_node_from_composition(composition: Composition) -> NodeConfig:
         logger.warning(
             f"flow load failed for '{composition.flow.id}' ({e}); falling back to greeting"
         )
-        return create_greeting_node()
+        return create_greeting_node(composition.flow.language)

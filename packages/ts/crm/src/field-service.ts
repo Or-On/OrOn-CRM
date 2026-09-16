@@ -279,6 +279,20 @@ export interface ServiceReportPage {
   readonly nextCursor: ServiceReportCursor | null;
 }
 
+export interface DeletedServiceReport {
+  readonly reportId: string;
+  readonly caseId: string;
+}
+
+export class ServiceReportNotFoundError extends Error {
+  readonly code = "P0002";
+
+  constructor() {
+    super("The requested service report was not found");
+    this.name = "ServiceReportNotFoundError";
+  }
+}
+
 export interface ServiceCaseDossier {
   readonly serviceCase: ServiceCaseSummary;
   readonly customer: CustomerDossier;
@@ -2909,6 +2923,7 @@ export async function listServiceReportPage(
          ON technician.tenant_id = visit.tenant_id
         AND technician.id = visit.technician_id
       WHERE revision.tenant_id = platform.current_tenant_id()
+        AND report.deleted_at IS NULL
         AND ($1::text IS NULL OR revision.status = $1)
         AND ($2 = '' OR service_case.reference ILIKE '%' || $2 || '%'
           OR service_case.title ILIKE '%' || $2 || '%'
@@ -2948,17 +2963,27 @@ export async function openReportDraft(
 ): Promise<ReportRevision> {
   await requireFieldService(sql);
   const reports = await sql<{ id: string }[]>`
-    INSERT INTO service.reports(tenant_id, case_id, visit_id)
-    SELECT platform.current_tenant_id(), visit.case_id, visit.id
-    FROM service.visits visit
-    WHERE visit.id=${visitId}::uuid AND visit.case_id=${caseId}::uuid
-      AND visit.status <> 'cancelled'
-    ON CONFLICT (tenant_id, visit_id) DO UPDATE SET visit_id = EXCLUDED.visit_id
-    RETURNING id
+    WITH inserted AS (
+      INSERT INTO service.reports(tenant_id, case_id, visit_id)
+      SELECT platform.current_tenant_id(), visit.case_id, visit.id
+      FROM service.visits visit
+      WHERE visit.id=${visitId}::uuid AND visit.case_id=${caseId}::uuid
+        AND visit.status <> 'cancelled'
+      ON CONFLICT (tenant_id, visit_id) DO NOTHING
+      RETURNING id
+    )
+    SELECT id FROM inserted
+    UNION ALL
+    SELECT report.id
+    FROM service.reports report
+    WHERE report.tenant_id = platform.current_tenant_id()
+      AND report.case_id = ${caseId}::uuid
+      AND report.visit_id = ${visitId}::uuid
+      AND report.deleted_at IS NULL
+    LIMIT 1
   `;
   const reportId = reports[0]?.id;
-  if (reportId === undefined)
-    throw new Error("Report creation returned no identifier");
+  if (reportId === undefined) throw new ServiceReportNotFoundError();
   const drafts = await sql<
     {
       id: string;
@@ -3012,7 +3037,7 @@ export async function openReportDraft(
     FROM service.reports report
     JOIN service.cases service_case ON service_case.id = report.case_id
     LEFT JOIN service.report_revisions existing ON existing.report_id = report.id
-    WHERE report.id = ${reportId}::uuid
+    WHERE report.id = ${reportId}::uuid AND report.deleted_at IS NULL
     GROUP BY service_case.customer_contact_id, service_case.product_type,
              service_case.product_model, service_case.serial_number
     RETURNING id, report_id, version, status, diagnosis, work_performed,
@@ -3063,26 +3088,35 @@ export async function saveReportDraft(
       finalized_at: Date | null;
     }[]
   >`
-    UPDATE service.report_revisions SET
+    UPDATE service.report_revisions revision SET
       diagnosis = CASE WHEN ${input.diagnosis !== undefined}
-        THEN ${nullableText(input.diagnosis, 10_000)} ELSE diagnosis END,
+        THEN ${nullableText(input.diagnosis, 10_000)} ELSE revision.diagnosis END,
       work_performed = CASE WHEN ${input.workPerformed !== undefined}
-        THEN ${nullableText(input.workPerformed, 10_000)} ELSE work_performed END,
+        THEN ${nullableText(input.workPerformed, 10_000)} ELSE revision.work_performed END,
       part_replaced = CASE WHEN ${input.partReplaced !== undefined}
-        THEN ${input.partReplaced ?? null} ELSE part_replaced END,
+        THEN ${input.partReplaced ?? null} ELSE revision.part_replaced END,
       replacement_part_details = CASE WHEN ${input.replacementPartDetails !== undefined}
         THEN ${nullableText(input.replacementPartDetails, 2_000)}
-        ELSE replacement_part_details END,
+        ELSE revision.replacement_part_details END,
       technician_notes = CASE WHEN ${input.technicianNotes !== undefined}
-        THEN ${nullableText(input.technicianNotes, 10_000)} ELSE technician_notes END,
+        THEN ${nullableText(input.technicianNotes, 10_000)} ELSE revision.technician_notes END,
       customer_snapshot = CASE WHEN ${input.customerSnapshot !== undefined}
-        THEN ${sql.json(databaseJson(input.customerSnapshot ?? {}))} ELSE customer_snapshot END,
+        THEN ${sql.json(databaseJson(input.customerSnapshot ?? {}))} ELSE revision.customer_snapshot END,
       product_snapshot = CASE WHEN ${input.productSnapshot !== undefined}
-        THEN ${sql.json(databaseJson(input.productSnapshot ?? {}))} ELSE product_snapshot END,
+        THEN ${sql.json(databaseJson(input.productSnapshot ?? {}))} ELSE revision.product_snapshot END,
       updated_at = CURRENT_TIMESTAMP
-    WHERE id = ${revisionId}::uuid AND status IN ('draft','review_required')
-    RETURNING id, report_id, version, status, diagnosis, work_performed,
-      part_replaced, replacement_part_details, technician_notes, finalized_at
+    WHERE revision.id = ${revisionId}::uuid
+      AND revision.status IN ('draft','review_required')
+      AND EXISTS (
+        SELECT 1 FROM service.reports report
+        WHERE report.id = revision.report_id
+          AND report.tenant_id = revision.tenant_id
+          AND report.deleted_at IS NULL
+      )
+    RETURNING revision.id, revision.report_id, revision.version, revision.status,
+      revision.diagnosis, revision.work_performed, revision.part_replaced,
+      revision.replacement_part_details, revision.technician_notes,
+      revision.finalized_at
   `;
   const row = rows[0];
   if (row === undefined)
@@ -3109,6 +3143,55 @@ export async function saveReportDraft(
     )
   `;
   return reportRevision(row);
+}
+
+/**
+ * Removes a report aggregate from normal product views while retaining its
+ * immutable revisions, evidence, and audit history.
+ */
+export async function deleteServiceReport(
+  sql: postgres.TransactionSql,
+  actorUserId: string,
+  revisionId: string,
+  requestId: string = randomUUID(),
+): Promise<DeletedServiceReport> {
+  await requireFieldService(sql);
+  const rows = await sql<{ report_id: string; case_id: string }[]>`
+    WITH selected AS (
+      SELECT report.id, report.case_id
+      FROM service.report_revisions revision
+      JOIN service.reports report
+        ON report.tenant_id = revision.tenant_id
+       AND report.id = revision.report_id
+      WHERE revision.id = ${revisionId}::uuid
+        AND revision.tenant_id = platform.current_tenant_id()
+        AND report.deleted_at IS NULL
+    ), removed AS (
+      UPDATE service.reports report SET
+        deleted_at = clock_timestamp(),
+        deleted_by_user_id = ${actorUserId}::uuid
+      FROM selected
+      WHERE report.id = selected.id
+        AND report.tenant_id = platform.current_tenant_id()
+        AND report.deleted_at IS NULL
+      RETURNING report.id AS report_id, report.case_id
+    )
+    SELECT report_id, case_id FROM removed
+  `;
+  const row = rows[0];
+  if (row === undefined) throw new ServiceReportNotFoundError();
+  await sql`
+    INSERT INTO audit.records(
+      tenant_id, actor_user_id, action, target_type, target_id,
+      request_id, metadata
+    ) VALUES (
+      platform.current_tenant_id(), ${actorUserId}::uuid,
+      'field_service.report.deleted', 'report', ${row.report_id}::uuid,
+      ${requestId},
+      ${sql.json({ caseId: row.case_id, revisionId })}
+    )
+  `;
+  return { reportId: row.report_id, caseId: row.case_id };
 }
 
 export async function linkReportAttachment(
@@ -3147,6 +3230,17 @@ export async function linkReportAttachment(
       ${nullableText(input.caption, 500)}, ${actorUserId}::uuid
     FROM objects.object_metadata object
     WHERE object.id = ${input.objectId}::uuid AND object.deleted_at IS NULL
+      AND (
+        ${input.reportRevisionId ?? null}::uuid IS NULL OR EXISTS (
+          SELECT 1
+          FROM service.report_revisions revision
+          JOIN service.reports report
+            ON report.tenant_id = revision.tenant_id
+           AND report.id = revision.report_id
+          WHERE revision.id = ${input.reportRevisionId ?? null}::uuid
+            AND report.deleted_at IS NULL
+        )
+      )
     ON CONFLICT (tenant_id, object_id, case_id) DO UPDATE SET
       caption = coalesce(EXCLUDED.caption, service.report_attachments.caption)
     RETURNING id
@@ -3596,6 +3690,7 @@ export async function finalizeReportRevision(
     JOIN service.visits visit ON visit.id = report.visit_id
     WHERE revision.id = ${revisionId}::uuid
       AND revision.status IN ('draft','review_required')
+      AND report.deleted_at IS NULL
     FOR UPDATE OF revision
   `;
   const row = rows[0];
@@ -3739,6 +3834,7 @@ export async function finalizeReportRevision(
     JOIN crm.tenant_settings settings ON settings.tenant_id = report.tenant_id
     WHERE revision.id = ${revisionId}::uuid
       AND report.id = revision.report_id
+      AND report.deleted_at IS NULL
       AND settings.tenant_id = platform.current_tenant_id()
     RETURNING revision.id, revision.report_id, revision.version, revision.status,
       revision.diagnosis, revision.work_performed, revision.part_replaced,
@@ -4672,6 +4768,7 @@ async function getServiceCaseDossierRecord(
         FROM service.report_revisions revision
         JOIN service.reports report ON report.id = revision.report_id
         WHERE report.case_id = ${caseId}::uuid
+          AND report.deleted_at IS NULL
         ORDER BY revision.created_at DESC, revision.id DESC
       `,
     sql<{ conversation_id: string }[]>`
@@ -4721,6 +4818,15 @@ async function getServiceCaseDossierRecord(
         FROM service.report_attachments attachment
         JOIN objects.object_metadata object ON object.id = attachment.object_id
         WHERE attachment.case_id = ${caseId}::uuid AND object.deleted_at IS NULL
+          AND (
+            attachment.report_revision_id IS NULL OR EXISTS (
+              SELECT 1
+              FROM service.report_revisions revision
+              JOIN service.reports report ON report.id = revision.report_id
+              WHERE revision.id = attachment.report_revision_id
+                AND report.deleted_at IS NULL
+            )
+          )
         ORDER BY attachment.created_at, attachment.id
       `,
     sql<
@@ -4744,6 +4850,15 @@ async function getServiceCaseDossierRecord(
         JOIN service.report_attachments attachment
           ON attachment.id=result.attachment_id
         WHERE attachment.case_id=${caseId}::uuid
+          AND (
+            attachment.report_revision_id IS NULL OR EXISTS (
+              SELECT 1
+              FROM service.report_revisions revision
+              JOIN service.reports report ON report.id = revision.report_id
+              WHERE revision.id = attachment.report_revision_id
+                AND report.deleted_at IS NULL
+            )
+          )
           AND result.attempt=(
             SELECT max(latest.attempt) FROM service.ocr_results latest
             WHERE latest.attachment_id=result.attachment_id
@@ -4904,6 +5019,7 @@ export async function getServiceReportDocument(
     JOIN service.reports report ON report.id=revision.report_id
     WHERE revision.id=${revisionId}::uuid
       AND revision.status IN ('finalized', 'superseded')
+      AND report.deleted_at IS NULL
   `;
   const row = rows[0];
   if (row === undefined) return undefined;

@@ -6,12 +6,12 @@ credentials. Deployment LLM variables alone never enable a paid evaluation.
 
 from __future__ import annotations
 
-import json
 import os
 from dataclasses import dataclass
 
 import httpx
 import pytest
+from oron_agent.config import load_settings
 from oron_agent.grounding import grounding_instruction, render_reply
 
 
@@ -91,9 +91,14 @@ CASES = [
 def _endpoint() -> tuple[str, str, str] | None:
     if os.environ.get("ORON_RUN_PROVIDER_EVALS", "").strip().lower() != "true":
         return None
-    base_url = os.environ.get("ORON_LLM_BASE_URL") or os.environ.get("LLM_BASE_URL", "")
-    model = os.environ.get("ORON_LLM_MODEL") or os.environ.get("LLM_MODEL", "")
-    api_key = os.environ.get("LLM_API_KEY", "")
+    settings = load_settings()
+    base_url = (
+        os.environ.get("ORON_LLM_BASE_URL")
+        or os.environ.get("LLM_BASE_URL")
+        or settings.llm_base_url
+    )
+    model = os.environ.get("ORON_LLM_MODEL") or os.environ.get("LLM_MODEL") or settings.llm_model
+    api_key = os.environ.get("LLM_API_KEY") or settings.llm_api_key.get_secret_value()
     return (base_url, model, api_key) if base_url and model and api_key else None
 
 
@@ -148,18 +153,9 @@ def test_provider_advances_support_instead_of_acknowledging(case: Case):
     choice = response.json()["choices"][0]
     raw = choice["message"]["content"]
     assert choice.get("finish_reason") == "stop", choice.get("finish_reason")
-    parsed = json.loads(raw)
-    assert isinstance(parsed, dict)
-    reply = render_reply(
-        raw,
-        [],
-        case.language,
-        latest_caller_text=case.latest_caller_text,
-        recent_spoken_texts=tuple(
-            message["content"] for message in case.history if message["role"] == "assistant"
-        ),
-    )
-    assert reply.decision in case.allowed_decisions
+    reply = render_reply(raw, [], case.language)
+    assert reply.decision == "natural_conversation"
+    assert reply.text.strip()
     assert reply.text not in {"תודה על השיתוף.", "Thank you for sharing."}
 
 

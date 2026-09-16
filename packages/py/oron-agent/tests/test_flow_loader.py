@@ -17,7 +17,7 @@ def test_english_example_declares_english():
     assert EXAMPLE_EN.flow.language == "en"
 
 
-def test_an_unscripted_entry_uses_a_deterministic_opener_before_the_llm():
+def test_an_unscripted_entry_uses_one_model_opener_policy():
     composition = Composition(
         flow=FlowMeta(id=uuid.uuid4(), version=1, language="en"),
         steps=[
@@ -28,14 +28,13 @@ def test_an_unscripted_entry_uses_a_deterministic_opener_before_the_llm():
 
     node = initial_node_from_composition(composition)
 
-    assert node["pre_actions"] == [
-        {"type": "tts_say", "text": "Hello, this is support. How can I help?"}
-    ]
-    assert node["respond_immediately"] is False
+    assert node.get("pre_actions", []) == []
+    assert node["respond_immediately"] is True
     assert "WhatsApp" in node["task_messages"][0]["content"]
+    assert "configured speech language code 'en'" in node["task_messages"][-1]["content"]
 
 
-def test_a_hebrew_unscripted_entry_is_short_neutral_and_deterministic():
+def test_an_unscripted_entry_carries_configured_language_without_a_response_table():
     composition = Composition(
         flow=FlowMeta(id=uuid.uuid4(), version=1, language="he"),
         steps=[
@@ -46,8 +45,10 @@ def test_a_hebrew_unscripted_entry_is_short_neutral_and_deterministic():
 
     node = initial_node_from_composition(composition)
 
-    assert node["pre_actions"] == [{"type": "tts_say", "text": "שלום, כאן התמיכה. איך אפשר לעזור?"}]
-    assert node["respond_immediately"] is False
+    assert node.get("pre_actions", []) == []
+    assert node["respond_immediately"] is True
+    assert "configured speech language code 'he'" in node["task_messages"][-1]["content"]
+    assert "שלום" not in node["task_messages"][-1]["content"]
 
 
 def test_a_terminal_entry_keeps_its_immediate_hangup_semantics():

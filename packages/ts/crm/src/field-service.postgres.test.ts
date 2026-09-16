@@ -9,6 +9,7 @@ import {
   createServiceCase,
   createServiceLocation,
   createServiceVisit,
+  deleteServiceReport,
   finalizeReportRevision,
   getServiceCaseDossier,
   getServiceReportDocument,
@@ -351,6 +352,60 @@ describe.skipIf(databaseUrl === undefined)(
         expect(createServiceReportWorkbook(after).equals(beforeWorkbook)).toBe(
           true,
         );
+
+        await expect(
+          deleteServiceReport(
+            sql,
+            fixture.userId,
+            report.id,
+            "signed-report-delete",
+          ),
+        ).resolves.toEqual({
+          reportId: report.reportId,
+          caseId: fixture.caseId,
+        });
+        await expect(
+          getServiceReportDocument(sql, report.id),
+        ).resolves.toBeUndefined();
+        await expect(listServiceReportPage(sql)).resolves.toMatchObject({
+          reports: [],
+        });
+        const dossier = await getServiceCaseDossier(sql, fixture.caseId);
+        expect(dossier?.reports).toEqual([]);
+        expect(dossier?.attachments).toHaveLength(2);
+        expect(
+          dossier?.attachments.every(
+            (attachment) => attachment.reportRevisionId === null,
+          ),
+        ).toBe(true);
+        const retained = await sql<
+          {
+            deleted: boolean;
+            revision_status: string;
+            linked_evidence: string;
+          }[]
+        >`
+          SELECT report.deleted_at IS NOT NULL AS deleted,
+                 revision.status AS revision_status,
+                 count(attachment.id)::text AS linked_evidence
+          FROM service.reports report
+          JOIN service.report_revisions revision
+            ON revision.report_id = report.id
+          LEFT JOIN service.report_attachments attachment
+            ON attachment.report_revision_id = revision.id
+          WHERE report.id = ${report.reportId}::uuid
+          GROUP BY report.deleted_at, revision.status
+        `;
+        expect(retained).toEqual([
+          { deleted: true, revision_status: "finalized", linked_evidence: "2" },
+        ]);
+        const audit = await sql<{ count: string }[]>`
+          SELECT count(*)::text AS count FROM audit.records
+          WHERE action = 'field_service.report.deleted'
+            AND target_id = ${report.reportId}::uuid
+            AND request_id = 'signed-report-delete'
+        `;
+        expect(audit).toEqual([{ count: "1" }]);
       }));
 
     it("keeps read-only AI suggestions unbooked while manual scheduling remains available", async () =>

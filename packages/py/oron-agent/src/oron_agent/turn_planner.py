@@ -1,16 +1,14 @@
-"""Plan one complete LLM turn before it reaches text-to-speech.
+"""Stream model text to speech at natural semantic boundaries.
 
-Pipecat applies TTS text filters after sentence/clause aggregation. A filter
-there cannot repair a boundary that the aggregator has already emitted, and a
-terminal full stop is deliberately stripped for Soniox. This processor holds
-the already-bounded LLM turn, repairs it once with full context, and emits one
-AggregatedTextFrame. TTS therefore receives an internal full stop between an
-answer and its question, while the assistant transcript sees the same text.
+The chunker waits for a sentence, a substantial clause, or a bounded amount of
+text. It never sends individual model tokens to TTS, and it does not wait for a
+complete multi-sentence answer before the first synthesis request.
 """
+
+from __future__ import annotations
 
 import time
 
-from oron_hebrew.filters import normalize_question_boundary
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     Frame,
@@ -23,58 +21,112 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.utils.text.base_text_aggregator import AggregationType
 
+_SENTENCE_MARKS = frozenset(".!?؟\n")
+_CLAUSE_MARKS = frozenset(",;،—–")
 
-class HebrewTurnPlanner(FrameProcessor):
-    """Collapse a streamed, spoken LLM response into one canonical utterance.
 
-    The live model is capped at 256 output tokens and instructed to produce no
-    more than two short sentences. Waiting for its end frame is consequently
-    bounded, while avoiding an irreversible early clause send.
-    """
+class NaturalTurnChunker(FrameProcessor):
+    """Emit cancellable, generation-tagged speech chunks from one LLM stream."""
 
-    def __init__(self, *, max_chars: int = 8192, **kwargs):
+    def __init__(
+        self,
+        *,
+        min_clause_chars: int = 48,
+        max_chunk_chars: int = 220,
+        max_turn_chars: int = 8192,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
-        if max_chars < 1:
-            raise ValueError("max_chars must be positive")
-        self._max_chars = max_chars
+        if not 8 <= min_clause_chars <= max_chunk_chars <= max_turn_chars:
+            raise ValueError("invalid conversational chunk limits")
+        self._min_clause_chars = min_clause_chars
+        self._max_chunk_chars = max_chunk_chars
+        self._max_turn_chars = max_turn_chars
         self._generation = 0
         self._started_ns = 0
         self._first_token_ns: int | None = None
-        self._length = 0
-        self._overflow = False
-        self._parts: list[str] = []
+        self._buffer = ""
+        self._total_chars = 0
         self._collecting = False
         self._function_call_started = False
         self._pending_function_call = False
         self._skip_tts = False
+        self._emitted = False
 
     def _reset_turn(self) -> None:
-        self._parts = []
+        self._buffer = ""
+        self._total_chars = 0
         self._collecting = False
         self._function_call_started = False
         self._skip_tts = False
+        self._emitted = False
         self._first_token_ns = None
-        self._length = 0
-        self._overflow = False
+
+    def _next_boundary(self, *, final: bool) -> int | None:
+        text = self._buffer
+        if not text:
+            return None
+        # Evidence selectors must remain one complete JSON object for the
+        # downstream validator. Ordinary conversational text streams.
+        if text.lstrip().startswith("{"):
+            return len(text) if final else None
+        for index, char in enumerate(text):
+            length = index + 1
+            if char in _SENTENCE_MARKS and length >= 8:
+                return length
+            if char in _CLAUSE_MARKS and length >= self._min_clause_chars:
+                return length
+        if len(text) >= self._max_chunk_chars:
+            split = text.rfind(" ", self._min_clause_chars, self._max_chunk_chars + 1)
+            return split + 1 if split >= self._min_clause_chars else self._max_chunk_chars
+        return len(text) if final else None
+
+    async def _flush_ready(self, *, final: bool) -> None:
+        while (boundary := self._next_boundary(final=final)) is not None:
+            chunk, self._buffer = self._buffer[:boundary], self._buffer[boundary:]
+            chunk = chunk.strip()
+            if not chunk:
+                if not self._buffer:
+                    return
+                continue
+            planned = AggregatedTextFrame(
+                chunk,
+                AggregationType.SENTENCE,
+                raw_text=chunk,
+            )
+            planned.metadata.update(
+                voice_generation=self._generation,
+                voice_text_state="authored",
+                voice_delivery_state="streaming_chunk",
+                planner_ms=(time.monotonic_ns() - self._started_ns) / 1_000_000,
+                model_first_token_ms=(
+                    (self._first_token_ns - self._started_ns) / 1_000_000
+                    if self._first_token_ns is not None
+                    else None
+                ),
+            )
+            self._emitted = True
+            await self.push_frame(planned, FrameDirection.DOWNSTREAM)
+            if not final:
+                # One chunk per token arrival keeps ordering fair while the
+                # provider/TTS tasks run; later text will trigger the next flush.
+                return
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
-
         if direction is not FrameDirection.DOWNSTREAM:
             await self.push_frame(frame, direction)
             return
-
         if isinstance(frame, InterruptionFrame):
             self._generation += 1
             self._reset_turn()
             self._pending_function_call = False
             await self.push_frame(frame, direction)
             return
-
         if isinstance(frame, LLMFullResponseStartFrame):
-            pending_function_call = self._pending_function_call
+            pending = self._pending_function_call
             self._reset_turn()
-            self._function_call_started = pending_function_call
+            self._function_call_started = pending
             self._pending_function_call = False
             self._generation += 1
             self._started_ns = time.monotonic_ns()
@@ -83,81 +135,48 @@ class HebrewTurnPlanner(FrameProcessor):
             frame.metadata["voice_generation"] = self._generation
             await self.push_frame(frame, direction)
             return
-
         if self._collecting and isinstance(frame, LLMTextFrame):
             if self._first_token_ns is None:
                 self._first_token_ns = time.monotonic_ns()
             if self._skip_tts or frame.skip_tts:
                 await self.push_frame(frame, direction)
-            else:
-                # LLMTextFrame carries its own inter-frame whitespace. Joining
-                # exactly mirrors the text TTS's character aggregator receives.
-                self._length += len(frame.text)
-                if self._length > self._max_chars:
-                    self._parts = []
-                    self._overflow = True
-                elif not self._overflow:
-                    self._parts.append(frame.text)
+                return
+            self._total_chars += len(frame.text)
+            if self._total_chars <= self._max_turn_chars:
+                self._buffer += frame.text
+                await self._flush_ready(final=False)
             return
-
         if isinstance(frame, FunctionCallsStartedFrame):
-            # A tool-only turn is intentionally silent; the transition target
-            # owns the next spoken line. Remember it so an empty-completion
-            # recovery does not talk over or duplicate that transition. This
-            # is a priority SystemFrame and can overtake the response-start
-            # ControlFrame, so retain an early signal for that next start.
             if self._collecting:
                 self._function_call_started = True
+                self._buffer = ""
             else:
                 self._pending_function_call = True
             await self.push_frame(frame, direction)
             return
-
         if isinstance(frame, LLMTextFrame):
-            # Late tokens from a cancelled generation must not bypass full-turn
-            # validation merely because there is no longer an open buffer.
+            # Never let a late token from a cancelled generation bypass the
+            # chunk validator and ownership gates.
             return
-
         if isinstance(frame, LLMFullResponseEndFrame) and self._collecting:
-            if not self._skip_tts:
-                planned = (
-                    "התשובה ארוכה מדי למסירה בטוחה. אפשר להתמקד בשאלה אחת?"
-                    if self._overflow
-                    else "".join(self._parts)
-                )
-                if not planned.strip() and not self._function_call_started:
-                    # Some compatible providers can finish with zero content
-                    # and no tool call (for example after provider-side safety
-                    # suppression). Silence is not a usable phone response.
-                    # Emit a typed selector, not invented prose: the downstream
-                    # evidence gate renders its locale-aware safe clarification.
-                    planned = '{"kind":"conversation","intent":"clarify"}'
-                # The evidence gate parses structured selectors after this
-                # buffer. Never insert spoken punctuation inside model JSON.
-                if not planned.lstrip().startswith("{"):
-                    planned = normalize_question_boundary(planned)
-                if planned.strip():
-                    planned_frame = AggregatedTextFrame(
-                        planned,
-                        AggregationType.SENTENCE,
-                        raw_text=planned,
+            if not self._skip_tts and not self._function_call_started:
+                if self._total_chars > self._max_turn_chars:
+                    self._buffer = (
+                        "That answer became too long for a voice reply. "
+                        "What should we focus on first?"
                     )
-                    planned_frame.metadata.update(frame.metadata)
-                    planned_frame.metadata.update(
-                        voice_generation=self._generation,
-                        voice_text_state="authored",
-                        voice_delivery_state="generated",
-                        planner_ms=(time.monotonic_ns() - self._started_ns) / 1_000_000,
-                        model_first_token_ms=(
-                            (self._first_token_ns - self._started_ns) / 1_000_000
-                            if self._first_token_ns is not None
-                            else None
-                        ),
+                elif not self._buffer.strip() and not self._emitted:
+                    self._buffer = (
+                        "Sorry, I lost the thread for a moment. Could you say that again?"
                     )
-                    await self.push_frame(planned_frame, direction)
+                await self._flush_ready(final=True)
             self._reset_turn()
             self._pending_function_call = False
             await self.push_frame(frame, direction)
             return
-
         await self.push_frame(frame, direction)
+
+
+# Retain the import name used by the existing pipeline while removing the old
+# Hebrew-specific behavior from the implementation.
+HebrewTurnPlanner = NaturalTurnChunker
