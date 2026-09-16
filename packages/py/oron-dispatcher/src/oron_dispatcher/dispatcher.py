@@ -174,7 +174,7 @@ class Dispatcher:
         caller_gender: Literal["male", "female"] | None = None,
         contact_id: UUID | None = None,
         source_conversation_id: UUID | None = None,
-        conversation_context: str | None = None,
+        handoff_id: UUID | None = None,
         overrides: Mapping[str, object] | None = None,
     ) -> DispatchResult:
         normalized = validate_e164(phone_number)
@@ -196,7 +196,7 @@ class Dispatcher:
             caller_gender=caller_gender,
             contact_id=contact_id,
             source_conversation_id=source_conversation_id,
-            conversation_context=conversation_context,
+            handoff_id=handoff_id,
         )
         if active := self._active.get(room):
             binding_fields = (
@@ -207,7 +207,7 @@ class Dispatcher:
                 "caller_gender",
                 "contact_id",
                 "source_conversation_id",
-                "conversation_context",
+                "handoff_id",
             )
             if any(
                 getattr(active.context, field) != getattr(context, field)

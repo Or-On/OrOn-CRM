@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 
-import { updateCurrentTenantName, updateTenantSettings } from "@or-on/crm";
+import {
+  updateCurrentTenantName,
+  updateTenantSettings,
+  type IdentityVerificationPolicy,
+  type TenantSupportProfile,
+} from "@or-on/crm";
 
 import {
   jsonObject,
@@ -37,7 +42,15 @@ export async function PATCH(request: Request) {
       ) ||
       (body.accentToken !== undefined &&
         body.accentToken !== null &&
-        typeof body.accentToken !== "string")
+        typeof body.accentToken !== "string") ||
+      (body.supportProfile !== undefined &&
+        (body.supportProfile === null ||
+          typeof body.supportProfile !== "object" ||
+          Array.isArray(body.supportProfile))) ||
+      (body.identityVerification !== undefined &&
+        (body.identityVerification === null ||
+          typeof body.identityVerification !== "object" ||
+          Array.isArray(body.identityVerification)))
     ) {
       throw new TypeError("invalid workspace settings");
     }
@@ -77,6 +90,18 @@ export async function PATCH(request: Request) {
         ...(body.reportFooter === undefined
           ? {}
           : { reportFooter: body.reportFooter as string | null }),
+        ...(body.supportProfile === undefined
+          ? {}
+          : {
+              supportProfile:
+                body.supportProfile as unknown as TenantSupportProfile,
+            }),
+        ...(body.identityVerification === undefined
+          ? {}
+          : {
+              identityVerification:
+                body.identityVerification as unknown as IdentityVerificationPolicy,
+            }),
       });
       const tenantName = await updateCurrentTenantName(
         sql,

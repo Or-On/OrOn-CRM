@@ -310,7 +310,7 @@ async def test_durable_admission_replay_concurrency_and_quality_summary(isolated
             {"to_number": "+12025550124"},
             {"flow_version": 2},
             {"caller_gender": "female"},
-            {"conversation_context": "Changed caller claim"},
+            {"contact_id": uuid4()},
         ]:
             with pytest.raises(IdempotencyConflict):
                 await runtime.begin(

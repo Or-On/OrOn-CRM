@@ -68,6 +68,11 @@ from oron_agent.flows.resolve import StoredFlowUnavailable, resolve_flow_spec
 from oron_agent.grounding import VoiceEvidenceContext, VoiceEvidenceGate
 from oron_agent.hangup import hangup_room
 from oron_agent.hold_opener import HoldOpener
+from oron_agent.identity_verification import (
+    IdentityVerificationRequirements,
+    identity_verification_entry,
+    unlocked_handoff_entry,
+)
 from oron_agent.idle import UserIdlePoker
 from oron_agent.language import language_profile
 from oron_agent.llm import LlmProvider, build_llm, warm_prompt_cache
@@ -79,6 +84,7 @@ from oron_agent.runtime_sessions import RuntimeSessions
 from oron_agent.session_recorder import SessionRecorder, finish_after_cancellation
 from oron_agent.spoken_safety import BusinessClaimGuardFilter
 from oron_agent.storage import build_artifact_store, save_audio_file
+from oron_agent.text_diagnostics import VoiceTextDiagnostics
 from oron_agent.tokens import mint_room_token
 from oron_agent.tool_call_guard import HallucinatedToolCallGuard
 from oron_agent.tracing import conversation_span_attributes, setup_process_tracing
@@ -95,7 +101,6 @@ from oron_agent.voice_quality import (
     build_soniox_context,
     make_speech_transformer,
 )
-from oron_agent.whatsapp_context import apply_whatsapp_context_to_flow
 
 
 class RealVoiceProvidersDenied(RuntimeError):
@@ -208,6 +213,39 @@ async def run_bot(
         quality = {}
     knowledge_reader = getattr(sessions, "get_voice_knowledge", None)
     agent_version_id = configuration.get("agentVersionId")
+    verification_requirements: IdentityVerificationRequirements | None = None
+    verify_identity = getattr(sessions, "verify_caller_identity", None)
+    load_handoff_context = getattr(sessions, "get_verified_handoff_context", None)
+    if ctx.handoff_id is not None:
+        requirements_reader = getattr(sessions, "get_identity_verification_requirements", None)
+        if requirements_reader is None or verify_identity is None or load_handoff_context is None:
+            raise StoredFlowUnavailable("secure handoff verification runtime is unavailable")
+        verification_requirements = IdentityVerificationRequirements.model_validate(
+            await requirements_reader(ctx)
+        )
+    verification_runtime_state = {
+        "state": (
+            verification_requirements.state
+            if verification_requirements is not None
+            else "context_unlocked"
+        )
+    }
+    session_dir = SessionDir(ctx.session_id)
+    text_diagnostics = (
+        VoiceTextDiagnostics(
+            session_dir.text_diagnostics,
+            session_id=ctx.session_id,
+            tenant_id=ctx.tenant_id,
+            handoff_id=ctx.handoff_id,
+            verification_state=(
+                verification_requirements.state
+                if verification_requirements is not None
+                else "context_unlocked"
+            ),
+        )
+        if st.text_diagnostics_enabled
+        else None
+    )
 
     async def load_knowledge() -> list[dict]:
         if knowledge_reader is None or not agent_version_id:
@@ -233,8 +271,6 @@ async def run_bot(
             **quality,
         }
     )
-    if ctx.conversation_context:
-        spec = apply_whatsapp_context_to_flow(spec, ctx.conversation_context)
     # Only now is the flow known, so only now can its voice be applied — under
     # the console's per-call knobs, over the deployment's defaults. The sessions
     # client above is built from credentials no override may touch.
@@ -401,7 +437,13 @@ async def run_bot(
         # HebrewNormalizeFilter then does the spoken-form rules and drops emoji.
         text_filters=[
             MarkdownTextFilter(),
-            BusinessClaimGuardFilter(lambda: conversation_language.current),
+            BusinessClaimGuardFilter(
+                lambda: conversation_language.current,
+                lambda: (
+                    verification_runtime_state["state"]
+                    in {"identity_required", "collecting_identity", "verifying_identity"}
+                ),
+            ),
         ],
         text_aggregation_mode=st.tts_text_aggregation,
         first_clause=st.tts_first_clause,
@@ -429,6 +471,15 @@ async def run_bot(
             pronunciations={"Or-On": "אוֹר אוֹן", **spec.pronunciations},
         )
     )
+    if text_diagnostics is not None:
+
+        async def capture_tts_input(text: str, _aggregation_type: object) -> str:
+            text_diagnostics.record_tts(text)
+            return text
+
+        # Last transformer: this is the exact normalized text handed to the
+        # provider, after terminology and Hebrew pronunciation processing.
+        tts.add_text_transformer(capture_tts_input)
 
     initial_messages: list[LLMContextMessage] | None = (
         [
@@ -460,7 +511,6 @@ async def run_bot(
     tool_call_guard = HallucinatedToolCallGuard()
     turn_planner = HebrewTurnPlanner()
     # Artifacts are staged locally during the call and uploaded at teardown.
-    session_dir = SessionDir(ctx.session_id)
     transcript_handler = TranscriptHandler(output_file=session_dir.transcript)
     # Stereo: caller on the left channel, agent on the right. A mixed mono file
     # cannot be scored for turn-taking, barge-in, or per-speaker audio quality,
@@ -632,6 +682,8 @@ async def run_bot(
     @context_aggregator.user().event_handler("on_user_turn_stopped")
     async def on_user_turn_stopped(aggregator, strategy, message):
         if message.content:
+            if text_diagnostics is not None:
+                text_diagnostics.record_stt(message.content, conversation_language.current)
             await transcript_handler.save_message(
                 TranscriptMessage(
                     role="user",
@@ -654,6 +706,8 @@ async def run_bot(
     @context_aggregator.assistant().event_handler("on_assistant_turn_stopped")
     async def on_assistant_turn_stopped(aggregator, message):
         if message.content:
+            if text_diagnostics is not None:
+                text_diagnostics.record_llm(message.content)
             await transcript_handler.save_message(
                 TranscriptMessage(
                     role="assistant",
@@ -681,6 +735,11 @@ async def run_bot(
             await audiobuffer.stop_recording()
             await asyncio.sleep(2)
             await transcript_handler.finalize()
+            if text_diagnostics is not None:
+                try:
+                    await text_diagnostics.finalize(quality_observer.snapshot())
+                except OSError:
+                    logger.warning("voice text diagnostics could not be persisted")
             quality_writer = getattr(sessions, "record_voice_quality", None)
             if quality_writer is not None:
                 try:
@@ -735,11 +794,34 @@ async def run_bot(
         if voice_control is not None:
             await voice_control.refresh()
             worker.create_task(voice_control.run())
-        await flow_manager.initialize(
-            initial_node_from_spec(
-                spec, action_guard=voice_control.action if voice_control else None
-            )
-        )
+        action_guard = voice_control.action if voice_control else None
+        entry = initial_node_from_spec(spec, action_guard=action_guard)
+        if verification_requirements is not None:
+            if verify_identity is None or load_handoff_context is None:
+                raise StoredFlowUnavailable("secure handoff verification runtime is unavailable")
+
+            async def submit_identity(values: dict[str, object]) -> dict:
+                result = await verify_identity(ctx, values)
+                if isinstance(result.get("state"), str):
+                    verification_runtime_state["state"] = result["state"]
+                    if text_diagnostics is not None:
+                        text_diagnostics.set_verification_state(result["state"])
+                return result
+
+            async def fetch_unlocked_context() -> dict:
+                return await load_handoff_context(ctx)
+
+            if verification_requirements.state == "context_unlocked":
+                entry = unlocked_handoff_entry(entry, await fetch_unlocked_context())
+            else:
+                entry = identity_verification_entry(
+                    verification_requirements,
+                    entry,
+                    verify=submit_identity,
+                    load_context=fetch_unlocked_context,
+                    action_guard=action_guard,
+                )
+        await flow_manager.initialize(entry)
         max_session_seconds = quality.get("budgets", {}).get("maxSessionSeconds", 1800)
         if not isinstance(max_session_seconds, int) or isinstance(max_session_seconds, bool):
             max_session_seconds = 1800

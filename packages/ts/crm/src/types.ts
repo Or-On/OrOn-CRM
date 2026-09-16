@@ -209,6 +209,41 @@ export interface TenantSettings {
     "blue" | "cyan" | "emerald" | "violet" | "amber" | "rose" | null;
   readonly reportHeader?: string | null;
   readonly reportFooter?: string | null;
+  readonly supportProfile?: TenantSupportProfile;
+  readonly identityVerification?: IdentityVerificationPolicy;
+}
+
+export interface TenantTerminologyEntry {
+  readonly term: string;
+  readonly preferredTerm?: string;
+  readonly pronunciation?: string;
+  readonly language?: string;
+}
+
+export interface TenantSupportProfile {
+  readonly schemaVersion: "1.0";
+  readonly displayName?: string;
+  readonly supportDisplayName?: string;
+  readonly legalName?: string;
+  readonly businessDescription?: string;
+  readonly productsAndServices?: readonly string[];
+  readonly authorizedAffiliations?: readonly string[];
+  readonly primaryLanguage?: string;
+  readonly supportedLanguages?: readonly string[];
+  readonly timezone?: string;
+  readonly businessHours?: Readonly<Record<string, JsonValue>>;
+  readonly terminology?: readonly TenantTerminologyEntry[];
+}
+
+export interface IdentityVerificationPolicy {
+  readonly schemaVersion: "1.0";
+  readonly enabled: boolean;
+  readonly requiredFactors: readonly (
+    "fullName" | "phone" | "nationalId" | "customerNumber"
+  )[];
+  readonly maxAttempts: number;
+  readonly onFailure: "human_handoff" | "end_call";
+  readonly contextDisclosure: "after_verification";
 }
 
 export interface StoredIdentityImage {

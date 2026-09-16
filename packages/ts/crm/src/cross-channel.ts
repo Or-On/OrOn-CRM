@@ -1002,6 +1002,19 @@ export async function queueWhatsAppAutomaticCall(
   if (available[0]?.available !== true)
     throw new TypeError("published retained voice flow is unavailable");
 
+  // One canonical handoff owns the complete channel transition. The voice
+  // session will bind itself to this exact record before any customer context
+  // can be read; a retry reuses it through the existing idempotency contract.
+  const handoff = await requestHandoff(
+    sql,
+    actorUserId,
+    candidate.contact_id,
+    "whatsapp",
+    "Customer requested a secure WhatsApp-to-voice continuation.",
+    `automatic-call:${idempotencyKey}`,
+    { conversationId },
+  );
+
   const payload = {
     actorUserId,
     contactIdentityId: candidate.contact_identity_id,
@@ -1010,6 +1023,7 @@ export async function queueWhatsAppAutomaticCall(
     destination: candidate.destination,
     flowId,
     flowVersion,
+    handoffId: handoff.id,
     mode: "real",
     ownershipEpoch: candidate.ownership_epoch,
     agentVersionId: candidate.agent_version_id,

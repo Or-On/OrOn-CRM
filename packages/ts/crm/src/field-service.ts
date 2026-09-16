@@ -293,6 +293,54 @@ export class ServiceReportNotFoundError extends Error {
   }
 }
 
+export interface TechnicianBriefing {
+  readonly customer: {
+    readonly name: string;
+    readonly preferredLanguage: string | null;
+    readonly locationName: string | null;
+    readonly locationAddress: string | null;
+  };
+  readonly issue: {
+    readonly title: string;
+    readonly description: string;
+    readonly priority: ServiceCaseSummary["priority"];
+    readonly warrantyStatus: WarrantyStatus;
+    readonly productType: string | null;
+    readonly productModel: string | null;
+    readonly serialNumber: string | null;
+  };
+  readonly nextAppointment: {
+    readonly startsAt: string;
+    readonly endsAt: string;
+    readonly timezone: string;
+    readonly technicianName: string;
+    readonly notes: string | null;
+  } | null;
+  readonly currentVisits: readonly {
+    readonly visitNumber: number;
+    readonly status: ServiceVisit["status"];
+    readonly technicianName: string;
+    readonly arrivalAt: string | null;
+    readonly departureAt: string | null;
+  }[];
+  readonly whatsappSummary: string | null;
+  readonly voiceSummary: string | null;
+  readonly previousService: readonly {
+    readonly caseReference: string;
+    readonly caseTitle: string;
+    readonly productType: string | null;
+    readonly productModel: string | null;
+    readonly serialNumber: string | null;
+    readonly visitNumber: number;
+    readonly visitStatus: ServiceVisit["status"];
+    readonly technicianName: string;
+    readonly servicedAt: string;
+    readonly diagnosis: string | null;
+    readonly workPerformed: string | null;
+    readonly replacementPartDetails: string | null;
+  }[];
+}
+
 export interface ServiceCaseDossier {
   readonly serviceCase: ServiceCaseSummary;
   readonly customer: CustomerDossier;
@@ -317,6 +365,16 @@ export interface ServiceCaseDossier {
     readonly transcriptObjectId: string | null;
     readonly recordingStatus: "available" | "missing";
     readonly transcriptStatus: "available" | "missing";
+    readonly outcomeDetail: {
+      readonly status: string | null;
+      readonly summary: string | null;
+      readonly issue: string | null;
+      readonly resolution: string | null;
+      readonly unresolvedItems: readonly string[];
+      readonly nextAction: string | null;
+      readonly escalation: string | null;
+      readonly technicianRequired: boolean | null;
+    } | null;
   }[];
   readonly attachments: readonly ServiceAttachmentSummary[];
   readonly ocrResults?: readonly ServiceOcrSummary[];
@@ -335,6 +393,8 @@ export interface ServiceCaseDossier {
     readonly action: string;
     readonly occurredAt: string;
   }[];
+  /** A bounded, structured pre-visit view; never an unfiltered transcript. */
+  readonly technicianBriefing: TechnicianBriefing;
 }
 
 export interface ServiceCaseLinkCandidates {
@@ -4722,6 +4782,7 @@ async function getServiceCaseDossierRecord(
     attachments,
     ocrResults,
     statusHistory,
+    previousService,
   ] = await Promise.all([
     getCustomerDossier(sql, serviceCaseRecord.customerContactId),
     listServiceAppointmentRecords(sql, caseId),
@@ -4739,13 +4800,20 @@ async function getServiceCaseDossierRecord(
         departure_signature_object_id: string | null;
         arrival_identity: Readonly<Record<string, unknown>> | null;
         departure_identity: Readonly<Record<string, unknown>> | null;
+        technician_full_name: string;
       }[]
     >`
-        SELECT id, case_id, appointment_id, technician_id, visit_number,
-               status, arrival_at, departure_at, arrival_signature_object_id,
-               departure_signature_object_id, arrival_identity, departure_identity
-        FROM service.visits WHERE case_id = ${caseId}::uuid
-        ORDER BY visit_number, id
+        SELECT visit.id, visit.case_id, visit.appointment_id,
+               visit.technician_id, visit.visit_number, visit.status,
+               visit.arrival_at, visit.departure_at,
+               visit.arrival_signature_object_id,
+               visit.departure_signature_object_id, visit.arrival_identity,
+               visit.departure_identity,
+               technician.full_name AS technician_full_name
+        FROM service.visits visit
+        JOIN service.technicians technician ON technician.id=visit.technician_id
+        WHERE visit.case_id = ${caseId}::uuid
+        ORDER BY visit.visit_number, visit.id
       `,
     sql<
       {
@@ -4878,6 +4946,76 @@ async function getServiceCaseDossierRecord(
         WHERE case_id = ${caseId}::uuid
         ORDER BY occurred_at, id
       `,
+    sql<
+      {
+        case_reference: string;
+        case_title: string;
+        product_type: string | null;
+        product_model: string | null;
+        serial_number: string | null;
+        visit_number: number;
+        visit_status: ServiceVisit["status"];
+        technician_name: string;
+        serviced_at: Date;
+        diagnosis: string | null;
+        work_performed: string | null;
+        replacement_part_details: string | null;
+      }[]
+    >`
+        SELECT previous.reference AS case_reference,
+               previous.title AS case_title,
+               previous.product_type,
+               previous.product_model,
+               previous.serial_number,
+               previous_visit.visit_number,
+               previous_visit.status AS visit_status,
+               technician.full_name AS technician_name,
+               coalesce(
+                 revision.finalized_at,
+                 previous_visit.departure_at,
+                 previous_visit.arrival_at,
+                 previous.updated_at
+               ) AS serviced_at,
+               revision.diagnosis,
+               revision.work_performed,
+               revision.replacement_part_details
+        FROM service.cases previous
+        JOIN service.visits previous_visit ON previous_visit.case_id=previous.id
+        JOIN service.technicians technician
+          ON technician.id=previous_visit.technician_id
+        LEFT JOIN service.reports report
+          ON report.visit_id=previous_visit.id AND report.deleted_at IS NULL
+        LEFT JOIN LATERAL (
+          SELECT candidate.diagnosis, candidate.work_performed,
+                 candidate.replacement_part_details, candidate.finalized_at
+          FROM service.report_revisions candidate
+          WHERE candidate.report_id=report.id
+            AND candidate.status IN ('finalized','superseded')
+          ORDER BY candidate.version DESC, candidate.id DESC
+          LIMIT 1
+        ) revision ON true
+        WHERE previous.customer_contact_id=${serviceCaseRecord.customerContactId}::uuid
+          AND previous.id<>${caseId}::uuid
+          AND (
+            (${serviceCaseRecord.serialNumber}::text IS NOT NULL
+              AND previous.serial_number=${serviceCaseRecord.serialNumber}::text)
+            OR (
+              ${serviceCaseRecord.serialNumber}::text IS NULL
+              AND ${serviceCaseRecord.productModel}::text IS NOT NULL
+              AND previous.product_model=${serviceCaseRecord.productModel}::text
+            )
+            OR (
+              ${serviceCaseRecord.serialNumber}::text IS NULL
+              AND ${serviceCaseRecord.productModel}::text IS NULL
+              AND (
+                ${serviceCaseRecord.productType}::text IS NULL
+                OR previous.product_type=${serviceCaseRecord.productType}::text
+              )
+            )
+          )
+        ORDER BY serviced_at DESC, previous.id DESC, previous_visit.id DESC
+        LIMIT 5
+      `,
   ]);
   if (customer === undefined)
     throw new Error("Case customer could not be read");
@@ -4903,16 +5041,43 @@ async function getServiceCaseDossierRecord(
             ended_at: Date | null;
             recording_object_id: string | null;
             transcript_object_id: string | null;
+            outcome_detail: unknown;
           }[]
         >`
           SELECT session_id, status, direction::text, outcome, answered,
                  created_at AS started_at, ended_at, recording_object_id,
-                 transcript_object_id
+                 transcript_object_id, outcome_detail
           FROM public.sessions
           WHERE session_id = ANY(${calls.map((row) => row.session_id)}::uuid[])
           ORDER BY started_at, session_id
         `,
   ]);
+  const mappedSummaries = summaries.map((row) => ({
+    sourceKind: row.source_kind,
+    status: row.status,
+    summary: row.summary,
+  }));
+  const nextAppointment = [...appointments]
+    .filter(
+      (appointment) =>
+        appointment.approvalStatus === "approved" &&
+        !["completed", "cancelled"].includes(appointment.status),
+    )
+    .sort((left, right) => left.startsAt.localeCompare(right.startsAt))[0];
+  const whatsappSummary =
+    mappedSummaries.find(
+      (summary) =>
+        summary.sourceKind === "whatsapp" && summary.summary !== null,
+    )?.summary ?? null;
+  const voiceSummary =
+    mappedSummaries.find(
+      (summary) => summary.sourceKind === "call" && summary.summary !== null,
+    )?.summary ??
+    [...callHistory]
+      .reverse()
+      .map((call) => voiceOutcomeDetail(call.outcome_detail)?.summary)
+      .find((summary) => summary !== null && summary !== undefined) ??
+    null;
   return {
     serviceCase: serviceCaseRecord,
     customer,
@@ -4936,6 +5101,7 @@ async function getServiceCaseDossierRecord(
         row.recording_object_id === null ? "missing" : "available",
       transcriptStatus:
         row.transcript_object_id === null ? "missing" : "available",
+      outcomeDetail: voiceOutcomeDetail(row.outcome_detail),
     })),
     attachments: attachments.map((row) => ({
       id: row.id,
@@ -4967,15 +5133,62 @@ async function getServiceCaseDossierRecord(
       reason: row.reason,
       changedAt: row.changed_at.toISOString(),
     })),
-    summaries: summaries.map((row) => ({
-      sourceKind: row.source_kind,
-      status: row.status,
-      summary: row.summary,
-    })),
+    summaries: mappedSummaries,
     audit: audit.map((row) => ({
       action: row.action,
       occurredAt: row.occurred_at.toISOString(),
     })),
+    technicianBriefing: {
+      customer: {
+        name: serviceCaseRecord.customerName,
+        preferredLanguage: customer.preferredLanguage,
+        locationName: serviceCaseRecord.serviceLocationName,
+        locationAddress:
+          serviceCaseRecord.serviceLocationAddress ?? customer.address,
+      },
+      issue: {
+        title: serviceCaseRecord.title,
+        description: serviceCaseRecord.faultDescription,
+        priority: serviceCaseRecord.priority,
+        warrantyStatus: serviceCaseRecord.warrantyStatus,
+        productType: serviceCaseRecord.productType,
+        productModel: serviceCaseRecord.productModel,
+        serialNumber: serviceCaseRecord.serialNumber,
+      },
+      nextAppointment:
+        nextAppointment === undefined
+          ? null
+          : {
+              startsAt: nextAppointment.startsAt,
+              endsAt: nextAppointment.endsAt,
+              timezone: nextAppointment.timezone,
+              technicianName: nextAppointment.technicianName,
+              notes: nextAppointment.notes,
+            },
+      currentVisits: visits.map((row) => ({
+        visitNumber: row.visit_number,
+        status: row.status,
+        technicianName: row.technician_full_name,
+        arrivalAt: row.arrival_at?.toISOString() ?? null,
+        departureAt: row.departure_at?.toISOString() ?? null,
+      })),
+      whatsappSummary,
+      voiceSummary,
+      previousService: previousService.map((row) => ({
+        caseReference: row.case_reference,
+        caseTitle: row.case_title,
+        productType: row.product_type,
+        productModel: row.product_model,
+        serialNumber: row.serial_number,
+        visitNumber: row.visit_number,
+        visitStatus: row.visit_status,
+        technicianName: row.technician_name,
+        servicedAt: row.serviced_at.toISOString(),
+        diagnosis: row.diagnosis,
+        workPerformed: row.work_performed,
+        replacementPartDetails: row.replacement_part_details,
+      })),
+    },
   };
 }
 
@@ -4983,6 +5196,29 @@ function objectRecord(value: unknown): Readonly<Record<string, unknown>> {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Readonly<Record<string, unknown>>)
     : {};
+}
+
+function voiceOutcomeDetail(
+  value: unknown,
+): ServiceCaseDossier["calls"][number]["outcomeDetail"] | null {
+  const detail = objectRecord(value);
+  if (Object.keys(detail).length === 0) return null;
+  const unresolved = detail.unresolvedItems;
+  return {
+    status: recordText(detail, "status"),
+    summary: recordText(detail, "summary"),
+    issue: recordText(detail, "issue"),
+    resolution: recordText(detail, "resolution"),
+    unresolvedItems: Array.isArray(unresolved)
+      ? unresolved.filter((item): item is string => typeof item === "string")
+      : [],
+    nextAction: recordText(detail, "nextAction"),
+    escalation: recordText(detail, "escalation"),
+    technicianRequired:
+      typeof detail.technicianRequired === "boolean"
+        ? detail.technicianRequired
+        : null,
+  };
 }
 
 function recordText(

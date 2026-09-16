@@ -195,14 +195,17 @@ def test_outbound_contract_forwards_the_validated_address_form() -> None:
     dispatcher = _dispatcher()
     ledger = FakeLedger()
     conversation_id = uuid4()
+    contact_id = uuid4()
+    handoff_id = uuid4()
     request = {
         "phone_number": "+14155550100",
         "caller_gender": "female",
         "flow_id": str(uuid4()),
         "idempotency_key": "request-voice-form",
         "explicit_approval": True,
+        "contact_id": str(contact_id),
         "source_conversation_id": str(conversation_id),
-        "conversation_context": "Customer: Please call me now.",
+        "handoff_id": str(handoff_id),
     }
     headers = {
         "Authorization": f"Bearer {_service_token()}",
@@ -218,10 +221,8 @@ def test_outbound_contract_forwards_the_validated_address_form() -> None:
         dispatcher.place_outbound_call.await_args.kwargs["source_conversation_id"]
         == conversation_id
     )
-    assert (
-        dispatcher.place_outbound_call.await_args.kwargs["conversation_context"]
-        == "Customer: Please call me now."
-    )
+    assert dispatcher.place_outbound_call.await_args.kwargs["contact_id"] == contact_id
+    assert dispatcher.place_outbound_call.await_args.kwargs["handoff_id"] == handoff_id
 
 
 def test_outbound_contract_accepts_no_guessed_caller_gender() -> None:

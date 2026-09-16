@@ -308,6 +308,55 @@ describe("tenant settings repository", () => {
     ).rejects.toThrow("valid IANA time-zone name");
     expect(fixture.statements).toHaveLength(0);
   });
+
+  it("rejects malformed tenant voice configuration before persistence", async () => {
+    const fixture = transaction([]);
+    const base = {
+      displayName: "Fictional workspace",
+      defaultCurrency: "USD",
+      locale: "en",
+      timezone: "UTC",
+    } as const;
+
+    await expect(
+      updateTenantSettings(fixture.sql, {
+        ...base,
+        supportProfile: {
+          schemaVersion: "1.0",
+          terminology: [{ term: "" }],
+        },
+      }),
+    ).rejects.toThrow("tenant support profile is invalid");
+    await expect(
+      updateTenantSettings(fixture.sql, {
+        ...base,
+        supportProfile: {
+          schemaVersion: "1.0",
+          businessHours: {
+            monday: {
+              closed: false,
+              opensAt: "17:00",
+              closesAt: "09:00",
+            },
+          },
+        },
+      }),
+    ).rejects.toThrow("tenant support profile is invalid");
+    await expect(
+      updateTenantSettings(fixture.sql, {
+        ...base,
+        identityVerification: {
+          schemaVersion: "1.0",
+          enabled: true,
+          requiredFactors: ["phone", "phone"],
+          maxAttempts: 3,
+          onFailure: "human_handoff",
+          contextDisclosure: "after_verification",
+        },
+      }),
+    ).rejects.toThrow("identity verification policy is invalid");
+    expect(fixture.statements).toHaveLength(0);
+  });
 });
 
 describe("platform tenant administration repository", () => {

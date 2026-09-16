@@ -133,6 +133,28 @@ const dossier: ServiceCaseDossier = {
   statusHistory: [],
   summaries: [],
   audit: [],
+  technicianBriefing: {
+    customer: {
+      name: serviceCase.customerName,
+      preferredLanguage: "he",
+      locationName: null,
+      locationAddress: null,
+    },
+    issue: {
+      title: serviceCase.title,
+      description: serviceCase.faultDescription,
+      priority: serviceCase.priority,
+      warrantyStatus: serviceCase.warrantyStatus,
+      productType: null,
+      productModel: null,
+      serialNumber: null,
+    },
+    nextAppointment: null,
+    currentVisits: [],
+    whatsappSummary: null,
+    voiceSummary: null,
+    previousService: [],
+  },
 };
 
 describe("field-service UI contracts", () => {
@@ -256,7 +278,7 @@ describe("field-service UI contracts", () => {
     );
 
     expect(screen.getAllByText("ממתין לתזמון").length).toBeGreaterThan(0);
-    expect(screen.getByText("לא ידוע")).toBeTruthy();
+    expect(screen.getAllByText("לא ידוע").length).toBeGreaterThan(0);
     expect(screen.getByText("תווית מוצר")).toBeTruthy();
     expect(screen.getByText(/OCR · נדרשת בדיקה · 81%/u)).toBeTruthy();
     expect(screen.getByRole("option", { name: "מתוזמן" })).toBeTruthy();
@@ -280,6 +302,85 @@ describe("field-service UI contracts", () => {
     expect(screen.getByText("נוצר מ-WhatsApp intake").getAttribute("dir")).toBe(
       "auto",
     );
+  });
+
+  it("renders a bounded technician briefing without exposing raw channel history", () => {
+    render(
+      localized(
+        <ServiceCaseWorkspace
+          canManage={false}
+          canOperate={false}
+          canReadVoice={false}
+          dossier={{
+            ...dossier,
+            conversations: [
+              {
+                conversationId: "30000000-0000-4000-8000-000000000001",
+                messages: [
+                  {
+                    id: "31000000-0000-4000-8000-000000000001",
+                    conversationId: "30000000-0000-4000-8000-000000000001",
+                    direction: "inbound",
+                    senderType: "contact",
+                    contentType: "text",
+                    contentText: "RAW CUSTOMER TRANSCRIPT",
+                    status: "received",
+                    providerMessageId: null,
+                    createdAt: "2026-09-14T08:00:00.000Z",
+                    reactions: [],
+                    deliveryEvents: [],
+                  },
+                ],
+              },
+            ],
+            technicianBriefing: {
+              ...dossier.technicianBriefing,
+              customer: {
+                ...dossier.technicianBriefing.customer,
+                locationName: "North site",
+                locationAddress: "1 Fictional Street",
+              },
+              whatsappSummary: "Customer reported intermittent cooling.",
+              voiceSummary: null,
+              previousService: [
+                {
+                  caseReference: "FS-2025-0042",
+                  caseTitle: "Previous cooling repair",
+                  productType: "Air conditioner",
+                  productModel: "Example 500",
+                  serialNumber: "EXAMPLE-42",
+                  visitNumber: 1,
+                  visitStatus: "reported",
+                  technicianName: "Fictional Technician",
+                  servicedAt: "2025-09-14T08:00:00.000Z",
+                  diagnosis: "Blocked filter",
+                  workPerformed: "Filter replaced",
+                  replacementPartDetails: "Example filter",
+                },
+              ],
+            },
+          }}
+          feature={feature}
+          linkCandidates={undefined}
+          technicians={[]}
+          timezone="Asia/Jerusalem"
+        />,
+      ),
+    );
+
+    expect(
+      screen.getByRole("heading", { name: "What to know before arrival" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByText("Customer reported intermittent cooling."),
+    ).toBeTruthy();
+    expect(screen.getByText(/Previous cooling repair/u)).toBeTruthy();
+    expect(screen.queryByText("Voice summary")).toBeNull();
+    expect(
+      screen.queryByText("RAW CUSTOMER TRANSCRIPT", {
+        selector: ".technician-briefing *",
+      }),
+    ).toBeNull();
   });
 
   it("offers distinct desktop upload and rear-camera capture controls", () => {

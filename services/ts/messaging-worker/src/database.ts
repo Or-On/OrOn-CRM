@@ -2422,6 +2422,7 @@ interface AutomaticCallPayload {
   readonly destination: string;
   readonly flowId: string;
   readonly flowVersion: number;
+  readonly handoffId: string;
   readonly mode: "real";
   readonly triggerMessageId: string;
 }
@@ -2451,6 +2452,8 @@ function parseAutomaticCallPayload(value: unknown): AutomaticCallPayload {
     !/^\+[1-9][0-9]{7,14}$/u.test(payload.destination) ||
     typeof payload.flowId !== "string" ||
     !uuid.test(payload.flowId) ||
+    typeof payload.handoffId !== "string" ||
+    !uuid.test(payload.handoffId) ||
     typeof payload.flowVersion !== "number" ||
     !Number.isInteger(payload.flowVersion) ||
     payload.flowVersion < 1 ||
@@ -2459,40 +2462,6 @@ function parseAutomaticCallPayload(value: unknown): AutomaticCallPayload {
   )
     throw new TypeError("automatic call payload is invalid");
   return payload as unknown as AutomaticCallPayload;
-}
-
-function conversationContext(
-  messages: readonly {
-    readonly content_text: string;
-    readonly direction: "inbound" | "outbound";
-  }[],
-  evidence: readonly string[] = [],
-): string {
-  const evidenceBlock = evidence
-    .map((line) => line.replace(/\s+/gu, " ").trim())
-    .filter(Boolean)
-    .join("\n")
-    .slice(0, 1400);
-  const lines = messages.map((message) => {
-    const label =
-      message.direction === "inbound"
-        ? "Customer report (unverified)"
-        : "Prior assistant statement (unverified)";
-    const text = message.content_text.replace(/\s+/gu, " ").trim();
-    return `${label}: ${text}`;
-  });
-  const selected: string[] = [];
-  let length = evidenceBlock.length;
-  for (const line of lines.toReversed()) {
-    if (length + line.length + 1 > 3500) break;
-    selected.unshift(line);
-    length += line.length + 1;
-  }
-  if (selected.length === 0)
-    throw new TypeError("automatic call conversation context is unavailable");
-  return [evidenceBlock, "Recent WhatsApp conversation:", ...selected]
-    .filter(Boolean)
-    .join("\n");
 }
 
 async function loadAutomaticCallWork(
@@ -2522,15 +2491,10 @@ async function loadAutomaticCallWork(
         sender_address: string;
         trigger_text: string;
         agent_version_id: string;
-        contact_name: string;
-        contact_company: string | null;
-        lifecycle_status: string;
       }[]
     >`
       SELECT origin.sender_address, trigger.content_text AS trigger_text,
-             agent.id AS agent_version_id, contact.name AS contact_name,
-             contact.company AS contact_company,
-             contact.lifecycle_status
+             agent.id AS agent_version_id
       FROM messaging.conversations conversation
       JOIN messaging.channels channel
         ON channel.id=conversation.channel_id
@@ -2572,6 +2536,13 @@ async function loadAutomaticCallWork(
       JOIN crm.contacts contact
         ON contact.id = conversation.contact_id
        AND contact.tenant_id = conversation.tenant_id
+      JOIN automation.handoffs handoff
+        ON handoff.id=${payload.handoffId}::uuid
+       AND handoff.tenant_id=conversation.tenant_id
+       AND handoff.contact_id=contact.id
+       AND handoff.conversation_id=conversation.id
+       AND handoff.source_channel='whatsapp'
+       AND handoff.status IN ('pending','accepted')
       JOIN crm.contact_channel_identities identity
         ON identity.id=authorized_job.callback_sender_identity_id
        AND identity.tenant_id=conversation.tenant_id
@@ -2615,99 +2586,16 @@ async function loadAutomaticCallWork(
     ) AS available`;
     if (flow[0]?.available !== true)
       throw new TypeError("automatic call flow is unavailable");
-    const messages = await transaction<
-      {
-        content_text: string;
-        direction: "inbound" | "outbound";
-      }[]
-    >`
-      SELECT message.direction, message.content_text
-      FROM messaging.messages message
-      JOIN messaging.messages boundary
-        ON boundary.id = ${payload.triggerMessageId}::uuid
-       AND boundary.conversation_id = message.conversation_id
-      JOIN messaging.inbound_message_origins boundary_origin
-        ON boundary_origin.tenant_id = boundary.tenant_id
-       AND boundary_origin.message_id = boundary.id
-      LEFT JOIN messaging.inbound_message_origins message_origin
-        ON message_origin.tenant_id = message.tenant_id
-       AND message_origin.message_id = message.id
-      LEFT JOIN messaging.outbound_requests outbound_request
-        ON outbound_request.tenant_id = message.tenant_id
-       AND outbound_request.message_id = message.id
-      WHERE message.conversation_id = ${payload.conversationId}::uuid
-        AND message.content_type = 'text' AND message.content_text IS NOT NULL
-        AND ((message.direction='inbound' AND message.status='received') OR
-             (message.direction='outbound' AND
-              message.status IN ('sent','delivered','read')))
-        AND COALESCE(message_origin.created_at, outbound_request.created_at,
-                     message.created_at) <= boundary_origin.created_at
-      ORDER BY COALESCE(message_origin.created_at, outbound_request.created_at,
-                        message.created_at) DESC,
-               message.id DESC
-      LIMIT 12
-    `;
-    const notes = await transaction<{ body: string; created_at: Date }[]>`
-      SELECT left(note.body, 500) AS body, note.created_at
-      FROM crm.notes note
-      WHERE note.contact_id=${payload.contactId}::uuid
-      ORDER BY note.created_at DESC, note.id DESC LIMIT 3
-    `;
-    const prior = await transaction<{ summary: string; status: string }[]>`
-      SELECT left(coalesce(previous.last_message_preview, ''), 300) AS summary,
-             previous.status
-      FROM messaging.conversations previous
-      WHERE previous.contact_id=${payload.contactId}::uuid
-        AND previous.id<>${payload.conversationId}::uuid
-      ORDER BY previous.last_message_at DESC NULLS LAST, previous.id DESC LIMIT 3
-    `;
-    const tickets = await transaction<
-      {
-        id: string;
-        title: string;
-        status: string;
-        priority: string;
-        summary: string;
-      }[]
-    >`
-      SELECT id, title, status, priority,
-             left(coalesce(description, ''), 500) AS summary
-      FROM crm.tasks
-      WHERE contact_id=${payload.contactId}::uuid
-      ORDER BY updated_at DESC, id DESC LIMIT 5
-    `;
-    const evidence = [
-      `Tenant CRM contact: ${row.contact_name}.`,
-      row.contact_company ? `Company: ${row.contact_company}.` : "",
-      `CRM lifecycle status: ${row.lifecycle_status}.`,
-      ...notes
-        .toReversed()
-        .map(
-          (note) => `CRM note (${note.created_at.toISOString()}): ${note.body}`,
-        ),
-      ...prior
-        .toReversed()
-        .map(
-          (item) =>
-            `Earlier WhatsApp conversation (${item.status}): ${item.summary}`,
-        ),
-      ...tickets
-        .toReversed()
-        .map(
-          (ticket) =>
-            `Prior CRM ticket ${ticket.id} (${ticket.status}, ${ticket.priority}): ${ticket.title}${ticket.summary ? ` — ${ticket.summary}` : ""}`,
-        ),
-    ];
     return {
       actorRole: "agent",
       actorUserId: payload.actorUserId,
       agentVersionId: row.agent_version_id,
       contactId: payload.contactId,
-      conversationContext: conversationContext(messages.reverse(), evidence),
       conversationId: payload.conversationId,
       destination: row.sender_address,
       flowId: payload.flowId,
       flowVersion: payload.flowVersion,
+      handoffId: payload.handoffId,
       idempotencyKey: `whatsapp-auto-call:${payload.triggerMessageId}`,
       jobId: job.id,
       tenantId: job.tenant_id,
@@ -2839,54 +2727,21 @@ async function processAutomaticCall(
         if (stillOwned[0] === undefined) return;
         const fallbackReason = "Automatic telephone call could not be started";
         const handoff = await transaction<{ id: string }[]>`
-          INSERT INTO automation.handoffs
-            (tenant_id, contact_id, conversation_id, requested_by_user_id,
-             source_channel, reason_safe, status, idempotency_key)
-          VALUES (platform.current_tenant_id(), ${payload.contactId}::uuid,
-                  ${payload.conversationId}::uuid, ${payload.actorUserId}::uuid,
-                  'whatsapp', ${fallbackReason}, 'pending',
-                  ${`auto-call-failed:${job.id}`})
-          ON CONFLICT (tenant_id, idempotency_key) DO UPDATE
-            SET idempotency_key=EXCLUDED.idempotency_key
+          UPDATE automation.handoffs
+          SET status='pending', reason_safe=${fallbackReason},
+              assigned_user_id=NULL, accepted_at=NULL,
+              updated_at=CURRENT_TIMESTAMP
+          WHERE id=${payload.handoffId}::uuid
+            AND contact_id=${payload.contactId}::uuid
+            AND conversation_id=${payload.conversationId}::uuid
+            AND source_channel='whatsapp'
           RETURNING id
         `;
-        const contact = await transaction<
-          { name: string; company: string | null; lifecycle_status: string }[]
-        >`
-          SELECT name, company, lifecycle_status FROM crm.contacts
-          WHERE id=${payload.contactId}::uuid
-        `;
-        const messages = await transaction<
-          { direction: "inbound" | "outbound"; content_text: string }[]
-        >`
-          SELECT direction, left(content_text, 1200) AS content_text
-          FROM messaging.messages
-          WHERE conversation_id=${payload.conversationId}::uuid
-            AND content_type='text' AND content_text IS NOT NULL
-          ORDER BY created_at DESC, updated_at DESC, id DESC LIMIT 20
-        `;
         const callFailureDescription = [
-          `Customer: ${contact[0]?.name ?? "Unknown contact"}`,
-          contact[0]?.company ? `Company: ${contact[0].company}` : null,
-          contact[0]?.lifecycle_status
-            ? `CRM status: ${contact[0].lifecycle_status}`
-            : null,
           `Escalation reason: ${fallbackReason}`,
           `Safe error code: ${reason}`,
-          "",
-          "WhatsApp evidence:",
-          ...messages
-            .toReversed()
-            .map(
-              (message) =>
-                `${message.direction === "inbound" ? "Customer" : "AI Agent"}: ${message.content_text.replace(/\s+/gu, " ").trim()}`,
-            ),
-          "",
-          `Conversation reference: ${payload.conversationId}`,
-          `Call job reference: ${job.id}`,
-          `Handoff reference: ${handoff[0]?.id ?? "unavailable"}`,
+          "Review the linked conversation and contact timeline before following up.",
         ]
-          .filter((line): line is string => line !== null)
           .join("\n")
           .slice(0, 20_000);
         if (handoff[0] !== undefined) {

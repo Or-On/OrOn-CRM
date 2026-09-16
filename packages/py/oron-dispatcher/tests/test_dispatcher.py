@@ -262,11 +262,12 @@ async def test_outbound_replay_does_not_launch_or_dial() -> None:
     dial.assert_not_awaited()
 
 
-async def test_outbound_carries_cross_channel_context_into_the_agent() -> None:
+async def test_outbound_carries_secure_cross_channel_references_into_the_agent() -> None:
     dial = AsyncMock()
     dispatcher, sessions, launch, _ = _dispatcher(sip=_sip(enabled=True, dial=dial))
     conversation_id = uuid4()
     contact_id = uuid4()
+    handoff_id = uuid4()
 
     await dispatcher.place_outbound_call(
         "+14155550100",
@@ -277,16 +278,16 @@ async def test_outbound_carries_cross_channel_context_into_the_agent() -> None:
         caller_gender="female",
         contact_id=contact_id,
         source_conversation_id=conversation_id,
-        conversation_context="Customer: Please call me now.",
+        handoff_id=handoff_id,
     )
 
     context = sessions.begin.await_args.args[0]
     assert context.caller_gender == "female"
     assert context.contact_id == contact_id
     assert context.source_conversation_id == conversation_id
-    assert context.conversation_context == "Customer: Please call me now."
+    assert context.handoff_id == handoff_id
     assert launch.await_args.args[1].caller_gender == "female"
-    assert launch.await_args.args[1].conversation_context == "Customer: Please call me now."
+    assert launch.await_args.args[1].handoff_id == handoff_id
     dial.assert_awaited_once()
 
 

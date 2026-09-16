@@ -21,6 +21,7 @@ const fixture = {
       transcriptObjectId: "70000000-0000-4000-8000-000000000001",
       recordingStatus: "available",
       transcriptStatus: "available",
+      outcomeDetail: null,
     },
   ],
   summaries: [
@@ -36,6 +37,9 @@ const fixture = {
       summary: "Permitted chat",
     },
   ],
+  technicianBriefing: {
+    voiceSummary: "Private voice summary",
+  },
 } as unknown as ServiceCaseDossier;
 
 describe("field-service dossier access", () => {
@@ -47,6 +51,7 @@ describe("field-service dossier access", () => {
     expect(result.summaries).toEqual([
       expect.objectContaining({ sourceKind: "whatsapp" }),
     ]);
+    expect(result.technicianBriefing.voiceSummary).toBeNull();
   });
 
   it("preserves the original dossier for authorized voice readers", () => {

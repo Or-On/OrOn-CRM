@@ -4,12 +4,12 @@ export interface AutomaticCallRequest {
   readonly actorRole: Role;
   readonly actorUserId: string;
   readonly agentVersionId?: string;
-  readonly conversationContext: string;
   readonly conversationId: string;
   readonly contactId: string;
   readonly destination: string;
   readonly flowId: string;
   readonly flowVersion?: number;
+  readonly handoffId: string;
   readonly idempotencyKey: string;
   readonly jobId: string;
   readonly tenantId: string;
@@ -56,6 +56,7 @@ export class DispatcherAutomaticCallProvider implements AutomaticCallProvider {
     if (
       (request.agentVersionId !== undefined &&
         !uuidPattern.test(request.agentVersionId)) ||
+      !uuidPattern.test(request.handoffId) ||
       (request.flowVersion !== undefined &&
         (!Number.isSafeInteger(request.flowVersion) || request.flowVersion < 1))
     )
@@ -90,7 +91,6 @@ export class DispatcherAutomaticCallProvider implements AutomaticCallProvider {
           body: JSON.stringify({
             caller_gender: null,
             contact_id: request.contactId,
-            conversation_context: request.conversationContext,
             explicit_approval: true,
             flow_id: request.flowId,
             ...(request.agentVersionId === undefined
@@ -100,6 +100,7 @@ export class DispatcherAutomaticCallProvider implements AutomaticCallProvider {
               ? {}
               : { flow_version: request.flowVersion }),
             idempotency_key: request.idempotencyKey,
+            handoff_id: request.handoffId,
             phone_number: request.destination,
             source_conversation_id: request.conversationId,
           }),

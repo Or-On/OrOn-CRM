@@ -164,11 +164,27 @@ Use one test tenant and a non-sensitive recipient:
    human-handoff fallback.
 5. During a separately authorized smoke-test window, enable all three call
    switches, request a call explicitly and confirm one canonical session.
-6. Confirm the call uses relevant WhatsApp context without reading it aloud.
-7. End the call and confirm its session is linked to the same contact and appears
-   in the contact activity timeline.
-8. Disable any one call switch and confirm the provider boundary refuses and an
-   urgent human-attention task and alert are created after bounded retries.
+6. Confirm the opening identifies only the configured tenant, including when
+   the WhatsApp issue mentions Google, Microsoft or another third party.
+7. Before verification, ask about the issue and confirm no WhatsApp message,
+   address, case, appointment, visit or report detail is disclosed.
+8. Supply an incorrect verification set and confirm the response reveals neither
+   the expected value nor which factor matched; exhaust the configured attempts
+   and confirm the configured safe escalation.
+9. Start a fresh handoff, supply the configured full name, normalized telephone
+   number and national ID, and confirm the exact originating WhatsApp context is
+   unlocked without restarting the conversation.
+10. End the call and confirm its structured outcome is linked to the same
+    contact, source conversation, handoff and existing case in the customer
+    activity timeline and technician briefing.
+11. Repeat with a tenant-A session and tenant-B identifiers and confirm the
+    server returns no tenant-B profile, verification state, context or outcome.
+12. With development text diagnostics temporarily enabled, compare final STT,
+    LLM output and exact TTS input for one Hebrew and one mixed Hebrew/English
+    call, then listen to the audio and record the first stage where any mismatch
+    appears. Disable diagnostics immediately afterward.
+13. Disable any one call switch and confirm the provider boundary refuses and an
+    urgent human-attention task and alert are created after bounded retries.
 
 A live smoke test requires separate explicit user authorization. Automated
 tests and CI use fake model and provider responses only.

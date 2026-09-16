@@ -220,14 +220,23 @@ conversation can collect context and offer human follow-up, but cannot simulate
 an unavailable company system. Unsafe requests receive one brief refusal and a
 safe alternative rather than a policy lecture.
 
-The current handler registry contains conversation-routing functions, not
-subscriber lookup, identity verification, ticketing, technician scheduling, or
-message-delivery tools. A final TTS-boundary guard suppresses generated claims
-that one of those operations succeeded and replaces them with an honest human
-follow-up. It also suppresses requests for a full identity number. When real
-business tools are added, their verified result must be carried to an explicit
-claim-authorization state before relaxing this guard; prompt compliance alone
-is not evidence that an operation occurred.
+The handler registry contains conversation-routing functions plus one bounded
+caller-verification tool for a canonical WhatsApp-to-voice handoff. The model
+collects only the configured factor names and supplied answers; deterministic
+database functions compare normalized values and never return the expected
+national ID. Previous messages, address, case, appointment, visit and report
+context remain unavailable to the model until the authoritative verification
+record reaches `context_unlocked`. Ticketing, technician scheduling and message
+delivery remain unavailable unless a separate exposed tool returns the exact
+result. A final TTS-boundary guard suppresses unsupported success claims and
+unnecessary repetition of full identity numbers.
+
+For a controlled development diagnosis, set `VOICE_TEXT_DIAGNOSTICS=true` on
+the dispatcher. The resulting session artifact records redacted final STT text,
+LLM response text, exact TTS-bound text, latency, verification state and context
+lock state. Identifier-shaped digit sequences are removed before persistence.
+Keep this flag `false` in production and do not use the artifact as a substitute
+for listening to the authorized test call.
 
 `USER_IDLE_SECS=10` is the first genuine-silence prompt. The idle processor
 suspends this policy while either participant is speaking, so a long caller

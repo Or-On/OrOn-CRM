@@ -18,6 +18,7 @@ class SessionDir:
         self.path = base / str(session_id)
         for relative in (RECORDING_PATH, TRANSCRIPT_PATH):
             (self.path / relative).parent.mkdir(parents=True, exist_ok=True)
+        (self.path / "diagnostics").mkdir(parents=True, exist_ok=True)
 
     @property
     def recording(self) -> str:
@@ -26,3 +27,7 @@ class SessionDir:
     @property
     def transcript(self) -> str:
         return str(self.path / TRANSCRIPT_PATH)
+
+    @property
+    def text_diagnostics(self) -> str:
+        return str(self.path / "diagnostics/voice-turns.json")

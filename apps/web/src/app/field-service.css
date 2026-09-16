@@ -890,6 +890,137 @@
   gap: 0.65rem;
 }
 
+.technician-briefing {
+  display: grid;
+  gap: 1rem;
+  padding: 1.2rem;
+  border-color: color-mix(in srgb, var(--or-accent) 24%, var(--or-border));
+}
+
+.technician-briefing > header {
+  display: flex;
+  align-items: start;
+  gap: 0.8rem;
+}
+
+.technician-briefing > header :is(h2, p),
+.technician-briefing section :is(h3, p, dl),
+.technician-briefing__history ol {
+  margin: 0;
+}
+
+.technician-briefing > header h2 {
+  margin-block-start: 0.2rem;
+  font-size: 1.05rem;
+}
+
+.technician-briefing > header p,
+.technician-briefing section p,
+.technician-briefing section small,
+.technician-briefing__history span {
+  color: var(--or-text-muted);
+  font-size: 0.74rem;
+  line-height: 1.55;
+}
+
+.technician-briefing__icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  inline-size: 2.5rem;
+  block-size: 2.5rem;
+  color: var(--or-accent);
+  background: color-mix(in srgb, var(--or-accent) 10%, var(--or-surface));
+  border-radius: var(--or-radius-md);
+}
+
+.technician-briefing__grid,
+.technician-briefing__context {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.technician-briefing__context {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.technician-briefing__grid > section,
+.technician-briefing__context > section,
+.technician-briefing__history {
+  display: grid;
+  align-content: start;
+  gap: 0.45rem;
+  min-inline-size: 0;
+  padding: 0.85rem;
+  background: var(--or-surface-subtle);
+  border: 1px solid var(--or-divider);
+  border-radius: var(--or-radius-sm);
+}
+
+.technician-briefing section h3 {
+  color: var(--or-text-secondary);
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+.technician-briefing section > strong,
+.technician-briefing section p {
+  overflow-wrap: anywhere;
+}
+
+.technician-briefing section p:has(> svg) {
+  display: flex;
+  align-items: start;
+  gap: 0.35rem;
+}
+
+.technician-briefing section dl {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.technician-briefing section dl > div {
+  display: grid;
+  grid-template-columns: 4rem minmax(0, 1fr);
+  gap: 0.5rem;
+}
+
+.technician-briefing section :is(dt, dd) {
+  margin: 0;
+  font-size: 0.72rem;
+}
+
+.technician-briefing section dt {
+  color: var(--or-text-muted);
+}
+
+.technician-briefing__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.technician-briefing__history ol {
+  display: grid;
+  gap: 0.6rem;
+  padding: 0;
+  list-style: none;
+}
+
+.technician-briefing__history li {
+  display: grid;
+  grid-template-columns: minmax(12rem, 0.55fr) minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  padding-block-start: 0.6rem;
+  border-block-start: 1px solid var(--or-divider);
+}
+
+.technician-briefing__history li > div {
+  display: grid;
+  gap: 0.2rem;
+}
+
 .service-case-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(17rem, 0.34fr);
@@ -1358,6 +1489,18 @@
 }
 
 @media (max-width: 70rem) {
+  .technician-briefing__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .technician-briefing__history li {
+    grid-template-columns: minmax(11rem, 0.6fr) minmax(0, 1fr);
+  }
+
+  .technician-briefing__history li > small {
+    grid-column: 2;
+  }
+
   .service-case-layout {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -1368,6 +1511,16 @@
 }
 
 @media (max-width: 48rem) {
+  .technician-briefing__grid,
+  .technician-briefing__context,
+  .technician-briefing__history li {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .technician-briefing__history li > small {
+    grid-column: auto;
+  }
+
   .service-case-hero {
     min-block-size: auto;
     gap: 1rem;

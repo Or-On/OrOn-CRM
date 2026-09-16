@@ -617,6 +617,16 @@ describe.skipIf(databaseUrl === undefined)(
         expect(dossier?.conversationIds).not.toContain(unrelatedConversationId);
         expect(dossier?.callSessionIds).not.toContain(unrelatedSessionId);
         expect(dossier?.callSessionIds).not.toContain(sessionId);
+        expect(dossier?.technicianBriefing).toMatchObject({
+          customer: { name: "Fictional scheduling customer" },
+          issue: {
+            title: "Fictional scheduling case",
+            description: "Synthetic scheduling evidence",
+          },
+          whatsappSummary: null,
+          voiceSummary: null,
+          previousService: [],
+        });
       }));
 
     it("rejects archived or wrong-customer locations when creating a case", async () =>

@@ -11,10 +11,10 @@ const request = {
   actorRole: "agent" as const,
   actorUserId: "20000000-0000-4000-8000-000000000001",
   contactId: "60000000-0000-4000-8000-000000000001",
-  conversationContext: "Customer: Please call me.",
   conversationId: "30000000-0000-4000-8000-000000000001",
   destination: "+12025550198",
   flowId: "40000000-0000-4000-8000-000000000001",
+  handoffId: "80000000-0000-4000-8000-000000000001",
   idempotencyKey: "whatsapp-auto-call:test",
   jobId: "50000000-0000-4000-8000-000000000001",
   tenantId: "10000000-0000-4000-8000-000000000001",
@@ -58,12 +58,13 @@ describe("DispatcherAutomaticCallProvider", () => {
     const body = JSON.parse(init.body as string) as Record<string, unknown>;
     expect(body).toMatchObject({
       caller_gender: null,
-      conversation_context: request.conversationContext,
       explicit_approval: true,
       flow_id: request.flowId,
+      handoff_id: request.handoffId,
       phone_number: request.destination,
       source_conversation_id: request.conversationId,
     });
+    expect(body).not.toHaveProperty("conversation_context");
   });
 
   it.each([

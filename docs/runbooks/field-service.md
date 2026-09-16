@@ -237,6 +237,15 @@ calls, original transcript/recording availability, grounded summaries, and
 audit history. Ambiguous links require an authorized operator; phone-number-only
 matching is not used.
 
+The case workspace derives a bounded **pre-visit briefing** from those trusted
+links. It shows the customer and site, fault and product identifiers, approved
+next appointment, current visit state, the latest grounded WhatsApp and voice
+summaries, and at most five recent service visits matched by serial number,
+model, or product type. It never copies an unfiltered transcript into the
+briefing. Users without `voice:read` receive neither linked call records nor the
+voice-derived briefing summary; ordinary field-service access does not imply
+voice access.
+
 Final report views use a branding snapshot containing the tenant business name,
 logo, approved accent, business contact details, locale, timezone, and report
 header/footer. Browser print provides the Hebrew-safe branded PDF path without

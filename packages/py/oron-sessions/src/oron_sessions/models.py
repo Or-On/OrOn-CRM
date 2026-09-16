@@ -65,6 +65,7 @@ class SessionUpdate(SQLModel):
     # Outbound only — see Session.answered.
     answered: bool | None = None
     outcome: str | None = None
+    outcome_detail: dict | None = None
     recording_uri: NonEmptyStr | None = None
     transcript_uri: NonEmptyStr | None = None
     ended_at: dt.datetime | None = None
@@ -114,6 +115,10 @@ class Session(SessionBase, TenantScoped, CallUsage, table=True):
     # recorded rather than inferred from the transcript afterwards. NULL means
     # the call never reached one: hung up, failed, or nobody answered.
     outcome: str | None = None
+    # Structured cross-channel result. It contains canonical references and
+    # operational state only; transcripts and sensitive identity values remain
+    # in their dedicated protected stores.
+    outcome_detail: dict | None = Field(default=None, sa_type=JSONB)
     # Transcript and recording are blob-store artifacts under one prefix per
     # session; the row holds pointers, not the payloads.
     recording_uri: NonEmptyStr | None = None
@@ -172,6 +177,7 @@ class SessionPublic(SessionBase, CallUsage):
     status: SessionStatus
     answered: bool | None = None
     outcome: str | None = None
+    outcome_detail: dict | None = None
     contact_id: uuid.UUID | None = None
     platform_campaign_id: uuid.UUID | None = None
     # Decrypted for the console. This is a deliberate loosening of design D4

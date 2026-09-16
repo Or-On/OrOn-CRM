@@ -15,8 +15,6 @@ from pipecat.utils.text.base_text_filter import BaseTextFilter
 
 _UNVERIFIED_BUSINESS_CLAIM_RE = re.compile(
     r"(?:"
-    r"(?:אצטרך|צריך|מסור|למסור|תוכל\s+למסור|תוכלי\s+למסור)"
-    r"\s+[^.?!]{0,50}(?:מספר\s+)?תעודת\s+הזהות|"
     r"מצאתי\s+את\s+פרטי\s+המנוי|"
     r"בדקתי\s+(?:ב?מערכת|את\s+המערכת)|"
     r"אני\s+רואה\s+ש(?:המנוי|הממיר|החשבון)|"
@@ -35,6 +33,12 @@ _UNVERIFIED_BUSINESS_CLAIM_RE = re.compile(
     re.IGNORECASE,
 )
 
+_IDENTITY_COLLECTION_RE = re.compile(
+    r"(?:אצטרך|צריך|מסור|למסור|תוכל\s+למסור|תוכלי\s+למסור)"
+    r"\s+[^.?!]{0,50}(?:מספר\s+)?תעודת\s+הזהות",
+    re.IGNORECASE,
+)
+
 _TTS_CONTROL_TAG = re.compile(r"\[[^\[\]\r\n]{1,48}\]")
 
 
@@ -49,11 +53,19 @@ def sanitize_tts_markup(text: str) -> str:
     return " ".join(_TTS_CONTROL_TAG.sub(" ", text).split())
 
 
-def safe_spoken_text(text: str, language: str = "en") -> tuple[str, bool]:
+def safe_spoken_text(
+    text: str,
+    language: str = "en",
+    *,
+    allow_identity_collection: bool = False,
+) -> tuple[str, bool]:
     """Sanitize speech and replace unverifiable external-system claims."""
 
     sanitized = sanitize_tts_markup(text)
-    if not _UNVERIFIED_BUSINESS_CLAIM_RE.search(sanitized):
+    blocked_identity_request = (
+        not allow_identity_collection and _IDENTITY_COLLECTION_RE.search(sanitized) is not None
+    )
+    if not blocked_identity_request and not _UNVERIFIED_BUSINESS_CLAIM_RE.search(sanitized):
         return sanitized, False
     logger.warning("suppressed unverified business-system claim before TTS")
     if language.lower().startswith("he"):
@@ -76,9 +88,19 @@ class BusinessClaimGuardFilter(BaseTextFilter):
     changed. This is a final spoken-boundary control, not another prompt hint.
     """
 
-    def __init__(self, get_language: Callable[[], str] | None = None):
+    def __init__(
+        self,
+        get_language: Callable[[], str] | None = None,
+        allow_identity_collection: Callable[[], bool] | None = None,
+    ):
         self._get_language = get_language
+        self._allow_identity_collection = allow_identity_collection
 
     async def filter(self, text: str) -> str:
         language = self._get_language() if self._get_language is not None else "en"
-        return safe_spoken_text(text, language)[0]
+        allowed = (
+            self._allow_identity_collection()
+            if self._allow_identity_collection is not None
+            else False
+        )
+        return safe_spoken_text(text, language, allow_identity_collection=allowed)[0]

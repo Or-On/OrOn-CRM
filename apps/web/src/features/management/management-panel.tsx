@@ -50,12 +50,14 @@ import { useCapability } from "../access";
 import { crmMutation } from "../crm";
 import { IdentityImage, IdentityImageEditor } from "../identity";
 import { FieldServiceSettings } from "../field-service";
+import { TenantSupportSettings } from "./support-settings";
 
 export type SettingsTab =
   | "account"
   | "appearance"
   | "security"
   | "workspace"
+  | "support"
   | "team"
   | "notifications"
   | "access"
@@ -381,6 +383,12 @@ export function ManagementPanel({
             id: "workspace",
             label: t("management.workspaceTab"),
             tabId: "settings-workspace-tab",
+          },
+          {
+            controls: "settings-support-panel",
+            id: "support",
+            label: t("tenantSupportSettings.tab"),
+            tabId: "settings-support-tab",
           },
         ]
       : []),
@@ -921,6 +929,23 @@ export function ManagementPanel({
                 </fieldset>
               </form>
             </Surface>
+          </section>
+        ) : null}
+
+        {canManageTenant &&
+        settings !== undefined &&
+        tenantName !== undefined ? (
+          <section
+            aria-labelledby="settings-support-tab"
+            className="settings-panel"
+            hidden={activeTab !== "support"}
+            id="settings-support-panel"
+            role="tabpanel"
+          >
+            <TenantSupportSettings
+              settings={settings}
+              tenantName={tenantName}
+            />
           </section>
         ) : null}
 

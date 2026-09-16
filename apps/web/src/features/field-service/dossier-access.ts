@@ -19,6 +19,10 @@ export function dossierForVoiceAccess(
     summaries: dossier.summaries.filter(
       (summary) => summary.sourceKind === "whatsapp",
     ),
+    technicianBriefing: {
+      ...dossier.technicianBriefing,
+      voiceSummary: null,
+    },
   };
 }
 

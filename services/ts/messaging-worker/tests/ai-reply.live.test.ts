@@ -727,34 +727,14 @@ describe.skipIf(sourceUrl === undefined)(
       });
       const callRequest = automaticCall.mock.calls[0]?.[0] as
         AutomaticCallRequest | undefined;
-      expect(callRequest?.conversationContext).toContain(
-        "Customer report (unverified): Please call me.",
+      expect(callRequest?.handoffId).toMatch(
+        /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/iu,
       );
-      expect(callRequest?.conversationContext).toContain(
-        "Customer report (unverified): The connection is still unstable, so please call me now.",
-      );
-      expect(callRequest?.conversationContext).toContain(
-        'Prior assistant statement (unverified): To request a call, please reply in a separate message: "Please call me now."',
-      );
-      expect(callRequest?.conversationContext).toContain(
-        "Customer report (unverified): purple triangles argue with seven",
-      );
-      expect(callRequest?.conversationContext).toContain(
-        "Tenant CRM contact: Fictional Customer.",
-      );
-      expect(callRequest?.conversationContext).toContain(
-        `Prior CRM ticket ${linkedTicketId}`,
-      );
-      const callContexts = automaticCall.mock.calls.map(
-        ([request]) => (request as AutomaticCallRequest).conversationContext,
-      );
-      expect(callContexts[1]).toContain(
-        "Customer report (unverified): Please call me.",
-      );
-      for (const context of callContexts) {
-        expect(context).not.toContain(callAcknowledgement);
-        expect(context).not.toContain(queuedInvisibleText);
-        expect(context).not.toContain(failedInvisibleText);
+      for (const [request] of automaticCall.mock.calls) {
+        expect(request).not.toHaveProperty("conversationContext");
+        expect(JSON.stringify(request)).not.toContain(callAcknowledgement);
+        expect(JSON.stringify(request)).not.toContain(queuedInvisibleText);
+        expect(JSON.stringify(request)).not.toContain(failedInvisibleText);
       }
       const invisibleOutbound = await admin<
         { content_text: string; request_status: string; status: string }[]

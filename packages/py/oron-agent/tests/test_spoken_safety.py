@@ -29,6 +29,14 @@ async def test_general_troubleshooting_guidance_is_preserved():
 
 
 @pytest.mark.asyncio
+async def test_identity_collection_is_allowed_only_while_the_backend_gate_is_active():
+    request = "אצטרך את מספר תעודת הזהות שלך כדי להשלים את האימות."
+
+    assert await BusinessClaimGuardFilter(lambda: "he", lambda: True).filter(request) == request
+    assert await BusinessClaimGuardFilter(lambda: "he", lambda: False).filter(request) != request
+
+
+@pytest.mark.asyncio
 async def test_perfect_tense_unverified_action_claim_is_suppressed():
     output = await BusinessClaimGuardFilter(lambda: "en").filter(
         "Private reasoning: I have refunded your payment secret-token."

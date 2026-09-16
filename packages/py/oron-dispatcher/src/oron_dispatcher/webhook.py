@@ -17,7 +17,7 @@ from or_on_platform.service_auth import (
     ServicePrincipal,
 )
 from oron_common import E164
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from oron_dispatcher.dispatcher import (
     AgentStartupUnavailable,
@@ -45,9 +45,20 @@ class OutboundCallRequest(BaseModel):
     agent_version_id: UUID | None = None
     caller_gender: Literal["male", "female"] | None = None
     source_conversation_id: UUID | None = None
-    conversation_context: str | None = Field(default=None, max_length=4000)
+    handoff_id: UUID | None = None
     idempotency_key: str = Field(min_length=8, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$")
     explicit_approval: bool = False
+
+    @model_validator(mode="after")
+    def _cross_channel_binding_is_complete(self) -> OutboundCallRequest:
+        references = (self.contact_id, self.source_conversation_id, self.handoff_id)
+        if (self.source_conversation_id is not None or self.handoff_id is not None) and not all(
+            value is not None for value in references
+        ):
+            raise ValueError(
+                "contact_id, source_conversation_id and handoff_id must be supplied together"
+            )
+        return self
 
 
 class WebhookAck(BaseModel):
@@ -184,7 +195,7 @@ def create_app(
                 caller_gender=request.caller_gender,
                 contact_id=request.contact_id,
                 source_conversation_id=request.source_conversation_id,
-                conversation_context=request.conversation_context,
+                handoff_id=request.handoff_id,
             )
         except IdempotencyConflict:
             raise HTTPException(

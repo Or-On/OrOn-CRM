@@ -223,11 +223,16 @@ export async function getTenantSettings(
       accent_token: TenantAccentToken;
       report_header: string | null;
       report_footer: string | null;
+      support_profile: NonNullable<TenantSettings["supportProfile"]>;
+      identity_verification_policy: NonNullable<
+        TenantSettings["identityVerification"]
+      >;
     }[]
   >`
     SELECT display_name, default_currency, locale, timezone,
            business_name, business_email, business_phone, business_address,
-           accent_token, report_header, report_footer
+           accent_token, report_header, report_footer, support_profile,
+           identity_verification_policy
     FROM crm.tenant_settings
   `;
   const row = rows[0];
@@ -244,6 +249,15 @@ export async function getTenantSettings(
       accentToken: null,
       reportHeader: null,
       reportFooter: null,
+      supportProfile: { schemaVersion: "1.0" },
+      identityVerification: {
+        schemaVersion: "1.0",
+        enabled: true,
+        requiredFactors: ["fullName", "phone", "nationalId"],
+        maxAttempts: 3,
+        onFailure: "human_handoff",
+        contextDisclosure: "after_verification",
+      },
     };
   }
   return {
@@ -258,6 +272,8 @@ export async function getTenantSettings(
     accentToken: row.accent_token,
     reportHeader: row.report_header,
     reportFooter: row.report_footer,
+    supportProfile: row.support_profile,
+    identityVerification: row.identity_verification_policy,
   };
 }
 
@@ -269,6 +285,109 @@ function tenantSettingText(
   if (normalized.length > maximum)
     throw new TypeError("workspace branding value is too long");
   return normalized === "" ? null : normalized;
+}
+
+function plainRecord(
+  value: unknown,
+): value is Readonly<Record<string, unknown>> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function validOptionalText(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  maximum: number,
+): boolean {
+  const value = record[key];
+  return (
+    value === undefined ||
+    (typeof value === "string" &&
+      value.trim().length >= 1 &&
+      value.trim().length <= maximum)
+  );
+}
+
+function validateTenantSupportProfile(value: unknown): void {
+  if (!plainRecord(value) || value.schemaVersion !== "1.0")
+    throw new TypeError("tenant support profile is invalid");
+  const validText = [
+    ["displayName", 160],
+    ["supportDisplayName", 160],
+    ["legalName", 240],
+    ["businessDescription", 2_000],
+    ["primaryLanguage", 35],
+    ["timezone", 100],
+  ].every(([key, maximum]) =>
+    validOptionalText(value, String(key), Number(maximum)),
+  );
+  const validStringList = (
+    key: string,
+    maximumItems: number,
+    maximumLength: number,
+  ): boolean => {
+    const items = value[key];
+    return (
+      items === undefined ||
+      (Array.isArray(items) &&
+        items.length <= maximumItems &&
+        items.every(
+          (item) =>
+            typeof item === "string" &&
+            item.trim().length >= 1 &&
+            item.trim().length <= maximumLength,
+        ))
+    );
+  };
+  const terminology = value.terminology;
+  const validTerminology =
+    terminology === undefined ||
+    (Array.isArray(terminology) &&
+      terminology.length <= 64 &&
+      terminology.every(
+        (entry) =>
+          plainRecord(entry) &&
+          validOptionalText(entry, "term", 80) &&
+          entry.term !== undefined &&
+          validOptionalText(entry, "preferredTerm", 80) &&
+          validOptionalText(entry, "pronunciation", 80) &&
+          validOptionalText(entry, "language", 35),
+      ));
+  const businessHours = value.businessHours;
+  const validBusinessHours =
+    businessHours === undefined ||
+    (plainRecord(businessHours) &&
+      JSON.stringify(businessHours).length <= 4_000 &&
+      [
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday",
+        "saturday",
+        "sunday",
+      ].every((day) => {
+        const configured = businessHours[day];
+        if (configured === undefined) return true;
+        if (!plainRecord(configured) || typeof configured.closed !== "boolean")
+          return false;
+        if (configured.closed) return true;
+        return (
+          typeof configured.opensAt === "string" &&
+          typeof configured.closesAt === "string" &&
+          /^([01]\d|2[0-3]):[0-5]\d$/u.test(configured.opensAt) &&
+          /^([01]\d|2[0-3]):[0-5]\d$/u.test(configured.closesAt) &&
+          configured.opensAt < configured.closesAt
+        );
+      }));
+  if (
+    !validText ||
+    !validStringList("productsAndServices", 64, 160) ||
+    !validStringList("authorizedAffiliations", 32, 160) ||
+    !validStringList("supportedLanguages", 16, 35) ||
+    !validBusinessHours ||
+    !validTerminology
+  )
+    throw new TypeError("tenant support profile is invalid");
 }
 
 export async function updateTenantSettings(
@@ -288,6 +407,38 @@ export async function updateTenantSettings(
   const reportHeader = tenantSettingText(input.reportHeader, 500);
   const reportFooter = tenantSettingText(input.reportFooter, 1_000);
   const accentToken = input.accentToken ?? null;
+  const supportProfile = input.supportProfile;
+  const identityVerification = input.identityVerification;
+  if (supportProfile !== undefined)
+    validateTenantSupportProfile(supportProfile);
+  if (identityVerification !== undefined) {
+    const rawPolicy = identityVerification as unknown as Record<
+      string,
+      unknown
+    >;
+    const factors = [...identityVerification.requiredFactors];
+    const allowed = new Set([
+      "fullName",
+      "phone",
+      "nationalId",
+      "customerNumber",
+    ]);
+    if (
+      rawPolicy.schemaVersion !== "1.0" ||
+      typeof rawPolicy.enabled !== "boolean" ||
+      !Array.isArray(rawPolicy.requiredFactors) ||
+      factors.length < 1 ||
+      factors.length > 4 ||
+      new Set(factors).size !== factors.length ||
+      factors.some((factor) => !allowed.has(factor)) ||
+      !Number.isInteger(identityVerification.maxAttempts) ||
+      identityVerification.maxAttempts < 1 ||
+      identityVerification.maxAttempts > 10 ||
+      !["human_handoff", "end_call"].includes(String(rawPolicy.onFailure)) ||
+      rawPolicy.contextDisclosure !== "after_verification"
+    )
+      throw new TypeError("identity verification policy is invalid");
+  }
   if (
     accentToken !== null &&
     !["blue", "cyan", "emerald", "violet", "amber", "rose"].includes(
@@ -322,16 +473,25 @@ export async function updateTenantSettings(
       accent_token: TenantAccentToken;
       report_header: string | null;
       report_footer: string | null;
+      support_profile: NonNullable<TenantSettings["supportProfile"]>;
+      identity_verification_policy: NonNullable<
+        TenantSettings["identityVerification"]
+      >;
     }[]
   >`
     INSERT INTO crm.tenant_settings
       (tenant_id, display_name, default_currency, locale, timezone,
        business_name, business_email, business_phone, business_address,
-       accent_token, report_header, report_footer)
+       accent_token, report_header, report_footer, support_profile,
+       identity_verification_policy)
     VALUES (platform.current_tenant_id(), ${displayName === "" ? null : (displayName ?? null)},
             ${currency}, ${locale}, ${timezone}, ${businessName}, ${businessEmail},
             ${businessPhone}, ${businessAddress}, ${accentToken},
-            ${reportHeader}, ${reportFooter})
+            ${reportHeader}, ${reportFooter},
+            COALESCE(${supportProfile === undefined ? null : sql.json(JSON.parse(JSON.stringify(supportProfile)) as postgres.JSONValue)}::jsonb,
+              '{"schemaVersion":"1.0"}'::jsonb),
+            COALESCE(${identityVerification === undefined ? null : sql.json(JSON.parse(JSON.stringify(identityVerification)) as postgres.JSONValue)}::jsonb,
+              '{"schemaVersion":"1.0","enabled":true,"requiredFactors":["fullName","phone","nationalId"],"maxAttempts":3,"onFailure":"human_handoff","contextDisclosure":"after_verification"}'::jsonb))
     ON CONFLICT (tenant_id) DO UPDATE
       SET display_name = EXCLUDED.display_name,
           default_currency = EXCLUDED.default_currency,
@@ -350,10 +510,16 @@ export async function updateTenantSettings(
             THEN EXCLUDED.report_header ELSE crm.tenant_settings.report_header END,
           report_footer = CASE WHEN ${input.reportFooter !== undefined}
             THEN EXCLUDED.report_footer ELSE crm.tenant_settings.report_footer END,
+          support_profile = CASE WHEN ${supportProfile !== undefined}
+            THEN EXCLUDED.support_profile ELSE crm.tenant_settings.support_profile END,
+          identity_verification_policy = CASE WHEN ${identityVerification !== undefined}
+            THEN EXCLUDED.identity_verification_policy
+            ELSE crm.tenant_settings.identity_verification_policy END,
           updated_at = CURRENT_TIMESTAMP
     RETURNING display_name, default_currency, locale, timezone,
       business_name, business_email, business_phone, business_address,
-      accent_token, report_header, report_footer
+      accent_token, report_header, report_footer, support_profile,
+      identity_verification_policy
   `;
   const row = rows[0];
   if (row === undefined) throw new Error("tenant settings update failed");
@@ -369,6 +535,8 @@ export async function updateTenantSettings(
     accentToken: row.accent_token,
     reportHeader: row.report_header,
     reportFooter: row.report_footer,
+    supportProfile: row.support_profile,
+    identityVerification: row.identity_verification_policy,
   };
 }
 

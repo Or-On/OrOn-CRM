@@ -2,7 +2,7 @@ import uuid
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class Direction(StrEnum):
@@ -51,9 +51,21 @@ class CallContext(BaseModel):
     # address forms cannot be reliably made neutral in every sentence, so an
     # outbound caller may bind one form for the complete call.
     caller_gender: Literal["male", "female"] | None = None
-    # Optional cross-channel provenance. The transcript is bounded at admission
-    # and treated as untrusted reference material by the voice agent.
+    # Optional cross-channel provenance. Private conversation content is never
+    # transported in this context: the opaque, canonical handoff is verified by
+    # the persistence boundary before the voice runtime can unlock any data.
     contact_id: uuid.UUID | None = None
     source_conversation_id: uuid.UUID | None = None
-    conversation_context: str | None = Field(default=None, max_length=4000)
+    handoff_id: uuid.UUID | None = None
     raw_metadata: dict = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _cross_channel_references_are_complete(self) -> CallContext:
+        references = (self.contact_id, self.source_conversation_id, self.handoff_id)
+        if (self.source_conversation_id is not None or self.handoff_id is not None) and not all(
+            value is not None for value in references
+        ):
+            raise ValueError(
+                "contact_id, source_conversation_id and handoff_id must be supplied together"
+            )
+        return self

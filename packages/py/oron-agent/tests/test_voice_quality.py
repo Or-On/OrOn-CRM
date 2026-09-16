@@ -97,6 +97,34 @@ async def test_dynamic_turn_language_scopes_pronunciation_and_preserves_caller_a
     assert await transform("את יכולה לבדוק OrOn?", None) == "אתה יכול לבדוק אוֹר אוֹן?"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("authored", "preserved", "ending"),
+    [
+        (
+            "הראוטר מציג connection timeout. ניסית restart?",
+            ("connection timeout", "restart", "."),
+            "?",
+        ),
+        (
+            "דניאל נמצא ברחוב שקד 9, בשעה 12. זה מתאים?",
+            ("דניאל", "רחוב שקד תשעה", "שתים עשרה", ",", "."),
+            "?",
+        ),
+    ],
+)
+async def test_realistic_hebrew_tts_corpus_preserves_spoken_segmentation_and_mixed_terms(
+    authored, preserved, ending
+):
+    """Exercise the exact normalization seam whose output is handed to TTS."""
+
+    transform = make_speech_transformer(VoiceQualityConfig(language="he"), lambda: None)
+    tts_input = await transform(authored, None)
+
+    assert all(fragment in tts_input for fragment in preserved)
+    assert tts_input.endswith(ending)
+
+
 def test_duplicate_pronunciations_fail_closed():
     entry = PronunciationEntry(original="אלי", spoken="אֵלִי", language="he")
     with pytest.raises(ValidationError):

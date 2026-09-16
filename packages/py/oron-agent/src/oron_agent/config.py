@@ -61,6 +61,9 @@ class Settings(BaseSettings):
         default_factory=lambda: str(Path(tempfile.gettempdir()) / "oron-artifacts"),
         validation_alias="ARTIFACTS_LOCAL_ROOT",
     )
+    # Development-only redacted text-stage artifact. Production keeps this off;
+    # the ordinary customer UI never reads or exposes it.
+    text_diagnostics_enabled: bool = Field(default=False, validation_alias="VOICE_TEXT_DIAGNOSTICS")
 
     # Required only when the optional Vertex provider is selected.
     google_cloud_project: str = Field(default="", validation_alias="GOOGLE_CLOUD_PROJECT")

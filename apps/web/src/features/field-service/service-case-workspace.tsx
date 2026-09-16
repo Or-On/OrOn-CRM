@@ -24,12 +24,14 @@ import {
 import {
   ArrowLeft,
   CheckCircle2,
+  ClipboardList,
   Clock3,
   Download,
   FileCheck2,
   FileImage,
   MessageCircleMore,
   Link2,
+  MapPin,
   PhoneCall,
   Plus,
   ScanText,
@@ -507,6 +509,7 @@ export function ServiceCaseWorkspace({
   }
 
   const nextStatuses = nextServiceCaseStatuses(serviceCase.status);
+  const briefing = dossier.technicianBriefing;
 
   return (
     <div className="service-case-workspace">
@@ -547,6 +550,171 @@ export function ServiceCaseWorkspace({
       {error && !dialogOpen ? (
         <InlineFeedback description={error} tone="critical" />
       ) : null}
+
+      <Surface
+        aria-labelledby="technician-briefing-heading"
+        className="technician-briefing"
+        level="raised"
+      >
+        <header>
+          <span className="technician-briefing__icon">
+            <ClipboardList aria-hidden="true" size={19} />
+          </span>
+          <div>
+            <span className="eyebrow">
+              {he ? "תדריך לפני ביקור" : "Pre-visit briefing"}
+            </span>
+            <h2 id="technician-briefing-heading">
+              {he ? "מה צריך לדעת לפני ההגעה" : "What to know before arrival"}
+            </h2>
+            <p>
+              {he
+                ? "סיכום מובנה מהתיק, בלי להציג תמלול מלא."
+                : "Structured case context without an unfiltered transcript."}
+            </p>
+          </div>
+        </header>
+        <div className="technician-briefing__grid">
+          <section>
+            <h3>{he ? "לקוח ומיקום" : "Customer & site"}</h3>
+            <strong dir="auto">{briefing.customer.name}</strong>
+            <p dir="auto">
+              <MapPin aria-hidden="true" size={14} />
+              {[
+                briefing.customer.locationName,
+                briefing.customer.locationAddress,
+              ]
+                .filter(Boolean)
+                .join(" · ") || (he ? "מיקום לא סופק" : "No site supplied")}
+            </p>
+            {briefing.customer.preferredLanguage ? (
+              <small>
+                {he ? "שפה מועדפת" : "Preferred language"}:{" "}
+                <bdi>{briefing.customer.preferredLanguage}</bdi>
+              </small>
+            ) : null}
+          </section>
+          <section>
+            <h3>{he ? "התקלה" : "Issue"}</h3>
+            <strong dir="auto">{briefing.issue.title}</strong>
+            <p dir="auto">{briefing.issue.description}</p>
+            <div className="technician-briefing__badges">
+              <Badge label={briefing.issue.priority} tone="warning" />
+              <Badge
+                label={warrantyStatusLabel(briefing.issue.warrantyStatus, he)}
+                tone="neutral"
+              />
+            </div>
+          </section>
+          <section>
+            <h3>{he ? "מוצר" : "Product"}</h3>
+            <dl>
+              <div>
+                <dt>{he ? "סוג" : "Type"}</dt>
+                <dd dir="auto">{briefing.issue.productType ?? "—"}</dd>
+              </div>
+              <div>
+                <dt>{he ? "דגם" : "Model"}</dt>
+                <dd dir="auto">{briefing.issue.productModel ?? "—"}</dd>
+              </div>
+              <div>
+                <dt>{he ? "מספר סידורי" : "Serial"}</dt>
+                <dd dir="auto">{briefing.issue.serialNumber ?? "—"}</dd>
+              </div>
+            </dl>
+          </section>
+          <section>
+            <h3>{he ? "הביקור הבא" : "Next appointment"}</h3>
+            {briefing.nextAppointment ? (
+              <>
+                <strong dir="auto">
+                  {briefing.nextAppointment.technicianName}
+                </strong>
+                <p>
+                  <Clock3 aria-hidden="true" size={14} />
+                  {new Intl.DateTimeFormat(locale, {
+                    dateStyle: "medium",
+                    timeStyle: "short",
+                    timeZone: briefing.nextAppointment.timezone,
+                  }).format(new Date(briefing.nextAppointment.startsAt))}
+                </p>
+                {briefing.nextAppointment.notes ? (
+                  <small dir="auto">{briefing.nextAppointment.notes}</small>
+                ) : null}
+              </>
+            ) : (
+              <p>
+                {he ? "לא נקבע ביקור עתידי." : "No upcoming visit scheduled."}
+              </p>
+            )}
+          </section>
+        </div>
+        <div className="technician-briefing__context">
+          <section>
+            <h3>WhatsApp</h3>
+            <p dir="auto">
+              {briefing.whatsappSummary ??
+                (he
+                  ? "אין סיכום WhatsApp זמין."
+                  : "No WhatsApp summary available.")}
+            </p>
+          </section>
+          {canReadVoice ? (
+            <section>
+              <h3>{he ? "סיכום שיחה" : "Voice summary"}</h3>
+              <p dir="auto">
+                {briefing.voiceSummary ??
+                  (he ? "אין סיכום שיחה זמין." : "No voice summary available.")}
+              </p>
+            </section>
+          ) : null}
+        </div>
+        <section className="technician-briefing__history">
+          <h3>
+            {he ? "היסטוריית שירות רלוונטית" : "Relevant service history"}
+          </h3>
+          {briefing.previousService.length === 0 ? (
+            <p>
+              {he
+                ? "לא נמצאו ביקורים קודמים למוצר או ללקוח הזה."
+                : "No relevant previous service visits were found."}
+            </p>
+          ) : (
+            <ol>
+              {briefing.previousService.map((item) => (
+                <li key={`${item.caseReference}:${String(item.visitNumber)}`}>
+                  <div>
+                    <strong dir="auto">
+                      {item.caseReference} · {item.caseTitle}
+                    </strong>
+                    <span>
+                      {new Intl.DateTimeFormat(locale, {
+                        dateStyle: "medium",
+                        timeZone: timezone,
+                      }).format(new Date(item.servicedAt))}
+                      {" · "}
+                      <bdi dir="auto">{item.technicianName}</bdi>
+                    </span>
+                  </div>
+                  <p dir="auto">
+                    {[item.diagnosis, item.workPerformed]
+                      .filter(Boolean)
+                      .join(" · ") ||
+                      (he
+                        ? "לא נשמר סיכום עבודה."
+                        : "No work summary recorded.")}
+                  </p>
+                  {item.replacementPartDetails ? (
+                    <small dir="auto">
+                      {he ? "חלק" : "Part"}: {item.replacementPartDetails}
+                    </small>
+                  ) : null}
+                </li>
+              ))}
+            </ol>
+          )}
+        </section>
+      </Surface>
 
       <div className="service-case-layout">
         <div className="service-case-main">

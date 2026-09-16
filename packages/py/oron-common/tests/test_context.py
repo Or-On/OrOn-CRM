@@ -109,25 +109,30 @@ def test_caller_address_gender_is_typed_and_optional():
         )
 
 
-def test_cross_channel_context_is_typed_and_bounded():
+def test_cross_channel_context_carries_only_complete_opaque_references():
     conversation_id = uuid.uuid4()
+    contact_id = uuid.uuid4()
+    handoff_id = uuid.uuid4()
     ctx = CallContext(
         call_id="c10",
         direction="outbound",
         flow_id=FLOW_ID,
         tenant_id=TENANT_ID,
+        contact_id=contact_id,
         source_conversation_id=conversation_id,
-        conversation_context="Customer: Please call me now.",
+        handoff_id=handoff_id,
     )
     assert ctx.source_conversation_id == conversation_id
-    assert ctx.conversation_context == "Customer: Please call me now."
+    assert ctx.contact_id == contact_id
+    assert ctx.handoff_id == handoff_id
+    assert "conversation_context" not in ctx.model_dump()
     with pytest.raises(ValidationError):
         CallContext(
             call_id="c11",
             direction="outbound",
             flow_id=FLOW_ID,
             tenant_id=TENANT_ID,
-            conversation_context="x" * 4001,
+            source_conversation_id=conversation_id,
         )
 
 

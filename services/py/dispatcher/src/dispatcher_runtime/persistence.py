@@ -6,9 +6,10 @@ import base64
 import hashlib
 import hmac
 import json
+import unicodedata
 from uuid import UUID
 
-from oron_common import CallContext, CallUsage
+from oron_common import CallContext, CallUsage, validate_e164
 from oron_db import make_engine, make_sessionmaker, set_tenant
 from oron_dispatcher.dispatcher import IdempotencyConflict
 from oron_dispatcher.tenancy_client import PhoneResolution
@@ -25,69 +26,37 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlmodel import col
 
-_VOICE_RUNTIME_RULES = """\
-Natural live-conversation policy:
-- Listen to what the person actually says and respond directly to it. Every
-  completed user turn is part of a real conversation, not merely a command or
-  support intent to classify.
-- Respond naturally to greetings, small talk, jokes, acknowledgements,
-  follow-up questions, unrelated questions, and support requests. Do not force
-  the conversation back to support when the caller is simply talking.
-- Address every meaningful part of a turn. If the caller asks a social question
-  and reports a problem in the same turn, answer the social question briefly and
-  then help with the problem.
-- Use the language the caller is currently communicating in unless they ask for
-  another language. Adapt naturally when they switch, including within the same
-  conversation. Language metadata controls transcription and speech delivery;
-  it never limits what you may understand or discuss.
-- Keep ordinary spoken answers concise, usually one to three sentences. For
-  troubleshooting, take one useful step or ask one useful question at a time.
-- Avoid scripted call-center filler, repetitive apologies, announcing what you
-  are about to do, repeating the caller's sentence, and overusing their name.
-- Never invent personal real-world experiences. If directly asked whether the
-  service is automated, answer truthfully in one short sentence.
-Voice-channel safety rules:
-- Never use technical self-reference such as "as an AI", "as an LLM", or discuss
-  model limitations. Do not volunteer implementation details. If directly asked
-  whether the service is automated, answer honestly in one short sentence that
-  you are Or-On's automated support assistant, then return to the caller's issue.
-- Never speak unresolved placeholders or bracketed field names. Ask naturally
-  for a missing detail instead.
-- Default to one short, naturally punctuated reply; use additional sentences
-  only when they add necessary information. Ask at most one question. Never
-  deliver a long uninterrupted list or monologue.
-- Never join an answer and its follow-up question with only a comma. End the
-  answer as a complete sentence, then ask the question as a separate sentence
-  ending in a question mark. Use short sentence boundaries, not comma chains.
-- Do not use "אני מבינה" or "אני מבין" as automatic filler before an
-  answer. Answer directly. This also keeps the agent's first-person grammar
-  from being confused with the caller's separately configured address form.
-- Do not guess the caller's gender. Use natural gender-neutral Hebrew until a
-  trusted system line or the caller explicitly states it. Once a form is set,
-  use only that form for every later turn; never alternate masculine and
-  feminine wording.
-- Do not repeat an interrupted sentence verbatim. Continue from the caller's
-  latest point.
-- Treat a system lookup, eligibility decision, appointment slot, booking,
-  account change, or confirmation as unavailable unless a tool shown in the
-  current turn returns that exact result. Without such a tool, say briefly that
-  you cannot verify or complete it here and offer a human follow-up. Never say
-  "I am checking", "the system shows", "you are eligible", "I scheduled it",
-  or "it is confirmed" based only on conversation text.
-- The current runtime exposes conversation-routing tools only. It has no
-  customer lookup, identity verification, ticketing, technician scheduling,
-  or WhatsApp-delivery tool. Do not ask for a full identity number, claim that
-  a subscriber or device was found, open a service request, schedule a visit,
-  or promise a message. Give general guidance and offer a human follow-up.
-- Never repeat a full identity number, telephone number, access code, payment
-  value, or other sensitive identifier aloud. If confirmation is necessary,
-  use only the last four digits after a verified tool supplies them.
-- For unsafe or out-of-scope requests, refuse in one short, ordinary sentence
-  and offer one safe relevant alternative. Do not lecture, cite laws or ethics,
-  or describe model limitations.
-"""
+from dispatcher_runtime.support_context import (
+    TenantSupportProfile,
+    compile_voice_runtime_prompt,
+    support_profile_from_database,
+    terminology_quality_overrides,
+)
 
 _CALL_CONFIGURATION_EVENT = "voice.call.configuration.v1"
+
+
+def _normalize_identity_name(value: str) -> str:
+    # Match platform.normalize_identity_name exactly: NFKC, lowercase, then
+    # remove whitespace and punctuation. Deliberately do not fuzzy-match.
+    normalized = unicodedata.normalize("NFKC", value).strip().lower()
+    compact = "".join(
+        character
+        for character in normalized
+        if not character.isspace() and not unicodedata.category(character).startswith("P")
+    )
+    if not compact or len(compact) > 160:
+        raise ValueError("fullName is invalid")
+    return compact
+
+
+def _normalize_national_id(value: str) -> str:
+    normalized = "".join(
+        character for character in value if not character.isspace() and character != "-"
+    )
+    if not normalized.isascii() or not normalized.isdigit() or not 4 <= len(normalized) <= 32:
+        raise ValueError("nationalId is invalid")
+    return normalized
 
 
 def _call_configuration_event(context: CallContext) -> SessionEvent | None:
@@ -268,7 +237,7 @@ class PostgresVoiceRuntime:
                     "source_conversation": str(context.source_conversation_id)
                     if context.source_conversation_id
                     else None,
-                    "conversation": context.conversation_context,
+                    "handoff": str(context.handoff_id) if context.handoff_id else None,
                 },
                 sort_keys=True,
                 separators=(",", ":"),
@@ -373,6 +342,24 @@ class PostgresVoiceRuntime:
             row.initiated_by_service = "dispatcher"
             row.contact_id = resolved_contact_id
             database.add(row)
+            await database.flush()
+            verification_receipt: dict | None = None
+            if context.handoff_id is not None:
+                verification_receipt = (
+                    await database.execute(
+                        text(
+                            """
+                            SELECT platform.initialize_voice_identity_verification(
+                              :session_id,:handoff_id
+                            )
+                            """
+                        ),
+                        {
+                            "session_id": str(context.session_id),
+                            "handoff_id": str(context.handoff_id),
+                        },
+                    )
+                ).scalar_one()
             if configuration_event := _call_configuration_event(context):
                 database.add(configuration_event)
             if idempotency_key is not None:
@@ -392,6 +379,12 @@ class PostgresVoiceRuntime:
                             "source_conversation_id": str(context.source_conversation_id)
                             if context.source_conversation_id
                             else None,
+                            "handoff_id": str(context.handoff_id) if context.handoff_id else None,
+                            "verification_state": (
+                                verification_receipt.get("state")
+                                if verification_receipt is not None
+                                else None
+                            ),
                         },
                     )
                 )
@@ -423,6 +416,11 @@ class PostgresVoiceRuntime:
                     usage=usage,
                 ),
             )
+            if row is not None:
+                await database.execute(
+                    text("SELECT platform.write_voice_session_outcome(:session_id)"),
+                    {"session_id": str(session_id)},
+                )
             return row is not None
 
     async def checkpoint_usage(
@@ -450,6 +448,7 @@ class PostgresVoiceRuntime:
         resolve_agent: bool = True,
         flow_version: int | None = None,
         persona_gender: str | None = None,
+        support_profile: TenantSupportProfile | None = None,
     ) -> FlowSpec | None:
         try:
             spec = (
@@ -474,14 +473,12 @@ class PostgresVoiceRuntime:
         # rules around their retained persona.
         retained = spec.role_message.strip() if spec.role_message else ""
         authoritative = prompt.strip() if prompt is not None else retained
-        self_reference = (
-            f"Your structured speaking gender is {spec.persona_gender}. "
-            "Use matching Hebrew forms for yourself; this structured setting "
-            "overrides contrary wording in prose."
+        profile = support_profile or await self._tenant_support_profile(tenant_id)
+        role_message = compile_voice_runtime_prompt(
+            profile,
+            agent_prompt=authoritative,
+            persona_gender=spec.persona_gender,
         )
-        role_message = (
-            f"{authoritative}\n\n{_VOICE_RUNTIME_RULES.strip()}\n- {self_reference}"
-        ).strip()
         nodes = [
             node.model_copy(
                 update={
@@ -501,6 +498,25 @@ class PostgresVoiceRuntime:
         # this value with the selected voice and scripted lines.
         updates: dict[str, object] = {"role_message": role_message, "nodes": nodes}
         return spec.model_copy(update=updates)
+
+    async def _tenant_support_profile(self, tenant_id: UUID) -> TenantSupportProfile:
+        async with self._sessionmaker() as database, database.begin():
+            await set_tenant(database, str(tenant_id))
+            raw = (
+                await database.execute(
+                    text("SELECT platform.current_voice_tenant_support_profile()")
+                )
+            ).scalar_one_or_none()
+        if not isinstance(raw, dict):
+            raise ValueError("tenant support profile is unavailable")
+        return support_profile_from_database(
+            raw.get("supportProfile") if isinstance(raw.get("supportProfile"), dict) else None,
+            tenant_name=str(raw["tenantName"]),
+            display_name=raw.get("displayName"),
+            business_name=raw.get("businessName"),
+            locale=str(raw.get("locale") or "en"),
+            timezone=str(raw.get("timezone") or "UTC"),
+        )
 
     async def get_voice_configuration(
         self,
@@ -567,12 +583,154 @@ class PostgresVoiceRuntime:
         retained_version = row["voice_version"]
         if retained_version is not None and not str(retained_version).isdigit():
             raise ValueError("published voice flow version is invalid")
+        profile = await self._tenant_support_profile(tenant_id)
+        quality = dict((row["channel_configuration"] or {}).get("quality", {}))
+        tenant_quality = terminology_quality_overrides(profile)
+        quality["sttVocabulary"] = list(
+            dict.fromkeys([*quality.get("sttVocabulary", []), *tenant_quality["sttVocabulary"]])
+        )[:64]
+        quality["pronunciationDictionary"] = [
+            *quality.get("pronunciationDictionary", []),
+            *tenant_quality["pronunciationDictionary"],
+        ][:64]
         return {
             "agentVersionId": str(row["id"]),
             "systemPrompt": row["system_prompt"],
-            "quality": (row["channel_configuration"] or {}).get("quality", {}),
+            "quality": quality,
             "flowVersion": int(retained_version) if retained_version is not None else flow_version,
+            "supportProfile": profile.model_dump(mode="json"),
         }
+
+    async def get_identity_verification_requirements(self, context: CallContext) -> dict:
+        """Return policy/state only; expected identity values never cross this boundary."""
+
+        if context.handoff_id is None:
+            return {
+                "required": False,
+                "factors": [],
+                "state": "context_unlocked",
+                "maxAttempts": 0,
+                "remainingAttempts": 0,
+                "onFailure": "end_call",
+            }
+        async with self._sessionmaker() as database, database.begin():
+            await set_tenant(database, str(context.tenant_id))
+            result = (
+                await database.execute(
+                    text("SELECT platform.voice_identity_verification_requirements(:session_id)"),
+                    {"session_id": str(context.session_id)},
+                )
+            ).scalar_one_or_none()
+        if not isinstance(result, dict):
+            raise ValueError("voice verification state is unavailable")
+        return result
+
+    async def verify_caller_identity(
+        self, context: CallContext, supplied: dict[str, object]
+    ) -> dict:
+        """Normalize submitted factors and compare only inside the tenant-scoped database."""
+
+        if context.handoff_id is None:
+            raise ValueError("voice verification is not required for this call")
+        requirements = await self.get_identity_verification_requirements(context)
+        factors = requirements.get("factors")
+        if not isinstance(factors, list) or not all(isinstance(item, str) for item in factors):
+            raise ValueError("voice verification policy is invalid")
+        normalized: dict[str, str | None] = {
+            "fullName": None,
+            "phone": None,
+            "nationalId": None,
+            "customerNumber": None,
+        }
+        for factor in factors:
+            value = supplied.get(factor)
+            if not isinstance(value, str):
+                raise ValueError("all configured verification factors are required")
+            if factor == "fullName":
+                normalized[factor] = _normalize_identity_name(value)
+            elif factor == "phone":
+                normalized[factor] = validate_e164(value, region="IL")
+            elif factor == "nationalId":
+                national_id = _normalize_national_id(value)
+                normalized[factor] = hmac.new(
+                    self._blind_index_key,
+                    f"{context.tenant_id}:{national_id}".encode(),
+                    hashlib.sha256,
+                ).hexdigest()
+            elif factor == "customerNumber":
+                customer_number = unicodedata.normalize("NFKC", value).strip()
+                if not customer_number or len(customer_number) > 120:
+                    raise ValueError("customerNumber is invalid")
+                normalized[factor] = customer_number
+            else:
+                raise ValueError("voice verification policy contains an unsupported factor")
+
+        async with self._sessionmaker() as database, database.begin():
+            await set_tenant(database, str(context.tenant_id))
+            result = (
+                await database.execute(
+                    text(
+                        """
+                        SELECT platform.verify_voice_caller_identity(
+                          :session_id,:full_name,:phone,:national_id,:customer_number
+                        )
+                        """
+                    ),
+                    {
+                        "session_id": str(context.session_id),
+                        "full_name": normalized["fullName"],
+                        "phone": normalized["phone"],
+                        "national_id": normalized["nationalId"],
+                        "customer_number": normalized["customerNumber"],
+                    },
+                )
+            ).scalar_one()
+            if not isinstance(result, dict):
+                raise ValueError("voice verification result is unavailable")
+            sequence = (
+                await database.execute(
+                    text(
+                        """
+                        SELECT coalesce(max(sequence),-1)+1 FROM public.session_events
+                        WHERE tenant_id=:tenant_id AND session_id=:session_id
+                        """
+                    ),
+                    {
+                        "tenant_id": str(context.tenant_id),
+                        "session_id": str(context.session_id),
+                    },
+                )
+            ).scalar_one()
+            database.add(
+                SessionEvent(
+                    tenant_id=context.tenant_id,
+                    session_id=context.session_id,
+                    sequence=sequence,
+                    event_type="voice.identity_verification.v1",
+                    payload={
+                        "verified": result.get("verified") is True,
+                        "state": result.get("state"),
+                        "remaining_attempts": result.get("remainingAttempts"),
+                        "context_unlocked": result.get("state") == "context_unlocked",
+                    },
+                )
+            )
+        return result
+
+    async def get_verified_handoff_context(self, context: CallContext) -> dict:
+        if context.handoff_id is None:
+            return {}
+        async with self._sessionmaker() as database, database.begin():
+            await set_tenant(database, str(context.tenant_id))
+            result = (
+                await database.execute(
+                    text("SELECT platform.verified_voice_handoff_context(:session_id)"),
+                    {"session_id": str(context.session_id)},
+                )
+            ).scalar_one()
+        if not isinstance(result, dict):
+            raise ValueError("verified handoff context is unavailable")
+        return result
 
     async def get_voice_knowledge(self, agent_version_id: UUID, *, tenant_id: UUID) -> list[dict]:
         """RLS-scoped fresh eligibility. Expired/revoked latest versions never fall back."""
@@ -796,6 +954,12 @@ class AgentPostgresSessions:
         persona = {"feminine": "female", "masculine": "male", "neutral": "neutral"}.get(
             str(quality.get("agentGrammar", ""))
         )
+        raw_profile = configuration.get("supportProfile")
+        support_profile = (
+            TenantSupportProfile.model_validate(raw_profile)
+            if isinstance(raw_profile, dict)
+            else None
+        )
         spec = await self._backend.get_flow(
             context.flow_id,
             tenant_id=context.tenant_id,
@@ -803,8 +967,20 @@ class AgentPostgresSessions:
             resolve_agent=False,
             flow_version=configuration.get("flowVersion") or context.flow_version,
             persona_gender=persona,
+            support_profile=support_profile,
         )
         return spec, configuration
+
+    async def get_identity_verification_requirements(self, context: CallContext) -> dict:
+        return await self._backend.get_identity_verification_requirements(context)
+
+    async def verify_caller_identity(
+        self, context: CallContext, supplied: dict[str, object]
+    ) -> dict:
+        return await self._backend.verify_caller_identity(context, supplied)
+
+    async def get_verified_handoff_context(self, context: CallContext) -> dict:
+        return await self._backend.get_verified_handoff_context(context)
 
     async def get_voice_knowledge(self, agent_version_id: UUID, *, tenant_id: UUID) -> list[dict]:
         return await self._backend.get_voice_knowledge(agent_version_id, tenant_id=tenant_id)

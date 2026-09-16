@@ -26,6 +26,7 @@ const SETTINGS_TABS = new Set<SettingsTab>([
   "appearance",
   "security",
   "workspace",
+  "support",
   "team",
   "notifications",
   "access",
@@ -86,7 +87,7 @@ export default async function SettingsPage({
     );
     const initialTab =
       (requestedInitialTab === "team" && !data.canManageMembers) ||
-      ((["workspace", "access", "integrations"] as const).some(
+      ((["workspace", "support", "access", "integrations"] as const).some(
         (tab) => requestedInitialTab === tab,
       ) &&
         !data.canManageTenant)
