@@ -18,7 +18,15 @@ vi.mock("../src/features/auth", () => ({
   withCurrentTenant: async (
     _permission: string,
     operation: (sql: unknown) => Promise<unknown>,
-  ) => operation(vi.fn().mockResolvedValue([{ found: true }])),
+  ) =>
+    operation(
+      vi.fn().mockResolvedValue([
+        {
+          agent_version_id: "70000000-0000-4000-8000-000000000001",
+          flow_version: 3,
+        },
+      ]),
+    ),
 }));
 
 import { POST } from "../src/app/api/voice/real-calls/route";
@@ -105,6 +113,8 @@ describe("real call admission boundary", () => {
       explicit_approval: true,
       caller_gender: "male",
       flow_id: "702a2dd8-24d9-4d54-a571-89c69978d48a",
+      flow_version: 3,
+      agent_version_id: "70000000-0000-4000-8000-000000000001",
       phone_number: "+14155550123",
     });
   });

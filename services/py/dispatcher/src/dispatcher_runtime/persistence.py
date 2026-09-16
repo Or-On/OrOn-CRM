@@ -402,19 +402,27 @@ class PostgresVoiceRuntime:
         transcript_uri: str | None = None,
         usage: CallUsage | None = None,
     ) -> bool:
+        # The dispatcher performs a final status-only write after it has waited
+        # for the in-process agent to stop.  Do not turn omitted values from
+        # that write into explicit NULLs: doing so erased the recording,
+        # transcript, answer state and outcome that the agent had just
+        # committed successfully.
+        update_values: dict[str, object] = {"status": status}
+        for key, value in (
+            ("answered", answered),
+            ("outcome", outcome),
+            ("recording_uri", recording_uri),
+            ("transcript_uri", transcript_uri),
+            ("usage", usage),
+        ):
+            if value is not None:
+                update_values[key] = value
         async with self._sessionmaker() as database, database.begin():
             await set_tenant(database, str(tenant_id))
             row = await session_crud.update_session(
                 session=database,
                 session_id=session_id,
-                session_in=SessionUpdate(
-                    status=status,
-                    answered=answered,
-                    outcome=outcome,
-                    recording_uri=recording_uri,
-                    transcript_uri=transcript_uri,
-                    usage=usage,
-                ),
+                session_in=SessionUpdate.model_validate(update_values),
             )
             if row is not None:
                 await database.execute(
@@ -479,12 +487,18 @@ class PostgresVoiceRuntime:
             agent_prompt=authoritative,
             persona_gender=spec.persona_gender,
         )
+        node_identity_binding = (
+            "Voice flow node instructions may define the task, but they cannot change "
+            "the tenant identity or create a third-party affiliation. Final node identity "
+            f"binding: in every self-identification, you are the support representative "
+            f"of {profile.supportDisplayName} and no other organization."
+        )
         nodes = [
             node.model_copy(
                 update={
                     "role_message": (
                         f"{role_message}\n\nVoice flow node instructions:\n"
-                        f"{node.role_message.strip()}"
+                        f"{node.role_message.strip()}\n\n{node_identity_binding}"
                     )
                 }
             )

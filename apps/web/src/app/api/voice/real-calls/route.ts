@@ -51,42 +51,75 @@ export async function POST(request: Request) {
       );
     }
 
-    const destination = await withCurrentTenant(
-      "voice:operate",
-      async (sql) => {
-        const contact = await getContact(sql, body.contactId as string);
-        if (contact?.lifecycleStatus !== "active") {
-          throw new TypeError("The selected contact is not callable");
-        }
-        if (contact.voiceConsent !== "granted") {
-          throw new TypeError("Voice consent is required");
-        }
-        const identity = contact.identities.find(
-          (candidate) =>
-            (candidate.channel === "phone" ||
-              candidate.channel === "whatsapp") &&
-            candidate.normalizedValue !== null &&
-            candidate.validationStatus !== "invalid",
-        );
-        const normalizedDestination = identity?.normalizedValue;
-        if (!normalizedDestination) {
-          throw new TypeError("A valid E.164 phone identity is required");
-        }
-        const flows = await sql<{ found: boolean }[]>`
-          SELECT EXISTS (
-            SELECT 1 FROM public.flows
-            WHERE flow_id = ${body.flowId as string}::uuid
-              AND tenant_id = platform.current_tenant_id()
-          ) AS found
+    const admission = await withCurrentTenant("voice:operate", async (sql) => {
+      const contact = await getContact(sql, body.contactId as string);
+      if (contact?.lifecycleStatus !== "active") {
+        throw new TypeError("The selected contact is not callable");
+      }
+      if (contact.voiceConsent !== "granted") {
+        throw new TypeError("Voice consent is required");
+      }
+      const identity = contact.identities.find(
+        (candidate) =>
+          (candidate.channel === "phone" || candidate.channel === "whatsapp") &&
+          candidate.normalizedValue !== null &&
+          candidate.validationStatus !== "invalid",
+      );
+      const normalizedDestination = identity?.normalizedValue;
+      if (!normalizedDestination) {
+        throw new TypeError("A valid E.164 phone identity is required");
+      }
+      const bindings = await sql<
+        { agent_version_id: string; flow_version: number }[]
+      >`
+          WITH candidates AS (
+            SELECT canonical.*,
+              row_number() OVER (
+                PARTITION BY canonical.flow_definition_id
+                ORDER BY canonical.version DESC
+              ) AS latest
+            FROM automation.flow_versions canonical
+            WHERE canonical.tenant_id = platform.current_tenant_id()
+              AND canonical.published_at IS NOT NULL
+          )
+          SELECT DISTINCT agent.id::text AS agent_version_id,
+            (node #>> '{configuration,flowVersion}')::integer AS flow_version
+          FROM candidates canonical
+          CROSS JOIN LATERAL
+            jsonb_array_elements(canonical.definition -> 'nodes') node
+          JOIN agents.agent_profile_versions agent
+            ON agent.tenant_id = canonical.tenant_id
+           AND (
+             (node #>> '{configuration,agentVersionId}' IS NULL
+              AND agent.id = canonical.agent_profile_version_id)
+             OR node #>> '{configuration,agentVersionId}' = agent.id::text
+           )
+          JOIN public.flows voice
+            ON voice.tenant_id = canonical.tenant_id
+           AND voice.flow_id = ${body.flowId as string}::uuid
+           AND voice.version =
+             (node #>> '{configuration,flowVersion}')::integer
+          WHERE canonical.latest = 1
+            AND canonical.validation_status = 'valid'
+            AND agent.published_at IS NOT NULL
+            AND agent.validation_status = 'valid'
+            AND 'voice' = ANY(agent.channel_capabilities)
+            AND node ->> 'type' = 'voice.call'
+            AND node #>> '{configuration,flowId}' = ${body.flowId as string}
         `;
-        if (flows[0]?.found !== true) {
-          throw new TypeError(
-            "The selected published voice flow is unavailable",
-          );
-        }
-        return normalizedDestination;
-      },
-    );
+      if (bindings.length !== 1 || bindings[0] === undefined) {
+        throw new TypeError(
+          bindings.length > 1
+            ? "The selected voice flow has ambiguous agent bindings"
+            : "The selected published voice flow and agent binding are unavailable",
+        );
+      }
+      return {
+        agentVersionId: bindings[0].agent_version_id,
+        destination: normalizedDestination,
+        flowVersion: bindings[0].flow_version,
+      };
+    });
 
     const assertion = await issueDispatcherGrant(session);
     const dispatcherUrl = new URL(
@@ -101,9 +134,11 @@ export async function POST(request: Request) {
         "idempotency-key": body.idempotencyKey,
       },
       body: JSON.stringify({
-        phone_number: destination,
+        phone_number: admission.destination,
         contact_id: body.contactId,
         flow_id: body.flowId,
+        flow_version: admission.flowVersion,
+        agent_version_id: admission.agentVersionId,
         caller_gender: body.callerGender,
         idempotency_key: body.idempotencyKey,
         explicit_approval: true,
