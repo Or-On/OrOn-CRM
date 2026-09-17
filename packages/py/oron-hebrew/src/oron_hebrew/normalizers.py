@@ -157,10 +157,18 @@ def normalize_address_numbers(text: str) -> str:
 # --- Currency (NEW): shekel/agorot readback, ILS only. "50 ₪"->"50 שקלים";
 #     "1 ₪"->"שקל אחד"; "19.90 ₪"->"19 שקלים ו90 אגורות". Symbol -> words; the
 #     spoken digits are left for the number filter / TTS to read in Hebrew. ---
-_CURRENCY_RE = re.compile(
-    r"(?<![\d.,])([+-]?)(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?"
-    r'\s*(?:₪|ש"ח|שח|שקלים)(?![א-ת\d])'
+#     Models write the abbreviation with a typographic gershayim (ש״ח) as often
+#     as with an ASCII quote, put ₪ before the amount as often as after, and
+#     sometimes use a decimal comma ("29,90") — every form must read as money,
+#     never as "twenty-nine point nine zero". A comma followed by exactly one or
+#     two digits cannot be a thousands separator, so it is only a decimal here.
+_AMOUNT = (
+    r"([+-]?)(?:(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?"
+    r"|(\d+),(\d{1,2}))(?![\d.,]*\d)"
 )
+_SHEKEL_WORD = r'(?:₪|ש["״]ח|שח|שקלים)'
+_CURRENCY_RE = re.compile(rf"(?<![\d.,]){_AMOUNT}\s*{_SHEKEL_WORD}(?![א-ת\d])")
+_PREFIX_CURRENCY_RE = re.compile(rf"₪\s*{_AMOUNT}(?![\d.,]?\d)")
 
 
 def _shekel_words(whole: int) -> str:
@@ -172,17 +180,66 @@ def _agorot_words(frac: str) -> str:
     return "אגורה אחת" if n == 1 else f"{feminine_hour_minute(n)} אגורות"
 
 
-def normalize_currency(text: str) -> str:
-    def _sub(m: re.Match) -> str:
-        if len(m.group(2).replace(",", "")) > 15:
-            return m.group(0)
-        sign = {"-": "מינוס ", "+": "פלוס ", "": ""}[m.group(1)]
-        shekels = _shekel_words(int(m.group(2).replace(",", "")))
-        if m.group(3):
-            return f"{sign}{shekels} ו{_agorot_words(m.group(3))}"
-        return sign + shekels
+def _currency_words(m: re.Match) -> str:
+    sign_text, grouped, dot_fraction, comma_whole, comma_fraction = m.groups()
+    whole = (grouped or comma_whole).replace(",", "")
+    fraction = dot_fraction or comma_fraction
+    if len(whole) > 15:
+        return m.group(0)
+    sign = {"-": "מינוס ", "+": "פלוס ", "": ""}[sign_text]
+    shekels = _shekel_words(int(whole))
+    if fraction and int(fraction):
+        if not int(whole):
+            return sign + _agorot_words(fraction)  # "0.50 ₪" is fifty agorot
+        return f"{sign}{shekels} ו{_agorot_words(fraction)}"
+    return sign + shekels
 
-    return _CURRENCY_RE.sub(_sub, text)
+
+def normalize_currency(text: str) -> str:
+    text = _PREFIX_CURRENCY_RE.sub(_currency_words, text)
+    return _CURRENCY_RE.sub(_currency_words, text)
+
+
+# --- Percent: "12%" -> "12 אחוז". The sign is not a letter TTS can voice, and
+#     the number filter would otherwise leave "שנים עשר%". ---
+_PERCENT_RE = re.compile(r"(\d)\s*%")
+
+
+def normalize_percent(text: str) -> str:
+    return _PERCENT_RE.sub(r"\1 אחוז", text)
+
+
+# --- Numeric dates: Israeli day-first "16.09.2026" / "16/09/2026" -> "16
+#     בספטמבר 2026". Left numeric, the generic number filter refuses to guess
+#     and TTS reads the digits and separators literally. Only real calendar
+#     dates are rewritten; anything else stays intact for other readback. ---
+_HEBREW_MONTHS = (
+    "בינואר",
+    "בפברואר",
+    "במרץ",
+    "באפריל",
+    "במאי",
+    "ביוני",
+    "ביולי",
+    "באוגוסט",
+    "בספטמבר",
+    "באוקטובר",
+    "בנובמבר",
+    "בדצמבר",
+)
+_NUMERIC_DATE_RE = re.compile(
+    r"(?<![\d.,/])(\d{1,2})([./])(\d{1,2})\2((?:19|20)\d{2})(?![\d/]|\.\d)"
+)
+
+
+def normalize_numeric_dates(text: str) -> str:
+    def _sub(m: re.Match) -> str:
+        day, month, year = int(m.group(1)), int(m.group(3)), m.group(4)
+        if not (1 <= day <= 31 and 1 <= month <= 12):
+            return m.group(0)
+        return f"{day} {_HEBREW_MONTHS[month - 1]} {year}"
+
+    return _NUMERIC_DATE_RE.sub(_sub, text)
 
 
 _NUMBER_TOKEN_RE = re.compile(r"(?<!\w)[+-]?\d+(?:[.,:/-]\d+)*(?!\w)")
@@ -241,6 +298,7 @@ def strip_unspoken_symbols(text: str) -> str:
 def normalize_for_tts(text: str) -> str:
     """Run all deterministic normalizers in the fixed, order-sensitive sequence.
     Niqqud is applied AFTER this by the Task 5 transformer."""
+    text = normalize_numeric_dates(text)
     text = normalize_long_identifiers(text)
     text = normalize_time_ranges(text)
     text = normalize_clock_times(text)
@@ -249,4 +307,5 @@ def normalize_for_tts(text: str) -> str:
     text = normalize_prefixed_hours(text)
     text = normalize_address_numbers(text)
     text = normalize_currency(text)
+    text = normalize_percent(text)
     return strip_unspoken_symbols(text)

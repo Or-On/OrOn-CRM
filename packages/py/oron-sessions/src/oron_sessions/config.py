@@ -89,6 +89,12 @@ class Settings(BaseSettings):
 
     def _dsn(self, override: str | None, role: DbRole, password: SecretStr | None) -> str:
         if override:
+            # Deployment env files use the driverless form every other service
+            # reads; the async engine needs the asyncpg dialect named, and would
+            # otherwise try (and fail) to import psycopg2 on every sweep.
+            for prefix in ("postgresql://", "postgres://"):
+                if override.startswith(prefix):
+                    return f"{DRIVER}://{override.removeprefix(prefix)}"
             return override
         parts = {
             "DB_HOST": self.db_host,

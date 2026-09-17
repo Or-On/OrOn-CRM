@@ -148,21 +148,30 @@ export async function issueLiveAgentGrant(
 export async function issueControlApiGrant(
   session: AuthSession,
   capability:
-    "voice:read" | "voice:write" | "orchestration:read" | "orchestration:write",
+    | "voice:read"
+    | "voice:write"
+    | "voice:manage"
+    | "orchestration:read"
+    | "orchestration:write",
 ): Promise<string> {
-  const permission: Permission = capability.startsWith("voice:")
-    ? capability === "voice:read"
-      ? "voice:read"
-      : "voice:operate"
-    : capability === "orchestration:read"
-      ? "crm:read"
-      : "flows:manage";
-  if (
-    !isAuthorized(
-      { role: session.tenant.role, isSuperuser: session.isSuperuser },
-      permission,
-    )
-  ) {
+  // `voice:manage` publishes flows, routes numbers to them and creates/runs
+  // campaigns: the same configuration the CRM gates on flows:manage and
+  // campaigns:manage. `voice:operate` alone (agents) must not reach it.
+  const required: readonly Permission[] =
+    capability === "voice:read"
+      ? ["voice:read"]
+      : capability === "voice:write"
+        ? ["voice:operate"]
+        : capability === "voice:manage"
+          ? ["voice:operate", "flows:manage", "campaigns:manage"]
+          : capability === "orchestration:read"
+            ? ["crm:read"]
+            : ["flows:manage"];
+  const principal = {
+    role: session.tenant.role,
+    isSuperuser: session.isSuperuser,
+  };
+  if (!required.every((permission) => isAuthorized(principal, permission))) {
     throw new ForbiddenError("Forbidden");
   }
   const { serviceSecret } = authConfig();

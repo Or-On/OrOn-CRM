@@ -42,6 +42,23 @@ _FLOW_TABLE = cast(Any, Flow).__table__
 _DEFAULT_CALLING_HOURS = {0: [9, 18], 1: [9, 18], 2: [9, 18], 3: [9, 18], 4: [9, 14], 6: [9, 18]}
 
 
+def _tenant_phone_numbers(tenant_id: UUID) -> Any:
+    """Every DID this tenant owns, and only this tenant's.
+
+    `public.phone_numbers` is a control-plane table with no RLS policy: the
+    dispatcher resolves an inbound DID before any tenant is known, so the row
+    must be visible without a tenant GUC. That makes the predicate this
+    statement carries the only thing standing between one tenant's operator and
+    every other tenant's numbers, flow bindings and dispatch rule ids.
+    """
+
+    return (
+        select(PhoneNumber)
+        .where(_PHONE_NUMBER_TABLE.c.tenant_id == tenant_id)
+        .order_by(col(PhoneNumber.e164))
+    )
+
+
 def _tenant_flow_owner_clause(tenant_id: UUID) -> Any:
     """Match only a tenant-owned flow; NULL fixture rows are never runtime input."""
 
@@ -609,9 +626,7 @@ class PostgresVoiceRepository:
         async with self._sessionmaker() as database, database.begin():
             await self._scope(database, principal)
             rows = list(
-                (
-                    await database.execute(select(PhoneNumber).order_by(col(PhoneNumber.e164)))
-                ).scalars()
+                (await database.execute(_tenant_phone_numbers(principal.tenant_id))).scalars()
             )
             return [_phone_summary(row) for row in rows]
 
@@ -1031,7 +1046,7 @@ def create_voice_router(
             principal = verifier.verify(credentials.credentials)
         except InvalidServiceAssertion:
             raise HTTPException(status_code=401, detail="invalid service assertion") from None
-        if principal.capability not in {"voice:read", "voice:write"}:
+        if principal.capability not in {"voice:read", "voice:write", "voice:manage"}:
             raise HTTPException(status_code=403, detail="voice capability required")
         return principal
 
@@ -1041,6 +1056,17 @@ def create_voice_router(
         principal = await require_voice_read(credentials)
         if principal.capability != "voice:write":
             raise HTTPException(status_code=403, detail="voice write capability required")
+        return principal
+
+    async def require_voice_manage(
+        credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
+    ) -> ServicePrincipal:
+        # Operating calls (`voice:write`) is an agent permission; changing what
+        # callers are routed to or who gets dialled is tenant configuration. The
+        # web boundary only issues `voice:manage` to flows+campaigns managers.
+        principal = await require_voice_read(credentials)
+        if principal.capability != "voice:manage":
+            raise HTTPException(status_code=403, detail="voice manage capability required")
         return principal
 
     async def configured_repository() -> VoiceRepository:
@@ -1133,7 +1159,7 @@ def create_voice_router(
     )
     async def register_voice_phone_number(
         command: RegisterPhoneNumberRequest,
-        principal: ServicePrincipal = Depends(require_voice_write),
+        principal: ServicePrincipal = Depends(require_voice_manage),
         store: VoiceRepository = Depends(configured_repository),
     ) -> PhoneNumberSummary:
         try:
@@ -1190,7 +1216,7 @@ def create_voice_router(
     )
     async def publish_voice_flow(
         command: FlowDocumentRequest,
-        principal: ServicePrincipal = Depends(require_voice_write),
+        principal: ServicePrincipal = Depends(require_voice_manage),
         store: VoiceRepository = Depends(configured_repository),
     ) -> FlowPublishResult:
         try:
@@ -1212,7 +1238,7 @@ def create_voice_router(
     )
     async def create_voice_campaign(
         command: VoiceCampaignCreate,
-        principal: ServicePrincipal = Depends(require_voice_write),
+        principal: ServicePrincipal = Depends(require_voice_manage),
         store: VoiceRepository = Depends(configured_repository),
     ) -> VoiceCampaignSummary:
         try:
@@ -1227,7 +1253,7 @@ def create_voice_router(
     )
     async def run_voice_campaign(
         command: VoiceCampaignRun,
-        principal: ServicePrincipal = Depends(require_voice_write),
+        principal: ServicePrincipal = Depends(require_voice_manage),
         store: VoiceRepository = Depends(configured_repository),
     ) -> VoiceCampaignRunResult:
         try:

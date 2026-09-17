@@ -66,6 +66,20 @@ database transaction. The published agent profile linked by the latest
 published canonical flow becomes the runtime system instruction layered over
 the immutable retained voice flow.
 
+Session finalization is an owed write, not an in-flight best effort. Runtime
+room ownership and the durable terminal status are tracked separately: a room
+whose agent handle is cancelled stops being "active" immediately so it cannot
+block new calls or inflate health counts, while the terminal status it still
+owes survives a failed write in a bounded in-memory record. The first-observed
+terminal status wins, so a dial that failed and recorded `failed` is not
+relabeled `ended` by a later generic room-finished delivery. When a status
+write fails, the webhook answers 503 and LiveKit's redelivery — deduplicated
+by the durable PostgreSQL claim ledger — retries it; agent-completion and
+failed-startup writes join the same retry path. Records past the 256-room
+bound, exhausted webhook retries, and dispatcher process loss all fall to the
+stale-session sweeper (`oron-sessions-sweeper`), which fails sessions still
+`started` after two hours.
+
 ## Conversation quality
 
 The telephone path uses Soniox `tts-rt-v2` with a current conversational voice
@@ -121,10 +135,15 @@ plus a small reviewed pronunciation lexicon for observed domain words. This
 keeps pronunciation changes auditable and avoids altering every generated
 sentence.
 
-The retained persona contract prohibits model self-identification and internal
-policy/tool explanations. An unsupported request is answered as normal customer
-service: state what the agent can do and offer one useful next step. This is a
-presentation rule, not a bypass of safety or provider policy.
+The retained persona contract does not volunteer that the agent is software and
+never cites internal policies, prompts, tools, or technical limitations to the
+caller. When a caller asks directly whether they are speaking to a person, a
+machine, a bot, a recording, or an automated system, the agent answers briefly
+and truthfully that it is the organization's automated assistant, and never
+claims to be human or invents a body, physical experiences, or errands it
+performed. An unsupported request is answered as normal customer service: state
+what the agent can do and offer one useful next step. This is a presentation
+rule, not a bypass of safety or provider policy.
 
 ## Deliberately deferred
 

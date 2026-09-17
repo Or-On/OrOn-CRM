@@ -124,13 +124,24 @@ _THOUSANDS = [
 
 
 def number_to_hebrew(n: int) -> str:
-    """Convert an integer (0-999,999) to Hebrew words."""
+    """Convert an integer (0-999,999,999) to Hebrew words."""
     if n == 0:
         return "אפס"
-    if n < 0 or n >= 1_000_000:
+    if n < 0 or n >= 1_000_000_000:
         return str(n)
 
     parts = []
+
+    # Millions: a price such as 1,250,000 must not be voiced digit string first.
+    millions = n // 1_000_000
+    if millions > 0:
+        if millions == 1:
+            parts.append("מיליון")
+        elif millions == 2:
+            parts.append("שני מיליון")
+        else:
+            parts.append(number_to_hebrew(millions) + " מיליון")
+        n %= 1_000_000
 
     # Thousands
     thousands = n // 1000

@@ -151,3 +151,113 @@ async def test_onset_preroll_keeps_soft_initial_audio(monkeypatch):
         ]
     )
     assert _audio_bytes(out) == audio[int(SR * 0.06) * 2 :]
+
+
+async def test_an_interruption_before_any_audio_still_yields_to_the_new_response(monkeypatch):
+    """Barge-in during the gap between the TTS request and its first byte."""
+
+    trim = TrimLeadingSilence()
+    trim.push_frame = AsyncMock()
+    monkeypatch.setattr(trim, "_start_interruption", AsyncMock())
+    for frame in [
+        TTSStartedFrame(context_id="old"),
+        InterruptionFrame(),
+        TTSAudioRawFrame(
+            audio=_pcm(0.3, silent=False), sample_rate=SR, num_channels=1, context_id="old"
+        ),
+        TTSStartedFrame(context_id="new"),
+        TTSAudioRawFrame(
+            audio=_pcm(0.3, silent=False), sample_rate=SR, num_channels=1, context_id="new"
+        ),
+        TTSStoppedFrame(context_id="new"),
+    ]:
+        await trim.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+    audio = [
+        call.args[0]
+        for call in trim.push_frame.call_args_list
+        if isinstance(call.args[0], TTSAudioRawFrame)
+    ]
+    assert audio and all(frame.context_id == "new" for frame in audio)
+
+
+async def test_repeated_interruptions_do_not_unblock_a_cancelled_context(monkeypatch):
+    """Once a context is cancelled, no later audio for it may be emitted.
+
+    The property is about what arrives AFTER the cancellation, so the recorded
+    pushes are split at the interruption: the first chunk's onset was already
+    found and legitimately played before the caller spoke, while everything the
+    cancelled context still has in flight must be dropped — by the first
+    interruption, and just as reliably by the second and third."""
+
+    trim = TrimLeadingSilence()
+    trim.push_frame = AsyncMock()
+    monkeypatch.setattr(trim, "_start_interruption", AsyncMock())
+    await trim.process_frame(TTSStartedFrame(context_id="old"), FrameDirection.DOWNSTREAM)
+    await trim.process_frame(
+        TTSAudioRawFrame(
+            audio=_pcm(0.2, silent=False), sample_rate=SR, num_channels=1, context_id="old"
+        ),
+        FrameDirection.DOWNSTREAM,
+    )
+    played_before = [
+        call.args[0]
+        for call in trim.push_frame.call_args_list
+        if isinstance(call.args[0], TTSAudioRawFrame)
+    ]
+    # Speech that already left the pipeline before the barge-in is expected out.
+    assert [frame.context_id for frame in played_before] == ["old"]
+    played_until = len(trim.push_frame.call_args_list)
+
+    for _ in range(3):
+        await trim.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+    await trim.process_frame(
+        TTSAudioRawFrame(
+            audio=_pcm(0.2, silent=False), sample_rate=SR, num_channels=1, context_id="old"
+        ),
+        FrameDirection.DOWNSTREAM,
+    )
+    await trim.process_frame(TTSStoppedFrame(context_id="old"), FrameDirection.DOWNSTREAM)
+
+    emitted_after = [
+        call.args[0]
+        for call in trim.push_frame.call_args_list[played_until:]
+        if isinstance(call.args[0], TTSAudioRawFrame)
+    ]
+    assert emitted_after == []
+
+
+async def test_each_cancelled_context_is_remembered_exactly_once(monkeypatch):
+    """The cancelled-context window is bounded, so one barge-in must cost one
+    slot. Interruption redeliveries that arrive before the next response
+    starts would otherwise fill the window with duplicates of the same
+    context, shrinking the retention every other cancelled context gets."""
+
+    trim = TrimLeadingSilence()
+    trim.push_frame = AsyncMock()
+    monkeypatch.setattr(trim, "_start_interruption", AsyncMock())
+    await trim.process_frame(TTSStartedFrame(context_id="old"), FrameDirection.DOWNSTREAM)
+    await trim.process_frame(
+        TTSAudioRawFrame(
+            audio=_pcm(0.2, silent=False), sample_rate=SR, num_channels=1, context_id="old"
+        ),
+        FrameDirection.DOWNSTREAM,
+    )
+    for _ in range(3):
+        await trim.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+
+    assert list(trim._cancelled_contexts) == ["old"]  # noqa: SLF001 — the retention window
+    # and the remembered entry still rejects the cancelled context's late audio
+    calls = len(trim.push_frame.call_args_list)
+    await trim.process_frame(
+        TTSAudioRawFrame(
+            audio=_pcm(0.2, silent=False), sample_rate=SR, num_channels=1, context_id="old"
+        ),
+        FrameDirection.DOWNSTREAM,
+    )
+    late = [
+        call.args[0]
+        for call in trim.push_frame.call_args_list[calls:]
+        if isinstance(call.args[0], TTSAudioRawFrame)
+    ]
+    assert late == []

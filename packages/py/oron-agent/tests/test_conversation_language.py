@@ -114,3 +114,72 @@ async def test_tts_does_not_repeat_same_language_setting(monkeypatch):
     await processor.process_frame(spoken, FrameDirection.DOWNSTREAM)
 
     assert pushed == [spoken]
+
+
+@pytest.mark.asyncio
+async def test_a_provisional_label_never_switches_the_conversation(monkeypatch):
+    """Soniox revises its language guess while an utterance is still open. Only
+    the endpointed utterance's dominant language is a decision; acting on a
+    revision makes the agent flip language mid-sentence."""
+
+    state = ConversationLanguageState("he")
+    processor = CallerLanguageContextProcessor(state)
+    pushed = []
+
+    async def capture(frame, direction):
+        pushed.append(frame)
+
+    monkeypatch.setattr(processor, "push_frame", capture)
+    await processor.process_frame(
+        TranscriptionFrame("router", "caller", "", Language.EN_US, finalized=False),
+        FrameDirection.DOWNSTREAM,
+    )
+
+    assert state.current == "he"
+    assert not any(isinstance(frame, LLMMessagesAppendFrame) for frame in pushed)
+
+
+@pytest.mark.asyncio
+async def test_an_utterance_in_the_current_language_adds_no_instruction(monkeypatch):
+    """One English product name inside a Hebrew sentence still endpoints as
+    Hebrew, and a redundant metadata line every turn is prompt noise."""
+
+    state = ConversationLanguageState("he")
+    processor = CallerLanguageContextProcessor(state)
+    pushed = []
+
+    async def capture(frame, direction):
+        pushed.append(frame)
+
+    monkeypatch.setattr(processor, "push_frame", capture)
+    await processor.process_frame(
+        TranscriptionFrame("יש לי בעיה עם ה-router", "caller", "", Language.HE, finalized=True),
+        FrameDirection.DOWNSTREAM,
+    )
+
+    assert state.current == "he"
+    assert not any(isinstance(frame, LLMMessagesAppendFrame) for frame in pushed)
+
+
+@pytest.mark.asyncio
+async def test_a_short_answer_can_still_carry_the_switch_back(monkeypatch):
+    """ "כן" is one word, but it is a complete endpointed utterance and the
+    provider labels it — a caller who has switched back must be followed."""
+
+    state = ConversationLanguageState("he")
+    state.current = "en"
+    processor = CallerLanguageContextProcessor(state)
+    pushed = []
+
+    async def capture(frame, direction):
+        pushed.append(frame)
+
+    monkeypatch.setattr(processor, "push_frame", capture)
+    await processor.process_frame(
+        TranscriptionFrame("כן", "caller", "", Language.HE, finalized=True),
+        FrameDirection.DOWNSTREAM,
+    )
+
+    assert state.current == "he"
+    instruction = next(f for f in pushed if isinstance(f, LLMMessagesAppendFrame))
+    assert "language code 'he'" in instruction.messages[0]["content"]

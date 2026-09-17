@@ -46,6 +46,14 @@ independent PostgreSQL role passwords, authentication secrets, encryption keys,
 and webhook/provider secrets. Never copy a developer `.env` or local database
 into the deployment.
 
+`sweeper.env` carries the stale-session sweeper's `DATABASE_URL`, which must be
+exactly the dispatcher's `VOICE_DATABASE_URL`: the sweeper connects as
+`platform_voice`, whose only cross-tenant reach is the bounded
+`platform.fail_stale_voice_sessions` function. The deployment refuses to start
+when the two differ. The historical `oron_sessions_app`/`oron_tenancy_app`
+roles are never given a password; the tenancy one still holds DML on users,
+memberships and API keys.
+
 ## 4. Render before mutating
 
 Set `DEPLOYMENT_DATA_DIR`, `DEPLOYMENT_CONFIG_DIR`, `PLATFORM_ORIGIN`,
@@ -58,8 +66,12 @@ docker compose --env-file /private/path/deployment.env \
 ```
 
 Add `--profile workers` only after the real messaging configuration and queued
-work have been reviewed. Add `--profile voice` only after LiveKit, SIP, field
-encryption, STT, TTS, and LLM settings have been validated.
+work have been reviewed. The workers profile also schedules the stale-session
+sweeper: one bounded pass per `SWEEP_INTERVAL_SECONDS` (default hourly) that
+fails sessions still `started` after `STALE_SESSION_MINUTES` — the final
+repair for calls a dispatcher could not durably finalize. Add `--profile
+voice` only after LiveKit, SIP, field encryption, STT, TTS, and LLM settings
+have been validated.
 
 ## 5. Migrate, bootstrap, and start
 

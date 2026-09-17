@@ -9,7 +9,7 @@ import {
 } from "../auth";
 
 export async function voiceClient(
-  capability: "voice:read" | "voice:write",
+  capability: "voice:read" | "voice:write" | "voice:manage",
   options: {
     readonly timeoutMs?: number;
     readonly signal?: AbortSignal;
@@ -18,7 +18,11 @@ export async function voiceClient(
 ): Promise<ControlApiClient> {
   const resolved = options.freshAuthorization
     ? await withFreshCurrentTenant(
-        capability === "voice:read" ? "voice:read" : "voice:operate",
+        capability === "voice:read"
+          ? "voice:read"
+          : capability === "voice:manage"
+            ? "flows:manage"
+            : "voice:operate",
         (_sql, session) => Promise.resolve({ session }),
       )
     : await currentRawSession();

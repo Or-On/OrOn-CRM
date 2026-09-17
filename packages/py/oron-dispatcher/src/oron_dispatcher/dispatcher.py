@@ -18,6 +18,10 @@ from oron_dispatcher.tenancy_client import PhoneResolution
 
 logger = logging.getLogger(__name__)
 
+# Rooms whose durable finalization is still owed. Only grows while persistence
+# is failing, and the stale-session sweeper repairs anything evicted.
+_MAX_UNFINALIZED_ROOMS = 256
+
 
 class PersistenceUnavailable(RuntimeError):
     """The dispatcher cannot durably record a lifecycle transition."""
@@ -114,6 +118,16 @@ class Dispatcher:
         self._hangup_room = hangup_room
         self._mint_token = mint_token
         self._active: dict[str, _Active] = {}
+        # Strong references: a bare create_task result is only weakly held by the
+        # loop, so a completion handler can be garbage collected mid-hangup and
+        # leave a provider leg open with the session still marked started.
+        self._completions: set[asyncio.Task[None]] = set()
+        # Runtime ownership and durable persistence are separate concerns and are
+        # tracked separately. `_active` answers "is a bot running for this room";
+        # it must be released the moment the handle is cancelled. `_unfinalized`
+        # answers "does this room still owe a status write"; it must survive a
+        # failed write so a LiveKit webhook redelivery can retry it.
+        self._unfinalized: dict[str, tuple[CallContext, SessionStatus]] = {}
 
     async def handle_participant_joined(self, event: Any) -> None:
         participant = event.participant
@@ -231,6 +245,17 @@ class Dispatcher:
                 explicit_approval=explicit_approval,
             )
         except Exception:
+            # A dial error is not proof that no leg exists: a request that timed
+            # out client-side may already have been accepted by LiveKit, leaving
+            # a paid SIP leg ringing into a room whose agent is about to be
+            # cancelled. Delete the room first so every leg is torn down.
+            try:
+                await self._hangup_room(room)
+            except Exception as teardown:
+                logger.error(
+                    "Room teardown after a failed dial did not complete (error_type=%s)",
+                    type(teardown).__name__,
+                )
             await self._finalize(room, status=SessionStatus.FAILED)
             raise
         return DispatchResult(session_id=session_id, room=room, created=True)
@@ -301,7 +326,14 @@ class Dispatcher:
                 "Voice agent startup refused before dial (error_type=%s)",
                 type(error).__name__,
             )
-            if not await self._sessions.finalize(context, status=SessionStatus.FAILED):
+            # The owed-write contract, not a bare write: a transient outage must
+            # not strand a `started` row whose agent never existed. The hung-up
+            # room's room_finished delivery retries this write; an outbound room
+            # is never created on this path, so the sweeper remains its repair.
+            self._remember_unfinalized(room, context, SessionStatus.FAILED)
+            try:
+                await self._persist_finalization(room)
+            except PersistenceUnavailable:
                 raise PersistenceUnavailable("failed to persist failed call startup") from None
             public_reason = getattr(error, "public_reason", None)
             if not isinstance(public_reason, str) or not public_reason:
@@ -310,18 +342,25 @@ class Dispatcher:
         self._active[room] = _Active(context=context, handle=handle)
         observer = getattr(handle, "observe_completion", None)
         if callable(observer):
-            observer(
-                lambda error: asyncio.create_task(
-                    self._handle_agent_completion(room, error),
-                    name=f"dispatcher-agent-completion:{context.session_id}",
-                )
-            )
+            observer(lambda error: self._track_completion(room, context, error))
         return True
+
+    def _track_completion(
+        self, room: str, context: CallContext, error: BaseException | None
+    ) -> None:
+        task = asyncio.create_task(
+            self._handle_agent_completion(room, error),
+            name=f"dispatcher-agent-completion:{context.session_id}",
+        )
+        self._completions.add(task)
+        task.add_done_callback(self._completions.discard)
 
     async def _handle_agent_completion(self, room: str, error: BaseException | None) -> None:
         """Close a provider leg when its detached conversational task exits."""
 
-        active = self._active.get(room)
+        # Popped before any await so this and `_finalize` cannot both act on the
+        # same room; the durable record below is what survives either way.
+        active = self._active.pop(room, None)
         if active is None:
             return
         if error is not None:
@@ -329,27 +368,78 @@ class Dispatcher:
                 "Voice agent stopped unexpectedly (error_type=%s)",
                 type(error).__name__,
             )
+        self._remember_unfinalized(
+            room,
+            active.context,
+            SessionStatus.FAILED if error is not None else SessionStatus.ENDED,
+        )
         try:
             await self._hangup_room(room)
         finally:
             # Do not call handle.cancel() from its own completion callback.
-            if not await self._sessions.finalize(
-                active.context,
-                status=SessionStatus.FAILED if error is not None else SessionStatus.ENDED,
-            ):
+            try:
+                await self._persist_finalization(room)
+            except PersistenceUnavailable:
+                # Nothing here can retry, but the record is kept: a room_finished
+                # redelivery repairs it, and the sweeper is the final backstop.
                 logger.error("Voice agent completion could not be persisted")
-            self._active.pop(room, None)
+
+    def _remember_unfinalized(self, room: str, context: CallContext, status: SessionStatus) -> None:
+        """Record the status write this room still owes.
+
+        First observation wins: a dial that failed and recorded FAILED must not
+        be relabelled ENDED by a later generic room_finished delivery.
+        """
+
+        if room in self._unfinalized:
+            return
+        if len(self._unfinalized) >= _MAX_UNFINALIZED_ROOMS:
+            evicted = next(iter(self._unfinalized))
+            self._unfinalized.pop(evicted, None)
+            logger.error(
+                "dropping the unfinalized record for %s; the stale-session "
+                "sweeper is now its only repair",
+                evicted,
+            )
+        self._unfinalized[room] = (context, status)
+
+    async def _persist_finalization(self, room: str) -> None:
+        """Write the owed status, keeping the record until it actually lands."""
+
+        pending = self._unfinalized.get(room)
+        if pending is None:
+            return
+        context, status = pending
+        if not await self._sessions.finalize(context, status=status):
+            raise PersistenceUnavailable("call finalization was not persisted")
+        self._unfinalized.pop(room, None)
 
     async def _finalize(self, room: str, *, status: SessionStatus) -> None:
-        active = self._active.get(room)
+        """Release the room's runtime ownership, then settle what it owes.
+
+        The two halves are deliberately independent. Releasing `_active` whatever
+        persistence does stops a failed write from leaving a call that cannot
+        exist: the entry refused the room for `handle_participant_joined` and
+        inflated `active_calls` for the life of the process. Keeping the owed
+        status in `_unfinalized` stops that same release from silently losing the
+        completion: `handle_room_finished` raises, the webhook answers 503, and
+        LiveKit's redelivery re-enters here with no `_active` entry and retries
+        the write that failed.
+        """
+
+        active = self._active.pop(room, None)
         if active is None:
+            # A redelivery, or the agent's own completion callback got here
+            # first. Either way the only work left is the write it still owes.
+            await self._persist_finalization(room)
             return
+        # Recorded before the cancel: a handle that raises on cancel must not
+        # also lose the fact that this room needs a status write.
+        self._remember_unfinalized(room, active.context, status)
         try:
             await active.handle.cancel()
         finally:
-            if not await self._sessions.finalize(active.context, status=status):
-                raise PersistenceUnavailable("call finalization was not persisted")
-        self._active.pop(room, None)
+            await self._persist_finalization(room)
 
     async def health(self) -> HealthReport:
         persistence_ready = await self._sessions.ready()

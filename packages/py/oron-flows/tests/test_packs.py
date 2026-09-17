@@ -1,3 +1,4 @@
+import pytest
 from oron_flows.packs import LANGUAGE_PACKS, build_persona, load_language_pack
 
 
@@ -54,7 +55,10 @@ def test_no_pronunciations_leaves_no_dangling_header():
     assert "PRONUNCIATION" not in persona
 
 
-def test_voice_personas_forbid_model_self_identification_and_offer_a_next_step():
+def test_voice_personas_keep_model_jargon_out_and_offer_a_next_step():
+    """The agent must not narrate its own machinery — but "don't volunteer it"
+    is a different rule from "never admit it", and only the first is wanted."""
+
     for language in ("he", "en"):
         persona = build_persona(
             load_language_pack(language),
@@ -63,7 +67,8 @@ def test_voice_personas_forbid_model_self_identification_and_offer_a_next_step()
             gender="female",
             pronunciations={},
         )
-        assert "Never identify yourself as an AI" in persona
+        assert "Do not volunteer that you are an AI" in persona
+        assert "never cite internal policies" in persona
         assert 'Never say "as an AI"' in persona
         assert "offer one\n  useful next step" in persona
         assert "Never write or spell a punctuation name" in persona
@@ -80,3 +85,63 @@ def test_hebrew_persona_stays_neutral_without_trusted_gender_context():
     assert "Do not guess the caller's gender" in persona
     assert "Never fall back to masculine" in persona
     assert 'Say "סליחה, טעיתי"' in persona
+
+
+def _persona(code: str) -> str:
+    return build_persona(
+        LANGUAGE_PACKS[code],
+        agent_name="Noa",
+        org="Or-On Support",
+        gender="female",
+        pronunciations={},
+    )
+
+
+@pytest.mark.parametrize("code", sorted(LANGUAGE_PACKS))
+def test_every_persona_discloses_truthfully_when_asked(code: str) -> None:
+    """Sounding natural is not permission to deny being a machine.
+
+    The rule used to be a flat "never identify yourself as an AI", which leaves
+    a caller asking "am I talking to a robot?" no truthful answer available.
+    """
+
+    persona = _persona(code)
+    assert "Do not volunteer that you are an AI" in persona
+    assert "answer truthfully and briefly" in persona
+    assert "Never claim to be human" in persona
+    assert "never deny it when asked" in persona
+    assert "Never identify yourself as an AI" not in persona
+
+
+@pytest.mark.parametrize("code", sorted(LANGUAGE_PACKS))
+def test_no_persona_instructs_the_agent_to_pose_as_a_person(code: str) -> None:
+    persona = _persona(code).lower()
+    for forbidden in (
+        "pretend to be human",
+        "pretend you are human",
+        "say you are a human",
+        "you are a human employee",
+        "never admit",
+        "deny that you are",
+    ):
+        assert forbidden not in persona
+
+
+@pytest.mark.parametrize("code", sorted(LANGUAGE_PACKS))
+def test_no_persona_claims_a_body_or_physical_errand(code: str) -> None:
+    persona = _persona(code)
+    assert "never invent a" in persona
+    assert "you will personally walk over" in persona
+
+
+def test_the_disclosure_names_the_tenant_not_the_platform() -> None:
+    persona = _persona("en")
+    assert "Or-On Support's automated assistant" in persona
+    assert "${org}" not in persona
+
+
+def test_hebrew_defaults_to_hebrew_without_forbidding_a_switch() -> None:
+    persona = _persona("he")
+    assert "Hebrew is this flow's language" in persona
+    assert "If the caller is speaking another language, or asks you to switch" in persona
+    assert "Speak ONLY in Hebrew" not in persona

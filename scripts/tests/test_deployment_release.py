@@ -248,3 +248,130 @@ def test_messaging_worker_health_is_a_release_gate() -> None:
 def test_edge_limit_allows_the_largest_content_validated_upload() -> None:
     caddy = (ROOT / "infra" / "caddy" / "Caddyfile.deployment").read_text(encoding="utf-8")
     assert "max_size 22MB" in caddy
+
+
+def test_stale_session_sweeper_is_scheduled_and_least_privileged() -> None:
+    """The dispatcher's owed-finalization backstop must actually run in DEV.
+
+    Scheduling is a plain compose service in the already-enabled workers
+    profile: one container, one bounded pass per interval, so sweeps never
+    overlap and a failed pass only delays the next. The sweep must reach the
+    database only as the voice runtime role, through the one definer function
+    it is granted — never the migration role or a historical Or-on login.
+    """
+
+    compose = (ROOT / "infra" / "compose" / "deployment.yaml").read_text(encoding="utf-8")
+    deploy = DEPLOY.read_text(encoding="utf-8")
+    template = (ROOT / "infra" / "deployment" / "config" / "sweeper.env.template").read_text(
+        encoding="utf-8"
+    )
+    migrate = (ROOT / "infra" / "scripts" / "migrate.py").read_text(encoding="utf-8")
+
+    sweeper = re.search(
+        r"^  sweeper:\n(?P<body>.*?)(?=^  [a-z][a-z0-9-]*:\n|\Z)",
+        compose,
+        re.MULTILINE | re.DOTALL,
+    )
+    assert sweeper is not None
+    body = sweeper.group("body")
+    assert "profiles: [workers]" in body  # starts with the existing DEV stack
+    assert "oron-sessions-sweeper" in body  # the retained entry point, per interval
+    assert "networks: [database]" in body  # database only: no egress, no edge
+    assert "egress" not in body
+
+    # The voice runtime login the dispatcher already holds; never a newly
+    # activated historical Or-on role (the tenancy one still holds DML on
+    # users, memberships and api_keys) and never a second provisioned password.
+    assert "postgresql://platform_voice:" in template
+    assert "CONTROL_DATABASE_URL" not in template
+    assert "STALE_SESSION_MINUTES=" in template
+    for legacy in ("oron_sessions_app", "oron_tenancy_app"):
+        assert legacy not in template
+        assert legacy not in migrate
+        assert legacy not in deploy
+
+    # Deployment refuses to start without the private sweeper configuration and
+    # cannot silently carry any credential other than the dispatcher's own.
+    assert '"${SHARED_DIR}/config/sweeper.env"' in deploy
+    assert "sweeper.env DATABASE_URL must log in as platform_voice" in deploy
+    assert "sweeper.env DATABASE_URL must equal dispatcher.env VOICE_DATABASE_URL" in deploy
+
+
+def test_ci_lints_the_same_python_paths_as_make_lint() -> None:
+    """`make lint` names `infra` in its ruff paths; CI must not silently lint a
+    smaller set, or a gate that passes locally can still be bypassed remotely."""
+
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert "uv run ruff format --check packages/py services/py db infra scripts" in workflow
+    assert "uv run ruff check packages/py services/py db infra scripts" in workflow
+
+
+def test_every_private_config_the_deployment_reads_is_proven_root_owned() -> None:
+    """Reading a secret out of a file the script never checks the ownership of
+    lets a non-root writer of that file choose a credential the deployment then
+    provisions and uses. The ownership loop must therefore cover every config
+    file `read_private_config_value` is called against, not just the ones whose
+    checks were written first.
+    """
+
+    deploy = DEPLOY.read_text(encoding="utf-8")
+    ownership_loop = re.search(
+        r"for config_file in (?P<files>.*?); do\n\s*\[\[ \$\(stat --format='%u'",
+        deploy,
+        re.DOTALL,
+    )
+    assert ownership_loop is not None, "the root-ownership loop moved or was removed"
+    proven = set(re.findall(r"\$\{([A-Z_]+_CONFIG)\}", ownership_loop.group("files")))
+    read = set(re.findall(r'read_private_config_value "\$\{([A-Z_]+_CONFIG)\}"', deploy))
+
+    assert read, "no private configuration reads found; the helper was renamed"
+    assert read <= proven, f"read without an ownership check: {sorted(read - proven)}"
+
+
+def test_the_sweeper_entry_point_ships_inside_the_migrator_image() -> None:
+    """The sweeper service runs `oron-sessions-sweeper` out of the migrator
+    image. Nothing in compose can prove that binary exists, so the closure that
+    puts it there is pinned here: narrow the Dockerfile's sync, drop the
+    control-api dependency, or rename the script, and the scheduled backstop
+    becomes an hourly "command not found" that never exits non-zero.
+    """
+
+    dockerfile = (ROOT / "infra" / "images" / "migrator.Dockerfile").read_text(encoding="utf-8")
+    control_api = (ROOT / "services" / "py" / "control-api" / "pyproject.toml").read_text(
+        encoding="utf-8"
+    )
+    sessions = (ROOT / "packages" / "py" / "oron-sessions" / "pyproject.toml").read_text(
+        encoding="utf-8"
+    )
+    compose = (ROOT / "infra" / "compose" / "deployment.yaml").read_text(encoding="utf-8")
+
+    assert "uv sync --frozen --package or-on-control-api" in dockerfile
+    assert "ENV PATH=/app/.venv/bin:$PATH" in dockerfile
+    assert re.search(r'^\s*"oron-sessions==', control_api, re.MULTILINE)
+    assert 'oron-sessions-sweeper = "oron_sessions.sweeper:main"' in sessions
+    # Both services must resolve to the same immutable digest variable, or the
+    # sweeper can run a different build from the migration that provisioned it.
+    assert compose.count("${MIGRATOR_IMAGE:?Set an immutable migrator image digest}") == 2
+
+
+def test_the_sweeper_cannot_fail_live_calls_underneath_the_session_budget() -> None:
+    """`fail_stale_voice_sessions` flips any session still `started` past the cutoff,
+    so the stale threshold has to sit above the longest call the agent permits.
+    """
+
+    template = (ROOT / "infra" / "deployment" / "config" / "sweeper.env.template").read_text(
+        encoding="utf-8"
+    )
+    bot = (ROOT / "packages" / "py" / "oron-agent" / "src" / "oron_agent" / "bot.py").read_text(
+        encoding="utf-8"
+    )
+
+    configured = re.search(r"^STALE_SESSION_MINUTES=(\d+)$", template, re.MULTILINE)
+    assert configured is not None
+    stale_seconds = int(configured.group(1)) * 60
+
+    # The agent clamps its own session budget, and that ceiling is the longest a
+    # session row can legitimately sit at `started`.
+    clamp = re.search(r"min\((\d+), max_session_seconds\)", bot)
+    assert clamp is not None, "the agent's session-budget clamp moved"
+    assert stale_seconds > int(clamp.group(1))

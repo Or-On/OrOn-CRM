@@ -56,7 +56,13 @@ class TrimLeadingSilence(FrameProcessor):
             return
         if isinstance(frame, InterruptionFrame):
             if self._context_id is not None:
+                # Remember each cancelled context once: the window is bounded, so
+                # interruption redeliveries that arrive before the next response
+                # starts must not shrink the retention every other cancelled
+                # context gets. Clearing here leaves nothing for a second
+                # interruption to append until TTSStartedFrame names a new one.
                 self._cancelled_contexts.append(self._context_id)
+                self._context_id = None
             self._trimming = False
             self._buffer = b""
             self._template = None

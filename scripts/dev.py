@@ -22,7 +22,10 @@ if str(ROOT) not in sys.path:
 ENV_FILE = ROOT / ".env"
 ENV_EXAMPLE = ROOT / ".env.example"
 COMPOSE_FILE = ROOT / "infra" / "compose" / "compose.yaml"
-PYTHON_PATHS = ("packages/py", "services/py", "db", "scripts")
+# `infra` is linted and formatted with the rest: pyproject already declares its
+# own py312 target for the deployment host, but the files were reaching neither
+# ruff invocation because this tuple did not name them.
+PYTHON_PATHS = ("packages/py", "services/py", "db", "infra", "scripts")
 PYTHON_TYPE_PATHS = (
     "packages/py/oron-common/src",
     "packages/py/oron-db/src",

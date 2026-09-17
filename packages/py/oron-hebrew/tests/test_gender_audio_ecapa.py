@@ -10,6 +10,7 @@ by hand against the model card's example clips, not in CI.
 """
 
 import asyncio
+import threading
 from unittest.mock import AsyncMock
 
 import pytest
@@ -21,6 +22,7 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.utils.asyncio.task_manager import TaskManager
 
 
 class _StubVAD:
@@ -71,11 +73,16 @@ async def _feed(proc: GenderClassifierProcessor, seconds: float) -> None:
 
 
 @pytest.fixture
-def low_confidence_processor(monkeypatch):
+async def low_confidence_processor(monkeypatch):
     """A processor whose inference always comes back under the threshold, so the
     retry path stays open for the whole 1s->3s window. VAD is held open so the
-    scheduling logic is what is under test."""
-    proc = GenderClassifierProcessor(vad_analyzer=_StubVAD(VADState.SPEAKING))
+    scheduling logic is what is under test.
+
+    Async so TaskManager() binds to the test's running loop; classification
+    goes through BaseObject.create_task, which raises without a manager."""
+    proc = GenderClassifierProcessor(
+        vad_analyzer=_StubVAD(VADState.SPEAKING), task_manager=TaskManager()
+    )
     calls = []
     monkeypatch.setattr(
         proc, "_classify", lambda: (calls.append(1), ("male", 0.10))[1], raising=True
@@ -116,6 +123,7 @@ async def test_configured_confirmation_requires_two_matching_readings(monkeypatc
         confirmation_attempts=2,
         on_gender_classified=lambda gender, confidence: _record(observed, gender, confidence),
         vad_analyzer=_StubVAD(VADState.SPEAKING),
+        task_manager=TaskManager(),
     )
     monkeypatch.setattr(proc, "_classify", lambda: next(results), raising=True)
 
@@ -139,6 +147,7 @@ async def test_conflicting_high_confidence_readings_do_not_latch(monkeypatch):
         confirmation_attempts=2,
         on_gender_classified=lambda gender, confidence: _record(observed, gender, confidence),
         vad_analyzer=_StubVAD(VADState.SPEAKING),
+        task_manager=TaskManager(),
     )
     monkeypatch.setattr(proc, "_classify", lambda: next(results), raising=True)
 
@@ -249,3 +258,95 @@ def test_default_vad_is_no_stricter_than_the_pipeline():
     pipecat_default = VADParams()
     assert GENDER_VAD_PARAMS.confidence < pipecat_default.confidence
     assert GENDER_VAD_PARAMS.min_volume < pipecat_default.min_volume
+
+
+# ---- inference task lifetime ------------------------------------------------
+#
+# Inference runs through BaseObject.create_task, so the task manager owns the
+# strong reference, the exception logging, and the dangling-task report. These
+# pin the observable consequences with a fake model: no inference is ever lost
+# mid-flight, at most one runs at a time, and an exception cannot leave the
+# processor retrying or half-open.
+
+
+def _lifecycle_processor(monkeypatch, classify) -> tuple[GenderClassifierProcessor, list]:
+    calls: list = []
+    proc = GenderClassifierProcessor(
+        required_seconds=0.05,
+        retry_interval_seconds=5.0,  # one inference only, whatever happens after
+        max_seconds=10.0,
+        confidence_threshold=0.8,
+        vad_analyzer=_StubVAD(VADState.SPEAKING),
+        task_manager=TaskManager(),
+    )
+    monkeypatch.setattr(
+        proc,
+        "_classify",
+        lambda: (calls.append(1), classify())[1],  # type: ignore[misc]
+        raising=True,
+    )
+    return proc, calls
+
+
+async def test_the_inference_task_is_retained_until_it_completes(monkeypatch):
+    """The classification runs in a task nobody awaits. Before the fix it was
+    a bare create_task — only weakly held by the loop, so it could be collected
+    mid-flight and leave `_classifying` stuck True for the rest of the call.
+    Retention means: nobody holds the task, yet it still runs to its verdict."""
+
+    gate = threading.Event()  # _classify runs in a thread executor
+    proc, calls = _lifecycle_processor(monkeypatch, lambda: (gate.wait(5), ("female", 0.95))[1])
+
+    await _feed(proc, 0.1)  # reach required_seconds; the task parks on the gate
+    await asyncio.sleep(0.05)
+    assert len(calls) == 1, "the inference must have started and be in flight"
+
+    # It is the ONLY inference: the `_classifying` latch holds while it runs.
+    await _feed(proc, 0.5)
+    await asyncio.sleep(0.05)
+    assert len(calls) == 1, "a second inference must not start while one is running"
+
+    gate.set()
+    await asyncio.sleep(0.1)  # let the released inference finish and latch
+    assert proc._classified  # noqa: SLF001 — the verdict arrived
+    assert len(calls) == 1
+
+
+async def test_an_inference_that_outlives_cleanup_still_records_its_verdict(monkeypatch):
+    """FrameProcessor.cleanup cancels its own input/process tasks but NOT tasks
+    from create_task (the pipeline releases those separately). The accepted
+    cost: a classification already running at teardown completes. The verdict
+    latches either way, so at most this one late result is ever recorded."""
+
+    gate = threading.Event()
+    proc, calls = _lifecycle_processor(monkeypatch, lambda: (gate.wait(5), ("female", 0.95))[1])
+
+    await _feed(proc, 0.1)
+    await asyncio.sleep(0.05)
+    assert len(calls) == 1
+
+    await proc.cleanup()  # teardown does not request the inference's cancellation
+
+    gate.set()
+    await asyncio.sleep(0.1)
+    assert proc._classified  # noqa: SLF001 — the in-flight verdict still landed
+
+
+async def test_a_failed_inference_latches_failure_without_a_retry_storm(monkeypatch):
+    """A provider/model failure must not retry forever or leave the processor
+    half-open: `_classified` latches so the failure is final, and no further
+    audio can spawn another inference against the broken model."""
+
+    def _raise():
+        raise RuntimeError("inference worker unavailable")
+
+    proc, calls = _lifecycle_processor(monkeypatch, _raise)
+
+    await _feed(proc, 0.1)
+    await asyncio.sleep(0.05)
+    assert len(calls) == 1
+    assert proc._classified  # noqa: SLF001 — the exception latched the verdict
+
+    await _feed(proc, 0.5)  # plenty more speech after the failure
+    await asyncio.sleep(0.05)
+    assert len(calls) == 1, "a failed inference must not be retried against a broken model"

@@ -97,6 +97,25 @@ def test_an_explicit_url_wins_over_the_parts(monkeypatch):
     assert settings.control_database_url.startswith("postgresql+asyncpg://oron_tenancy_app:t3n@")
 
 
+def test_driverless_deployment_dsns_select_the_async_driver(monkeypatch):
+    """Deployment env files carry `postgresql://`. Passed through unchanged,
+    create_async_engine picks psycopg2 (not installed) and the process dies at
+    its first query."""
+    from oron_db import make_engine
+
+    settings = _settings(
+        monkeypatch,
+        DATABASE_URL="postgresql://oron_sessions_app:s3ss@postgres:5432/oron",
+        CONTROL_DATABASE_URL="postgres://oron_tenancy_app:t3n@postgres:5432/oron",
+    )
+    assert settings.database_url == "postgresql+asyncpg://oron_sessions_app:s3ss@postgres:5432/oron"
+    assert settings.control_database_url == (
+        "postgresql+asyncpg://oron_tenancy_app:t3n@postgres:5432/oron"
+    )
+    for url in (settings.database_url, settings.control_database_url):
+        assert make_engine(url).dialect.driver == "asyncpg"
+
+
 def test_incomplete_parts_without_an_override_fail_at_load(monkeypatch):
     """Fail closed: a half-built DSN surfaces as a baffling connection error at
     the first query instead of a missing-variable message at startup."""

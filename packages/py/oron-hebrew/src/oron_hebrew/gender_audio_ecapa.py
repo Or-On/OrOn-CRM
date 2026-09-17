@@ -196,7 +196,9 @@ class GenderClassifierProcessor(FrameProcessor):
         return _classify_pcm(self._model, bytes(self._audio_buffer), self._sample_rate)
 
     async def _run_classification(self) -> None:
-        loop = asyncio.get_event_loop()
+        # get_running_loop: get_event_loop is deprecated inside a coroutine and
+        # raises rather than creating a loop on the target interpreter.
+        loop = asyncio.get_running_loop()
         try:
             gender, confidence = await loop.run_in_executor(None, self._classify)
         except Exception as e:
@@ -274,6 +276,17 @@ class GenderClassifierProcessor(FrameProcessor):
             if not self._classifying and self._buffered_seconds() >= self._next_attempt_seconds:
                 self._classifying = True
                 self._next_attempt_seconds = self._buffered_seconds() + self._retry_interval_seconds
-                asyncio.create_task(self._run_classification())
+                # The processor's own task registry, not a bare create_task.
+                # Verified against the pinned pipecat 1.8.1: BaseObject.create_task
+                # hands the coroutine to TaskManager.create_task, which keeps the
+                # task in a dict (a strong reference, so an inference outliving
+                # this frame cannot be collected mid-flight leaving `_classifying`
+                # stuck True), logs any unexpected exception instead of dropping
+                # it, and names the task so `_print_dangling_tasks` reports it if
+                # it is still running at teardown. It is NOT cancelled for us:
+                # FrameProcessor.cleanup only cancels its own input/process tasks.
+                # That is acceptable here because the verdict latches, so at most
+                # one classification is ever in flight.
+                self.create_task(self._run_classification())
 
         await self.push_frame(frame, direction)

@@ -873,6 +873,14 @@ async def run_bot(
 
     @transport.event_handler("on_participant_left")
     async def on_participant_left(transport, participant_id, reason):
+        # This ends the call for ANY departing remote participant, which is only
+        # correct while the SIP leg is the room's single remote identity. Every
+        # path that could add an observer/browser/console participant is
+        # currently unreachable (no production caller of the dispatcher's
+        # observer_token/start_browser_call, no token-minting HTTP route);
+        # test_nothing_in_production_mints_a_second_room_participant fails the
+        # build the moment one is wired up. Give this handler the departing
+        # identity before adding any second participant.
         logger.info(
             f"Participant left {participant_id} ({reason}), ending session={ctx.session_id}"
         )

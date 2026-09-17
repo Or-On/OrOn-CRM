@@ -11,7 +11,14 @@
 
 Historical `oron_sessions_app` and `oron_tenancy_app` remain because old Or-on
 revisions and runtime packages depend on them. They coexist during migration and
-are removed only after application parity and live privilege tests.
+are removed only after application parity and live privilege tests. Deployment
+never gives them a password: `oron_tenancy_app` still holds DML on `users`,
+`memberships` and `api_keys`.
+
+The stale-session sweeper runs as `platform_voice`. Its only cross-tenant reach
+is `EXECUTE` on `platform.fail_stale_voice_sessions(integer)`, a definer
+function that marks `started` sessions older than 60..10080 minutes `failed`
+and returns only a count.
 
 Every runtime role is `NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION
 NOBYPASSRLS`. Passwords are provisioned outside migration SQL. Object ownership

@@ -8,6 +8,10 @@ export default tseslint.config(
     ignores: [
       "**/.next/**",
       "**/.artifacts/**",
+      // Claude-managed worktrees: full source copies with no node_modules, so
+      // type-aware linting them only produces unresolved-type noise on a tree
+      // the primary checkout's own gate already covers.
+      "**/.claude/**",
       "**/.venv/**",
       "**/.pytest_cache/**",
       "**/.ruff_cache/**",

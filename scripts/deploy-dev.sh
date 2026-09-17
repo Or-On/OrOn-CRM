@@ -43,6 +43,7 @@ for file in \
   "${SHARED_DIR}/config/dispatcher.env" \
   "${SHARED_DIR}/config/messaging-worker.env" \
   "${SHARED_DIR}/config/migrator.env" \
+  "${SHARED_DIR}/config/sweeper.env" \
   "${SHARED_DIR}/config/web.env"; do
   if [[ ! -f ${file} ]]; then
     echo "Required private configuration is missing: ${file}" >&2
@@ -77,7 +78,10 @@ read_private_config_value() {
 readonly DISPATCHER_CONFIG="${SHARED_DIR}/config/dispatcher.env"
 readonly WEB_CONFIG="${SHARED_DIR}/config/web.env"
 readonly MESSAGING_WORKER_CONFIG="${SHARED_DIR}/config/messaging-worker.env"
-for config_file in "${DISPATCHER_CONFIG}" "${WEB_CONFIG}" "${MESSAGING_WORKER_CONFIG}"; do
+readonly MIGRATOR_CONFIG="${SHARED_DIR}/config/migrator.env"
+readonly SWEEPER_CONFIG="${SHARED_DIR}/config/sweeper.env"
+for config_file in "${DISPATCHER_CONFIG}" "${WEB_CONFIG}" "${MESSAGING_WORKER_CONFIG}" \
+  "${MIGRATOR_CONFIG}" "${SWEEPER_CONFIG}"; do
   [[ $(stat --format='%u' "${config_file}") -eq 0 ]] || {
     echo "Private runtime configuration must be owned by root: ${config_file}" >&2
     exit 1
@@ -117,6 +121,20 @@ if ! BLIND_INDEX_BYTES="$(printf '%s' "${SHARED_BLIND_INDEX_KEY}" | base64 --dec
   echo "BLIND_INDEX_KEY must decode to at least 32 bytes" >&2
   exit 1
 fi
+
+# The session sweeper holds a database login, so it is pinned to the one the
+# voice dispatcher already holds: the voice role may only reach every tenant's
+# stale sessions through platform.fail_stale_voice_sessions. Requiring the exact
+# same DSN means the sweeper can never silently carry migration credentials or
+# activate a historical Or-on login.
+[[ $(read_private_config_value "${SWEEPER_CONFIG}" DATABASE_URL) == postgresql://platform_voice:* ]] || {
+  echo "sweeper.env DATABASE_URL must log in as platform_voice" >&2
+  exit 1
+}
+[[ $(read_private_config_value "${SWEEPER_CONFIG}" DATABASE_URL) == "$(read_private_config_value "${DISPATCHER_CONFIG}" VOICE_DATABASE_URL)" ]] || {
+  echo "sweeper.env DATABASE_URL must equal dispatcher.env VOICE_DATABASE_URL" >&2
+  exit 1
+}
 
 exec 9>"${LOCK_FILE}"
 if ! flock --nonblock 9; then

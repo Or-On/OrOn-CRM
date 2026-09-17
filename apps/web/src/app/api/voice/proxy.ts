@@ -45,3 +45,20 @@ export async function voiceWrite(
     return failure(error);
   }
 }
+
+/** Tenant voice configuration: flows, number routing and campaigns. */
+export async function voiceManage(
+  request: Request,
+  operation: (client: ControlApiClient) => Promise<Upstream>,
+): Promise<Response> {
+  try {
+    await assertAuthenticatedMutation(request);
+    const client = await voiceClient("voice:manage", {
+      freshAuthorization: true,
+    });
+    const result = await operation(client);
+    return Response.json(result.data, { status: result.status });
+  } catch (error) {
+    return failure(error);
+  }
+}

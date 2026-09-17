@@ -62,6 +62,32 @@ class NaturalTurnChunker(FrameProcessor):
         self._emitted = False
         self._first_token_ns = None
 
+    @staticmethod
+    def _continues_a_token(text: str, index: int, *, final: bool) -> bool:
+        """True when the mark at `index` sits inside a token rather than ending a
+        sentence or clause.
+
+        A price streams in as "29." then "90": splitting there sends two TTS
+        chunks, so the caller hears "twenty-nine" — pause — "ninety", and the
+        downstream Hebrew currency normalizer never sees the whole value either.
+        The same shape covers "1.2.3", "16.09.2026" and "example.com".
+
+        The test is what follows the mark, because a sentence never resumes with
+        a letter or digit and no space in between. When nothing follows it yet,
+        only a digit before the mark is worth waiting a token for — making every
+        ordinary sentence end wait for lookahead would spend first-audio latency
+        on the rare case. At the end of a turn nothing more is coming, so the
+        mark is a real boundary either way.
+        """
+        if text[index] == "\n":
+            return False  # a line break is the one mark that is never intra-token
+        following = text[index + 1 : index + 2]
+        if following:
+            # "..." and "?!" end at their last mark; splitting inside the run
+            # would open the next chunk with stray punctuation.
+            return following.isalnum() or (following in _SENTENCE_MARKS and following != "\n")
+        return index > 0 and text[index - 1].isdigit() and not final
+
     def _next_boundary(self, *, final: bool) -> int | None:
         text = self._buffer
         if not text:
@@ -73,8 +99,12 @@ class NaturalTurnChunker(FrameProcessor):
         for index, char in enumerate(text):
             length = index + 1
             if char in _SENTENCE_MARKS and length >= 8:
+                if self._continues_a_token(text, index, final=final):
+                    continue
                 return length
             if char in _CLAUSE_MARKS and length >= self._min_clause_chars:
+                if self._continues_a_token(text, index, final=final):
+                    continue
                 return length
         if len(text) >= self._max_chunk_chars:
             split = text.rfind(" ", self._min_clause_chars, self._max_chunk_chars + 1)

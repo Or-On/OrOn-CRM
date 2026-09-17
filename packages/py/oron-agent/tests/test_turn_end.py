@@ -108,8 +108,22 @@ def test_compose_fallbacks_match_the_code_defaults():
             if "=" in line and not line.startswith("#")
         )
     }
-    settings = Settings()
+    # `_env_file=None`: Settings otherwise loads the repository's own .env, which
+    # `make bootstrap` creates and a developer then tunes — so this drift guard
+    # was comparing .env.example against whatever that developer had set locally
+    # rather than against the code defaults it exists to pin.
+    settings = Settings(_env_file=None)
     assert configured["SONIOX_STT_MODEL"] == settings.soniox_stt_model
     assert configured["TURN_START"] == settings.turn_start
     assert configured["TURN_END"] == settings.turn_end
     assert int(configured["INTERRUPT_MIN_WORDS"]) == settings.interrupt_min_words
+    # The conversation-timing and Vertex knobs are documented here too, so the
+    # same drift guard has to cover them: a fallback that no longer matches the
+    # code default ships the old behaviour to anyone who copied this file.
+    assert configured["VERTEX_LOCATION"] == settings.vertex_location
+    assert configured["VERTEX_LLM_MODEL"] == settings.vertex_llm_model
+    assert int(configured["VERTEX_THINKING_BUDGET"]) == settings.vertex_thinking_budget
+    assert float(configured["USER_IDLE_SECS"]) == settings.user_idle_secs
+    assert float(configured["OPENER_HOLD_MAX_SECS"]) == settings.opener_hold_max_secs
+    assert float(configured["ANSWER_TIMEOUT_SECS"]) == settings.answer_timeout_secs
+    assert int(configured["AGENT_IDLE_TIMEOUT_SECS"]) == settings.agent_idle_timeout_secs

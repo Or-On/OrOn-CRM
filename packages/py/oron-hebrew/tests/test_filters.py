@@ -286,3 +286,31 @@ async def test_negation_amount_and_correction_survive_speech_normalization():
 async def test_quoted_second_person_is_not_rewritten_to_callers_preference():
     text = 'היא אמרה "תוכלי להמשיך". תוכל להמשיך?'
     assert await HebrewNormalizeFilter(lambda: "male").filter(text) == text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        # Gershayim, prefix symbol and decimal comma are all money, never "נקודה".
+        ("המחיר 29.90 ש״ח", "המחיר עשרים ותשעה שקלים ותשעים אגורות"),
+        ('המחיר 29.90 ש"ח', "המחיר עשרים ותשעה שקלים ותשעים אגורות"),
+        ("המחיר ₪29.90", "המחיר עשרים ותשעה שקלים ותשעים אגורות"),
+        ("המחיר 29,90 ₪", "המחיר עשרים ותשעה שקלים ותשעים אגורות"),
+        ("סך הכל 1,250.50 שקלים", "סך הכל אלף ומאתיים וחמישים שקלים וחמישים אגורות"),
+        ("המחיר 29.00 ₪", "המחיר עשרים ותשעה שקלים"),
+        ("0,50 ₪", "חמישים אגורות"),
+        ("1,250,000 ₪", "מיליון ומאתיים וחמישים אלף שקלים"),
+        ("12%", "שנים עשר אחוז"),
+        ("הפגישה ב-16.09.2026", "הפגישה בשישה עשר בספטמבר אלפיים ועשרים ושישה"),
+        ("ב-1/2/2026", "באחד בפברואר אלפיים ועשרים ושישה"),
+    ],
+)
+async def test_filter_speaks_money_percent_and_numeric_dates(text, expected):
+    assert await HebrewNormalizeFilter().filter(text) == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text", ["גרסה 1.2.3", "32.13.2026"])
+async def test_filter_leaves_non_dates_and_non_money_intact(text):
+    assert await HebrewNormalizeFilter().filter(text) == text

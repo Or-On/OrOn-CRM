@@ -67,8 +67,10 @@ jobs:
           python-version: 3.14.7
           enable-cache: true
       - run: uv sync --all-packages --locked --group voice
-      - run: uv run ruff format --check packages/py services/py db scripts
-      - run: uv run ruff check packages/py services/py db scripts
+      # `infra` is linted with the rest: the deployment host helpers declare
+      # their own py312 target, and `make lint` already includes them.
+      - run: uv run ruff format --check packages/py services/py db infra scripts
+      - run: uv run ruff check packages/py services/py db infra scripts
       - run: >-
           uv run pyrefly check packages/py/oron-common/src packages/py/oron-db/src
           packages/py/oron-flows/src packages/py/oron-hebrew/src

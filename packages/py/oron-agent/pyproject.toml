@@ -15,7 +15,7 @@ dependencies = [
   "openinference-instrumentation-pipecat==2.0.3",
   "opentelemetry-exporter-otlp-proto-grpc==1.44.0",
   "oron-common==0.1.0",
-  "oron-flows==0.1.0",
+  "oron-flows==0.2.0",
   "oron-hebrew==0.1.0",
   "oron-secrets==0.1.0",
   "oron-sessions==0.1.0",

@@ -4,6 +4,21 @@ Last updated: 2026-09-12 (Asia/Jerusalem)
 
 ## Active readiness checkpoint — supersedes historical checkpoint below
 
+### Engineering audit follow-up — 2026-09-17 (uncommitted)
+
+- Voice configuration (flow publish, DID registration, campaign create/run)
+  now requires a `voice:manage` assertion issued only to flows+campaigns
+  managers; `voice:write` (agents) keeps call operation only.
+- Stale-session sweeper runs as `platform_voice` through the new definer
+  `platform.fail_stale_voice_sessions` (migration `b8e3f1a6c2d9`); the
+  historical Or-on logins stay password-less. DEV hosts need a root-owned
+  `sweeper.env` whose `DATABASE_URL` equals dispatcher `VOICE_DATABASE_URL`.
+- Failed outbound dials now delete the room before finalizing; Hebrew speech
+  reads `ש״ח`, prefix `₪`, decimal-comma amounts, percentages, day-first
+  numeric dates and millions correctly.
+- Live PostgreSQL tests (including the new sweep function) skip on hosts
+  without `TEST_DATABASE_URL`; they must pass in CI before release.
+
 ### Voice AI quality — locally verified implementation checkpoint, 2026-09-12
 
 - Fully read `docs/audit/voice-ai-quality-master-prompt.md`; preserved the dirty

@@ -17,6 +17,7 @@ from httpx import ASGITransport, AsyncClient
 from or_on_platform.config import PlatformSettings
 from oron_common import CallCost, CallUsage, Direction
 from oron_sessions.models import SessionStatus
+from sqlalchemy.dialects import postgresql
 
 SECRET = "phase5-service-assertion-secret-long-enough"
 
@@ -223,6 +224,61 @@ async def test_simulated_call_requires_write_capability() -> None:
     assert repository.principal.capability == "voice:write"
 
 
+async def test_voice_configuration_requires_manage_not_operate_capability() -> None:
+    """An agent's `voice:write` operates calls; it must not publish flows, route
+    numbers or create/run campaigns — those are flows/campaigns management."""
+
+    class ManagingRepository(FakeVoiceRepository):
+        async def run_campaign(self, principal: ServicePrincipal, campaign_id: UUID):
+            self.principal = principal
+            raise LookupError("campaign not found")
+
+    repository = ManagingRepository()
+    app = create_app(
+        settings=_settings(),
+        database_probe=FakeProbe(),
+        voice_repository=repository,
+        assertion_verifier=ServiceAssertionVerifier(SECRET),
+    )
+    flow_id = str(uuid4())
+    requests = [
+        ("/api/v1/voice/flows/publish", {"source": {}}),
+        (
+            "/api/v1/voice/phone-numbers",
+            {"e164": "+972501234567", "flow_id": flow_id, "allowed_addresses": ["192.0.2.0/24"]},
+        ),
+        ("/api/v1/voice/campaigns", {"name": "Fictional", "flow_id": flow_id}),
+        ("/api/v1/voice/campaigns/run", {"campaign_id": str(uuid4())}),
+    ]
+    async with (
+        app.router.lifespan_context(app),
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client,
+    ):
+        for path, body in requests:
+            for capability in ("voice:read", "voice:write"):
+                denied = await client.post(
+                    path,
+                    headers={"authorization": f"Bearer {_token(capability=capability)}"},
+                    json=body,
+                )
+                assert denied.status_code == 403, (path, capability)
+        managed = await client.post(
+            "/api/v1/voice/campaigns/run",
+            headers={"authorization": f"Bearer {_token(capability='voice:manage')}"},
+            json={"campaign_id": str(uuid4())},
+        )
+        # Manage capability still reads.
+        listed = await client.get(
+            "/api/v1/voice/sessions",
+            headers={"authorization": f"Bearer {_token(capability='voice:manage')}"},
+        )
+
+    assert managed.status_code == 404
+    assert repository.principal is not None
+    assert repository.principal.capability == "voice:manage"
+    assert listed.status_code == 200
+
+
 def test_real_telephony_requires_flag_and_explicit_action_approval() -> None:
     for enabled, approved in ((False, False), (False, True), (True, False)):
         try:
@@ -297,3 +353,21 @@ def test_voice_database_requires_service_assertion_secret() -> None:
         raise AssertionError(
             "voice database configuration must fail closed without an assertion secret"
         )
+
+
+def test_phone_number_listing_is_scoped_to_the_principals_tenant() -> None:
+    """`public.phone_numbers` carries no RLS policy — the dispatcher must resolve
+    an inbound DID before any tenant is known. The listing statement's own
+    predicate is therefore the whole isolation boundary: without it every
+    operator with voice:read sees every tenant's numbers and flow bindings."""
+
+    from control_api.voice import _tenant_phone_numbers
+
+    tenant_id = uuid4()
+    compiled = _tenant_phone_numbers(tenant_id).compile(
+        dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+    )
+    statement = " ".join(str(compiled).split())
+
+    assert f"WHERE phone_numbers.tenant_id = '{tenant_id}'" in statement
+    assert "ORDER BY phone_numbers.e164" in statement
