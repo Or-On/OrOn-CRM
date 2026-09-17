@@ -11,6 +11,8 @@ import pytest
 from control_api.auth import ServicePrincipal
 from control_api.voice import PostgresVoiceRepository
 
+from db.tests.postgres.conftest import run_alembic
+
 pytestmark = [pytest.mark.postgres, pytest.mark.integration, pytest.mark.rls]
 
 
@@ -53,6 +55,7 @@ async def test_phone_numbers_has_no_policy_so_the_listing_must_scope_itself(
 async def test_an_operator_never_sees_another_tenants_numbers(
     isolated_postgres_url: str,
 ) -> None:
+    await run_alembic(isolated_postgres_url, "upgrade", "head")
     connection = await asyncpg.connect(isolated_postgres_url)
     try:
         mine, my_number = await _tenant_with_number(connection, "+97235550111")

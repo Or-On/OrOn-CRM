@@ -67,8 +67,8 @@ async def test_sweep_refuses_a_threshold_that_could_fail_live_calls(
     pg: asyncpg.Connection,
 ) -> None:
     for minutes in (None, 0, 59, 10081):
-        async with pg.transaction():
-            with pytest.raises(asyncpg.InvalidParameterValueError):
+        with pytest.raises(asyncpg.InvalidParameterValueError):
+            async with pg.transaction():
                 await pg.fetchval("SELECT platform.fail_stale_voice_sessions($1)", minutes)
 
 
