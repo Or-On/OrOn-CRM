@@ -81,6 +81,11 @@ class ConversationHarness:
         self._messages = [
             message
             for message in self._messages
-            if not message["content"].startswith("VOICE CONVERSATION AND EVIDENCE POLICY v2.")
+            if not message["content"].startswith(
+                (
+                    "VOICE CONVERSATION AND EVIDENCE POLICY v2.",
+                    "VOICE EVIDENCE AND ACTION SAFETY POLICY v3.",
+                )
+            )
         ]
         return snapshot

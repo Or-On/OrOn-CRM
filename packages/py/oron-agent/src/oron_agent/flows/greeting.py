@@ -1,10 +1,10 @@
 from pipecat.flows import NodeConfig
 
 
-def create_greeting_node(language: str = "en") -> NodeConfig:
+def create_greeting_node(language: str = "en", role_message: str | None = None) -> NodeConfig:
     """Create one model-authored opener policy without localized response tables."""
 
-    return NodeConfig(
+    node = NodeConfig(
         task_messages=[
             {
                 "role": "system",
@@ -21,3 +21,6 @@ def create_greeting_node(language: str = "en") -> NodeConfig:
         ],
         respond_immediately=True,
     )
+    if role_message and role_message.strip():
+        node["role_message"] = role_message.strip()
+    return node

@@ -37,7 +37,7 @@ def _tool_call(name: str, call_id: str, *, advertised: tuple[str, ...] = ()):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("name", ["person_help", "handoff_available", "progress"])
-async def test_unadvertised_intent_tool_is_removed_and_empty_turn_recovers(name):
+async def test_unadvertised_intent_tool_is_removed_without_inventing_a_recovery_turn(name):
     guard = HallucinatedToolCallGuard()
     planner = HebrewTurnPlanner()
     planned = []
@@ -57,11 +57,7 @@ async def test_unadvertised_intent_tool_is_removed_and_empty_turn_recovers(name)
     )
     await guard.process_frame(LLMFullResponseEndFrame(), FrameDirection.DOWNSTREAM)
 
-    recoveries = [frame for frame in planned if isinstance(frame, AggregatedTextFrame)]
-    assert [frame.text for frame in recoveries] == [
-        "Sorry, I lost the thread for a moment.",
-        "Could you say that again?",
-    ]
+    assert not any(isinstance(frame, AggregatedTextFrame) for frame in planned)
     assert not any(isinstance(frame, FunctionCallsStartedFrame) for frame in planned)
 
 

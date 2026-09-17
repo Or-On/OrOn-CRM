@@ -4,6 +4,7 @@ from typing import Any
 from loguru import logger
 from oron_flows.compose import Composition, expand
 from oron_flows.graph import FlowSpec
+from oron_flows.packs import build_persona, load_language_pack
 from pipecat.flows import NodeConfig
 
 from oron_agent.flows.binder import bind_flow
@@ -12,6 +13,19 @@ from oron_agent.flows.handlers.library import standard_handlers
 from oron_agent.flows.runtime import HandlerRegistry
 
 __all__ = ["initial_node_from_composition", "initial_node_from_spec"]
+
+
+def _composition_role_message(composition: Composition) -> str | None:
+    persona = composition.persona
+    if persona is None:
+        return None
+    return build_persona(
+        load_language_pack(composition.flow.language),
+        agent_name=persona.agent_name,
+        org=persona.org,
+        gender=persona.gender,
+        pronunciations=persona.pronunciations,
+    )
 
 
 def _with_safe_entry_opener(node: NodeConfig, language: str) -> NodeConfig:
@@ -43,7 +57,10 @@ def initial_node_from_spec(
         return _with_safe_entry_opener(node, spec.language)
     except Exception as e:  # noqa: BLE001
         logger.warning(f"flow load failed for '{spec.id}' ({e}); falling back to greeting")
-        return create_greeting_node(spec.language)
+        # Recovery must retain the stored role. A generic greeting without the
+        # authoritative role can make a tenant call sound like the provider's
+        # demo assistant after a single malformed node or missing handler.
+        return create_greeting_node(spec.language, role_message=spec.role_message)
 
 
 def initial_node_from_composition(composition: Composition) -> NodeConfig:
@@ -55,4 +72,7 @@ def initial_node_from_composition(composition: Composition) -> NodeConfig:
         logger.warning(
             f"flow load failed for '{composition.flow.id}' ({e}); falling back to greeting"
         )
-        return create_greeting_node(composition.flow.language)
+        return create_greeting_node(
+            composition.flow.language,
+            role_message=_composition_role_message(composition),
+        )

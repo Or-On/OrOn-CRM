@@ -4,7 +4,7 @@ from oron_agent.flows.loader import initial_node_from_composition, initial_node_
 from oron_flows.components.library import Announce, Converse
 from oron_flows.compose import Composition, FlowMeta
 from oron_flows.graph import FlowSpec
-from oron_flows.node import ActionSpec, ActionType, FlowNode, Message
+from oron_flows.node import ActionSpec, ActionType, FlowNode, FunctionSpec, Message
 from oron_flows.seeds import EXAMPLE_EN, EXAMPLE_HE
 
 
@@ -93,3 +93,31 @@ def test_a_broken_composition_falls_back_to_the_greeting_rather_than_killing_the
     )
     node = initial_node_from_composition(broken)
     assert node["task_messages"]
+
+
+def test_a_broken_stored_flow_keeps_its_authoritative_role_on_recovery():
+    spec = FlowSpec(
+        id=uuid.uuid4(),
+        version=3,
+        language="he",
+        role_message="You are the support representative of Tenant A Support.",
+        entry="open",
+        nodes=[
+            {
+                "name": "open",
+                "functions": [
+                    FunctionSpec(
+                        name="broken",
+                        description="broken fixture",
+                        handler="missing_handler",
+                        routes={"ok": "open"},
+                    )
+                ],
+            }
+        ],
+    )
+
+    node = initial_node_from_spec(spec)
+
+    assert node["role_message"] == spec.role_message
+    assert "configured speech language code 'he'" in node["task_messages"][0]["content"]

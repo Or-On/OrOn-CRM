@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import time
 
+from loguru import logger
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     Frame,
@@ -191,14 +192,18 @@ class NaturalTurnChunker(FrameProcessor):
         if isinstance(frame, LLMFullResponseEndFrame) and self._collecting:
             if not self._skip_tts and not self._function_call_started:
                 if self._total_chars > self._max_turn_chars:
-                    self._buffer = (
-                        "That answer became too long for a voice reply. "
-                        "What should we focus on first?"
+                    # Do not replace the caller's answer with a canned line.
+                    # Text already accepted below the turn budget remains in
+                    # order; excess provider output is discarded at the input
+                    # boundary and the next caller turn can clarify naturally.
+                    logger.warning(
+                        "voice reply exceeded the turn budget; preserving the accepted prefix"
                     )
                 elif not self._buffer.strip() and not self._emitted:
-                    self._buffer = (
-                        "Sorry, I lost the thread for a moment. Could you say that again?"
-                    )
+                    # An empty model turn is not a license to speak a fixed
+                    # English recovery sentence (especially during Hebrew).
+                    # Idle handling owns the next caller-facing nudge.
+                    logger.warning("voice reply contained no speakable model text")
                 await self._flush_ready(final=True)
             self._reset_turn()
             self._pending_function_call = False

@@ -6,13 +6,14 @@ silent in :class:`HebrewTurnPlanner`, because a real flow transition owns the
 next spoken line.  Those two behaviours are correct independently, but an LLM
 that emits an intent label as a made-up function (for example
 ``person_help``) would otherwise be mistaken for a real transition and leave
-the caller in silence.
+the caller in an invalid tool state.
 
 This processor is deliberately downstream of the LLM and immediately
 upstream of the turn planner.  It admits only functions advertised by the
 trusted current ``LLMContext``.  Unknown lifecycle frames are consumed so the
-assistant context is not polluted, while the planner sees an ordinary empty
-completion and emits its typed, locale-aware clarification.  Legitimate tools
+assistant context is not polluted; an empty completion remains silent so a
+fixed recovery sentence cannot contradict the caller's language or the active
+tenant role. Idle handling owns any caller-facing nudge. Legitimate tools
 remain byte-for-byte unchanged.
 """
 

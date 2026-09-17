@@ -97,19 +97,32 @@ async def test_fact_selector_stays_whole_for_validation(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_oversized_turn_is_bounded_and_recovers_with_one_voice_prompt():
+async def test_oversized_turn_preserves_only_the_accepted_prefix_without_a_canned_reply():
     chunker = NaturalTurnChunker(max_chunk_chars=16, min_clause_chars=8, max_turn_chars=32)
     chunker.push_frame = AsyncMock()
     await chunker.process_frame(LLMFullResponseStartFrame(), FrameDirection.DOWNSTREAM)
-    await chunker.process_frame(LLMTextFrame("x" * 100), FrameDirection.DOWNSTREAM)
+    await chunker.process_frame(LLMTextFrame("accepted prefix. "), FrameDirection.DOWNSTREAM)
+    await chunker.process_frame(LLMTextFrame("excess model output"), FrameDirection.DOWNSTREAM)
     await chunker.process_frame(LLMFullResponseEndFrame(), FrameDirection.DOWNSTREAM)
     spoken = [
         call.args[0]
         for call in chunker.push_frame.call_args_list
         if isinstance(call.args[0], AggregatedTextFrame)
     ]
-    assert spoken
-    assert sum(len(frame.text) for frame in spoken) < 120
+    assert [frame.text for frame in spoken] == ["accepted prefix."]
+    assert all("too long" not in frame.text.lower() for frame in spoken)
+
+
+@pytest.mark.asyncio
+async def test_empty_turn_does_not_emit_english_recovery_during_a_hebrew_call():
+    chunker = NaturalTurnChunker()
+    chunker.push_frame = AsyncMock()
+    await chunker.process_frame(LLMFullResponseStartFrame(), FrameDirection.DOWNSTREAM)
+    await chunker.process_frame(LLMFullResponseEndFrame(), FrameDirection.DOWNSTREAM)
+
+    assert not any(
+        isinstance(call.args[0], AggregatedTextFrame) for call in chunker.push_frame.call_args_list
+    )
 
 
 @pytest.mark.asyncio
