@@ -8,6 +8,11 @@ readonly COMMIT_SHA="${1:-}"
 readonly RELEASE_ARCHIVE="${2:-}"
 readonly EXPECTED_ARCHIVE_SHA256="${3:-}"
 readonly LOCK_FILE="/run/lock/oron-dev-deploy.lock"
+readonly DISPATCHER_CONFIG="${SHARED_DIR}/config/dispatcher.env"
+readonly WEB_CONFIG="${SHARED_DIR}/config/web.env"
+readonly MESSAGING_WORKER_CONFIG="${SHARED_DIR}/config/messaging-worker.env"
+readonly MIGRATOR_CONFIG="${SHARED_DIR}/config/migrator.env"
+readonly SWEEPER_CONFIG="${SHARED_DIR}/config/sweeper.env"
 
 if [[ ${EUID} -ne 0 ]]; then
   echo "Run deployment as root" >&2
@@ -40,10 +45,9 @@ for file in \
   "${SHARED_DIR}/config/owner-password.txt" \
   "${SHARED_DIR}/config/bootstrap-owner.env" \
   "${SHARED_DIR}/config/control-api.env" \
-  "${SHARED_DIR}/config/dispatcher.env" \
+  "${DISPATCHER_CONFIG}" \
   "${SHARED_DIR}/config/messaging-worker.env" \
   "${SHARED_DIR}/config/migrator.env" \
-  "${SHARED_DIR}/config/sweeper.env" \
   "${SHARED_DIR}/config/web.env"; do
   if [[ ! -f ${file} ]]; then
     echo "Required private configuration is missing: ${file}" >&2
@@ -72,14 +76,29 @@ read_private_config_value() {
   printf '%s' "${value}"
 }
 
+# Older DEV hosts were provisioned before the session sweeper existed. Reuse
+# the dispatcher's already-provisioned voice DSN for that first release so a
+# missing derived config does not block a safe deployment. Existing files are
+# still validated below and are never replaced silently.
+if [[ ! -f ${SWEEPER_CONFIG} ]]; then
+  [[ $(stat --format='%u' "${DISPATCHER_CONFIG}") -eq 0 ]] || {
+    echo "Private runtime configuration must be owned by root: ${DISPATCHER_CONFIG}" >&2
+    exit 1
+  }
+  voice_database_url="$(read_private_config_value "${DISPATCHER_CONFIG}" VOICE_DATABASE_URL)"
+  [[ ${voice_database_url} == postgresql://platform_voice:* ]] || {
+    echo "dispatcher.env VOICE_DATABASE_URL must log in as platform_voice" >&2
+    exit 1
+  }
+  install -m 0600 -o root -g root /dev/null "${SWEEPER_CONFIG}"
+  printf 'DATABASE_URL=%s\nSTALE_SESSION_MINUTES=120\nSWEEP_INTERVAL_SECONDS=3600\n' \
+    "${voice_database_url}" >"${SWEEPER_CONFIG}"
+fi
+chmod 0600 "${SWEEPER_CONFIG}"
+
 # Field-service evidence crosses the web, messaging, and voice runtimes. Refuse
 # a release when an older host configuration would make those services encrypt
 # or locate the same private object differently.
-readonly DISPATCHER_CONFIG="${SHARED_DIR}/config/dispatcher.env"
-readonly WEB_CONFIG="${SHARED_DIR}/config/web.env"
-readonly MESSAGING_WORKER_CONFIG="${SHARED_DIR}/config/messaging-worker.env"
-readonly MIGRATOR_CONFIG="${SHARED_DIR}/config/migrator.env"
-readonly SWEEPER_CONFIG="${SHARED_DIR}/config/sweeper.env"
 for config_file in "${DISPATCHER_CONFIG}" "${WEB_CONFIG}" "${MESSAGING_WORKER_CONFIG}" \
   "${MIGRATOR_CONFIG}" "${SWEEPER_CONFIG}"; do
   [[ $(stat --format='%u' "${config_file}") -eq 0 ]] || {

@@ -290,9 +290,13 @@ def test_stale_session_sweeper_is_scheduled_and_least_privileged() -> None:
         assert legacy not in migrate
         assert legacy not in deploy
 
-    # Deployment refuses to start without the private sweeper configuration and
-    # cannot silently carry any credential other than the dispatcher's own.
+    # Existing DEV hosts predate the sweeper config. Deployment bootstraps that
+    # derived file from the dispatcher's voice DSN, then cannot silently carry
+    # any other credential.
     assert '"${SHARED_DIR}/config/sweeper.env"' in deploy
+    assert "if [[ ! -f ${SWEEPER_CONFIG} ]]; then" in deploy
+    assert "DATABASE_URL=%s\\nSTALE_SESSION_MINUTES=120\\nSWEEP_INTERVAL_SECONDS=3600" in deploy
+    assert 'install -m 0600 -o root -g root /dev/null "${SWEEPER_CONFIG}"' in deploy
     assert "sweeper.env DATABASE_URL must log in as platform_voice" in deploy
     assert "sweeper.env DATABASE_URL must equal dispatcher.env VOICE_DATABASE_URL" in deploy
 
