@@ -310,14 +310,14 @@ describe("route-backed workspace commands", () => {
 
   it("warms route data only when a user shows navigation intent", () => {
     render(localized(<AppShell session={session}>Workspace</AppShell>));
-    const tasks = screen.getByRole("link", { name: "Tasks" });
+    const tickets = screen.getByRole("link", { name: "Tickets" });
 
     expect(navigation.prefetch).not.toHaveBeenCalled();
-    fireEvent.mouseEnter(tasks);
-    expect(navigation.prefetch).toHaveBeenLastCalledWith("/tasks");
+    fireEvent.mouseEnter(tickets);
+    expect(navigation.prefetch).toHaveBeenLastCalledWith("/tickets");
 
-    fireEvent.focus(tasks);
-    expect(navigation.prefetch).toHaveBeenLastCalledWith("/tasks");
+    fireEvent.focus(tickets);
+    expect(navigation.prefetch).toHaveBeenLastCalledWith("/tickets");
   });
 
   it("starts expanded, persists navigation density, and collapses with Escape", () => {

@@ -10,6 +10,9 @@ import {
   parseStoredWhatsAppStatusEnvelope,
   messageDeliveryFailure,
   loadEligibleAgentKnowledge,
+  openOrAttachTicket,
+  recordTicketEvent,
+  setTicketHandlingMode,
   queueWhatsAppAutomaticCall,
   queueWhatsAppOutbound,
   assignDefaultWhatsAppAi,
@@ -2024,6 +2027,38 @@ async function loadAiWork(
   });
 }
 
+/**
+ * Resolve the issue this AI action belongs to, before the action happens.
+ *
+ * Called only when the model has taken a real action — a handoff or a callback
+ * — which is the point a genuine support issue is recognised. A greeting, a
+ * redelivered webhook or a retried job does not open anything: the first two
+ * never reach here, and the third repeats `attachmentKey` and attaches to the
+ * ticket the earlier attempt already created.
+ *
+ * The subject is the model's own safe reason, never the customer's message
+ * text, so a ticket list cannot become a place private message bodies leak to.
+ */
+async function ticketForAiAction(
+  transaction: postgres.TransactionSql,
+  work: AiWork,
+  jobId: string,
+  subjectSafe: string,
+): Promise<string> {
+  const attached = await openOrAttachTicket(
+    transaction,
+    work.authorizedUserId,
+    {
+      contactId: work.contactId,
+      subject: subjectSafe,
+      sourceChannel: "whatsapp",
+      sourceConversationId: work.conversationId,
+      attachmentKey: `whatsapp-ai-issue:${jobId}`,
+    },
+  );
+  return attached.ticket.id;
+}
+
 async function createAiHandoff(
   transaction: postgres.TransactionSql,
   work: AiWork,
@@ -2172,6 +2207,36 @@ async function createAiHandoff(
             'conversation.ai_handoff', 'conversation', ${work.conversationId}::uuid,
             ${transaction.json({ reasonCode })})
   `;
+  // The escalation now also lives on the customer's ISSUE, beside the internal
+  // work item rather than instead of it: `crm.tasks` keeps carrying the
+  // operator's to-do and its existing notifications, deep links and audit, and
+  // the ticket carries the customer-facing history the next channel reads.
+  const issueTicketId = await ticketForAiAction(
+    transaction,
+    work,
+    jobId,
+    `AI handoff · ${safeReason}`,
+  );
+  await recordTicketEvent(transaction, work.authorizedUserId, {
+    ticketId: issueTicketId,
+    kind: "escalation",
+    actorKind: "ai",
+    summarySafe: safeReason,
+    evidence: {
+      handoffId: receipt[0].id,
+      conversationId: work.conversationId,
+      ...(ticket[0] === undefined ? {} : { taskId: ticket[0].id }),
+    },
+  });
+  // A human owns it from here. This is terminal for automatic work on the
+  // issue, exactly as it already is for the conversation above.
+  await setTicketHandlingMode(
+    transaction,
+    work.authorizedUserId,
+    issueTicketId,
+    "human",
+    safeReason,
+  );
   return receipt[0].id;
 }
 
@@ -2274,6 +2339,15 @@ async function processWhatsAppAiReply(
           explicitCallRequested
         ) {
           try {
+            // The issue exists BEFORE the dial is admitted, so every attempt —
+            // including the retries and the ones that never connect — lands on
+            // one ticket instead of creating a trail of orphaned records.
+            const ticketId = await ticketForAiAction(
+              transaction,
+              work,
+              job.id,
+              "Customer requested a callback",
+            );
             const receipt = await queueWhatsAppAutomaticCall(
               transaction,
               work.authorizedUserId,
@@ -2281,6 +2355,29 @@ async function processWhatsAppAiReply(
               work.triggerMessageId,
               `whatsapp-ai-call:${job.id}`,
             );
+            // Voice takes the issue while the call is outstanding. The
+            // messaging worker still persists inbound WhatsApp for this
+            // conversation; it must not run a second AI conversation about the
+            // same problem underneath the call.
+            await setTicketHandlingMode(
+              transaction,
+              work.authorizedUserId,
+              ticketId,
+              "ai_voice",
+              "Callback admitted; voice owns the issue.",
+            );
+            await recordTicketEvent(transaction, work.authorizedUserId, {
+              ticketId,
+              kind: "call_attempt",
+              actorKind: "ai",
+              summarySafe:
+                "Callback queued after an explicit customer request.",
+              evidence: {
+                jobId: receipt.jobId,
+                flowId: receipt.flowId,
+                flowVersion: receipt.flowVersion,
+              },
+            });
             automaticCallQueued = true;
             evidence = {
               kind: "receipt",

@@ -3,7 +3,12 @@ import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
-import { activeDestination, findDestinations, navigation } from "./navigation";
+import {
+  activeDestination,
+  contextualDestinations,
+  findDestinations,
+  navigation,
+} from "./navigation";
 import {
   applicationPageManifest,
   isApplicationPageHref,
@@ -68,6 +73,31 @@ describe("operator navigation", () => {
       false,
     );
   });
+  it("promotes Tickets without stranding legacy Tasks links", () => {
+    // Tickets is the customer-facing issue register and owns the primary slot;
+    // crm.tasks keeps its route, rows, permissions and deep links and becomes
+    // an internal work list beneath it.
+    expect(navigation.map((item) => item.href)).toContain("/tickets");
+    expect(navigation.map((item) => item.href)).not.toContain("/tasks");
+    expect(activeDestination("/tasks")).toBe("/tickets");
+    expect(activeDestination("/tickets")).toBe("/tickets");
+    expect(
+      activeDestination("/tickets/11111111-1111-4111-8111-111111111111"),
+    ).toBe("/tickets");
+    expect(isApplicationPageHref("/tasks")).toBe(true);
+  });
+
+  it("scopes each contextual destination to the module that owns it", () => {
+    // parentHref used to be ignored, which put every subroute under Voice.
+    const parents = new Set(
+      contextualDestinations.map((item) => item.parentHref),
+    );
+
+    expect(parents).toEqual(new Set(["/tickets", "/voice"]));
+    for (const item of contextualDestinations)
+      expect(navigation.map(({ href }) => href)).toContain(item.parentHref);
+  });
+
   it("searches available destinations and excludes deferred Live Lab", () => {
     expect(findDestinations("  INBOX ")).toHaveLength(1);
     expect(findDestinations("no such screen")).toHaveLength(0);
@@ -77,7 +107,7 @@ describe("operator navigation", () => {
       "/inbox",
       "/email",
       "/calendar",
-      "/tasks",
+      "/tickets",
       "/contacts",
       "/pipelines",
       "/field-service",

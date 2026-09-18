@@ -821,6 +821,31 @@ describe.skipIf(sourceUrl === undefined)(
     `;
       expect(voiceJobs[0]?.count).toBe(1);
 
+      // The issue exists before the dial, exactly once, and voice owns it while
+      // the call is outstanding — so a retry cannot open a second ticket and the
+      // WhatsApp agent cannot start a competing conversation underneath it.
+      const issues = await admin<
+        { handling_mode: string; id: string; stage: string; status: string }[]
+      >`
+        SELECT id, status, stage, handling_mode FROM support.tickets
+        WHERE source_conversation_id=${conversationId}::uuid
+      `;
+      expect(issues).toHaveLength(1);
+      const issue = issues[0];
+      if (!issue) throw new Error("support ticket fixture missing");
+      expect(issue.status).toBe("open");
+      expect(issue.handling_mode).toBe("ai_voice");
+      expect(issue.stage).toBe("in_call");
+      const attemptEvents = await admin<{ kind: string }[]>`
+        SELECT kind FROM support.ticket_events
+        WHERE ticket_id=${issue.id}::uuid ORDER BY sequence
+      `;
+      expect(attemptEvents.map((row) => row.kind)).toEqual([
+        "opened",
+        "assignment",
+        "call_attempt",
+      ]);
+
       const originalCalls = await admin<
         {
           callback_destination: string;

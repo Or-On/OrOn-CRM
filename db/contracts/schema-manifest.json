@@ -1,5 +1,5 @@
 {
-  "alembic_head": "c5f7a90b41de",
+  "alembic_head": "e4c71a9d2b83",
   "expected_functions": [
     "agents.protect_approved_knowledge",
     "automation.protect_published_flow_version",
@@ -85,57 +85,64 @@
     "service.validate_technician_user_link"
   ],
   "expected_indexes": [
+    "ix_appointment_technician_time",
     "ix_audit_records_tenant_cursor",
-    "ix_broadcast_recipients_pending",
     "ix_billing_ledger_tenant_created",
     "ix_billing_topups_tenant_created",
-    "ix_conversations_ai_ownership",
-    "ix_conversations_tenant_cursor",
-    "ix_conversations_visible_inbox",
-    "ix_contacts_tenant_activity",
-    "ix_contacts_voice_campaign_eligibility",
-    "ix_conversations_inbox",
+    "ix_broadcast_recipients_pending",
     "ix_calendar_events_tenant_range",
     "ix_calendar_events_tenant_status_start",
+    "ix_contacts_tenant_activity",
+    "ix_contacts_voice_campaign_eligibility",
+    "ix_conversations_ai_ownership",
+    "ix_conversations_inbox",
+    "ix_conversations_tenant_cursor",
+    "ix_conversations_visible_inbox",
+    "ix_customer_documents_contact",
     "ix_expenses_tenant_incurred",
     "ix_expenses_tenant_status_incurred",
     "ix_flow_runs_status_time",
     "ix_flow_versions_published",
+    "ix_inbound_message_origins_identity",
     "ix_jobs_claim",
     "ix_knowledge_chunks_fts",
-    "uq_knowledge_source_version",
     "ix_live_chats_tenant_updated",
     "ix_live_messages_chat_cursor",
     "ix_messages_conversation_cursor",
-    "ix_inbound_message_origins_identity",
     "ix_outbound_requests_status",
+    "ix_platform_voice_campaigns",
+    "ix_report_attachments_context",
+    "ix_service_cases_customer",
+    "ix_service_cases_queue",
+    "ix_service_locations_active_customer",
+    "ix_service_locations_customer",
+    "ix_service_reports_active_case",
     "ix_session_events_cursor",
     "ix_sessions_contact_cursor",
     "ix_sessions_tenant_cursor",
-    "ix_voice_identity_handoff_state",
+    "ix_support_call_attempts_session",
+    "ix_support_call_attempts_ticket",
+    "ix_support_ticket_events_timeline",
+    "ix_support_tickets_contact",
+    "ix_support_tickets_open_queue",
+    "ix_support_tickets_source_conversation",
     "ix_tasks_tenant_assignee_status",
     "ix_tasks_tenant_contact_updated",
     "ix_tasks_tenant_status_due",
-    "ix_service_cases_customer",
-    "ix_service_cases_queue",
-    "ix_service_locations_customer",
-    "ix_service_locations_active_customer",
-    "ix_service_reports_active_case",
-    "ix_customer_documents_contact",
-    "ix_appointment_technician_time",
-    "ix_report_attachments_context",
-    "ix_platform_voice_campaigns",
+    "ix_voice_identity_handoff_state",
+    "uq_active_technician_linked_user",
+    "uq_case_summary_source",
     "uq_contact_identity_normalized",
-    "uq_tenant_invitations_open_email",
+    "uq_expenses_tenant_source_reference",
     "uq_inbound_provider_event",
     "uq_jobs_whatsapp_callback_trigger",
+    "uq_knowledge_source_version",
     "uq_messages_provider_id",
-    "uq_service_case_intake",
-    "uq_case_summary_source",
     "uq_report_editable_revision",
     "uq_report_finalized_revision",
-    "uq_active_technician_linked_user",
-    "uq_expenses_tenant_source_reference"
+    "uq_service_case_intake",
+    "uq_support_tickets_attachment",
+    "uq_tenant_invitations_open_email"
   ],
   "expected_schemas": [
     "agents",
@@ -150,7 +157,8 @@
     "ops",
     "platform",
     "public",
-    "service"
+    "service",
+    "support"
   ],
   "expected_tables": {
     "agents": [
@@ -162,7 +170,9 @@
       "model_configurations",
       "usage_events"
     ],
-    "audit": ["records"],
+    "audit": [
+      "records"
+    ],
     "automation": [
       "flow_definitions",
       "flow_runs",
@@ -198,7 +208,9 @@
       "tasks",
       "tenant_settings"
     ],
-    "finance": ["expenses"],
+    "finance": [
+      "expenses"
+    ],
     "live": [
       "chats",
       "messages",
@@ -222,7 +234,9 @@
       "outbound_requests",
       "quick_replies"
     ],
-    "objects": ["object_metadata"],
+    "objects": [
+      "object_metadata"
+    ],
     "ops": [
       "idempotency_keys",
       "import_items",
@@ -278,14 +292,30 @@
       "technicians",
       "tenant_configuration",
       "visits"
+    ],
+    "support": [
+      "assurance_policies",
+      "ticket_call_attempts",
+      "ticket_events",
+      "tickets"
     ]
   },
   "extensions": {
-    "deferred": ["pgcrypto"],
-    "optional": ["vector"],
-    "required": ["citext"]
+    "deferred": [
+      "pgcrypto"
+    ],
+    "optional": [
+      "vector"
+    ],
+    "required": [
+      "citext"
+    ]
   },
-  "legacy_runtime_roles": ["oron_app", "oron_sessions_app", "oron_tenancy_app"],
+  "legacy_runtime_roles": [
+    "oron_app",
+    "oron_sessions_app",
+    "oron_tenancy_app"
+  ],
   "migration_role": "platform_migrator",
   "runtime_roles": [
     "platform_messaging",
@@ -389,6 +419,10 @@
     "service.technician_session_identities",
     "service.technicians",
     "service.tenant_configuration",
-    "service.visits"
+    "service.visits",
+    "support.assurance_policies",
+    "support.ticket_call_attempts",
+    "support.ticket_events",
+    "support.tickets"
   ]
 }

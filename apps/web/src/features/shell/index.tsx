@@ -32,6 +32,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   PhoneCall,
+  LifeBuoy,
   ListChecks,
   LoaderCircle,
   Plus,
@@ -84,6 +85,7 @@ const icons: Record<NavigationIcon, LucideIcon> = {
   inbox: MessagesSquare,
   email: Mail,
   calendar: CalendarDays,
+  tickets: LifeBuoy,
   tasks: ListChecks,
   contacts: ContactRound,
   pipeline: Columns3,
@@ -245,14 +247,33 @@ export function AppShell({
       : t("shell.overview");
   const currentGroup = currentNavigation?.group ?? "Workspace";
   const isInbox = pathname === "/inbox";
-  const hasContextNavigation = currentNavigation?.icon === "voice";
-  const relatedDestinations = [
-    { href: "/voice", label: t("shell.voice") },
-    ...contextualDestinations.map((item) => ({
-      href: item.href,
-      label: t(`shell.${item.translationKey}`),
-    })),
-  ];
+  // `parentHref` was previously ignored, so every contextual destination
+  // appeared under Voice regardless of which module it belonged to. Filtering
+  // on it is what lets a second module (Tickets, with internal Tasks beneath
+  // it) have subroutes without leaking them into an unrelated rail.
+  const contextParent = currentNavigation?.href ?? currentContext?.parentHref;
+  const contextChildren = contextualDestinations.filter(
+    (item) => item.parentHref === contextParent,
+  );
+  const hasContextNavigation = contextChildren.length > 0;
+  const relatedDestinations =
+    contextParent === undefined
+      ? []
+      : [
+          {
+            href: contextParent,
+            label: t(
+              `shell.${navKey(
+                navigation.find(({ href }) => href === contextParent)?.icon ??
+                  "overview",
+              )}`,
+            ),
+          },
+          ...contextChildren.map((item) => ({
+            href: item.href,
+            label: t(`shell.${item.translationKey}`),
+          })),
+        ];
 
   const commandEntries = useMemo<readonly CommandEntry[]>(() => {
     const destinationEntries = findDestinations(
@@ -666,7 +687,9 @@ export function AppShell({
                         closeMobileNavigation(pathname === href && menuOpen);
                       }}
                       prefetch={
-                        href === "/tasks" || href === "/calendar" ? true : false
+                        href === "/tickets" || href === "/calendar"
+                          ? true
+                          : false
                       }
                       title={!expanded ? label : undefined}
                     >

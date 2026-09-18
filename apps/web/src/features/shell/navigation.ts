@@ -28,6 +28,7 @@ export type NavigationIcon =
   | "inbox"
   | "email"
   | "calendar"
+  | "tickets"
   | "tasks"
   | "contacts"
   | "pipeline"
@@ -60,7 +61,11 @@ export const navigation = [
     group: "Workspace",
     icon: "calendar",
   },
-  { href: "/tasks", label: "Tasks", group: "Workspace", icon: "tasks" },
+  // Tickets is the customer-facing issue register and takes the primary slot.
+  // Tasks keeps its route, records, permissions and deep links, and becomes a
+  // contextual destination beneath it: existing escalations still create those
+  // internal work items and still link straight to them.
+  { href: "/tickets", label: "Tickets", group: "Workspace", icon: "tickets" },
   {
     href: "/contacts",
     label: "Contacts",
@@ -142,6 +147,14 @@ export const navigation = [
 ] as const satisfies readonly NavigationDestination[];
 
 export const contextualDestinations = [
+  {
+    href: "/tasks",
+    label: "Internal tasks",
+    group: "Workspace",
+    icon: "tasks",
+    parentHref: "/tickets",
+    translationKey: "tasks",
+  },
   {
     href: "/voice/campaigns",
     label: "Voice campaigns",

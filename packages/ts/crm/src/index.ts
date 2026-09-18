@@ -19,6 +19,7 @@ export * from "./protected-national-id.js";
 export * from "./private-object-storage.js";
 export * from "./pipelines.js";
 export * from "./tasks.js";
+export * from "./tickets.js";
 export * from "./tenant-features.js";
 export * from "./field-service-domain.js";
 export * from "./field-service-export.js";
