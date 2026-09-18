@@ -79,7 +79,7 @@ from oron_agent.language import language_profile
 from oron_agent.llm import LlmProvider, build_llm, warm_prompt_cache
 from oron_agent.ownership_stt import OwnershipSonioxSTTService
 from oron_agent.pipeline import build_agent_processors
-from oron_agent.quality_observer import VoiceQualityObserver
+from oron_agent.quality_observer import VoiceQualityObserver, component_latency_observer
 from oron_agent.recognition import RecognitionAcceptanceProcessor
 from oron_agent.runtime_sessions import RuntimeSessions
 from oron_agent.session_recorder import SessionRecorder, finish_after_cancellation
@@ -98,6 +98,7 @@ from oron_agent.turn_planner import HebrewTurnPlanner
 from oron_agent.turn_taking import TurnTaking, TurnTakingObserver
 from oron_agent.voice_control import VoiceControlGate, VoiceController, VoiceControlSnapshot
 from oron_agent.voice_quality import (
+    RecognitionContextProfile,
     VoiceQualityConfig,
     build_soniox_context,
     make_speech_transformer,
@@ -296,7 +297,12 @@ async def run_bot(
             # the sole live language signal; conversational meaning stays with
             # the LLM.
             enable_language_identification=True,
-            context=build_soniox_context(quality_config),
+            # Orientation plus literal spellings, from the SAME immutable
+            # published version the prompt is compiled from. Nothing the caller
+            # says and no CRM record reaches the recognizer.
+            context=build_soniox_context(
+                quality_config, RecognitionContextProfile.from_configuration(configuration)
+            ),
             endpoint_latency_adjustment_level=(
                 st.soniox_endpoint_latency_adjustment_level
                 if st.turn_end is TurnEnd.SONIOX
@@ -449,6 +455,7 @@ async def run_bot(
         text_aggregation_mode=st.tts_text_aggregation,
         first_clause=st.tts_first_clause,
         speed=quality_config.speakingPace if "speakingPace" in quality else st.tts_speed,
+        reduce_silence=st.tts_reduce_silence,
         soniox_api_key=st.soniox_api_key.get_secret_value(),
         soniox_model=st.soniox_tts_model,
         gemini_model=st.gemini_tts_model,
@@ -613,10 +620,20 @@ async def run_bot(
     # Bound, not inline: its open interruption needs settling at call end.
     turn_taking_observer = TurnTakingObserver(turn_taking)
     quality_observer = VoiceQualityObserver(llm=llm, tts=tts, transport_output=transport.output())
+    # Pipecat's own caller-stop -> bot-speaking attribution, which names the
+    # parts no processor reports a metric for: the VAD silence, the endpointing
+    # wait, the sentence aggregation before the first synthesis request. Its
+    # parts sum to the measured total, so it answers "which component owns this
+    # second" without a second hand-rolled timing layer. Needs enable_metrics,
+    # which pipeline_params() already sets. None while tracing owns the stack.
+    latency_observer = component_latency_observer(
+        quality_observer, tracing_enabled=st.tracing_enabled
+    )
     observers: list[BaseObserver] = [
         UsageObserver(usage),
         turn_taking_observer,
         quality_observer,
+        *([latency_observer] if latency_observer is not None else []),
         # Raw LLM token events use Pipecat's optional NLTK sentence matcher.
         # NLTK is intentionally removed from the runtime image while its
         # unpatched security advisory remains open. The final bot-output/TTS,

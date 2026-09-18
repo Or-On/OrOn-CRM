@@ -139,6 +139,51 @@ async def test_interruption_discards_buffer_and_stale_audio_context(monkeypatch)
     assert audio and all(frame.context_id == "new" for frame in audio)
 
 
+def _noise(seconds: float, amplitude: int, seed: int) -> bytes:
+    """Broadband noise at a chosen level — the shape of a Hebrew fricative.
+
+    ש, ס and ח begin with turbulence, not a vowel: broadband and far quieter
+    than the syllable that follows. A sine would be the easy case.
+    """
+    count = int(SR * seconds)
+    rng = np.random.default_rng(seed)
+    return (rng.standard_normal(count) * amplitude).clip(-32768, 32767).astype(np.int16).tobytes()
+
+
+async def test_a_soft_fricative_onset_survives_the_real_onset_detector():
+    """The whole risk of trimming Hebrew: "שלום" arriving as "לום".
+
+    `detect_speech_onset` gates on -40 dBFS, so the 40 ms preroll is what keeps
+    a quieter-than-vowel consonant. Measured here at roughly -36 dBFS, which is
+    a realistic synthesized fricative: every sample of it must be kept.
+    """
+    silence = _pcm(0.30, silent=True)
+    fricative = _noise(0.08, 500, seed=1)  # ~-36 dBFS RMS
+    vowel = _noise(0.40, 6000, seed=2)
+
+    out = await _run(
+        [
+            TTSStartedFrame(),
+            *[
+                TTSAudioRawFrame(
+                    audio=(silence + fricative + vowel)[offset : offset + int(SR * 0.02) * 2],
+                    sample_rate=SR,
+                    num_channels=1,
+                )
+                for offset in range(0, len(silence + fricative + vowel), int(SR * 0.02) * 2)
+            ],
+            TTSStoppedFrame(),
+        ]
+    )
+    emitted = _audio_bytes(out)
+
+    # Nothing from the consonant onward may be missing...
+    assert len(emitted) >= len(fricative) + len(vowel)
+    # ...and the head that WAS dropped has to be real silence, not headroom we
+    # kept out of caution: at most the preroll remains in front of the onset.
+    assert len(emitted) <= len(fricative) + len(vowel) + int(SR * 0.06) * 2
+
+
 async def test_onset_preroll_keeps_soft_initial_audio(monkeypatch):
     # A deterministic onset fixture proves sample retention, not intelligibility.
     monkeypatch.setattr("oron_agent.tts_trim.detect_speech_onset", lambda *_: int(SR * 0.1))

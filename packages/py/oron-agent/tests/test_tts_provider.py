@@ -22,7 +22,13 @@ from pipecat.services.tts_service import TextAggregationMode
 from pipecat.utils.text.markdown_text_filter import MarkdownTextFilter
 
 
-def _build(provider: TtsProvider, voice: str, speed: float = 1.0, first_clause: bool = False):
+def _build(
+    provider: TtsProvider,
+    voice: str,
+    speed: float = 1.0,
+    first_clause: bool = False,
+    reduce_silence: bool = False,
+):
     return build_tts(
         provider,
         language=language_profile("he").tts_language,
@@ -32,6 +38,7 @@ def _build(provider: TtsProvider, voice: str, speed: float = 1.0, first_clause: 
         # Off by default here: these assert vendor settings, not aggregation.
         first_clause=first_clause,
         speed=speed,
+        reduce_silence=reduce_silence,
         soniox_api_key="sx",
         soniox_model="tts-rt-v2",
         gemini_model="gemini-3.1-flash-tts-preview",
@@ -86,12 +93,18 @@ def test_soniox_uses_the_proven_original_text_audio_path():
     the current Pipecat/Soniox combination they produced timestamp text while
     the entire outbound recording channel remained silent. Original text frames
     also keep any optional niqqud out of the assistant's conversation memory.
+
+    Re-asserted against pipecat 1.11.0, whose `_build_config_msg` still turns
+    timestamps on unconditionally — so the override is load-bearing, not
+    leftover.
     """
     tts = _build(TtsProvider.SONIOX, "Maya")
 
     assert tts._push_text_frames is True
     assert tts._build_config_msg("ctx-1")["return_timestamps"] is False
-    assert tts._build_config_msg("ctx-1")["reduce_silence"] is False
+    # The unpatched service asks for timestamps: without the override this
+    # service would take the path that went silent on a live call.
+    assert SonioxTTSService._build_config_msg(tts, "ctx-1")["return_timestamps"] is True
 
     # Both defaults on together, which is how production runs: the guard is a
     # service-level flag, so swapping the aggregator must not reach it.
@@ -99,6 +112,25 @@ def test_soniox_uses_the_proven_original_text_audio_path():
 
     assert with_clause._push_text_frames is True
     assert with_clause._build_config_msg("ctx-1")["return_timestamps"] is False
+
+
+def test_reduce_silence_is_absent_unless_a_deployment_asks_for_it():
+    """Soniox errors on the field for a model without silence reduction, and
+    documents `false` as the default — so sending `false` can only ever fail a
+    stream. Absent means absent, not present-and-false."""
+    assert "reduce_silence" not in _build(TtsProvider.SONIOX, "Maya")._build_config_msg("c")
+
+    enabled = _build(TtsProvider.SONIOX, "Maya", reduce_silence=True)
+
+    assert enabled._build_config_msg("c")["reduce_silence"] is True
+
+
+def test_reduce_silence_is_a_soniox_only_knob(google_auth_stubbed):
+    """Gemini has no equivalent; asking for one must not become a spoken
+    instruction the way `speed` does."""
+    gemini = _build(TtsProvider.GEMINI, "Leda", reduce_silence=True)
+
+    assert not gemini._settings.prompt
 
 
 def test_the_voice_and_model_defaults_follow_the_provider(monkeypatch):

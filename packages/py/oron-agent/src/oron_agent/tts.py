@@ -43,6 +43,13 @@ class SonioxUnpointedContextTTSService(SonioxTTSService):
     and do not ask Soniox for character timestamps. This gives up word-level
     interruption progress, but it never feeds pointed text back into the LLM
     and, most importantly, keeps synthesized audio on the transport path.
+
+    Re-checked against pipecat 1.11.0 on 2026-09-18: `_build_config_msg` still
+    sets `return_timestamps = True` unconditionally, so the override is still
+    the only seam. Soniox itself documents `false` as the API default, so this
+    asks for the vendor default rather than fighting it. Removing the override
+    needs a real LiveKit/SIP call to prove the audio is audible again — the
+    failure it guards against was silent audio, which no offline test observes.
     """
 
     def __init__(self, **kwargs):
@@ -50,14 +57,14 @@ class SonioxUnpointedContextTTSService(SonioxTTSService):
         self._push_text_frames = True
 
     def _build_config_msg(self, context_id: str) -> dict[str, Any]:
-        return {
-            **super()._build_config_msg(context_id),
-            "return_timestamps": False,
-            # Soniox documents false as the natural-pacing default. Keep it
-            # explicit until call-quality evidence shows that tightening only
-            # inter-word pauses improves this voice without sounding rushed.
-            "reduce_silence": False,
-        }
+        # Only `return_timestamps` is forced. `reduce_silence` is NOT sent
+        # unless a deployment asked for it: Soniox documents `false` as the
+        # default, and documents that the field on a model without
+        # `supports_silence_reduction` is an `invalid_request` error rather
+        # than a no-op. Sending the default explicitly therefore buys nothing
+        # and can only ever fail a stream. Pipecat 1.9.0 made it a real
+        # setting, omitted while unset, which is what carries it now.
+        return {**super()._build_config_msg(context_id), "return_timestamps": False}
 
 
 def build_tts(
@@ -80,6 +87,12 @@ def build_tts(
     # differently — Soniox `speed`, Gemini `speaking_rate` — so the name is
     # normalised here rather than leaking a vendor's vocabulary into the flow.
     speed: float,
+    # Soniox-only, and sent only when True. It shortens the gaps BETWEEN WORDS
+    # (not sentence or punctuation pauses, which is what a robotic-sounding
+    # clause boundary actually is), so it is a delivery change with no
+    # first-audio benefit. Off until a Hebrew listening comparison says
+    # otherwise; Gemini has no equivalent and ignores it.
+    reduce_silence: bool,
     soniox_api_key: str,
     soniox_model: str,
     gemini_model: str,
@@ -91,7 +104,14 @@ def build_tts(
             text_filters=list(text_filters),
             text_aggregation_mode=text_aggregation_mode,
             settings=SonioxTTSService.Settings(
-                model=soniox_model, voice=voice, language=language, speed=speed
+                model=soniox_model,
+                voice=voice,
+                language=language,
+                speed=speed,
+                # None, not False: pipecat omits the field entirely while it is
+                # None, which is what keeps an unsupported-model error off a
+                # setting nobody asked for.
+                reduce_silence=True if reduce_silence else None,
             ),
         )
     else:

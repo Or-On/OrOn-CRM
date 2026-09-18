@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from oron_agent.audio import ResponsiveUserTurnStartStrategy, TurnEnd
 from oron_agent.bot import build_user_aggregator_params
-from oron_agent.config import Settings
+from oron_agent.config import AgentOverrides, Settings, settings_with
 from pipecat.services.soniox.stt import SonioxSTTService
 from pipecat.turns.user_stop.external_user_turn_stop_strategy import (
     ExternalUserTurnStopStrategy,
@@ -13,6 +13,7 @@ from pipecat.turns.user_stop.external_user_turn_stop_strategy import (
 from pipecat.turns.user_stop.speech_timeout_user_turn_stop_strategy import (
     SpeechTimeoutUserTurnStopStrategy,
 )
+from pydantic import ValidationError
 
 BASE = dict(
     LIVEKIT_URL="ws://x",
@@ -93,6 +94,44 @@ def test_semantic_endpoint_controls_are_bounded_and_responsive():
     assert st.soniox_max_endpoint_delay_ms == 1000
 
 
+def test_the_endpoint_matrix_can_be_swept_on_one_live_stack():
+    """When a caller has finished a Hebrew sentence is the one measurement that
+    cannot be made offline, so the three knobs have to be per-call. Without
+    this each candidate value costs an image build and an instance reset, which
+    is why the matrix was never actually swept."""
+    tuned = settings_with(
+        _settings(),
+        AgentOverrides(
+            soniox_endpoint_latency_adjustment_level=1,
+            soniox_endpoint_sensitivity=-0.2,
+            soniox_max_endpoint_delay_ms=1800,
+        ),
+    )
+
+    assert tuned.soniox_endpoint_latency_adjustment_level == 1
+    assert tuned.soniox_endpoint_sensitivity == -0.2
+    assert tuned.soniox_max_endpoint_delay_ms == 1800
+    # Deployment defaults are untouched by a per-call experiment.
+    assert _settings().soniox_endpoint_sensitivity == 0.15
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"soniox_endpoint_latency_adjustment_level": 4},
+        {"soniox_endpoint_latency_adjustment_level": -1},
+        {"soniox_endpoint_sensitivity": 1.5},
+        {"soniox_max_endpoint_delay_ms": 400},
+        {"soniox_max_endpoint_delay_ms": 5000},
+    ],
+)
+def test_a_console_sweep_cannot_leave_the_range_soniox_accepts(override):
+    """Out of range is not a slower agent, it is a rejected STT config message
+    and a call that transcribes nothing."""
+    with pytest.raises(ValidationError):
+        AgentOverrides(**override)
+
+
 def test_compose_fallbacks_match_the_code_defaults():
     """docker-compose sets these env vars unconditionally, so its `:-` fallback
     OVERRIDES the Settings default rather than deferring to it. A fallback left
@@ -117,6 +156,19 @@ def test_compose_fallbacks_match_the_code_defaults():
     assert configured["TURN_START"] == settings.turn_start
     assert configured["TURN_END"] == settings.turn_end
     assert int(configured["INTERRUPT_MIN_WORDS"]) == settings.interrupt_min_words
+    # The endpoint matrix decides when the agent believes a Hebrew sentence
+    # ended, so a documented value that no longer matches the code default
+    # silently ships different turn-taking to anyone who copied this file.
+    assert (
+        int(configured["SONIOX_ENDPOINT_LATENCY_ADJUSTMENT_LEVEL"])
+        == settings.soniox_endpoint_latency_adjustment_level
+    )
+    assert float(configured["SONIOX_ENDPOINT_SENSITIVITY"]) == settings.soniox_endpoint_sensitivity
+    assert int(configured["SONIOX_MAX_ENDPOINT_DELAY_MS"]) == settings.soniox_max_endpoint_delay_ms
+    assert (configured["TTS_REDUCE_SILENCE"] == "true") == settings.tts_reduce_silence
+    assert (configured["TTS_FIRST_CLAUSE"] == "true") == settings.tts_first_clause
+    assert configured["TTS_TEXT_AGGREGATION"] == settings.tts_text_aggregation
+    assert float(configured["TTS_SPEED"]) == settings.tts_speed
     # The conversation-timing and Vertex knobs are documented here too, so the
     # same drift guard has to cover them: a fallback that no longer matches the
     # code default ships the old behaviour to anyone who copied this file.

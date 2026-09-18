@@ -55,6 +55,8 @@ function finite(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
+const readableQualitySchema = new Set(["1.0", "1.1"]);
+
 export function VoiceQualitySummary({
   events,
 }: {
@@ -66,8 +68,13 @@ export function VoiceQualitySummary({
     (candidate) => candidate.event_type === "voice.quality.summary.v1",
   );
   const payload = object(event?.payload);
-  const summary =
-    payload?.schema_version === "1.0" ? object(payload.summary_ms) : undefined;
+  // 1.1 added a `component_latency` section beside these stages; `summary_ms`
+  // is unchanged, so an equality check on one version would blank this panel
+  // for every call recorded by a newer agent while the data it reads is still
+  // there. Accept the versions whose `summary_ms` this component understands.
+  const summary = readableQualitySchema.has(String(payload?.schema_version))
+    ? object(payload?.summary_ms)
+    : undefined;
   const number = new Intl.NumberFormat(locale, { maximumFractionDigits: 0 });
   return (
     <Surface className="voice-cost-inspector">

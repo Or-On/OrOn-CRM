@@ -103,8 +103,13 @@ def normalize_time_ranges(text: str) -> str:
 
 # --- Split digits: Google Hebrew TTS emits "דירה 1 1"; join back to "11" ---
 _SPLIT_DIGITS_RE = re.compile(r"(?<=\d) (?=\d)")
+# The label carries its preposition or definite article as a prefix letter, so
+# `\bדירה` matched the bare noun and missed every natural sentence: "בדירה 1 1"
+# reached the number filter as two tokens and was voiced "דירה אחד 1". Same
+# lookbehind as _STREET_DIGIT_RE below, which keeps "אדירה" and "נדירה" out —
+# a Hebrew letter immediately before the label means this is a different word.
 _LABELLED_SPLIT_DIGITS_RE = re.compile(
-    r"(\b(?:דירה|בית|רחוב\s+[^\d,\n]{1,60})\s+)(\d(?: \d){1,3})(?!\d)(?! \d)"
+    r"((?<![א-ת])[בהלמ]?(?:דירה|בית|רחוב\s+[^\d,\n]{1,60})\s+)(\d(?: \d){1,3})(?!\d)(?! \d)"
 )
 
 

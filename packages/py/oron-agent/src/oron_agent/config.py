@@ -196,6 +196,12 @@ class Settings(BaseSettings):
         le=3000,
         validation_alias="SONIOX_MAX_ENDPOINT_DELAY_MS",
     )
+    # Shortens the gaps BETWEEN WORDS only — Soniox documents it as distinct
+    # from `speed`, and as untouched by sentence or punctuation pauses. Off
+    # because the documented API default is off and because the field on a
+    # model without `supports_silence_reduction` is an error, not a no-op: an
+    # unnecessary `false` would be a live-call failure mode with no upside.
+    tts_reduce_silence: bool = Field(default=False, validation_alias="TTS_REDUCE_SILENCE")
     google_application_credentials: str | None = Field(
         default=None, validation_alias="GOOGLE_APPLICATION_CREDENTIALS"
     )
@@ -411,12 +417,24 @@ class AgentOverrides(BaseModel):
     # by ear from the console instead of by an image build per arm.
     tts_niqqud: bool | None = None
     tts_speed: float | None = Field(default=None, ge=SPEED_MIN, le=SPEED_MAX)
+    # Inter-word pause tightening, compared by ear on one call rather than by
+    # rebuilding the image for each arm.
+    tts_reduce_silence: bool | None = None
     # The A/B this PR exists to lose or win: same call, same stack, aggregator
     # swapped. Without it the comparison costs an image build per arm.
     tts_text_aggregation: TextAggregationMode | None = None
     # Per-call so both arms can be compared on one stack.
     tts_first_clause: bool | None = None
     vad_stop_secs: float | None = None
+    # Soniox's three semantic-endpoint knobs. Tuning these is the one
+    # measurement that CANNOT be made offline — it needs a caller finishing a
+    # real Hebrew sentence — and the endpoint matrix was previously the only
+    # turn-taking setting that still cost an image build and an instance reset
+    # per candidate value. Same bounds as the deployment settings, so a console
+    # sweep cannot leave the range Soniox accepts.
+    soniox_endpoint_latency_adjustment_level: int | None = Field(default=None, ge=0, le=3)
+    soniox_endpoint_sensitivity: float | None = Field(default=None, ge=-1.0, le=1.0)
+    soniox_max_endpoint_delay_ms: int | None = Field(default=None, ge=500, le=3000)
     # The other half of the endpointing floor. Without it the two cannot be
     # compared from the console, and the VM has no SSH — every candidate value
     # would otherwise cost an image build and an instance reset.
