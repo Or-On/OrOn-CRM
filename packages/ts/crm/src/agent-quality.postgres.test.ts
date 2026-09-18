@@ -6,10 +6,13 @@ import {
   createAgentQualityDraft,
   evaluateAgentQuality,
   listAgentQualityVersions,
+  listAgentVoiceBindings,
 } from "./agent-quality-store.js";
 import {
   createAgentProfileDraft,
+  createCanonicalFlowDraft,
   publishAgentProfile,
+  publishCanonicalFlow,
 } from "./cross-channel.js";
 import {
   changeKnowledgePublication,
@@ -139,6 +142,71 @@ describe.skipIf(!databaseUrl)(
             await tx`UPDATE agents.agent_profile_versions SET system_prompt='changed' WHERE id=${versionId}::uuid`;
           }),
         ).rejects.toMatchObject({ code: "55000" });
+      }));
+    it("reports the pinned voice binding and never promotes a newer published version", async () =>
+      isolated(async (sql, _tenantId, userId) => {
+        const profileId = await createAgentProfileDraft(sql, userId, {
+          name: "Fictional voice agent",
+          systemPrompt: "את נציגת התמיכה של קו בדיוני.",
+          locale: "he",
+          channels: ["voice"],
+        });
+        const v1 = first(await listAgentQualityVersions(sql, profileId));
+        expect(await listAgentVoiceBindings(sql, profileId)).toEqual([]);
+        expect(await publishAgentProfile(sql, userId, profileId)).toBe(true);
+        const definitionId = await createCanonicalFlowDraft(
+          sql,
+          userId,
+          "Fictional voice line",
+          v1.id,
+          {
+            schemaVersion: "1.0",
+            channels: ["voice"],
+            nodes: [
+              { id: "start", type: "start" },
+              {
+                id: "call",
+                type: "voice.call",
+                configuration: { flowId: randomUUID(), flowVersion: 1 },
+              },
+              { id: "end", type: "end" },
+            ],
+            edges: [
+              { id: "start-call", source: "start", target: "call" },
+              { id: "call-end", source: "call", target: "end" },
+            ],
+          },
+        );
+        expect(await publishCanonicalFlow(sql, userId, definitionId)).toBe(
+          true,
+        );
+        expect(await listAgentVoiceBindings(sql, profileId)).toMatchObject([
+          {
+            flowDefinitionId: definitionId,
+            flowName: "Fictional voice line",
+            agentVersionId: v1.id,
+            agentVersion: 1,
+            callable: true,
+          },
+        ]);
+
+        // Edit the CRM prompt, test and publish v2: new calls must still use
+        // v1 until a flow version bound to v2 is published.
+        const v2 = await createAgentQualityDraft(sql, userId, profileId, {
+          baseVersionId: v1.id,
+          latestVersionId: v1.id,
+          systemPrompt: "את נציגת התמיכה של קו בדיוני. עני בקצרה.",
+          quality: v1.quality,
+          sourceIds: [],
+        });
+        await evaluateAgentQuality(sql, userId, profileId, {
+          versionId: v2,
+          text: "מי אתם?",
+        });
+        expect(await publishAgentProfile(sql, userId, profileId)).toBe(true);
+        expect(await listAgentVoiceBindings(sql, profileId)).toMatchObject([
+          { agentVersionId: v1.id, agentVersion: 1, callable: true },
+        ]);
       }));
     it("blocks published document/chunk mutation and role/tenant leakage; revocation is current for both runtimes", async () =>
       isolated(async (sql, tenantId, userId) => {

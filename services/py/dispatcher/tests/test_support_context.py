@@ -125,3 +125,44 @@ def test_tenant_authored_role_text_cannot_precede_the_safety_policy() -> None:
     assert prompt.endswith(
         "you are the support representative of Example Property Support and no other organization."
     )
+
+
+def test_questions_about_the_assistant_resolve_to_the_tenant_not_a_vendor() -> None:
+    """Live 2026-09-18: asked "who developed you?", the model said it is a large
+    language model trained by Google. The rule is tenant-parameterized and names
+    no vendor, so discussing a vendor's products stays valid context."""
+
+    for profile in (
+        _profile(),
+        TenantSupportProfile(displayName="Beta", supportDisplayName="Beta Dental Clinic"),
+    ):
+        prompt = _flowed(
+            compile_voice_runtime_prompt(profile, agent_prompt="Help.", persona_gender="male")
+        )
+        assert (
+            "If asked who you are, who made you, or what technology you run on, say you are "
+            f"the automated support assistant of {profile.supportDisplayName}."
+        ) in prompt
+        assert "Never use placeholders such as [name]." in prompt
+        assert "Google" not in prompt
+
+
+def test_caller_address_defaults_to_neutral_and_is_independent_of_the_persona() -> None:
+    prompt = _flowed(
+        compile_voice_runtime_prompt(_profile(), agent_prompt="Help.", persona_gender="female")
+    )
+
+    assert "Your own grammatical gender never determines the caller's." in prompt
+    assert "address them with natural neutral Hebrew" in prompt
+    assert "never with slash forms" in prompt
+    assert "A technical term in English does not change the reply language." in prompt
+
+
+def test_conversation_policy_follows_the_latest_turn_without_scripted_lines() -> None:
+    prompt = _flowed(
+        compile_voice_runtime_prompt(_profile(), agent_prompt="Help.", persona_gender="female")
+    )
+
+    assert "Answer the caller's latest turn first" in prompt
+    assert "acknowledge it briefly in your own words and answer the corrected request" in prompt
+    assert "Greet and introduce yourself only at the start of the call or when asked." in prompt

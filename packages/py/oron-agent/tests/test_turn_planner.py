@@ -334,3 +334,31 @@ async def test_a_new_turn_owns_playback_after_a_barge_in(monkeypatch):
     starts = [frame for frame in pushed if isinstance(frame, LLMFullResponseStartFrame)]
     assert spoken[0].metadata["voice_generation"] == starts[-1].metadata["voice_generation"]
     assert spoken[0].metadata["voice_generation"] > starts[0].metadata["voice_generation"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("seed", range(12))
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "לא, זה לא עולה 99 ₪. החבילה עולה 129.90 ₪ לחודש, וההתקנה חינם עד 16.09.2026. "
+        "רוצה שאסביר מה היא כוללת?",
+        "הממיר מחובר ב-HDMI, וה-Wi-Fi עובד? אם כן, נבדוק את מקור התמונה בטלוויזיה.",
+        "Sure. A cleaning costs 350 ILS, and we're open Sunday to Thursday, 9:00-17:00. "
+        "Would Tuesday work?",
+    ],
+)
+async def test_any_provider_token_split_delivers_every_word_once_in_order(monkeypatch, seed, reply):
+    import random
+
+    rng = random.Random(seed)  # noqa: S311 -- reproducible test token splits, not security
+    pieces, rest = [], reply
+    while rest:
+        cut = rng.randint(1, 7)
+        pieces.append(rest[:cut])
+        rest = rest[cut:]
+
+    pushed = await _stream(monkeypatch, pieces)
+
+    spoken = [frame.text for frame in pushed if isinstance(frame, AggregatedTextFrame)]
+    assert " ".join(spoken).split() == reply.split()

@@ -80,9 +80,9 @@ _BARE_TIME_RANGE_RE = re.compile(
 
 
 def normalize_time_ranges(text: str) -> str:
+    # Hours are feminine: "בין שמונה לשתים עשרה", never the masculine
+    # "שנים עשר" that the generic number reader would otherwise produce.
     def endpoint(hour: str, minutes: str) -> str:
-        if minutes == "00":
-            return hour
         return normalize_clock_times(f"שעה {hour}:{minutes}").removeprefix("שעה ")
 
     text = _CLOCK_TIME_RANGE_RE.sub(
@@ -92,7 +92,13 @@ def normalize_time_ranges(text: str) -> str:
         ),
         text,
     )
-    return _BARE_TIME_RANGE_RE.sub(r"\1\2 עד \3", text)
+    return _BARE_TIME_RANGE_RE.sub(
+        lambda match: (
+            f"{match.group(1)}{feminine_hour_minute(int(match.group(2)))} עד "
+            f"{feminine_hour_minute(int(match.group(3)))}"
+        ),
+        text,
+    )
 
 
 # --- Split digits: Google Hebrew TTS emits "דירה 1 1"; join back to "11" ---
@@ -139,7 +145,8 @@ def normalize_prefixed_hours(text: str) -> str:
 
 # --- Address numbers: "רחוב X 5" -> masculine cardinal (street numbers are
 #     grammatically masculine). Feminine-noun agreement is a prompt rule. ---
-_STREET_DIGIT_RE = re.compile(r"(\bרחוב\s+[^\d,\n]+?)\s+(\d+)(?![\d.,/-])")
+# "ברחוב"/"לרחוב" carry an attached preposition, so a \b before רחוב misses them.
+_STREET_DIGIT_RE = re.compile(r"((?<![א-ת])[בלמ]?רחוב\s+[^\d,\n]+?)\s+(\d+)(?![\d.,/-])")
 
 
 def normalize_address_numbers(text: str) -> str:
@@ -172,12 +179,21 @@ _PREFIX_CURRENCY_RE = re.compile(rf"₪\s*{_AMOUNT}(?![\d.,]?\d)")
 
 
 def _shekel_words(whole: int) -> str:
-    return "שקל אחד" if whole == 1 else f"{whole} שקלים"
+    # שקל is masculine; two takes the construct form ("שני שקלים").
+    if whole == 1:
+        return "שקל אחד"
+    if whole == 2:
+        return "שני שקלים"
+    return f"{number_to_hebrew(whole)} שקלים"
 
 
 def _agorot_words(frac: str) -> str:
     n = int(frac.ljust(2, "0"))  # "9" -> 90 agorot
-    return "אגורה אחת" if n == 1 else f"{feminine_hour_minute(n)} אגורות"
+    if n == 1:
+        return "אגורה אחת"
+    if n == 2:
+        return "שתי אגורות"
+    return f"{feminine_hour_minute(n)} אגורות"
 
 
 def _currency_words(m: re.Match) -> str:
@@ -202,11 +218,21 @@ def normalize_currency(text: str) -> str:
 
 # --- Percent: "12%" -> "12 אחוז". The sign is not a letter TTS can voice, and
 #     the number filter would otherwise leave "שנים עשר%". ---
-_PERCENT_RE = re.compile(r"(\d)\s*%")
+_PERCENT_RE = re.compile(r"(?<![\d.,])(\d+)\s*%")
+_DECIMAL_PERCENT_RE = re.compile(r"(\d)\s*%")
 
 
 def normalize_percent(text: str) -> str:
-    return _PERCENT_RE.sub(r"\1 אחוז", text)
+    # אחוז is masculine; two takes the construct form ("שני אחוז").
+    text = _PERCENT_RE.sub(
+        lambda match: (
+            f"{'שני' if int(match.group(1)) == 2 else number_to_hebrew(int(match.group(1)))} אחוז"
+            if len(match.group(1)) <= 9
+            else match.group(0)
+        ),
+        text,
+    )
+    return _DECIMAL_PERCENT_RE.sub(r"\1 אחוז", text)
 
 
 # --- Numeric dates: Israeli day-first "16.09.2026" / "16/09/2026" -> "16
@@ -232,22 +258,53 @@ _NUMERIC_DATE_RE = re.compile(
 )
 
 
+_DAY_OF_MONTH_RE = re.compile(
+    r"(?<![\d.,/])(\d{1,2})(?=\s+(?:" + "|".join(_HEBREW_MONTHS) + r")(?![א-ת]))"
+)
+
+
+def _year_words(year: int) -> str:
+    """A calendar year is read in the feminine: "אלפיים עשרים ושש"."""
+    thousands, rest = divmod(year, 1000)
+    hundreds, units = divmod(rest, 100)
+    parts = [number_to_hebrew(thousands * 1000)]
+    if hundreds:
+        parts.append(number_to_hebrew(hundreds * 100))
+    if units:
+        parts.append(feminine_hour_minute(units))
+    # One connective, before the final element unless it already carries one:
+    # "אלפיים וחמש", "אלף תשע מאות תשעים ותשע".
+    if len(parts) > 1 and " ו" not in parts[-1]:
+        parts[-1] = f"ו{parts[-1]}"
+    return " ".join(parts)
+
+
 def normalize_numeric_dates(text: str) -> str:
     def _sub(m: re.Match) -> str:
-        day, month, year = int(m.group(1)), int(m.group(3)), m.group(4)
+        day, month, year = int(m.group(1)), int(m.group(3)), int(m.group(4))
         if not (1 <= day <= 31 and 1 <= month <= 12):
             return m.group(0)
-        return f"{day} {_HEBREW_MONTHS[month - 1]} {year}"
+        return f"{number_to_hebrew(day)} {_HEBREW_MONTHS[month - 1]} {_year_words(year)}"
 
-    return _NUMERIC_DATE_RE.sub(_sub, text)
+    text = _NUMERIC_DATE_RE.sub(_sub, text)
+    # "ה-17 בספטמבר": the day of the month is read as a masculine cardinal.
+    return _DAY_OF_MONTH_RE.sub(
+        lambda m: number_to_hebrew(int(m.group(1))) if 1 <= int(m.group(1)) <= 31 else m.group(1),
+        text,
+    )
 
 
-_NUMBER_TOKEN_RE = re.compile(r"(?<!\w)[+-]?\d+(?:[.,:/-]\d+)*(?!\w)")
+# A number directly followed by a Hebrew word counts that noun ("3 אפשרויות").
+# Its cardinal must agree with the noun's gender, which nothing here knows, so
+# the digits are left for the synthesizer (and the prompt asks the model to
+# write such counts in words).
+# Atomic: "29.90 X" must not backtrack to "29" and slip past the lookahead.
+_NUMBER_TOKEN_RE = re.compile(r"(?<!\w)[+-]?(?>\d+(?:[.,:/-]\d+)*)(?!\w)(?![ \t]+[א-ת])")
 _DECIMAL_TOKEN_RE = re.compile(r"([+-]?)(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d+))?")
 
 
 def normalize_number_tokens(text: str) -> str:
-    """Speak complete numeric tokens without reinterpreting dates or IDs.
+    """Speak complete standalone numeric tokens without reinterpreting dates or IDs.
 
     A decimal's fractional digits remain digits (0.05 is not 0.5). Ambiguous
     dates and invalid grouped numbers are passed intact for specific readback

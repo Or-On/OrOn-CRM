@@ -80,6 +80,16 @@ const en = {
   noEvidence: "No eligible source",
   invalid:
     "Unavailable or conflicting knowledge must be resolved before publication.",
+  voiceStatus: "Live voice calls",
+  voiceNone:
+    "No published voice flow uses this agent. New voice calls will not use these instructions until a connected flow is published.",
+  voiceUses:
+    "New calls use v{agent} through the flow “{flow}” (flow v{flowVersion}).",
+  voiceNotCallable:
+    "This binding cannot start new calls: the bound agent version or flow version is unpublished or invalid.",
+  voiceBehind:
+    "v{latest} is published, but voice calls still use v{agent}. To apply it to new calls, publish a flow version that uses v{latest}. Calls already in progress keep their version.",
+  liveVoice: "live voice",
 } as const;
 const he: Record<keyof typeof en, string> = {
   open: "איכות שיחה וידע מאושר",
@@ -160,6 +170,16 @@ const he: Record<keyof typeof en, string> = {
   timing: "משך האימות הדטרמיניסטי",
   noEvidence: "אין מקור תקף",
   invalid: "יש לפתור ידע חסר או סותר לפני הפרסום.",
+  voiceStatus: "שיחות קוליות פעילות",
+  voiceNone:
+    "אין תהליך קולי מפורסם שמשתמש בסוכן הזה. שיחות קוליות חדשות לא ישתמשו בהנחיות האלה עד שיפורסם תהליך מקושר.",
+  voiceUses:
+    "שיחות חדשות משתמשות בגרסה v{agent} דרך התהליך „{flow}” (גרסת תהליך v{flowVersion}).",
+  voiceNotCallable:
+    "הקישור הזה לא יכול להתחיל שיחות חדשות: גרסת הסוכן או גרסת התהליך המקושרת אינה מפורסמת או אינה תקינה.",
+  voiceBehind:
+    "גרסה v{latest} פורסמה, אבל שיחות קוליות עדיין משתמשות בגרסה v{agent}. כדי להחיל אותה על שיחות חדשות, יש לפרסם גרסת תהליך שמשתמשת ב-v{latest}. שיחות שכבר מתנהלות ממשיכות עם הגרסה שלהן.",
+  liveVoice: "בשיחות קוליות",
 };
 export function qualityCopy(locale: string): Record<keyof typeof en, string> {
   return locale.startsWith("he") ? he : en;

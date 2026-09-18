@@ -7,6 +7,7 @@ import type {
   AgentQualityConfiguration,
   AgentQualityEvaluation,
   AgentQualityVersion,
+  AgentVoiceBinding,
   KnowledgeVersion,
   PronunciationEntry,
 } from "@or-on/crm";
@@ -20,8 +21,17 @@ import styles from "./agent-quality-workspace.module.css";
 type Copy = ReturnType<typeof qualityCopy>;
 interface WorkspaceData {
   versions: readonly AgentQualityVersion[];
+  voiceBindings: readonly AgentVoiceBinding[];
   knowledge: readonly KnowledgeVersion[];
 }
+interface QualityResponse {
+  versions: readonly AgentQualityVersion[];
+  voiceBindings?: readonly AgentVoiceBinding[];
+}
+const fill = (template: string, values: Record<string, string | number>) =>
+  template.replace(/\{(\w+)\}/g, (match, key: string) =>
+    key in values ? String(values[key]) : match,
+  );
 const lines = (value: FormDataEntryValue | null) =>
   (typeof value === "string" ? value : "")
     .split("\n")
@@ -51,24 +61,22 @@ export function AgentQualityWorkspace({
   const endpoint = `/api/orchestration/agents/${profileId}`;
   async function read(signal?: AbortSignal): Promise<WorkspaceData> {
     const [agents, knowledge] = await Promise.all([
-      crmRead<{ versions: readonly AgentQualityVersion[] }>(
-        `${endpoint}/quality`,
-        signal,
-      ),
+      crmRead<QualityResponse>(`${endpoint}/quality`, signal),
       crmRead<{ versions: readonly KnowledgeVersion[] }>(
         "/api/orchestration/knowledge",
         signal,
       ),
     ]);
-    return { versions: agents.versions, knowledge: knowledge.versions };
+    return {
+      versions: agents.versions,
+      voiceBindings: agents.voiceBindings ?? [],
+      knowledge: knowledge.versions,
+    };
   }
   useEffect(() => {
     const controller = new AbortController();
     void Promise.all([
-      crmRead<{ versions: readonly AgentQualityVersion[] }>(
-        `${endpoint}/quality`,
-        controller.signal,
-      ),
+      crmRead<QualityResponse>(`${endpoint}/quality`, controller.signal),
       crmRead<{ versions: readonly KnowledgeVersion[] }>(
         "/api/orchestration/knowledge",
         controller.signal,
@@ -76,7 +84,11 @@ export function AgentQualityWorkspace({
     ])
       .then(([agents, knowledge]) => {
         if (!controller.signal.aborted) {
-          setData({ versions: agents.versions, knowledge: knowledge.versions });
+          setData({
+            versions: agents.versions,
+            voiceBindings: agents.voiceBindings ?? [],
+            knowledge: knowledge.versions,
+          });
           setError(false);
         }
       })
@@ -134,9 +146,19 @@ export function AgentQualityWorkspace({
               <option value={version.id} key={version.id}>
                 v{version.version} ·{" "}
                 {version.publishedAt ? copy.published : copy.draft}
+                {data.voiceBindings.some(
+                  (binding) => binding.agentVersionId === version.id,
+                )
+                  ? ` · ${copy.liveVoice}`
+                  : ""}
               </option>
             ))}
           </Select>
+          <VoiceBindingStatus
+            versions={data.versions}
+            bindings={data.voiceBindings}
+            copy={copy}
+          />
           <p>{copy.restore}</p>
           <QualityForm
             key={selected.id}
@@ -282,6 +304,57 @@ export function AgentQualityWorkspace({
             </Button>
           ) : null}
         </>
+      ) : null}
+    </section>
+  );
+}
+
+function VoiceBindingStatus({
+  versions,
+  bindings,
+  copy,
+}: {
+  readonly versions: readonly AgentQualityVersion[];
+  readonly bindings: readonly AgentVoiceBinding[];
+  readonly copy: Copy;
+}) {
+  // Pinning is intentional: this only reports which version new calls use and
+  // what must be published to change it. Nothing here rebinds a flow.
+  const latestPublished = versions.find((version) => version.publishedAt);
+  const boundVersions = bindings.map((binding) => binding.agentVersion);
+  const newestBound = boundVersions.length ? Math.max(...boundVersions) : null;
+  return (
+    <section aria-label={copy.voiceStatus}>
+      <h5>{copy.voiceStatus}</h5>
+      {bindings.length === 0 ? (
+        <p role="status">{copy.voiceNone}</p>
+      ) : (
+        <ul>
+          {bindings.map((binding) => (
+            <li key={`${binding.flowDefinitionId}-${binding.agentVersionId}`}>
+              <span dir="auto">
+                {fill(copy.voiceUses, {
+                  agent: binding.agentVersion,
+                  flow: binding.flowName,
+                  flowVersion: binding.flowVersion,
+                })}
+              </span>
+              {binding.callable ? null : (
+                <p role="alert">{copy.voiceNotCallable}</p>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {latestPublished &&
+      newestBound !== null &&
+      latestPublished.version > newestBound ? (
+        <p role="alert">
+          {fill(copy.voiceBehind, {
+            latest: latestPublished.version,
+            agent: newestBound,
+          })}
+        </p>
       ) : null}
     </section>
   );

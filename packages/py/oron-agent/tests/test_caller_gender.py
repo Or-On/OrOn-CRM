@@ -95,13 +95,14 @@ def test_repeated_explicit_declaration_does_not_duplicate_context_update():
     assert state.observe_transcript("כבר אמרתי, אני גבר") is None
 
 
-def test_instruction_requires_natural_correction_and_consistent_forms():
+def test_instruction_requires_unscripted_correction_and_consistent_forms():
     instruction = caller_gender_instruction(CallerGender.MALE, explicit=True)
 
     assert "authoritative" in instruction
     assert "אתה" in instruction
-    assert "סליחה, טעיתי" in instruction
-    assert "Never say 'סליחה רבה'" in instruction
+    # A correction is acknowledged in the model's own words, not a fixed script.
+    assert "own words" in instruction
+    assert "סליחה" not in instruction
 
 
 def test_configured_instruction_is_authoritative_without_claiming_audio_detection():

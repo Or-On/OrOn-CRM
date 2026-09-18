@@ -36,7 +36,8 @@ def language_profile(language: str) -> LanguageProfile:
             idle_prompts=[
                 "הלו, אתם עדיין איתי?",
                 "אני עדיין כאן. אם אתם צריכים משהו, אפשר לדבר.",
-                "לא שמעתי כלום, אז אני מסיים את השיחה. תודה ולהתראות.",
+                # Gender-neutral first person: the persona may be female or male.
+                "לא שמעתי כלום, אז אסיים כאן את השיחה. תודה ולהתראות.",
             ],
         ),
         SupportedLanguage.en: LanguageProfile(

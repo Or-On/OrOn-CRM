@@ -14,6 +14,7 @@ def build_agent_processors(
     caller_gender_context=None,
     caller_language_context=None,
     turn_planner=None,
+    opening_context=None,
     evidence_context=None,
     evidence_gate=None,
     response_language=None,
@@ -79,6 +80,9 @@ def build_agent_processors(
     if caller_language_context is not None:
         processors.append(caller_language_context)
     processors.append(user_agg)
+    # Before inference: a delivered opener retires its one-shot instruction.
+    if opening_context is not None:
+        processors.append(opening_context)
     if evidence_context is not None:
         processors.append(evidence_context)
     if ownership_model is not None:

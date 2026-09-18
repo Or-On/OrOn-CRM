@@ -71,6 +71,83 @@ export async function listAgentQualityVersions(
   }));
 }
 
+export interface AgentVoiceBinding {
+  readonly flowDefinitionId: string;
+  readonly flowName: string;
+  readonly flowVersion: number;
+  readonly voiceFlowId: string | null;
+  readonly agentVersionId: string;
+  readonly agentVersion: number;
+  /** False when the dispatcher would refuse this binding for new calls. */
+  readonly callable: boolean;
+}
+
+/**
+ * Which of this agent's versions new voice calls actually use.
+ *
+ * Mirrors the dispatcher's resolution (`get_voice_configuration`): the latest
+ * published version of each flow definition, and for each `voice.call` node the
+ * node's `agentVersionId` or else the flow version's pinned agent version.
+ * Saving or publishing a newer agent version does not change this until a flow
+ * version bound to it is published; active calls keep their frozen version.
+ */
+export async function listAgentVoiceBindings(
+  sql: postgres.TransactionSql,
+  profileId: string,
+): Promise<readonly AgentVoiceBinding[]> {
+  const rows = await sql<
+    {
+      flow_definition_id: string;
+      flow_name: string;
+      flow_version: number;
+      voice_flow_id: string | null;
+      agent_version_id: string;
+      agent_version: number;
+      callable: boolean;
+    }[]
+  >`
+    WITH latest AS (
+      SELECT DISTINCT ON (flow.flow_definition_id) flow.*
+      FROM automation.flow_versions flow
+      WHERE flow.published_at IS NOT NULL
+      ORDER BY flow.flow_definition_id, flow.version DESC
+    )
+    SELECT latest.flow_definition_id, definition.name AS flow_name,
+           latest.version AS flow_version,
+           node #>> '{configuration,flowId}' AS voice_flow_id,
+           agent.id AS agent_version_id, agent.version AS agent_version,
+           (latest.validation_status = 'valid'
+             AND agent.published_at IS NOT NULL
+             AND agent.validation_status = 'valid'
+             AND 'voice' = ANY(agent.channel_capabilities)) AS callable
+    FROM latest
+    JOIN automation.flow_definitions definition
+      ON definition.id = latest.flow_definition_id
+     AND definition.tenant_id = latest.tenant_id
+     AND definition.archived_at IS NULL
+    CROSS JOIN LATERAL jsonb_array_elements(latest.definition -> 'nodes') node
+    JOIN agents.agent_profile_versions agent
+      ON agent.tenant_id = latest.tenant_id
+     AND (
+       (node #>> '{configuration,agentVersionId}' IS NULL
+        AND agent.id = latest.agent_profile_version_id)
+       OR node #>> '{configuration,agentVersionId}' = agent.id::text
+     )
+    WHERE node ->> 'type' = 'voice.call'
+      AND agent.agent_profile_id = ${profileId}::uuid
+    ORDER BY definition.name, latest.flow_definition_id
+  `;
+  return rows.map((row) => ({
+    flowDefinitionId: row.flow_definition_id,
+    flowName: row.flow_name,
+    flowVersion: row.flow_version,
+    voiceFlowId: row.voice_flow_id,
+    agentVersionId: row.agent_version_id,
+    agentVersion: row.agent_version,
+    callable: row.callable,
+  }));
+}
+
 export async function createAgentQualityDraft(
   sql: postgres.TransactionSql,
   actorId: string,

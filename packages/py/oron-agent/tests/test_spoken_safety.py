@@ -17,7 +17,8 @@ async def test_unverified_business_claims_are_suppressed(claim):
     output = await BusinessClaimGuardFilter(lambda: "he").filter(claim)
 
     assert (
-        output == "אין לי גישה מאומתת למערכת הזאת בשיחה הנוכחית, ולכן איני יכול לאשר שבוצעה פעולה."
+        output
+        == "אין לי גישה מאומתת למערכת הזאת בשיחה הנוכחית, ולכן אי אפשר לאשר מכאן שבוצעה פעולה."
     )
 
 

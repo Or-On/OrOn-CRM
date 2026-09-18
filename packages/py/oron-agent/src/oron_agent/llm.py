@@ -11,12 +11,14 @@ from typing import Any
 
 from google.genai.types import HttpOptions
 from loguru import logger
-from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
+from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter, GeminiLLMInvocationParams
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.google.vertex.llm import GoogleVertexLLMService
 from pipecat.services.llm_service import LLMService
 from pipecat.services.openai.llm import OpenAILLMService
+
+from oron_agent.provider_context import fold_instructions
 
 
 class LlmPreflightError(RuntimeError):
@@ -147,31 +149,45 @@ class _BoundedOpenAILLMService(OpenAILLMService):
             params.pop("max_tokens", None)
         messages = params.get("messages")
         if isinstance(messages, list):
-            messages = self._without_empty_tool_calls(messages)
-            params["messages"] = messages
-        if isinstance(messages, list) and not any(
-            not isinstance(message, dict) or message.get("role") not in {"system", "developer"}
-            for message in messages
-        ):
-            # Google's OpenAI-compatible endpoint rejects a request whose
-            # entire context becomes Gemini's system instruction: its native
-            # `contents` array is then empty. Immediate outbound openers have
-            # exactly that shape before the caller has spoken. Supply a
-            # transport event, explicitly not customer speech, so the model can
-            # execute the trusted flow objective without inventing a user turn.
-            params["messages"] = [
-                *messages,
-                {
-                    "role": "user",
-                    "content": (
-                        "Platform call-start event (not customer speech): the telephone "
-                        "connection is active. Begin according to the trusted flow objective "
-                        "and conversation context."
-                    ),
-                },
-            ]
+            # The adapter has already placed the tenant role (the service
+            # system_instruction) first. Every later instruction, including
+            # Pipecat's `developer` tool notes, is folded behind it: this
+            # endpoint otherwise keeps only the last one and drops the tenant
+            # identity. An opener with no conversation yet gets an explicit
+            # non-customer call-start event; see provider_context.
+            instruction, conversation = fold_instructions(self._without_empty_tool_calls(messages))
+            params["messages"] = (
+                [{"role": "system", "content": instruction}, *conversation]
+                if instruction
+                else conversation
+            )
         params["timeout"] = self._request_timeout_secs
         return params
+
+
+class _SingleInstructionGeminiAdapter(GeminiLLMAdapter):
+    """Send every context instruction inside Gemini's one system instruction.
+
+    The stock adapter discards an initial context system message whenever the
+    service has a system_instruction (the FlowManager role), and turns later
+    system messages into ``user`` turns. The first dropped the node task; the
+    second made the evidence policy look like the caller's latest turn.
+    """
+
+    def get_llm_invocation_params(
+        self, context: LLMContext, *, system_instruction: str | None = None
+    ) -> GeminiLLMInvocationParams:
+        instruction, conversation = fold_instructions(
+            self.get_messages(context), system_instruction
+        )
+        folded = LLMContext(
+            messages=conversation, tools=context.tools, tool_choice=context.tool_choice
+        )
+        return super().get_llm_invocation_params(folded, system_instruction=instruction)
+
+
+class _SingleInstructionVertexLLMService(GoogleVertexLLMService):
+    adapter_class = _SingleInstructionGeminiAdapter
 
 
 def build_llm(
@@ -205,7 +221,7 @@ def build_llm(
             ),
             request_timeout_secs=request_timeout_secs,
         )
-    return GoogleVertexLLMService(
+    return _SingleInstructionVertexLLMService(
         project_id=project_id,
         location=location,
         credentials_path=credentials_path,

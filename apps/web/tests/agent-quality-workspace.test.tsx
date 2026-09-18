@@ -139,6 +139,67 @@ describe("persisted agent quality workspace", () => {
     expect(screen.getByText(copy.stages)).toBeDefined();
     expect(document.querySelector("audio")).toBeNull();
   });
+  it.each(["en", "he"] as const)(
+    "shows in %s which version new voice calls use and that a newer published version is not bound",
+    async (locale) => {
+      const copy = qualityCopy(locale);
+      const published = (id: string, number: number): AgentQualityVersion => ({
+        ...version,
+        id,
+        version: number,
+        publishedAt: "2026-09-18T08:00:00.000Z",
+        validationStatus: "valid",
+      });
+      const v1 = published("20000000-0000-4000-8000-000000000011", 1);
+      const v2 = published("20000000-0000-4000-8000-000000000012", 2);
+      api.read.mockImplementation((url: string) =>
+        Promise.resolve(
+          url.includes("/quality")
+            ? {
+                versions: [v2, v1],
+                voiceBindings: [
+                  {
+                    flowDefinitionId: "30000000-0000-4000-8000-000000000011",
+                    flowName: "Fictional support line",
+                    flowVersion: 4,
+                    voiceFlowId: "40000000-0000-4000-8000-000000000011",
+                    agentVersionId: v1.id,
+                    agentVersion: 1,
+                    callable: true,
+                  },
+                ],
+              }
+            : { versions: [] },
+        ),
+      );
+      render(
+        localized(<AgentQualityWorkspace profileId={profileId} />, locale),
+      );
+
+      const status = await screen.findByRole("region", {
+        name: copy.voiceStatus,
+      });
+      expect(status.textContent).toContain("Fictional support line");
+      expect(status.textContent).toContain("v1");
+      const warning = screen
+        .getAllByRole("alert")
+        .find((alert) => alert.textContent.includes("v2"));
+      expect(warning?.textContent).toContain("v1");
+      const options = screen.getAllByRole("option").map((o) => o.textContent);
+      expect(options.find((text) => text.startsWith("v1"))).toContain(
+        copy.liveVoice,
+      );
+      expect(options.find((text) => text.startsWith("v2"))).not.toContain(
+        copy.liveVoice,
+      );
+      // Reporting never rebinds: no mutation is issued by loading the status.
+      expect(api.mutate).not.toHaveBeenCalled();
+    },
+  );
+  it("says when no published voice flow uses the agent", async () => {
+    render(localized(<AgentQualityWorkspace profileId={profileId} />));
+    expect(await screen.findByText(qualityCopy("en").voiceNone)).toBeDefined();
+  });
   it("does not expose management loading or mutation controls to a read-only agent inspector", () => {
     render(
       localized(

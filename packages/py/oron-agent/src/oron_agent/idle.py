@@ -11,6 +11,8 @@ countdown measures *silence in the conversation*, not wall-clock since the call
 began — a caller listening to a long answer is not idle.
 """
 
+from collections.abc import Callable
+
 from loguru import logger
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
@@ -65,6 +67,7 @@ class UserIdlePoker(IdleFrameProcessor):
         *,
         prompts: list[str],
         timeout_secs: float,
+        prompts_for_current_language: Callable[[], list[str]] | None = None,
         **kwargs,
     ):
         super().__init__(
@@ -82,6 +85,9 @@ class UserIdlePoker(IdleFrameProcessor):
             **kwargs,
         )
         self.policy = IdlePolicy(prompts=prompts)
+        # A caller who switched language mid-call is nudged in that language.
+        # Same-length localized lists keep the allowance position meaningful.
+        self._prompts_for_current_language = prompts_for_current_language
         # The reset above is not enough on its own: a turn longer than the
         # timeout still expires mid-sentence. Heard live 2026-07-26 — the bot
         # started speaking at 02:29:04, asked "are you still there?" at 02:29:13,
@@ -159,6 +165,8 @@ class UserIdlePoker(IdleFrameProcessor):
             # they were never given a turn to fill. The idle loop re-arms on its
             # own, so returning simply checks again later.
             return
+        if self._prompts_for_current_language is not None:
+            self.policy.prompts = self._prompts_for_current_language()
         prompt = self.policy.next_action()
         if prompt is None:
             # Disarming is what makes this once-only: the idle loop re-arms

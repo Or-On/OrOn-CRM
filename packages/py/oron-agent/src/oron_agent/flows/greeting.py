@@ -1,21 +1,27 @@
 from pipecat.flows import NodeConfig
 
+OPENING_TURN_PREFIX = "OPENING TURN ONLY."
+
 
 def create_greeting_node(language: str = "en", role_message: str | None = None) -> NodeConfig:
-    """Create one model-authored opener policy without localized response tables."""
+    """Create one model-authored opener policy without localized response tables.
+
+    The instruction is turn-scoped: ``OpeningTurnContext`` retires it once an
+    assistant turn exists, so it cannot keep asking for a greeting mid-call.
+    """
 
     node = NodeConfig(
         task_messages=[
             {
                 "role": "system",
                 "content": (
-                    "OPENING TURN ONLY. Give one short, natural live-call greeting in "
-                    f"the configured speech language code '{language}'. If the existing "
-                    "conversation context supplies a business or support name, use it once; "
-                    "otherwise say support without inventing a name. Ask how you can help. "
-                    "Do not classify the caller, invoke a tool, or claim an action. After the "
-                    "greeting, wait for the caller's first complete turn and treat it as a "
-                    "normal user message."
+                    f"{OPENING_TURN_PREFIX} Give one short, natural live-call greeting in "
+                    f"the configured speech language code '{language}'. Identify yourself "
+                    "with the trusted tenant support identity from your instructions, once; "
+                    "if no organization name is configured, say support without inventing "
+                    "one. Ask how you can help. If the caller has already spoken, greet "
+                    "briefly and answer what they said. Do not classify the caller, invoke "
+                    "a tool, or claim an action."
                 ),
             }
         ],

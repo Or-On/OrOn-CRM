@@ -11,8 +11,9 @@ from oron_hebrew.normalizers import (
 
 
 def test_time_range_uses_ad_not_hyphen():
-    assert normalize_time_ranges("בין השעות 12:00-16:00") == "בין השעות 12 עד 16"
-    assert normalize_time_ranges("בין השעות 8-12") == "בין השעות 8 עד 12"
+    # Hours are feminine; the generic reader used to voice "שנים עשר".
+    assert normalize_time_ranges("בין השעות 12:00-16:00") == "בין השעות שתים עשרה עד שש עשרה"
+    assert normalize_time_ranges("בין השעות 8-12") == "בין השעות שמונה עד שתים עשרה"
 
 
 def test_unlabelled_numeric_hyphen_is_not_assumed_to_be_a_time_range():
@@ -29,6 +30,7 @@ def test_join_split_digits():
 
 def test_street_number_is_masculine():
     assert normalize_address_numbers("רחוב שקד 9") == "רחוב שקד תשעה"
+    assert normalize_address_numbers("ברחוב שקד 9 בשעה") == "ברחוב שקד תשעה בשעה"
 
 
 def test_out_of_range_address_number_passes_through():
@@ -36,10 +38,11 @@ def test_out_of_range_address_number_passes_through():
 
 
 def test_currency_shekel_singular_plural_agorot():
-    assert normalize_currency("50 ₪") == "50 שקלים"
+    assert normalize_currency("50 ₪") == "חמישים שקלים"
     assert normalize_currency("1 ₪") == "שקל אחד"
-    assert normalize_currency('99 ש"ח') == "99 שקלים"
-    assert normalize_currency("19.90 ₪") == "19 שקלים ותשעים אגורות"
+    assert normalize_currency("2 ₪") == "שני שקלים"
+    assert normalize_currency('99 ש"ח') == "תשעים ותשעה שקלים"
+    assert normalize_currency("19.90 ₪") == "תשעה עשר שקלים ותשעים אגורות"
 
 
 def test_normalize_for_tts_order():
@@ -74,7 +77,7 @@ def test_street_number_unaffected_by_hour_rule():
 
 
 def test_time_range_rule_still_works_with_hour_rule_wired():
-    assert normalize_for_tts("בין השעות 12:00-16:00") == "בין השעות 12 עד 16"
+    assert normalize_for_tts("בין השעות 12:00-16:00") == "בין השעות שתים עשרה עד שש עשרה"
 
 
 def test_prefixed_clock_time_is_feminine_and_drops_the_hyphen():
@@ -89,7 +92,7 @@ def test_prefixed_clock_teen_is_feminine():
 
 def test_prefixed_count_without_a_time_word_stays_masculine():
     """`ב-5 שקלים` is a count, not a clock time — shekels are masculine."""
-    assert normalize_for_tts("זה עולה 5 שקלים") == "זה עולה 5 שקלים"
+    assert normalize_for_tts("זה עולה 5 שקלים") == "זה עולה חמישה שקלים"
     assert normalize_prefixed_hours("ל-3 שקלים") == "ל-3 שקלים"
 
 
@@ -107,7 +110,7 @@ def test_number_spacing_without_address_label_is_not_reinterpreted():
 
 
 def test_currency_preserves_grouping_sign_and_fraction():
-    assert normalize_currency("-1,500.05 ₪") == "מינוס 1500 שקלים וחמש אגורות"
+    assert normalize_currency("-1,500.05 ₪") == "מינוס אלף וחמש מאות שקלים וחמש אגורות"
     assert normalize_currency("150 ₪") != normalize_currency("1,500 ₪")
     assert normalize_currency("1.500 ₪") == "1.500 ₪"
 

@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { createAgentQualityDraft, listAgentQualityVersions } from "@or-on/crm";
+import {
+  createAgentQualityDraft,
+  listAgentQualityVersions,
+  listAgentVoiceBindings,
+} from "@or-on/crm";
 import {
   jsonObject,
   withCurrentTenant,
@@ -16,11 +20,14 @@ interface Context {
 export async function GET(_request: Request, context: Context) {
   try {
     const { id } = await context.params;
-    return NextResponse.json({
-      versions: await withCurrentTenant("flows:manage", (sql) =>
-        listAgentQualityVersions(sql, id),
-      ),
-    });
+    const { versions, voiceBindings } = await withCurrentTenant(
+      "flows:manage",
+      async (sql) => ({
+        versions: await listAgentQualityVersions(sql, id),
+        voiceBindings: await listAgentVoiceBindings(sql, id),
+      }),
+    );
+    return NextResponse.json({ versions, voiceBindings });
   } catch (error) {
     return crmErrorResponse(error);
   }

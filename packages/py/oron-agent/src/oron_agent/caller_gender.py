@@ -222,8 +222,8 @@ def caller_gender_instruction(
         f"{authority} {forms}{separation} Keep this choice until a later caller correction; "
         "a later CALLER ADDRESS UPDATE overrides this one, including any operator default. "
         "This preference does not establish biological sex or identity. "
-        "If acknowledging a correction, say naturally: 'סליחה, טעיתי. תודה שתיקנת אותי.' "
-        "Never say 'סליחה רבה'. Do not discuss how gender was detected."
+        "If this follows a correction, acknowledge it briefly in your own words and "
+        "continue with the caller's request. Do not discuss how gender was detected."
     )
 
 

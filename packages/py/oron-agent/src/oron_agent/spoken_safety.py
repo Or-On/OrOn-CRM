@@ -69,8 +69,9 @@ def safe_spoken_text(
         return sanitized, False
     logger.warning("suppressed unverified business-system claim before TTS")
     if language.lower().startswith("he"):
+        # Gender-neutral wording: the persona may be female or male.
         return (
-            "אין לי גישה מאומתת למערכת הזאת בשיחה הנוכחית, ולכן איני יכול לאשר שבוצעה פעולה.",
+            "אין לי גישה מאומתת למערכת הזאת בשיחה הנוכחית, ולכן אי אפשר לאשר מכאן שבוצעה פעולה.",
             True,
         )
     return (

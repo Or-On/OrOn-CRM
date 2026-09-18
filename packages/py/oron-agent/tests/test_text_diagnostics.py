@@ -72,3 +72,47 @@ async def test_diagnostic_keeps_the_generated_call_opening_as_the_first_turn(tmp
     assert turns[0]["stt_final_text"] is None
     assert turns[0]["tts_input_text"] == "Welcome to tenant support."
     assert turns[1]["stt_final_text"] == "Hello"
+
+
+async def test_raw_model_output_is_not_confused_with_delivered_text(tmp_path) -> None:
+    """A substituted sentence must be attributable to the stage that produced it."""
+
+    from oron_agent.text_diagnostics import ModelTextDiagnosticsObserver
+    from pipecat.frames.frames import LLMTextFrame
+    from pipecat.observers.base_observer import FramePushed
+    from pipecat.processors.frame_processor import FrameDirection
+
+    output = tmp_path / "stages.json"
+    diagnostics = VoiceTextDiagnostics(
+        str(output),
+        session_id=uuid.uuid4(),
+        tenant_id=uuid.uuid4(),
+        handoff_id=None,
+        verification_state="context_unlocked",
+    )
+    llm, downstream = object(), object()
+    observer = ModelTextDiagnosticsObserver(diagnostics, llm)
+
+    async def pushed(source, text):
+        await observer.on_push_frame(
+            FramePushed(
+                source=source,
+                destination=downstream,
+                frame=LLMTextFrame(text),
+                direction=FrameDirection.DOWNSTREAM,
+                timestamp=0,
+            )
+        )
+
+    diagnostics.record_stt("תפתחי לי קריאה", "he")
+    await pushed(llm, "<lang:he>פתחתי לך ")
+    await pushed(llm, "קריאת שירות.")
+    await pushed(downstream, "not from the model")
+    diagnostics.record_tts("אין לי גישה מאומתת למערכת הזאת")
+    diagnostics.record_delivered("אין לי גישה מאומתת למערכת הזאת")
+    await diagnostics.finalize({"turns": []})
+
+    turn = json.loads(output.read_text(encoding="utf-8"))["turns"][0]
+    assert turn["llm_response_text"] == "<lang:he>פתחתי לך קריאת שירות."
+    assert turn["delivered_assistant_text"] == "אין לי גישה מאומתת למערכת הזאת"
+    assert turn["tts_input_text"] == "אין לי גישה מאומתת למערכת הזאת"

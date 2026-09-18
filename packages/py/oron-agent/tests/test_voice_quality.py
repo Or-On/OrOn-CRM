@@ -77,7 +77,7 @@ async def test_english_configuration_does_not_expand_numbers_into_hebrew():
 
 
 @pytest.mark.asyncio
-async def test_dynamic_turn_language_scopes_pronunciation_and_preserves_caller_address():
+async def test_dynamic_turn_language_scopes_pronunciation_without_rewriting_grammar():
     current_language = "en"
     quality = VoiceQualityConfig(
         language="en",
@@ -94,7 +94,9 @@ async def test_dynamic_turn_language_scopes_pronunciation_and_preserves_caller_a
 
     assert await transform("sample", None) == "example"
     current_language = "he"
-    assert await transform("את יכולה לבדוק OrOn?", None) == "אתה יכול לבדוק אוֹר אוֹן?"
+    # Pronunciation applies; caller address is the model instruction's job and
+    # the speech transform no longer rewrites grammar.
+    assert await transform("את יכולה לבדוק OrOn?", None) == "את יכולה לבדוק אוֹר אוֹן?"
 
 
 @pytest.mark.asyncio

@@ -57,6 +57,7 @@ from oron_agent.caller_gender import (
     caller_gender_instruction,
 )
 from oron_agent.config import AgentOverrides, Settings, load_settings, settings_for_call
+from oron_agent.context_hygiene import OpeningTurnContext
 from oron_agent.conversation_language import (
     CallerLanguageContextProcessor,
     ConversationLanguageState,
@@ -84,7 +85,7 @@ from oron_agent.runtime_sessions import RuntimeSessions
 from oron_agent.session_recorder import SessionRecorder, finish_after_cancellation
 from oron_agent.spoken_safety import BusinessClaimGuardFilter
 from oron_agent.storage import build_artifact_store, save_audio_file
-from oron_agent.text_diagnostics import VoiceTextDiagnostics
+from oron_agent.text_diagnostics import ModelTextDiagnosticsObserver, VoiceTextDiagnostics
 from oron_agent.tokens import mint_room_token
 from oron_agent.tool_call_guard import HallucinatedToolCallGuard
 from oron_agent.tracing import conversation_span_attributes, setup_process_tracing
@@ -520,7 +521,15 @@ async def run_bot(
     # dev console watches a call it is not otherwise part of.
     rtvi = RTVIProcessor()
 
-    user_idle = UserIdlePoker(prompts=profile.idle_prompts, timeout_secs=st.user_idle_secs)
+    user_idle = UserIdlePoker(
+        prompts=profile.idle_prompts,
+        timeout_secs=st.user_idle_secs,
+        prompts_for_current_language=lambda: (
+            language_profile(conversation_language.current).idle_prompts
+            if conversation_language.current in {"he", "en"}
+            else profile.idle_prompts
+        ),
+    )
     control_reader = getattr(sessions, "read_voice_control", None)
     control_writer = getattr(sessions, "acknowledge_voice_control", None)
     voice_control = None
@@ -553,6 +562,7 @@ async def run_bot(
         caller_gender_context=caller_gender_context,
         caller_language_context=caller_language_context,
         turn_planner=turn_planner,
+        opening_context=OpeningTurnContext(),
         evidence_context=VoiceEvidenceContext(
             tenant_id=str(ctx.tenant_id),
             language=lambda: conversation_language.current,
@@ -616,6 +626,8 @@ async def run_bot(
             params=RTVIObserverParams(metrics_enabled=True, bot_llm_enabled=False),
         ),
     ]
+    if text_diagnostics is not None:
+        observers.append(ModelTextDiagnosticsObserver(text_diagnostics, llm))
 
     worker = PipelineWorker(
         Pipeline(processors),
@@ -707,7 +719,7 @@ async def run_bot(
     async def on_assistant_turn_stopped(aggregator, message):
         if message.content:
             if text_diagnostics is not None:
-                text_diagnostics.record_llm(message.content)
+                text_diagnostics.record_delivered(message.content)
             await transcript_handler.save_message(
                 TranscriptMessage(
                     role="assistant",

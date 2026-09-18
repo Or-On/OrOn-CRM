@@ -184,7 +184,7 @@ def test_vertex_settings_are_ignored_by_the_compat_branch():
 def test_vertex_receives_the_same_output_budget_and_bounded_timeout(monkeypatch):
     import oron_agent.llm as module
 
-    original = module.GoogleVertexLLMService
+    original = module._SingleInstructionVertexLLMService
     received = {}
 
     class ConstructorProbe:
@@ -194,7 +194,7 @@ def test_vertex_receives_the_same_output_budget_and_bounded_timeout(monkeypatch)
         def __init__(self, **kwargs):
             received.update(kwargs)
 
-    monkeypatch.setattr(module, "GoogleVertexLLMService", ConstructorProbe)
+    monkeypatch.setattr(module, "_SingleInstructionVertexLLMService", ConstructorProbe)
     build_llm(
         LlmProvider.VERTEX,
         **VERTEX_ARGS,

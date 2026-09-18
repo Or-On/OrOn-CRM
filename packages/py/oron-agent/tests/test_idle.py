@@ -323,3 +323,36 @@ async def test_the_aggregator_still_announces_a_dropped_turn():
 
     assert poker._idle_event.is_set()
     assert poker.policy.pokes == 1
+
+
+async def test_nudges_follow_a_mid_call_language_switch():
+    from oron_agent.language import language_profile
+
+    current = {"language": "he"}
+    poker = UserIdlePoker(
+        prompts=language_profile("he").idle_prompts,
+        timeout_secs=15.0,
+        prompts_for_current_language=lambda: language_profile(current["language"]).idle_prompts,
+    )
+    spoken = []
+
+    async def capture(frame, _direction=None):
+        spoken.append(getattr(frame, "text", None))
+
+    poker.push_frame = capture  # type: ignore[method-assign]
+    poker.arm()
+    await poker._on_idle(poker)
+    current["language"] = "en"
+    await poker._on_idle(poker)
+
+    assert spoken == [
+        language_profile("he").idle_prompts[0],
+        language_profile("en").idle_prompts[1],
+    ]
+
+
+def test_hebrew_sign_off_does_not_assume_the_persona_gender():
+    from oron_agent.language import language_profile
+
+    for prompt in language_profile("he").idle_prompts:
+        assert "מסיים" not in prompt and "מסיימת" not in prompt

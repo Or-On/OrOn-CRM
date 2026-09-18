@@ -1,4 +1,11 @@
-"""Development-only, redacted voice text-stage diagnostics."""
+"""Development-only, redacted voice text-stage diagnostics.
+
+Stages are kept distinct because each can change what the caller hears:
+``llm_response_text`` is the raw text the model streamed; ``tts_input_text`` is
+what reached synthesis after grounding, language-marker removal and speech
+formatting; ``delivered_assistant_text`` is what the assistant context recorded
+as spoken (after text filters, truncated on interruption).
+"""
 
 from __future__ import annotations
 
@@ -8,6 +15,10 @@ import re
 from pathlib import Path
 from typing import Any
 from uuid import UUID
+
+from pipecat.frames.frames import LLMTextFrame
+from pipecat.observers.base_observer import BaseObserver, FramePushed
+from pipecat.processors.frame_processor import FrameDirection
 
 _SENSITIVE_DIGITS = re.compile(r"(?<!\d)\d(?:[\s-]*\d){3,}(?!\d)")
 
@@ -47,6 +58,7 @@ class VoiceTextDiagnostics:
             "stt_final_text": redact_voice_text(stt_text) if stt_text is not None else None,
             "stt_language": language,
             "llm_response_text": None,
+            "delivered_assistant_text": None,
             "tts_input_text": [],
             "verification_state": self._verification_state,
             "context_unlock_state": "unlocked" if self._context_unlocked else "locked",
@@ -60,9 +72,16 @@ class VoiceTextDiagnostics:
         self._start_turn(stt_text=text, language=language)
 
     def record_llm(self, text: str) -> None:
+        """Append raw model output; streamed chunks accumulate per turn."""
         if not self._turn:
             self._start_turn(stt_text=None, language=None)
-        self._turns[self._turn]["llm_response_text"] = redact_voice_text(text)
+        turn = self._turns[self._turn]
+        turn["llm_response_text"] = (turn["llm_response_text"] or "") + text
+
+    def record_delivered(self, text: str) -> None:
+        if not self._turn:
+            self._start_turn(stt_text=None, language=None)
+        self._turns[self._turn]["delivered_assistant_text"] = redact_voice_text(text)
 
     def record_tts(self, text: str) -> None:
         if text.strip():
@@ -82,6 +101,11 @@ class VoiceTextDiagnostics:
             result.append(
                 {
                     **turn,
+                    "llm_response_text": (
+                        redact_voice_text(turn["llm_response_text"])
+                        if turn["llm_response_text"] is not None
+                        else None
+                    ),
                     "tts_input_text": " ".join(turn["tts_input_text"]).strip() or None,
                     "endpoint_latency": durations.get("speech_end_to_accepted_ms"),
                     "llm_first_token_latency": durations.get("model_first_token_ms"),
@@ -99,3 +123,20 @@ class VoiceTextDiagnostics:
             json.dumps(payload, ensure_ascii=False, indent=2),
             "utf-8",
         )
+
+
+class ModelTextDiagnosticsObserver(BaseObserver):
+    """Record the model's own streamed text, before any downstream processing."""
+
+    def __init__(self, diagnostics: VoiceTextDiagnostics, llm: object) -> None:
+        super().__init__()
+        self._diagnostics = diagnostics
+        self._llm = llm
+
+    async def on_push_frame(self, data: FramePushed) -> None:
+        if (
+            data.source is self._llm
+            and data.direction is FrameDirection.DOWNSTREAM
+            and isinstance(data.frame, LLMTextFrame)
+        ):
+            self._diagnostics.record_llm(data.frame.text)
