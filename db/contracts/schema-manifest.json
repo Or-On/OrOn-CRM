@@ -1,5 +1,5 @@
 {
-  "alembic_head": "e4c71a9d2b83",
+  "alembic_head": "b8d5e21f7a04",
   "expected_functions": [
     "agents.protect_approved_knowledge",
     "automation.protect_published_flow_version",
@@ -82,7 +82,9 @@
     "service.prevent_finalized_report_mutation",
     "service.prevent_signed_visit_mutation",
     "service.validate_report_attachment_context",
-    "service.validate_technician_user_link"
+    "service.validate_technician_user_link",
+    "support.enqueue_post_call",
+    "support.queue_post_call_from_session"
   ],
   "expected_indexes": [
     "ix_appointment_technician_time",
@@ -142,7 +144,10 @@
     "uq_report_finalized_revision",
     "uq_service_case_intake",
     "uq_support_tickets_attachment",
-    "uq_tenant_invitations_open_email"
+    "uq_tenant_invitations_open_email",
+    "ix_support_attempts_post_call_open",
+    "ix_support_tickets_awaiting_customer",
+    "uq_support_call_attempts_job"
   ],
   "expected_schemas": [
     "agents",

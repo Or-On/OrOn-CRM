@@ -153,12 +153,16 @@ jobs:
         env:
           MIGRATION_DATABASE_URL: ${{ env.DATABASE_URL }}
         run: uv run --no-sync python scripts/preview_ui.py --check-messaging
+      # Named explicitly rather than by glob: a suite that silently stops
+      # running is worse than one that fails, and `describe.skipIf` on a missing
+      # variable makes that invisible in the summary.
       - name: Isolated cross-channel worker acceptance (no providers)
         env:
           CROSS_CHANNEL_TEST_DATABASE_URL: postgresql://platform_migrator:ci-only-password@127.0.0.1:5432/or_on_platform_ci
         run: >-
           pnpm --filter @or-on/messaging-worker exec vitest run
           tests/ai-reply.live.test.ts tests/call-followup.live.test.ts
+          tests/support-tickets.live.test.ts tests/post-call.live.test.ts
       - name: Initialize dedicated readiness PostgreSQL
         env:
           DATABASE_URL: ${{ env.READINESS_POSTGRES_URL }}

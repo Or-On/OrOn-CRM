@@ -4,19 +4,29 @@ import datetime as dt
 from uuid import UUID, uuid4
 
 import jwt
+import pytest
 from control_api.app import create_app
 from control_api.auth import ServiceAssertionVerifier, ServicePrincipal
 from control_api.voice import (
     RealTelephonyDenied,
     SimulatedCallRequest,
     SimulatedCallResult,
+    VoiceArtifactReport,
     VoiceSessionSummary,
+    VoiceTranscript,
     require_real_telephony_authorization,
 )
 from httpx import ASGITransport, AsyncClient
 from or_on_platform.config import PlatformSettings
 from oron_common import CallCost, CallUsage, Direction
 from oron_sessions.models import SessionStatus
+from oron_sessions.verification import (
+    RecordingState,
+    RecordingVerification,
+    TranscriptState,
+    TranscriptTurn,
+    TranscriptVerification,
+)
 from sqlalchemy.dialects import postgresql
 
 SECRET = "phase5-service-assertion-secret-long-enough"
@@ -72,6 +82,47 @@ class FakeVoiceRepository:
     async def get_recording(self, principal: ServicePrincipal, session_id: UUID) -> bytes | None:
         self.principal = principal
         return b"RIFFfixture-wave"
+
+    async def verify_artifacts(
+        self, principal: ServicePrincipal, session_id: UUID
+    ) -> VoiceArtifactReport | None:
+        self.principal = principal
+        return VoiceArtifactReport(
+            session_id=session_id,
+            recording=RecordingVerification(
+                state=RecordingState.PARTIAL,
+                detail="short_but_present",
+                byte_size=2048,
+                duration_seconds=0.4,
+                sample_rate=16_000,
+                channels=1,
+                content_type="audio/wav",
+                checksum="a" * 64,
+                storage_backend="local",
+                storage_key="conversations/fixture/recordings/merged_audio.wav",
+            ),
+            transcript=TranscriptVerification(
+                state=TranscriptState.VALID,
+                detail="verified",
+                byte_size=120,
+                turn_count=3,
+                content_type="text/plain; charset=utf-8",
+                checksum="b" * 64,
+                storage_backend="local",
+                storage_key="conversations/fixture/transcripts/transcript.txt",
+            ),
+            verified_at=dt.datetime(2026, 9, 19, tzinfo=dt.UTC),
+        )
+
+    async def get_transcript(
+        self, principal: ServicePrincipal, session_id: UUID
+    ) -> VoiceTranscript | None:
+        self.principal = principal
+        return VoiceTranscript(
+            session_id=session_id,
+            state="valid",
+            turns=[TranscriptTurn(index=1, role="user", text="Fictional turn.")],
+        )
 
     async def close(self) -> None:
         self.closed = True
@@ -157,6 +208,61 @@ async def test_voice_recording_is_tenant_authorized_and_streamed_as_wav() -> Non
     assert accepted.content == b"RIFFfixture-wave"
     assert repository.principal is not None
     assert repository.principal.tenant_id == tenant_id
+
+
+async def test_artifact_verification_reports_states_not_a_stored_uri() -> None:
+    tenant_id = uuid4()
+    session_id = uuid4()
+    repository = FakeVoiceRepository()
+    app = create_app(
+        settings=_settings(),
+        database_probe=FakeProbe(),
+        voice_repository=repository,
+        assertion_verifier=ServiceAssertionVerifier(SECRET),
+    )
+    async with (
+        app.router.lifespan_context(app),
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client,
+    ):
+        denied = await client.get(f"/api/v1/voice/sessions/{session_id}/artifacts")
+        accepted = await client.get(
+            f"/api/v1/voice/sessions/{session_id}/artifacts",
+            headers={"authorization": f"Bearer {_token(tenant_id=tenant_id)}"},
+        )
+
+    assert denied.status_code == 401
+    assert accepted.status_code == 200
+    body = accepted.json()
+    # A partial recording stays partial across the boundary: the worker must not
+    # be able to read "there are bytes" as "there is a complete call".
+    assert body["recording"]["state"] == "partial"
+    assert body["recording"]["duration_seconds"] == pytest.approx(0.4)
+    assert body["transcript"]["turn_count"] == 3
+    assert repository.principal is not None
+    assert repository.principal.tenant_id == tenant_id
+
+
+async def test_transcript_turns_are_served_to_the_authenticated_caller() -> None:
+    session_id = uuid4()
+    app = create_app(
+        settings=_settings(),
+        database_probe=FakeProbe(),
+        voice_repository=FakeVoiceRepository(),
+        assertion_verifier=ServiceAssertionVerifier(SECRET),
+    )
+    async with (
+        app.router.lifespan_context(app),
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client,
+    ):
+        denied = await client.get(f"/api/v1/voice/sessions/{session_id}/transcript")
+        accepted = await client.get(
+            f"/api/v1/voice/sessions/{session_id}/transcript",
+            headers={"authorization": f"Bearer {_token()}"},
+        )
+
+    assert denied.status_code == 401
+    assert accepted.status_code == 200
+    assert accepted.json()["turns"][0]["index"] == 1
 
 
 async def test_voice_sessions_reject_wrong_audience_and_missing_capability() -> None:

@@ -10,9 +10,27 @@ import {
   parseStoredWhatsAppStatusEnvelope,
   messageDeliveryFailure,
   loadEligibleAgentKnowledge,
+  applyCustomerConfirmation,
+  applyPostCallOutcome,
+  awaitingCustomerTicket,
+  beginPostCallAnalysis,
+  bindTicketCallAttemptSession,
+  callOutcomeFromSession,
+  classifyCustomerReply,
+  failPostCallAnalysis,
+  followupMessage,
+  loadCallEvidence,
+  loadFollowupPlan,
+  loadPostCallWork,
+  openTicketCallAttempt,
   openOrAttachTicket,
+  recordArtifactVerification,
+  recordFollowupOutcome,
+  recordPostCallAnalysis,
   recordTicketEvent,
+  schedulePostCallFollowup,
   setTicketHandlingMode,
+  skipPostCallAnalysis,
   queueWhatsAppAutomaticCall,
   queueWhatsAppOutbound,
   assignDefaultWhatsAppAi,
@@ -66,6 +84,14 @@ import {
   FieldServiceAiProviderError,
   type FieldServiceAiProvider,
 } from "./field-service-provider.js";
+import {
+  ArtifactVerifierError,
+  type ArtifactVerifier,
+} from "./artifact-verifier.js";
+import {
+  PostCallProviderError,
+  type PostCallAnalysisProvider,
+} from "./post-call-provider.js";
 
 interface InboundEventRow {
   id: string;
@@ -108,6 +134,10 @@ export interface MessagingAutomationOptions {
   readonly fieldServiceProvider?: FieldServiceAiProvider;
   readonly protectedFieldKeys?: ProtectedFieldKeys;
   readonly privateObjectStorage?: PrivateObjectStorageOptions;
+  /** Reads a call's stored artifacts to decide whether they are usable. */
+  readonly artifactVerifier?: ArtifactVerifier;
+  readonly postCallProvider?: PostCallAnalysisProvider;
+  readonly postCallModel?: string;
 }
 
 const safeEscalationReasons: Readonly<
@@ -229,6 +259,28 @@ async function processInbound(
               AND entitlement.available AND configuration.enabled
               AND configuration.whatsapp_intake_enabled
               AND ${fieldServiceAiAvailable}
+            ON CONFLICT DO NOTHING
+          `;
+          // A wrap-up reply is answered before the ordinary AI turn is even
+          // considered: the customer was asked a specific question about a
+          // specific ticket, and that answer belongs on that ticket whether or
+          // not the conversation is still AI-owned.
+          await transaction`
+            INSERT INTO ops.jobs
+              (tenant_id, queue, job_type, reference_type, reference_id, payload,
+               idempotency_key, max_attempts, priority)
+            SELECT platform.current_tenant_id(), 'messaging',
+                   'support.postcall.reply', 'conversation',
+                   ${result.conversationId}::uuid,
+                   jsonb_build_object('conversationId', ${result.conversationId}::uuid,
+                     'messageId', ${result.messageId}::uuid),
+                   ${`support-postcall-reply:${result.messageId}`}, 3, 30
+            WHERE EXISTS (
+              SELECT 1 FROM support.tickets ticket
+              WHERE ticket.tenant_id = platform.current_tenant_id()
+                AND ticket.source_conversation_id = ${result.conversationId}::uuid
+                AND ticket.status = 'open' AND ticket.stage = 'awaiting_customer'
+            )
             ON CONFLICT DO NOTHING
           `;
           await transaction`
@@ -1468,6 +1520,485 @@ async function processFieldServiceOcr(
   }
 }
 
+/**
+ * The tenant's AI actor for automatic work, or nothing.
+ *
+ * Post-call processing runs long after the conversation that authorised it, so
+ * the actor is re-resolved and re-authorised here rather than carried in a job
+ * payload where a revoked operator would still look valid.
+ */
+async function postCallActor(
+  transaction: postgres.TransactionSql,
+): Promise<string | null> {
+  const rows = await transaction<{ user_id: string }[]>`
+    SELECT settings.whatsapp_ai_enabled_by_user_id AS user_id
+    FROM crm.tenant_settings settings
+    WHERE settings.tenant_id = platform.current_tenant_id()
+      AND settings.whatsapp_ai_enabled_by_user_id IS NOT NULL
+      AND platform.messaging_ai_actor_authorized(settings.whatsapp_ai_enabled_by_user_id)
+  `;
+  return rows[0]?.user_id ?? null;
+}
+
+function attemptReference(job: JobRow): string {
+  const payload = record(job.payload);
+  const attemptId = payload.attemptId;
+  if (
+    job.reference_id === null ||
+    !uuid(attemptId) ||
+    attemptId !== job.reference_id
+  )
+    throw new TypeError("post-call job reference is invalid");
+  return job.reference_id;
+}
+
+/**
+ * Drive one attempt's post-call workflow as far as it can go this delivery.
+ *
+ * Re-entrant by construction: each step asks the database to move a specific
+ * stage and does nothing if it has already moved. A duplicate delivery, a
+ * restarted worker and a retry after a crash therefore converge on one result
+ * instead of producing a second summary, a second ticket update or a second
+ * wrap-up message.
+ */
+async function processPostCall(
+  sql: Sql,
+  workerId: string,
+  job: JobRow,
+  automation: MessagingAutomationOptions,
+): Promise<void> {
+  try {
+    const attemptId = attemptReference(job);
+    const work = await sql.begin(async (transaction) => {
+      await setTenantContext(transaction, job.tenant_id);
+      await requireOwnedJob(transaction, workerId, job.id);
+      const loaded = await loadPostCallWork(transaction, attemptId);
+      if (loaded === undefined)
+        throw new TypeError("post_call_attempt_missing");
+      return loaded;
+    });
+    if (work.stage === "complete") {
+      await sql.begin(async (transaction) => {
+        await setTenantContext(transaction, job.tenant_id);
+        await finishJob(transaction, job.id, workerId);
+      });
+      return;
+    }
+    if (work.sessionId === null)
+      throw new TypeError("post_call_session_missing");
+    const sessionId = work.sessionId;
+    const callOutcome = callOutcomeFromSession(
+      work.sessionStatus,
+      work.sessionAnswered,
+      work.sessionOutcome,
+    );
+
+    // --- Artifacts -------------------------------------------------------
+    // Reading a full call out of object storage happens outside any
+    // transaction; holding a connection open for an upload-sized fetch would
+    // block the queue behind one slow bucket.
+    let transcriptState = work.transcriptState;
+    let analysable =
+      work.stage !== "artifacts_pending" &&
+      callOutcome === "answered" &&
+      (work.transcriptState === "valid" || work.transcriptState === "partial");
+    if (work.stage === "artifacts_pending") {
+      if (automation.artifactVerifier === undefined)
+        throw new ArtifactVerifierError("artifact_verifier_unavailable", false);
+      const actorUserId = await sql.begin(async (transaction) => {
+        await setTenantContext(transaction, job.tenant_id);
+        return postCallActor(transaction);
+      });
+      const verified = await automation.artifactVerifier.verify({
+        tenantId: job.tenant_id,
+        sessionId,
+        actorUserId: actorUserId ?? job.tenant_id,
+        jobId: job.id,
+      });
+      const outcome = await sql.begin(async (transaction) => {
+        await setTenantContext(transaction, job.tenant_id);
+        await requireOwnedJob(transaction, workerId, job.id);
+        return recordArtifactVerification(transaction, actorUserId, {
+          attemptId,
+          ticketId: work.ticketId,
+          sessionId,
+          callOutcome,
+          recording: verified.recording,
+          transcript: verified.transcript,
+        });
+      });
+      transcriptState = outcome.transcriptState;
+      analysable = outcome.analysable;
+    }
+
+    // --- Analysis --------------------------------------------------------
+    // A missing recording never blocks this, and a missing transcript never
+    // invents one: with nothing said there is nothing to summarise, and the
+    // attempt says `not_applicable` rather than pretending to have failed.
+    //
+    // Gated on the stage, not only on whether an analysis exists: a retry that
+    // arrives after a permanent analysis failure must carry on to the ticket
+    // update rather than try the provider again and fail the job forever.
+    let analysis = work.analysis;
+    const analysisOwed =
+      analysable &&
+      analysis === null &&
+      (work.stage === "artifacts_pending" ||
+        work.stage === "artifacts_verified" ||
+        work.stage === "summary_pending");
+    if (
+      analysisOwed &&
+      // A deployment with no model configured produces no summary and says so,
+      // rather than parking every finished call on a provider it will never get.
+      (automation.postCallProvider === undefined ||
+        automation.artifactVerifier === undefined)
+    ) {
+      await sql.begin(async (transaction) => {
+        await setTenantContext(transaction, job.tenant_id);
+        await failPostCallAnalysis(transaction, {
+          attemptId,
+          errorSafe: "analysis_provider_unavailable",
+          permanent: true,
+        });
+      });
+    } else if (analysisOwed) {
+      const provider = automation.postCallProvider;
+      const verifier = automation.artifactVerifier;
+      if (provider === undefined || verifier === undefined)
+        throw new PostCallProviderError("analysis_provider_unavailable", false);
+      const started = await sql.begin(async (transaction) => {
+        await setTenantContext(transaction, job.tenant_id);
+        await requireOwnedJob(transaction, workerId, job.id);
+        const begun = await beginPostCallAnalysis(transaction, attemptId);
+        const actorUserId = await postCallActor(transaction);
+        const evidence = await loadCallEvidence(transaction, {
+          ticketId: work.ticketId,
+          conversationId: work.conversationId,
+          contactId: work.contactId,
+        });
+        return { begun, actorUserId, evidence };
+      });
+      if (started.begun) {
+        const turns = await verifier.transcript({
+          tenantId: job.tenant_id,
+          sessionId,
+          actorUserId: started.actorUserId ?? job.tenant_id,
+          jobId: job.id,
+        });
+        try {
+          const produced = await provider.analyse({
+            // The customer's own language, detected the same way every other
+            // outbound reply detects it, not the tenant's default assumption.
+            locale: latestMessageLocale(
+              started.evidence.configuredLocale,
+              started.evidence.latestInboundText,
+            ),
+            issueSubject: work.ticketSubject,
+            callOutcome,
+            turns,
+            whatsAppContext: started.evidence.whatsAppContext,
+            actionReceipts: started.evidence.actionReceiptIds.map((id) => ({
+              id,
+              kind: "platform_receipt",
+              statusSafe: "recorded",
+            })),
+            evidence: {
+              // The cited turn range is what the analysis actually saw, so an
+              // index beyond it is a fabrication however plausible it looks.
+              transcriptTurnCount: turns.length,
+              whatsAppMessageIds: started.evidence.whatsAppMessageIds,
+              actionReceiptIds: started.evidence.actionReceiptIds,
+              operatorNoteIds: started.evidence.operatorNoteIds,
+            },
+          });
+          await sql.begin(async (transaction) => {
+            await setTenantContext(transaction, job.tenant_id);
+            await requireOwnedJob(transaction, workerId, job.id);
+            await recordPostCallAnalysis(transaction, {
+              attemptId,
+              analysis: produced,
+              modelSafe: automation.postCallModel ?? "configured-llm",
+            });
+          });
+          analysis = produced;
+        } catch (error) {
+          if (!(error instanceof PostCallProviderError)) throw error;
+          // The ticket, the call and the artifacts all survive a provider
+          // failure; only the summary is missing, and it says so.
+          await sql.begin(async (transaction) => {
+            await setTenantContext(transaction, job.tenant_id);
+            await failPostCallAnalysis(transaction, {
+              attemptId,
+              errorSafe: error.code,
+              permanent: !error.retryable,
+            });
+          });
+          if (error.retryable) throw error;
+          analysis = null;
+        }
+      }
+    } else if (!analysable) {
+      await sql.begin(async (transaction) => {
+        await setTenantContext(transaction, job.tenant_id);
+        await requireOwnedJob(transaction, workerId, job.id);
+        await skipPostCallAnalysis(transaction, attemptId);
+      });
+    }
+
+    // --- The ticket, then the customer -----------------------------------
+    await sql.begin(async (transaction) => {
+      await setTenantContext(transaction, job.tenant_id);
+      await requireOwnedJob(transaction, workerId, job.id);
+      const actorUserId = await postCallActor(transaction);
+      const applied = await applyPostCallOutcome(transaction, actorUserId, {
+        attemptId,
+        ticketId: work.ticketId,
+        analysis,
+        callOutcome,
+        transcriptState,
+        sessionId,
+      });
+      await schedulePostCallFollowup(transaction, {
+        attemptId,
+        required: applied.followupRequired,
+      });
+      await finishJob(transaction, job.id, workerId);
+    });
+  } catch (error) {
+    const reason =
+      error instanceof ArtifactVerifierError ||
+      error instanceof PostCallProviderError
+        ? error.code
+        : error instanceof TypeError
+          ? error.message
+          : "post_call_failed";
+    const permanent =
+      error instanceof TypeError ||
+      ((error instanceof ArtifactVerifierError ||
+        error instanceof PostCallProviderError) &&
+        !error.retryable);
+    await sql.begin(async (transaction) => {
+      await setTenantContext(transaction, job.tenant_id);
+      if (permanent)
+        await transaction`
+          UPDATE ops.jobs SET max_attempts = attempts
+          WHERE id = ${job.id}::uuid AND status = 'running' AND locked_by = ${workerId}
+        `;
+      await transaction`
+        SELECT ops.fail_job(${job.id}::uuid, ${workerId}, ${reason}, 15)
+      `;
+      // Visible to an operator rather than only in a log line: a pipeline that
+      // gave up silently is indistinguishable from one still working.
+      if (job.reference_id !== null)
+        await transaction`
+          UPDATE support.ticket_call_attempts
+          SET post_call_error_safe = ${reason}, updated_at = CURRENT_TIMESTAMP
+          WHERE tenant_id = platform.current_tenant_id()
+            AND id = ${job.reference_id}::uuid
+        `;
+    });
+  }
+}
+
+/**
+ * Send the wrap-up message, or record exactly why it was not sent.
+ *
+ * Separate from the summary job on purpose. Consent can be revoked and the
+ * customer-service window can close between the call ending and this running,
+ * and neither is a reason to undo a correctly analysed call — so this job owns
+ * the send and its own retry budget, and a permanent block is a final,
+ * operator-visible state rather than an endless retry.
+ */
+async function processPostCallFollowup(
+  sql: Sql,
+  workerId: string,
+  job: JobRow,
+  automation: MessagingAutomationOptions,
+): Promise<void> {
+  try {
+    const attemptId = attemptReference(job);
+    await sql.begin(async (transaction) => {
+      await setTenantContext(transaction, job.tenant_id);
+      await requireOwnedJob(transaction, workerId, job.id);
+      const plan = await loadFollowupPlan(transaction, attemptId);
+      if (plan === undefined) throw new TypeError("followup_target_missing");
+      if (plan === "blocked_consent") {
+        await recordFollowupOutcome(transaction, {
+          attemptId,
+          state: "blocked_consent",
+          errorSafe: "consent_withdrawn_before_sending",
+        });
+        await finishJob(transaction, job.id, workerId);
+        return;
+      }
+      if (plan.provider === "simulator" && automation.simulatorEnabled !== true)
+        throw new TypeError("simulation_disabled");
+      if (plan.provider === "meta" && automation.realWhatsAppEnabled !== true)
+        throw new TypeError("real_whatsapp_disabled");
+      const actorUserId = await postCallActor(transaction);
+      if (actorUserId === null)
+        throw new TypeError("followup_actor_unavailable");
+      const locale = latestMessageLocale(
+        plan.configuredLocale,
+        plan.latestInboundText,
+      );
+      // A telephone call does not open or extend the WhatsApp window. Outside
+      // it, Meta permits only an approved template, and this deployment has no
+      // approved post-call template — so the honest outcome is a recorded block
+      // an operator can act on, not a message the provider would reject.
+      if (plan.provider === "meta" && !plan.serviceWindowOpen) {
+        await recordFollowupOutcome(transaction, {
+          attemptId,
+          state: "blocked_window",
+          errorSafe: "outside_customer_service_window",
+        });
+        await recordTicketEvent(transaction, actorUserId, {
+          ticketId: plan.ticketId,
+          kind: "agent_message",
+          actorKind: "system",
+          summarySafe:
+            "The wrap-up message was not sent: the WhatsApp customer-service window has closed.",
+          evidence: { attemptId, reason: "outside_customer_service_window" },
+        });
+        await finishJob(transaction, job.id, workerId);
+        return;
+      }
+      // Model-written next-action prose passes the same guard every other
+      // delivered reply passes before a customer ever reads it.
+      const nextAction =
+        plan.nextAction !== null &&
+        safeConversationalReply(plan.nextAction, { locale })
+          ? plan.nextAction
+          : null;
+      const text = followupMessage({
+        resolution: plan.resolution,
+        ticketReference: plan.ticketReference,
+        ticketSubject: plan.ticketSubject,
+        nextAction,
+        locale,
+      });
+      const outbound = await queueWhatsAppOutbound(
+        transaction,
+        {
+          conversationId: plan.conversationId,
+          explicitlyConfirmed: true,
+          idempotencyKey: `support-followup:${attemptId}`,
+          kind: "text",
+          provider: plan.provider,
+          realProviderEnabled: automation.realWhatsAppEnabled === true,
+          recipientIdentityId: plan.recipientIdentityId,
+          recipientAddress: plan.recipientAddress,
+          senderUserId: actorUserId,
+          senderType: "agent",
+          text,
+        },
+        plan.channelConfiguration,
+      );
+      await recordFollowupOutcome(transaction, {
+        attemptId,
+        state: "sent",
+        messageId: outbound.messageId,
+      });
+      await recordTicketEvent(transaction, actorUserId, {
+        ticketId: plan.ticketId,
+        kind: "agent_message",
+        actorKind: "ai",
+        visibility: "customer_visible",
+        summarySafe: "Wrap-up message sent with the reply options.",
+        evidence: { attemptId, messageId: outbound.messageId },
+      });
+      await finishJob(transaction, job.id, workerId);
+    });
+  } catch (error) {
+    const reason =
+      error instanceof TypeError ? error.message : "followup_failed";
+    const permanent = error instanceof TypeError;
+    await sql.begin(async (transaction) => {
+      await setTenantContext(transaction, job.tenant_id);
+      if (permanent)
+        await transaction`
+          UPDATE ops.jobs SET max_attempts = attempts
+          WHERE id = ${job.id}::uuid AND status = 'running' AND locked_by = ${workerId}
+        `;
+      await transaction`
+        SELECT ops.fail_job(${job.id}::uuid, ${workerId}, ${reason}, 20)
+      `;
+      const dead = await transaction<{ dead: boolean }[]>`
+        SELECT status = 'dead' AS dead FROM ops.jobs WHERE id = ${job.id}::uuid
+      `;
+      if (dead[0]?.dead === true && job.reference_id !== null)
+        await recordFollowupOutcome(transaction, {
+          attemptId: job.reference_id,
+          state: "failed",
+          errorSafe: reason,
+        });
+    });
+  }
+}
+
+/**
+ * Let a wrap-up reply answer the question it was asked.
+ *
+ * Deterministic on purpose. The message offered three numbered choices and
+ * named the words for each, so almost every genuine answer is decidable without
+ * a model — and when it is not, the ticket is left alone and the reply falls
+ * through to the ordinary conversation. A customer opening a NEW problem in the
+ * same thread must never be read as an answer about the old one.
+ */
+async function processPostCallReply(
+  sql: Sql,
+  workerId: string,
+  job: JobRow,
+): Promise<void> {
+  try {
+    const payload = record(job.payload);
+    const conversationId = payload.conversationId;
+    const messageId = payload.messageId;
+    if (!uuid(conversationId) || !uuid(messageId) || job.reference_id === null)
+      throw new TypeError("post_call_reply_reference_invalid");
+    await sql.begin(async (transaction) => {
+      await setTenantContext(transaction, job.tenant_id);
+      await requireOwnedJob(transaction, workerId, job.id);
+      const ticket = await awaitingCustomerTicket(transaction, conversationId);
+      if (ticket === undefined) {
+        await finishJob(transaction, job.id, workerId);
+        return;
+      }
+      const message = await transaction<{ content_text: string | null }[]>`
+        SELECT content_text FROM messaging.messages
+        WHERE tenant_id = platform.current_tenant_id() AND id = ${messageId}::uuid
+          AND conversation_id = ${conversationId}::uuid AND direction = 'inbound'
+      `;
+      const intent = classifyCustomerReply(message[0]?.content_text ?? "");
+      if (intent === "unclear") {
+        await finishJob(transaction, job.id, workerId);
+        return;
+      }
+      const actorUserId = await postCallActor(transaction);
+      await applyCustomerConfirmation(transaction, actorUserId, {
+        ticketId: ticket.ticketId,
+        intent,
+        messageId,
+      });
+      await finishJob(transaction, job.id, workerId);
+    });
+  } catch (error) {
+    const reason =
+      error instanceof TypeError ? error.message : "post_call_reply_failed";
+    await sql.begin(async (transaction) => {
+      await setTenantContext(transaction, job.tenant_id);
+      if (error instanceof TypeError)
+        await transaction`
+          UPDATE ops.jobs SET max_attempts = attempts
+          WHERE id = ${job.id}::uuid AND status = 'running' AND locked_by = ${workerId}
+        `;
+      await transaction`
+        SELECT ops.fail_job(${job.id}::uuid, ${workerId}, ${reason}, 10)
+      `;
+    });
+  }
+}
+
 async function processJob(
   sql: Sql,
   workerId: string,
@@ -1478,6 +2009,18 @@ async function processJob(
     | undefined,
   automation: MessagingAutomationOptions,
 ): Promise<void> {
+  if (job.job_type === "support.postcall.process") {
+    await processPostCall(sql, workerId, job, automation);
+    return;
+  }
+  if (job.job_type === "support.postcall.followup") {
+    await processPostCallFollowup(sql, workerId, job, automation);
+    return;
+  }
+  if (job.job_type === "support.postcall.reply") {
+    await processPostCallReply(sql, workerId, job);
+    return;
+  }
   if (
     (job.job_type === "whatsapp.media.retrieve" ||
       job.job_type === "field_service.whatsapp_media.retrieve") &&
@@ -2366,6 +2909,15 @@ async function processWhatsAppAiReply(
               "ai_voice",
               "Callback admitted; voice owns the issue.",
             );
+            // The attempt row exists before the dial is placed, so an accepted
+            // call whose response is lost has something to reconcile against
+            // and the post-call pipeline has somewhere to land.
+            const attempt = await openTicketCallAttempt(transaction, {
+              ticketId,
+              jobId: receipt.jobId,
+              handoffId: receipt.handoffId,
+              assuranceLevel: "channel_associated",
+            });
             await recordTicketEvent(transaction, work.authorizedUserId, {
               ticketId,
               kind: "call_attempt",
@@ -2376,6 +2928,8 @@ async function processWhatsAppAiReply(
                 jobId: receipt.jobId,
                 flowId: receipt.flowId,
                 flowVersion: receipt.flowVersion,
+                attemptId: attempt.id,
+                attemptNumber: attempt.attemptNumber,
               },
             });
             automaticCallQueued = true;
@@ -2720,6 +3274,30 @@ async function processAutomaticCall(
     await sql.begin(async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
       await requireOwnedJob(transaction, workerId, job.id);
+      // Bind the canonical session to the issue's attempt. The unique index on
+      // (tenant, session) is what stops a replayed acceptance attaching one
+      // call to two attempts, and binding here is also the backstop for a call
+      // that reached a terminal status before this transaction ran.
+      const attempt = await transaction<{ id: string; ticket_id: string }[]>`
+        SELECT id, ticket_id FROM support.ticket_call_attempts
+        WHERE tenant_id = platform.current_tenant_id() AND job_id = ${job.id}::uuid
+        LIMIT 1
+      `;
+      const attemptRow = attempt[0];
+      if (attemptRow !== undefined) {
+        await bindTicketCallAttemptSession(
+          transaction,
+          attemptRow.id,
+          result.sessionId,
+        );
+        await recordTicketEvent(transaction, work.actorUserId, {
+          ticketId: attemptRow.ticket_id,
+          kind: "call_outcome",
+          actorKind: "system",
+          summarySafe: "The telephone call was accepted by the dispatcher.",
+          evidence: { sessionId: result.sessionId, attemptId: attemptRow.id },
+        });
+      }
       // A voice session is linked only when the trusted source conversation
       // resolves to one active service case. Ambiguous conversations remain
       // unlinked for an authorized operator to resolve; phone-number matching

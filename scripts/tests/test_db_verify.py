@@ -20,10 +20,10 @@ def test_graph_has_preserved_oron_root_and_one_target_head() -> None:
     assert report.bases == ("0001",)
     assert report.heads == (manifest["alembic_head"],)
     assert report.branch_points == ("8eda5976c920",)
-    # Bumped by exactly one per deliberate migration; 82 adds the support
-    # ticket foundation (e4c71a9d2b83). An unexplained change here means a
+    # Bumped by exactly one per deliberate migration; 83 adds the durable
+    # post-call pipeline (b8d5e21f7a04). An unexplained change here means a
     # migration arrived that nobody reviewed.
-    assert report.revision_count == 82
+    assert report.revision_count == 83
 
 
 def test_rendered_postgresql_contract_passes_static_security_checks() -> None:

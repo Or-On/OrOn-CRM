@@ -821,6 +821,8 @@ export async function queueWhatsAppTriggeredCall(
 export interface AutomaticCallCommand {
   readonly flowId: string;
   readonly flowVersion: number;
+  /** The canonical handoff this channel transition owns, for the ticket attempt. */
+  readonly handoffId: string;
   readonly jobId: string;
   readonly queued: boolean;
 }
@@ -1075,7 +1077,13 @@ export async function queueWhatsAppAutomaticCall(
         flowVersion,
       },
     );
-  return { flowId, flowVersion, jobId: job.id, queued: created };
+  return {
+    flowId,
+    flowVersion,
+    handoffId: handoff.id,
+    jobId: job.id,
+    queued: created,
+  };
 }
 
 export interface HandoffSummary {
