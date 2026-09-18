@@ -32,7 +32,7 @@ import json
 import math
 import statistics
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -95,44 +95,57 @@ def _split_atoms(segments: list[_Segment], stream: TurnStream) -> list[str]:
     return [atom for atom in stream.atomic if not any(atom in text for text in texts)]
 
 
+@dataclass
+class _TurnMeasurement:
+    """One turn under one aggregator arm.
+
+    A dataclass rather than a dict so the aggregates below stay typed: read
+    back out of a `dict[str, Any]`, every field widens to the union of all of
+    them and `sum`/`len`/`median` have nothing to work with.
+    """
+
+    turn: str
+    # The knob that decides when audio can start: how many streamed chunks the
+    # caller waits through before any text is handed to the synthesizer.
+    chunks_to_first_segment: int | None
+    characters_to_first_segment: int | None
+    # Each segment opens its own Soniox stream, so this is also the number of
+    # seams a listener can hear.
+    segments: int
+    split_atoms: list[str]
+    segment_texts: list[str]
+
+
 async def measure_aggregation() -> dict[str, Any]:
     results: dict[str, Any] = {}
     for mode in (AggregationType.SENTENCE, AggregationType.TOKEN):
-        for arm, _ in _aggregators(mode).items():
+        for arm in _aggregators(mode):
             key = f"{mode.value}+{arm}"
-            per_turn = []
+            per_turn: list[_TurnMeasurement] = []
             for stream in TURN_STREAMS:
                 aggregator = _aggregators(mode)[arm]
                 segments = await _segments(aggregator, stream)
+                first = segments[0] if segments else None
                 per_turn.append(
-                    {
-                        "turn": stream.name,
-                        # The knob that decides when audio can start: how many
-                        # streamed chunks the caller waits through before any
-                        # text is handed to the synthesizer.
-                        "chunks_to_first_segment": (
-                            segments[0].chunk_index + 1 if segments else None
-                        ),
-                        "characters_to_first_segment": (
-                            len(segments[0].text) if segments else None
-                        ),
-                        # Each segment opens its own Soniox stream, so this is
-                        # also the number of seams a listener can hear.
-                        "segments": len(segments),
-                        "split_atoms": _split_atoms(segments, stream),
-                        "segment_texts": [segment.text for segment in segments],
-                    }
+                    _TurnMeasurement(
+                        turn=stream.name,
+                        chunks_to_first_segment=(None if first is None else first.chunk_index + 1),
+                        characters_to_first_segment=(None if first is None else len(first.text)),
+                        segments=len(segments),
+                        split_atoms=_split_atoms(segments, stream),
+                        segment_texts=[segment.text for segment in segments],
+                    )
                 )
             firsts = [
-                row["chunks_to_first_segment"]
+                row.chunks_to_first_segment
                 for row in per_turn
-                if row["chunks_to_first_segment"] is not None
+                if row.chunks_to_first_segment is not None
             ]
             results[key] = {
-                "turns": per_turn,
+                "turns": [asdict(row) for row in per_turn],
                 "median_chunks_to_first_segment": (statistics.median(firsts) if firsts else None),
-                "total_segments": sum(row["segments"] for row in per_turn),
-                "total_split_atoms": sum(len(row["split_atoms"]) for row in per_turn),
+                "total_segments": sum(row.segments for row in per_turn),
+                "total_split_atoms": sum(len(row.split_atoms) for row in per_turn),
             }
     return results
 
@@ -238,8 +251,23 @@ async def _spoken(case: SpokenCase) -> str:
     return await transform(case.authored, None)
 
 
+@dataclass
+class _CaseMeasurement:
+    """One corpus case and whether it preserved its critical meaning."""
+
+    name: str
+    category: str
+    language: str
+    authored: str
+    spoken: str
+    missing_required: list[str]
+    leaked_forbidden: list[str]
+    critical_error: bool
+    transform_ms: float
+
+
 async def measure_corpus() -> dict[str, Any]:
-    rows = []
+    rows: list[_CaseMeasurement] = []
     for case in SPOKEN_CORPUS:
         started = time.perf_counter()
         spoken = await _spoken(case)
@@ -247,34 +275,34 @@ async def measure_corpus() -> dict[str, Any]:
         missing = [fragment for fragment in case.must_keep if fragment not in spoken]
         leaked = [fragment for fragment in case.must_lose if fragment in spoken]
         rows.append(
-            {
-                "name": case.name,
-                "category": case.category,
-                "language": case.language,
-                "authored": case.authored,
-                "spoken": spoken,
-                "missing_required": missing,
-                "leaked_forbidden": leaked,
-                "critical_error": bool(missing or leaked),
-                "transform_ms": round(elapsed_ms, 3),
-            }
+            _CaseMeasurement(
+                name=case.name,
+                category=case.category,
+                language=case.language,
+                authored=case.authored,
+                spoken=spoken,
+                missing_required=missing,
+                leaked_forbidden=leaked,
+                critical_error=bool(missing or leaked),
+                transform_ms=round(elapsed_ms, 3),
+            )
         )
-    failures = [row for row in rows if row["critical_error"]]
+    failures = [row for row in rows if row.critical_error]
     by_category: dict[str, dict[str, int]] = {}
     for row in rows:
-        bucket = by_category.setdefault(row["category"], {"cases": 0, "critical_errors": 0})
+        bucket = by_category.setdefault(row.category, {"cases": 0, "critical_errors": 0})
         bucket["cases"] += 1
-        bucket["critical_errors"] += int(row["critical_error"])
+        bucket["critical_errors"] += int(row.critical_error)
     return {
         "cases": len(rows),
         "critical_errors": len(failures),
         "by_category": by_category,
         "transform_p95_ms": (
-            sorted(row["transform_ms"] for row in rows)[math.ceil(len(rows) * 0.95) - 1]
+            sorted(row.transform_ms for row in rows)[math.ceil(len(rows) * 0.95) - 1]
             if rows
             else None
         ),
-        "rows": rows,
+        "rows": [asdict(row) for row in rows],
     }
 
 
