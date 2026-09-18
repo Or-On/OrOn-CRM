@@ -14,6 +14,7 @@
  */
 import type postgres from "postgres";
 
+import type { PostCallAnalysis } from "./post-call-analysis.js";
 import type { JsonValue } from "./types.js";
 
 export type TicketStatus = "open" | "closed";
@@ -138,6 +139,13 @@ function attachmentKey(value: string): string {
   )
     throw new TypeError("ticket attachment key is invalid");
   return value;
+}
+
+/** `numeric`/`bigint` columns arrive as strings; anything else is not a number. */
+function numeric(value: string | number | null): number | null {
+  if (value === null) return null;
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function mapTicket(row: TicketRow): Ticket {
@@ -501,9 +509,43 @@ export type CallAttemptOutcome =
   | "failed";
 export type RecordingState =
   "pending" | "processing" | "ready" | "partial" | "failed" | "unavailable";
-export type SummaryState = "pending" | "processing" | "ready" | "failed";
+/**
+ * `not_applicable` is the honest state for a busy signal: there was no
+ * conversation, so no summary is owed and none is missing.
+ */
+export type SummaryState =
+  "pending" | "processing" | "ready" | "failed" | "not_applicable";
 export type AssuranceLevel =
   "none" | "channel_associated" | "callback_confirmed" | "verified";
+
+/**
+ * The durable post-call workflow's position for one attempt.
+ *
+ * Column state rather than worker state on purpose: a restarted worker, a
+ * redelivered job and a concurrent retry all read the position from here, and
+ * every transition is conditioned on finding the stage it expects.
+ */
+export type PostCallStage =
+  | "not_started"
+  | "artifacts_pending"
+  | "artifacts_verified"
+  | "summary_pending"
+  | "summary_ready"
+  | "ticket_updated"
+  | "followup_pending"
+  | "complete";
+
+/** Independent of the recording: either artifact can arrive without the other. */
+export type TranscriptState =
+  "pending" | "valid" | "partial" | "empty" | "missing" | "failed";
+
+export type FollowupState =
+  | "not_required"
+  | "pending"
+  | "sent"
+  | "blocked_window"
+  | "blocked_consent"
+  | "failed";
 
 export interface TicketCallAttempt {
   readonly id: string;
@@ -518,6 +560,20 @@ export interface TicketCallAttempt {
   readonly queuedAt: string;
   readonly startedAt: string | null;
   readonly endedAt: string | null;
+  /** Where the durable post-call workflow currently stands for this attempt. */
+  readonly postCallStage: PostCallStage;
+  readonly postCallErrorSafe: string | null;
+  /** A fixed verification code, not prose: `header_only`, `bytes_unavailable`… */
+  readonly recordingDetail: string | null;
+  readonly recordingDurationSeconds: number | null;
+  readonly recordingByteSize: number | null;
+  readonly transcriptState: TranscriptState;
+  readonly transcriptDetail: string | null;
+  readonly transcriptTurnCount: number | null;
+  readonly analysis: PostCallAnalysis | null;
+  readonly analysisModel: string | null;
+  readonly followupState: FollowupState;
+  readonly followupSentAt: string | null;
 }
 
 export interface TicketDetail {
@@ -579,11 +635,27 @@ export async function getTicketDetail(
       queued_at: Date;
       started_at: Date | null;
       ended_at: Date | null;
+      post_call_stage: PostCallStage;
+      post_call_error_safe: string | null;
+      recording_detail_safe: string | null;
+      recording_duration_seconds: string | number | null;
+      recording_byte_size: string | number | null;
+      transcript_state: TranscriptState;
+      transcript_detail_safe: string | null;
+      transcript_turn_count: number | null;
+      analysis: unknown;
+      analysis_model_safe: string | null;
+      followup_state: FollowupState;
+      followup_sent_at: Date | null;
     }[]
   >`
     SELECT id, attempt_number, session_id, outcome, assurance_level,
            recording_state, recording_object_id, transcript_object_id,
-           summary_state, queued_at, started_at, ended_at
+           summary_state, queued_at, started_at, ended_at, post_call_stage,
+           post_call_error_safe, recording_detail_safe,
+           recording_duration_seconds, recording_byte_size, transcript_state,
+           transcript_detail_safe, transcript_turn_count, analysis,
+           analysis_model_safe, followup_state, followup_sent_at
     FROM support.ticket_call_attempts
     WHERE tenant_id = platform.current_tenant_id() AND ticket_id = ${id}::uuid
     ORDER BY attempt_number DESC
@@ -613,6 +685,25 @@ export async function getTicketDetail(
       queuedAt: attempt.queued_at.toISOString(),
       startedAt: attempt.started_at?.toISOString() ?? null,
       endedAt: attempt.ended_at?.toISOString() ?? null,
+      postCallStage: attempt.post_call_stage,
+      postCallErrorSafe: attempt.post_call_error_safe,
+      recordingDetail: attempt.recording_detail_safe,
+      // `numeric` and `bigint` arrive as strings from the driver; a silent NaN
+      // in a duration would render as a blank cell rather than an error.
+      recordingDurationSeconds: numeric(attempt.recording_duration_seconds),
+      recordingByteSize: numeric(attempt.recording_byte_size),
+      transcriptState: attempt.transcript_state,
+      transcriptDetail: attempt.transcript_detail_safe,
+      transcriptTurnCount: attempt.transcript_turn_count,
+      analysis:
+        attempt.analysis === null ||
+        typeof attempt.analysis !== "object" ||
+        Array.isArray(attempt.analysis)
+          ? null
+          : (attempt.analysis as PostCallAnalysis),
+      analysisModel: attempt.analysis_model_safe,
+      followupState: attempt.followup_state,
+      followupSentAt: attempt.followup_sent_at?.toISOString() ?? null,
     })),
   };
 }
@@ -620,8 +711,15 @@ export async function getTicketDetail(
 export interface TicketListOptions {
   readonly status?: TicketStatus | "all";
   readonly stage?: TicketStage;
+  readonly priority?: TicketPriority;
+  readonly sourceChannel?: TicketSourceChannel;
+  readonly handlingMode?: TicketHandlingMode;
+  /** Filter on the evidence-backed outcome, not on a model's opinion of it. */
+  readonly resolution?: TicketResolution;
   readonly query?: string;
   readonly ownerUserId?: string;
+  /** Inclusive lower bound on `lastActivityAt`. */
+  readonly activeSince?: string;
   readonly limit?: number;
   /** Keyset cursor: the previous page's last `lastActivityAt` and `id`. */
   readonly beforeActivityAt?: string;
@@ -653,6 +751,13 @@ export async function listTickets(
   if (query.length > 200) throw new TypeError("ticket search is too long");
   const ownerUserId = optionalIdentifier(options.ownerUserId, "ticket owner");
   const stage = options.stage ?? null;
+  const priority = options.priority ?? null;
+  const sourceChannel = options.sourceChannel ?? null;
+  const handlingMode = options.handlingMode ?? null;
+  const resolution = options.resolution ?? null;
+  const activeSince = options.activeSince ?? null;
+  if (activeSince !== null && !Number.isFinite(Date.parse(activeSince)))
+    throw new TypeError("ticket activity filter must be an instant");
   const limit = Math.min(Math.max(Math.trunc(options.limit ?? 25), 1), 100);
   const cursorActivity = options.beforeActivityAt ?? null;
   const cursorId = optionalIdentifier(options.beforeId, "ticket cursor");
@@ -664,6 +769,13 @@ export async function listTickets(
     WHERE ticket.tenant_id = platform.current_tenant_id()
       AND (${status}::text = 'all' OR ticket.status = ${status})
       AND (${stage}::text IS NULL OR ticket.stage = ${stage})
+      AND (${priority}::text IS NULL OR ticket.priority = ${priority})
+      AND (${sourceChannel}::text IS NULL OR ticket.source_channel = ${sourceChannel})
+      AND (${handlingMode}::text IS NULL OR ticket.handling_mode = ${handlingMode})
+      AND (${resolution}::text IS NULL
+           OR ticket.resolution_classification = ${resolution})
+      AND (${activeSince}::timestamptz IS NULL
+           OR ticket.last_activity_at >= ${activeSince}::timestamptz)
       AND (${ownerUserId}::uuid IS NULL OR ticket.owner_user_id = ${ownerUserId}::uuid)
       -- A phone number is a LOOKUP attribute on the contact's channel
       -- identities, not a column on the contact: the same person may change

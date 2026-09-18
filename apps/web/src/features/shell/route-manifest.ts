@@ -37,6 +37,8 @@ export const applicationPageManifest = [
   { template: "/he" },
   { template: "/inbox", navigationParent: "/inbox" },
   { template: "/invite" },
+  { template: "/leads", navigationParent: "/leads" },
+  { template: "/leads/[id]", navigationParent: "/leads" },
   { template: "/login" },
   { template: "/operations", navigationParent: "/operations" },
   { template: "/orchestration", navigationParent: "/orchestration" },
@@ -44,6 +46,7 @@ export const applicationPageManifest = [
   { template: "/profile", navigationParent: "/profile" },
   { template: "/roles", navigationParent: "/roles" },
   { template: "/settings", navigationParent: "/settings" },
+  { template: "/settings/business", navigationParent: "/settings" },
   { template: "/start" },
   { template: "/system/health", navigationParent: "/system/health" },
   // Legacy deep links keep working; the rail now highlights Tickets.

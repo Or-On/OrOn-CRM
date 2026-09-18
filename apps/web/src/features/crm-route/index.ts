@@ -24,8 +24,14 @@ export function crmErrorResponse(error: unknown): NextResponse {
     (error instanceof Error && error.name === "TenantFeatureDisabledError")
   )
     return NextResponse.json(
-      { error: "Field service is not enabled for this workspace" },
-      { status: 404 },
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "This module is not enabled for this workspace",
+        code: "TENANT_FEATURE_DISABLED",
+      },
+      { status: 403 },
     );
   if (error instanceof TypeError)
     return NextResponse.json({ error: error.message }, { status: 400 });
@@ -40,8 +46,23 @@ export function crmErrorResponse(error: unknown): NextResponse {
       { error: "This technician already has a conflicting appointment" },
       { status: 409 },
     );
-  if (code === "42501")
+  if (code === "42501" || code === "TF403")
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (code === "40001")
+    return NextResponse.json(
+      { error: "Configuration changed; refresh and try again" },
+      { status: 409 },
+    );
+  if (code === "TF409")
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "The module is still required by active configuration",
+      },
+      { status: 409 },
+    );
   if (code === "55006")
     return NextResponse.json(
       {

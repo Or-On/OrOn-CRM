@@ -1332,6 +1332,105 @@
   max-block-size: 28rem;
   overflow-y: auto;
 }
+/* Agent capabilities: the lifecycle, the actions a version holds, and the
+   field list it collects against. Logical properties so the same rules serve
+   the Hebrew workspace. */
+.agent-lifecycle,
+.agent-review {
+  border-block-start: 1px solid var(--or-divider);
+  padding-block-start: 1rem;
+  display: grid;
+  gap: 0.6rem;
+  font-size: var(--or-text-compact);
+}
+.agent-lifecycle h4,
+.agent-review h4 {
+  font-size: var(--or-text-compact);
+  margin: 0;
+}
+.agent-review h5 {
+  font-size: var(--or-text-compact);
+  margin: 0.4rem 0 0;
+}
+.agent-lifecycle__states {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--or-text-secondary);
+}
+.agent-lifecycle__stale {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: start;
+  gap: 0.6rem;
+  padding: 0.75rem;
+  border: 1px solid var(--or-border);
+  border-radius: var(--or-radius-md);
+}
+.agent-lifecycle__stale p {
+  margin: 0;
+}
+.agent-review ul {
+  margin: 0;
+  padding-inline-start: 1.1rem;
+  display: grid;
+  gap: 0.3rem;
+}
+.agent-review__warnings {
+  color: var(--or-text-secondary);
+}
+.agent-capabilities {
+  display: grid;
+  gap: 0.6rem;
+  border: 1px solid var(--or-border);
+  border-radius: var(--or-radius-md);
+  padding: 0.9rem;
+  margin: 0;
+  min-inline-size: 0;
+}
+.agent-capabilities legend {
+  font-weight: 600;
+  padding-inline: 0.25rem;
+}
+.agent-capabilities__hint {
+  margin: 0;
+  color: var(--or-text-secondary);
+  font-size: var(--or-text-compact);
+}
+.agent-capabilities__fields {
+  display: grid;
+  gap: 0.6rem;
+}
+.agent-capabilities__presets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+.agent-capabilities__field-list {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.agent-capabilities__field-list li {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  align-items: end;
+  gap: 0.5rem;
+  padding-block-end: 0.75rem;
+  border-block-end: 1px solid var(--or-divider);
+}
+@media (max-width: 45rem) {
+  .agent-lifecycle__stale {
+    grid-template-columns: 1fr;
+  }
+}
 .tenant-run-history {
   min-inline-size: 0;
   background: var(--or-surface);

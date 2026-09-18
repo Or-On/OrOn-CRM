@@ -73,8 +73,8 @@ def unlocked_handoff_entry(entry: NodeConfig, context: dict) -> NodeConfig:
 def _locked_terminal(entry: NodeConfig, *, escalated: bool) -> NodeConfig:
     role = str(entry.get("role_message") or "").strip()
     next_step = (
-        "Explain briefly that a support representative will need to continue the "
-        "identity check. Do not disclose any previous interaction or customer detail."
+        "Explain briefly that a person will need to continue the identity "
+        "check. Do not disclose any previous interaction or customer detail."
         if escalated
         else "Explain briefly that the call cannot continue because identity could not be verified."
     )

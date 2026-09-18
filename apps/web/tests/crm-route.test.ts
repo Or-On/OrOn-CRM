@@ -3,6 +3,18 @@ import { describe, expect, it } from "vitest";
 import { crmErrorResponse } from "../src/features/crm-route";
 
 describe("CRM PostgreSQL error responses", () => {
+  it("returns a useful conflict when active configuration needs a module", async () => {
+    const error = new Error("feature is required by active process Intake");
+    Object.assign(error, { code: "TF409" });
+
+    const response = crmErrorResponse(error);
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: "feature is required by active process Intake",
+    });
+  });
+
   it.each([
     ["42501", 403, "Forbidden"],
     ["P0002", 404, "The requested record was not found"],

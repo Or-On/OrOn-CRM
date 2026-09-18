@@ -8,6 +8,8 @@ import {
   listQuickReplies,
   listTeamMembers,
   listAgentProfiles,
+  requireTenantFeature,
+  TenantFeatureDisabledError,
 } from "@or-on/crm";
 import { loadConfig } from "@or-on/config";
 import { hasPermission } from "@or-on/auth";
@@ -50,6 +52,7 @@ export default async function InboxPage({
         ? requested
         : undefined;
     const data = await withCurrentTenant("crm:read", async (sql, session) => {
+      await requireTenantFeature(sql, "whatsapp");
       const conversationPage = await listConversationPage(sql, {
         query: initialSearch,
         filter: initialFilter,
@@ -123,7 +126,11 @@ export default async function InboxPage({
       </main>
     );
   } catch (error) {
-    if (error instanceof ForbiddenError) return <AccessDenied />;
+    if (
+      error instanceof ForbiddenError ||
+      error instanceof TenantFeatureDisabledError
+    )
+      return <AccessDenied />;
     if (error instanceof UnauthenticatedError) redirect("/login");
     throw error;
   }

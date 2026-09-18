@@ -41,6 +41,7 @@ import {
   ShieldCheck,
   Sun,
   UserCircle,
+  UserPlus,
   Users,
   Wrench,
   X,
@@ -76,6 +77,7 @@ import {
   findDestinations,
   navigation,
   destinationPermission,
+  requiredFeatureForHref,
   type NavigationGroup,
   type NavigationIcon,
 } from "./navigation";
@@ -87,6 +89,7 @@ const icons: Record<NavigationIcon, LucideIcon> = {
   calendar: CalendarDays,
   tickets: LifeBuoy,
   tasks: ListChecks,
+  leads: UserPlus,
   contacts: ContactRound,
   pipeline: Columns3,
   campaigns: Megaphone,
@@ -186,12 +189,14 @@ function InboxSearch() {
 export function AppShell({
   children,
   fieldServiceEnabled = false,
+  enabledFeatures,
   session,
   tenantBranding,
 }: {
   readonly children: ReactNode;
   readonly environment?: Environment;
   readonly fieldServiceEnabled?: boolean;
+  readonly enabledFeatures?: readonly string[] | undefined;
   readonly session: PublicSession | undefined;
   readonly tenantBranding?: {
     readonly businessName: string;
@@ -246,6 +251,16 @@ export function AppShell({
       ? t(`shell.${navKey(currentNavigation.icon)}`)
       : t("shell.overview");
   const currentGroup = currentNavigation?.group ?? "Workspace";
+  const featureEnabled = useCallback(
+    (href: string) => {
+      const required = requiredFeatureForHref(href);
+      if (required === undefined) return true;
+      if (enabledFeatures !== undefined)
+        return enabledFeatures.includes(required);
+      return required !== "field_service" || fieldServiceEnabled;
+    },
+    [enabledFeatures, fieldServiceEnabled],
+  );
   const isInbox = pathname === "/inbox";
   // `parentHref` was previously ignored, so every contextual destination
   // appeared under Voice regardless of which module it belonged to. Filtering
@@ -284,7 +299,7 @@ export function AppShell({
       .filter(
         (item) =>
           session?.permissions.includes(destinationPermission(item.href)) &&
-          (item.href !== "/field-service" || fieldServiceEnabled) &&
+          featureEnabled(item.href) &&
           (item.href !== "/tenants" || session.user.isSuperuser),
       )
       .map((item) => ({
@@ -297,7 +312,9 @@ export function AppShell({
 
     const contextualEntries = contextualDestinations
       .filter((item) => {
-        if (!session?.permissions.includes("voice:read")) return false;
+        if (!session?.permissions.includes(destinationPermission(item.href)))
+          return false;
+        if (!featureEnabled(item.href)) return false;
         const term = query.trim().toLocaleLowerCase(locale);
         return `${t(`shell.${item.translationKey}`)} ${item.label}`
           .toLocaleLowerCase(locale)
@@ -385,7 +402,7 @@ export function AppShell({
       ...destinationEntries,
       ...contextualEntries,
     ];
-  }, [fieldServiceEnabled, locale, query, session?.permissions, t]);
+  }, [featureEnabled, locale, query, session?.permissions, t]);
 
   useEffect(() => setThemeMounted(true), []);
   useEffect(() => {
@@ -664,7 +681,7 @@ export function AppShell({
                 .filter(
                   (item) =>
                     item.group === group &&
-                    (item.href !== "/field-service" || fieldServiceEnabled) &&
+                    featureEnabled(item.href) &&
                     (item.href !== "/tenants" || session.user.isSuperuser) &&
                     session.permissions.includes(
                       destinationPermission(item.href),

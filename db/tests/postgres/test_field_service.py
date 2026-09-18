@@ -756,7 +756,14 @@ async def test_tenant_isolation_covers_evidence_identities_settings_and_exports(
         assert await pg.fetchval(query, own[key]) == own[key]
         assert await pg.fetchval(query, foreign[key]) is None
     assert await pg.fetchval("SELECT count(*) FROM service.tenant_configuration") == 1
-    assert await pg.fetchval("SELECT count(*) FROM platform.tenant_feature_entitlements") == 1
+    assert await pg.fetchval("SELECT count(*) FROM platform.tenant_feature_entitlements") == 14
+    assert (
+        await pg.fetchval(
+            "SELECT count(*) FROM platform.tenant_feature_entitlements WHERE tenant_id=$1",
+            second.tenant_id,
+        )
+        == 0
+    )
 
 
 async def test_intake_case_idempotency_allows_separate_requests(

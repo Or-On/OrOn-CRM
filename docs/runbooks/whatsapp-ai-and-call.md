@@ -188,3 +188,39 @@ Use one test tenant and a non-sensitive recipient:
 
 A live smoke test requires separate explicit user authorization. Automated
 tests and CI use fake model and provider responses only.
+
+## After the call
+
+The journey continues on the same ticket without an operator doing anything. Open
+**Tickets**, find the issue by its reference and confirm each step in turn. Full
+design notes are in [Customer support journey](../architecture/support-journey.md).
+
+1. The ticket shows one call attempt, bound to the session the dispatcher
+   accepted, and **Post-call processing** moves from verifying artifacts through
+   to complete without a second attempt appearing.
+2. The recording reads **Recording ready** with a duration, or one of
+   **Partial recording** / **Recording unavailable** — and the play control is
+   offered only in the first two cases. A control that 404s is a defect, not a
+   slow upload.
+3. The transcript reads ready with a turn count, or is honestly marked
+   unavailable. An empty call reports "Not applicable" rather than a failure.
+4. The summary separates what the agent attempted from what the customer
+   reported from what a receipt proves. A promise made on the call appears under
+   commitments; **Actions completed** is empty unless the platform issued a
+   receipt.
+5. The resolution matches what the customer actually said. A call that ended
+   before any confirmation must not read **Resolved**.
+6. The customer receives one wrap-up message with three numbered choices, or the
+   ticket records why it was not sent — `blocked_window` outside the Meta
+   customer-service window, `blocked_consent` after an opt-out.
+7. Reply `1`, `2` or `3` from the customer's number and confirm the same ticket
+   resolves, stays open, or moves to a person. Send an unrelated new problem
+   instead and confirm the old ticket is untouched.
+8. Check the **AI resolution** panel on the Tickets register. The rate carries
+   its window and its denominator; a ticket that reopened appears in
+   **Reopened after resolution** rather than disappearing from the numerator.
+
+When post-call processing stalls, the attempt shows its stage and its last safe
+error code. Retries are bounded by the job's own attempt budget; a permanent
+failure leaves the ticket, the artifacts and the call intact with no summary
+rather than inventing one.

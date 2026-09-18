@@ -10,9 +10,27 @@ import {
   parseStoredWhatsAppStatusEnvelope,
   messageDeliveryFailure,
   loadEligibleAgentKnowledge,
+  applyCustomerConfirmation,
+  applyPostCallOutcome,
+  awaitingCustomerTicket,
+  beginPostCallAnalysis,
+  bindTicketCallAttemptSession,
+  callOutcomeFromSession,
+  classifyCustomerReply,
+  failPostCallAnalysis,
+  followupMessage,
+  loadCallEvidence,
+  loadFollowupPlan,
+  loadPostCallWork,
+  openTicketCallAttempt,
   openOrAttachTicket,
+  recordArtifactVerification,
+  recordFollowupOutcome,
+  recordPostCallAnalysis,
   recordTicketEvent,
+  schedulePostCallFollowup,
   setTicketHandlingMode,
+  skipPostCallAnalysis,
   queueWhatsAppAutomaticCall,
   queueWhatsAppOutbound,
   assignDefaultWhatsAppAi,
@@ -30,6 +48,21 @@ import {
   sanitizeIntakeProposal,
   stagePrivateObject,
   updateWhatsAppServiceIntake,
+  buildAgentExecutionContract,
+  capabilityRequiredFeature,
+  ensureLeadForInteraction,
+  executeLeadTool,
+  findInteractionLead,
+  hasCapability,
+  leadCompleteness,
+  loadLeadFieldSchema,
+  pinnedLeadFieldSchemaId,
+  LeadToolError,
+  type AgentExecutionContract,
+  type LeadBinding,
+  type LeadToolContext,
+  type LeadToolName,
+  type LeadToolResult,
   type ProtectedFieldKeys,
   type PrivateObjectStorageOptions,
   type StagedPrivateObject,
@@ -40,9 +73,11 @@ import type { WhatsAppProvider, WhatsAppSendRequest } from "./providers.js";
 import { WhatsAppProviderError } from "./providers.js";
 import {
   WhatsAppAiProviderError,
+  type WhatsAppActionReceipt,
   type WhatsAppAiDecision,
   type WhatsAppAiEscalationReason,
   type WhatsAppAiProvider,
+  type WhatsAppAiRequest,
 } from "./ai-provider.js";
 import {
   AutomaticCallProviderError,
@@ -59,6 +94,7 @@ import {
   latestMessageLocale,
   recentReplyWindowSize,
   safeConversationalReply,
+  type CommittedRecord,
   type EligibleKnowledgeFact,
   type GroundedReply,
 } from "./ai-grounding.js";
@@ -66,6 +102,14 @@ import {
   FieldServiceAiProviderError,
   type FieldServiceAiProvider,
 } from "./field-service-provider.js";
+import {
+  ArtifactVerifierError,
+  type ArtifactVerifier,
+} from "./artifact-verifier.js";
+import {
+  PostCallProviderError,
+  type PostCallAnalysisProvider,
+} from "./post-call-provider.js";
 
 interface InboundEventRow {
   id: string;
@@ -108,6 +152,10 @@ export interface MessagingAutomationOptions {
   readonly fieldServiceProvider?: FieldServiceAiProvider;
   readonly protectedFieldKeys?: ProtectedFieldKeys;
   readonly privateObjectStorage?: PrivateObjectStorageOptions;
+  /** Reads a call's stored artifacts to decide whether they are usable. */
+  readonly artifactVerifier?: ArtifactVerifier;
+  readonly postCallProvider?: PostCallAnalysisProvider;
+  readonly postCallModel?: string;
 }
 
 const safeEscalationReasons: Readonly<
@@ -129,6 +177,27 @@ async function setTenantContext(
     SELECT set_config('app.current_tenant', ${tenantId}, true),
            set_config('app.current_role', 'service', true)
   `;
+}
+
+class TenantFeatureRuntimeError extends TypeError {
+  readonly code = "tenant_feature_disabled";
+}
+
+async function requireTenantFeatures(
+  transaction: postgres.TransactionSql,
+  features: readonly string[],
+): Promise<void> {
+  const unique = [...new Set(features)];
+  const rows = await transaction<{ feature: string; enabled: boolean }[]>`
+    SELECT requested.feature,
+      platform.current_tenant_feature_enabled(requested.feature) AS enabled
+    FROM unnest(${unique}::text[]) requested(feature)
+  `;
+  const disabled = rows.filter((row) => !row.enabled).map((row) => row.feature);
+  if (disabled.length > 0)
+    throw new TenantFeatureRuntimeError(
+      `tenant feature disabled: ${disabled.join(", ")}`,
+    );
 }
 
 async function processInbound(
@@ -231,6 +300,28 @@ async function processInbound(
               AND ${fieldServiceAiAvailable}
             ON CONFLICT DO NOTHING
           `;
+          // A wrap-up reply is answered before the ordinary AI turn is even
+          // considered: the customer was asked a specific question about a
+          // specific ticket, and that answer belongs on that ticket whether or
+          // not the conversation is still AI-owned.
+          await transaction`
+            INSERT INTO ops.jobs
+              (tenant_id, queue, job_type, reference_type, reference_id, payload,
+               idempotency_key, max_attempts, priority)
+            SELECT platform.current_tenant_id(), 'messaging',
+                   'support.postcall.reply', 'conversation',
+                   ${result.conversationId}::uuid,
+                   jsonb_build_object('conversationId', ${result.conversationId}::uuid,
+                     'messageId', ${result.messageId}::uuid),
+                   ${`support-postcall-reply:${result.messageId}`}, 3, 30
+            WHERE EXISTS (
+              SELECT 1 FROM support.tickets ticket
+              WHERE ticket.tenant_id = platform.current_tenant_id()
+                AND ticket.source_conversation_id = ${result.conversationId}::uuid
+                AND ticket.status = 'open' AND ticket.stage = 'awaiting_customer'
+            )
+            ON CONFLICT DO NOTHING
+          `;
           await transaction`
             INSERT INTO ops.jobs
               (tenant_id, queue, job_type, reference_type, reference_id, payload,
@@ -327,6 +418,7 @@ async function loadFieldServiceIntakeWork(
   return sql.begin(async (transaction) => {
     await setTenantContext(transaction, job.tenant_id);
     await requireOwnedJob(transaction, workerId, job.id);
+    await requireTenantFeatures(transaction, ["field_service", "whatsapp"]);
     const feature = await getFieldServiceFeatureState(transaction);
     if (!feature.effective || !feature.whatsAppIntakeEnabled) {
       await cancelJobForDisabledFeature(transaction, job.id, workerId);
@@ -409,6 +501,7 @@ async function processFieldServiceIntake(
     await sql.begin(async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
       await requireOwnedJob(transaction, workerId, job.id);
+      await requireTenantFeatures(transaction, ["field_service", "whatsapp"]);
       const feature = await getFieldServiceFeatureState(transaction);
       if (!feature.effective || !feature.whatsAppIntakeEnabled) {
         await cancelJobForDisabledFeature(transaction, job.id, workerId);
@@ -1040,6 +1133,7 @@ async function loadFieldServiceSummaryWork(
   return sql.begin(async (transaction) => {
     await setTenantContext(transaction, job.tenant_id);
     await requireOwnedJob(transaction, workerId, job.id);
+    await requireTenantFeatures(transaction, ["field_service"]);
     const feature = await getFieldServiceFeatureState(transaction);
     if (!feature.effective) {
       await transaction`
@@ -1187,6 +1281,7 @@ async function processFieldServiceSummary(
     const mayCallProvider = await sql.begin(async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
       await requireOwnedJob(transaction, workerId, job.id);
+      await requireTenantFeatures(transaction, ["field_service"]);
       const feature = await getFieldServiceFeatureState(transaction);
       if (!feature.effective) {
         await transaction`
@@ -1208,6 +1303,7 @@ async function processFieldServiceSummary(
     await sql.begin(async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
       await requireOwnedJob(transaction, workerId, job.id);
+      await requireTenantFeatures(transaction, ["field_service"]);
       const feature = await getFieldServiceFeatureState(transaction);
       if (!feature.effective) {
         await transaction`
@@ -1313,6 +1409,11 @@ async function loadFieldServiceOcrWork(
   return sql.begin(async (transaction) => {
     await setTenantContext(transaction, job.tenant_id);
     await requireOwnedJob(transaction, workerId, job.id);
+    await requireTenantFeatures(transaction, [
+      "field_service",
+      "documents",
+      "ocr",
+    ]);
     const feature = await getFieldServiceFeatureState(transaction);
     if (!feature.effective || !feature.ocrEnabled) {
       await cancelFieldServiceOcr(transaction, job, workerId);
@@ -1392,6 +1493,11 @@ async function processFieldServiceOcr(
     const mayCallProvider = await sql.begin(async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
       await requireOwnedJob(transaction, workerId, job.id);
+      await requireTenantFeatures(transaction, [
+        "field_service",
+        "documents",
+        "ocr",
+      ]);
       const feature = await getFieldServiceFeatureState(transaction);
       if (!feature.effective || !feature.ocrEnabled) {
         await cancelFieldServiceOcr(transaction, job, workerId);
@@ -1407,6 +1513,11 @@ async function processFieldServiceOcr(
     await sql.begin(async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
       await requireOwnedJob(transaction, workerId, job.id);
+      await requireTenantFeatures(transaction, [
+        "field_service",
+        "documents",
+        "ocr",
+      ]);
       const feature = await getFieldServiceFeatureState(transaction);
       if (!feature.effective || !feature.ocrEnabled) {
         await cancelFieldServiceOcr(transaction, job, workerId);
@@ -1468,6 +1579,485 @@ async function processFieldServiceOcr(
   }
 }
 
+/**
+ * The tenant's AI actor for automatic work, or nothing.
+ *
+ * Post-call processing runs long after the conversation that authorised it, so
+ * the actor is re-resolved and re-authorised here rather than carried in a job
+ * payload where a revoked operator would still look valid.
+ */
+async function postCallActor(
+  transaction: postgres.TransactionSql,
+): Promise<string | null> {
+  const rows = await transaction<{ user_id: string }[]>`
+    SELECT settings.whatsapp_ai_enabled_by_user_id AS user_id
+    FROM crm.tenant_settings settings
+    WHERE settings.tenant_id = platform.current_tenant_id()
+      AND settings.whatsapp_ai_enabled_by_user_id IS NOT NULL
+      AND platform.messaging_ai_actor_authorized(settings.whatsapp_ai_enabled_by_user_id)
+  `;
+  return rows[0]?.user_id ?? null;
+}
+
+function attemptReference(job: JobRow): string {
+  const payload = record(job.payload);
+  const attemptId = payload.attemptId;
+  if (
+    job.reference_id === null ||
+    !uuid(attemptId) ||
+    attemptId !== job.reference_id
+  )
+    throw new TypeError("post-call job reference is invalid");
+  return job.reference_id;
+}
+
+/**
+ * Drive one attempt's post-call workflow as far as it can go this delivery.
+ *
+ * Re-entrant by construction: each step asks the database to move a specific
+ * stage and does nothing if it has already moved. A duplicate delivery, a
+ * restarted worker and a retry after a crash therefore converge on one result
+ * instead of producing a second summary, a second ticket update or a second
+ * wrap-up message.
+ */
+async function processPostCall(
+  sql: Sql,
+  workerId: string,
+  job: JobRow,
+  automation: MessagingAutomationOptions,
+): Promise<void> {
+  try {
+    const attemptId = attemptReference(job);
+    const work = await sql.begin(async (transaction) => {
+      await setTenantContext(transaction, job.tenant_id);
+      await requireOwnedJob(transaction, workerId, job.id);
+      const loaded = await loadPostCallWork(transaction, attemptId);
+      if (loaded === undefined)
+        throw new TypeError("post_call_attempt_missing");
+      return loaded;
+    });
+    if (work.stage === "complete") {
+      await sql.begin(async (transaction) => {
+        await setTenantContext(transaction, job.tenant_id);
+        await finishJob(transaction, job.id, workerId);
+      });
+      return;
+    }
+    if (work.sessionId === null)
+      throw new TypeError("post_call_session_missing");
+    const sessionId = work.sessionId;
+    const callOutcome = callOutcomeFromSession(
+      work.sessionStatus,
+      work.sessionAnswered,
+      work.sessionOutcome,
+    );
+
+    // --- Artifacts -------------------------------------------------------
+    // Reading a full call out of object storage happens outside any
+    // transaction; holding a connection open for an upload-sized fetch would
+    // block the queue behind one slow bucket.
+    let transcriptState = work.transcriptState;
+    let analysable =
+      work.stage !== "artifacts_pending" &&
+      callOutcome === "answered" &&
+      (work.transcriptState === "valid" || work.transcriptState === "partial");
+    if (work.stage === "artifacts_pending") {
+      if (automation.artifactVerifier === undefined)
+        throw new ArtifactVerifierError("artifact_verifier_unavailable", false);
+      const actorUserId = await sql.begin(async (transaction) => {
+        await setTenantContext(transaction, job.tenant_id);
+        return postCallActor(transaction);
+      });
+      const verified = await automation.artifactVerifier.verify({
+        tenantId: job.tenant_id,
+        sessionId,
+        actorUserId: actorUserId ?? job.tenant_id,
+        jobId: job.id,
+      });
+      const outcome = await sql.begin(async (transaction) => {
+        await setTenantContext(transaction, job.tenant_id);
+        await requireOwnedJob(transaction, workerId, job.id);
+        return recordArtifactVerification(transaction, actorUserId, {
+          attemptId,
+          ticketId: work.ticketId,
+          sessionId,
+          callOutcome,
+          recording: verified.recording,
+          transcript: verified.transcript,
+        });
+      });
+      transcriptState = outcome.transcriptState;
+      analysable = outcome.analysable;
+    }
+
+    // --- Analysis --------------------------------------------------------
+    // A missing recording never blocks this, and a missing transcript never
+    // invents one: with nothing said there is nothing to summarise, and the
+    // attempt says `not_applicable` rather than pretending to have failed.
+    //
+    // Gated on the stage, not only on whether an analysis exists: a retry that
+    // arrives after a permanent analysis failure must carry on to the ticket
+    // update rather than try the provider again and fail the job forever.
+    let analysis = work.analysis;
+    const analysisOwed =
+      analysable &&
+      analysis === null &&
+      (work.stage === "artifacts_pending" ||
+        work.stage === "artifacts_verified" ||
+        work.stage === "summary_pending");
+    if (
+      analysisOwed &&
+      // A deployment with no model configured produces no summary and says so,
+      // rather than parking every finished call on a provider it will never get.
+      (automation.postCallProvider === undefined ||
+        automation.artifactVerifier === undefined)
+    ) {
+      await sql.begin(async (transaction) => {
+        await setTenantContext(transaction, job.tenant_id);
+        await failPostCallAnalysis(transaction, {
+          attemptId,
+          errorSafe: "analysis_provider_unavailable",
+          permanent: true,
+        });
+      });
+    } else if (analysisOwed) {
+      const provider = automation.postCallProvider;
+      const verifier = automation.artifactVerifier;
+      if (provider === undefined || verifier === undefined)
+        throw new PostCallProviderError("analysis_provider_unavailable", false);
+      const started = await sql.begin(async (transaction) => {
+        await setTenantContext(transaction, job.tenant_id);
+        await requireOwnedJob(transaction, workerId, job.id);
+        const begun = await beginPostCallAnalysis(transaction, attemptId);
+        const actorUserId = await postCallActor(transaction);
+        const evidence = await loadCallEvidence(transaction, {
+          ticketId: work.ticketId,
+          conversationId: work.conversationId,
+          contactId: work.contactId,
+        });
+        return { begun, actorUserId, evidence };
+      });
+      if (started.begun) {
+        const turns = await verifier.transcript({
+          tenantId: job.tenant_id,
+          sessionId,
+          actorUserId: started.actorUserId ?? job.tenant_id,
+          jobId: job.id,
+        });
+        try {
+          const produced = await provider.analyse({
+            // The customer's own language, detected the same way every other
+            // outbound reply detects it, not the tenant's default assumption.
+            locale: latestMessageLocale(
+              started.evidence.configuredLocale,
+              started.evidence.latestInboundText,
+            ),
+            issueSubject: work.ticketSubject,
+            callOutcome,
+            turns,
+            whatsAppContext: started.evidence.whatsAppContext,
+            actionReceipts: started.evidence.actionReceiptIds.map((id) => ({
+              id,
+              kind: "platform_receipt",
+              statusSafe: "recorded",
+            })),
+            evidence: {
+              // The cited turn range is what the analysis actually saw, so an
+              // index beyond it is a fabrication however plausible it looks.
+              transcriptTurnCount: turns.length,
+              whatsAppMessageIds: started.evidence.whatsAppMessageIds,
+              actionReceiptIds: started.evidence.actionReceiptIds,
+              operatorNoteIds: started.evidence.operatorNoteIds,
+            },
+          });
+          await sql.begin(async (transaction) => {
+            await setTenantContext(transaction, job.tenant_id);
+            await requireOwnedJob(transaction, workerId, job.id);
+            await recordPostCallAnalysis(transaction, {
+              attemptId,
+              analysis: produced,
+              modelSafe: automation.postCallModel ?? "configured-llm",
+            });
+          });
+          analysis = produced;
+        } catch (error) {
+          if (!(error instanceof PostCallProviderError)) throw error;
+          // The ticket, the call and the artifacts all survive a provider
+          // failure; only the summary is missing, and it says so.
+          await sql.begin(async (transaction) => {
+            await setTenantContext(transaction, job.tenant_id);
+            await failPostCallAnalysis(transaction, {
+              attemptId,
+              errorSafe: error.code,
+              permanent: !error.retryable,
+            });
+          });
+          if (error.retryable) throw error;
+          analysis = null;
+        }
+      }
+    } else if (!analysable) {
+      await sql.begin(async (transaction) => {
+        await setTenantContext(transaction, job.tenant_id);
+        await requireOwnedJob(transaction, workerId, job.id);
+        await skipPostCallAnalysis(transaction, attemptId);
+      });
+    }
+
+    // --- The ticket, then the customer -----------------------------------
+    await sql.begin(async (transaction) => {
+      await setTenantContext(transaction, job.tenant_id);
+      await requireOwnedJob(transaction, workerId, job.id);
+      const actorUserId = await postCallActor(transaction);
+      const applied = await applyPostCallOutcome(transaction, actorUserId, {
+        attemptId,
+        ticketId: work.ticketId,
+        analysis,
+        callOutcome,
+        transcriptState,
+        sessionId,
+      });
+      await schedulePostCallFollowup(transaction, {
+        attemptId,
+        required: applied.followupRequired,
+      });
+      await finishJob(transaction, job.id, workerId);
+    });
+  } catch (error) {
+    const reason =
+      error instanceof ArtifactVerifierError ||
+      error instanceof PostCallProviderError
+        ? error.code
+        : error instanceof TypeError
+          ? error.message
+          : "post_call_failed";
+    const permanent =
+      error instanceof TypeError ||
+      ((error instanceof ArtifactVerifierError ||
+        error instanceof PostCallProviderError) &&
+        !error.retryable);
+    await sql.begin(async (transaction) => {
+      await setTenantContext(transaction, job.tenant_id);
+      if (permanent)
+        await transaction`
+          UPDATE ops.jobs SET max_attempts = attempts
+          WHERE id = ${job.id}::uuid AND status = 'running' AND locked_by = ${workerId}
+        `;
+      await transaction`
+        SELECT ops.fail_job(${job.id}::uuid, ${workerId}, ${reason}, 15)
+      `;
+      // Visible to an operator rather than only in a log line: a pipeline that
+      // gave up silently is indistinguishable from one still working.
+      if (job.reference_id !== null)
+        await transaction`
+          UPDATE support.ticket_call_attempts
+          SET post_call_error_safe = ${reason}, updated_at = CURRENT_TIMESTAMP
+          WHERE tenant_id = platform.current_tenant_id()
+            AND id = ${job.reference_id}::uuid
+        `;
+    });
+  }
+}
+
+/**
+ * Send the wrap-up message, or record exactly why it was not sent.
+ *
+ * Separate from the summary job on purpose. Consent can be revoked and the
+ * customer-service window can close between the call ending and this running,
+ * and neither is a reason to undo a correctly analysed call — so this job owns
+ * the send and its own retry budget, and a permanent block is a final,
+ * operator-visible state rather than an endless retry.
+ */
+async function processPostCallFollowup(
+  sql: Sql,
+  workerId: string,
+  job: JobRow,
+  automation: MessagingAutomationOptions,
+): Promise<void> {
+  try {
+    const attemptId = attemptReference(job);
+    await sql.begin(async (transaction) => {
+      await setTenantContext(transaction, job.tenant_id);
+      await requireOwnedJob(transaction, workerId, job.id);
+      const plan = await loadFollowupPlan(transaction, attemptId);
+      if (plan === undefined) throw new TypeError("followup_target_missing");
+      if (plan === "blocked_consent") {
+        await recordFollowupOutcome(transaction, {
+          attemptId,
+          state: "blocked_consent",
+          errorSafe: "consent_withdrawn_before_sending",
+        });
+        await finishJob(transaction, job.id, workerId);
+        return;
+      }
+      if (plan.provider === "simulator" && automation.simulatorEnabled !== true)
+        throw new TypeError("simulation_disabled");
+      if (plan.provider === "meta" && automation.realWhatsAppEnabled !== true)
+        throw new TypeError("real_whatsapp_disabled");
+      const actorUserId = await postCallActor(transaction);
+      if (actorUserId === null)
+        throw new TypeError("followup_actor_unavailable");
+      const locale = latestMessageLocale(
+        plan.configuredLocale,
+        plan.latestInboundText,
+      );
+      // A telephone call does not open or extend the WhatsApp window. Outside
+      // it, Meta permits only an approved template, and this deployment has no
+      // approved post-call template — so the honest outcome is a recorded block
+      // an operator can act on, not a message the provider would reject.
+      if (plan.provider === "meta" && !plan.serviceWindowOpen) {
+        await recordFollowupOutcome(transaction, {
+          attemptId,
+          state: "blocked_window",
+          errorSafe: "outside_customer_service_window",
+        });
+        await recordTicketEvent(transaction, actorUserId, {
+          ticketId: plan.ticketId,
+          kind: "agent_message",
+          actorKind: "system",
+          summarySafe:
+            "The wrap-up message was not sent: the WhatsApp customer-service window has closed.",
+          evidence: { attemptId, reason: "outside_customer_service_window" },
+        });
+        await finishJob(transaction, job.id, workerId);
+        return;
+      }
+      // Model-written next-action prose passes the same guard every other
+      // delivered reply passes before a customer ever reads it.
+      const nextAction =
+        plan.nextAction !== null &&
+        safeConversationalReply(plan.nextAction, { locale })
+          ? plan.nextAction
+          : null;
+      const text = followupMessage({
+        resolution: plan.resolution,
+        ticketReference: plan.ticketReference,
+        ticketSubject: plan.ticketSubject,
+        nextAction,
+        locale,
+      });
+      const outbound = await queueWhatsAppOutbound(
+        transaction,
+        {
+          conversationId: plan.conversationId,
+          explicitlyConfirmed: true,
+          idempotencyKey: `support-followup:${attemptId}`,
+          kind: "text",
+          provider: plan.provider,
+          realProviderEnabled: automation.realWhatsAppEnabled === true,
+          recipientIdentityId: plan.recipientIdentityId,
+          recipientAddress: plan.recipientAddress,
+          senderUserId: actorUserId,
+          senderType: "agent",
+          text,
+        },
+        plan.channelConfiguration,
+      );
+      await recordFollowupOutcome(transaction, {
+        attemptId,
+        state: "sent",
+        messageId: outbound.messageId,
+      });
+      await recordTicketEvent(transaction, actorUserId, {
+        ticketId: plan.ticketId,
+        kind: "agent_message",
+        actorKind: "ai",
+        visibility: "customer_visible",
+        summarySafe: "Wrap-up message sent with the reply options.",
+        evidence: { attemptId, messageId: outbound.messageId },
+      });
+      await finishJob(transaction, job.id, workerId);
+    });
+  } catch (error) {
+    const reason =
+      error instanceof TypeError ? error.message : "followup_failed";
+    const permanent = error instanceof TypeError;
+    await sql.begin(async (transaction) => {
+      await setTenantContext(transaction, job.tenant_id);
+      if (permanent)
+        await transaction`
+          UPDATE ops.jobs SET max_attempts = attempts
+          WHERE id = ${job.id}::uuid AND status = 'running' AND locked_by = ${workerId}
+        `;
+      await transaction`
+        SELECT ops.fail_job(${job.id}::uuid, ${workerId}, ${reason}, 20)
+      `;
+      const dead = await transaction<{ dead: boolean }[]>`
+        SELECT status = 'dead' AS dead FROM ops.jobs WHERE id = ${job.id}::uuid
+      `;
+      if (dead[0]?.dead === true && job.reference_id !== null)
+        await recordFollowupOutcome(transaction, {
+          attemptId: job.reference_id,
+          state: "failed",
+          errorSafe: reason,
+        });
+    });
+  }
+}
+
+/**
+ * Let a wrap-up reply answer the question it was asked.
+ *
+ * Deterministic on purpose. The message offered three numbered choices and
+ * named the words for each, so almost every genuine answer is decidable without
+ * a model — and when it is not, the ticket is left alone and the reply falls
+ * through to the ordinary conversation. A customer opening a NEW problem in the
+ * same thread must never be read as an answer about the old one.
+ */
+async function processPostCallReply(
+  sql: Sql,
+  workerId: string,
+  job: JobRow,
+): Promise<void> {
+  try {
+    const payload = record(job.payload);
+    const conversationId = payload.conversationId;
+    const messageId = payload.messageId;
+    if (!uuid(conversationId) || !uuid(messageId) || job.reference_id === null)
+      throw new TypeError("post_call_reply_reference_invalid");
+    await sql.begin(async (transaction) => {
+      await setTenantContext(transaction, job.tenant_id);
+      await requireOwnedJob(transaction, workerId, job.id);
+      const ticket = await awaitingCustomerTicket(transaction, conversationId);
+      if (ticket === undefined) {
+        await finishJob(transaction, job.id, workerId);
+        return;
+      }
+      const message = await transaction<{ content_text: string | null }[]>`
+        SELECT content_text FROM messaging.messages
+        WHERE tenant_id = platform.current_tenant_id() AND id = ${messageId}::uuid
+          AND conversation_id = ${conversationId}::uuid AND direction = 'inbound'
+      `;
+      const intent = classifyCustomerReply(message[0]?.content_text ?? "");
+      if (intent === "unclear") {
+        await finishJob(transaction, job.id, workerId);
+        return;
+      }
+      const actorUserId = await postCallActor(transaction);
+      await applyCustomerConfirmation(transaction, actorUserId, {
+        ticketId: ticket.ticketId,
+        intent,
+        messageId,
+      });
+      await finishJob(transaction, job.id, workerId);
+    });
+  } catch (error) {
+    const reason =
+      error instanceof TypeError ? error.message : "post_call_reply_failed";
+    await sql.begin(async (transaction) => {
+      await setTenantContext(transaction, job.tenant_id);
+      if (error instanceof TypeError)
+        await transaction`
+          UPDATE ops.jobs SET max_attempts = attempts
+          WHERE id = ${job.id}::uuid AND status = 'running' AND locked_by = ${workerId}
+        `;
+      await transaction`
+        SELECT ops.fail_job(${job.id}::uuid, ${workerId}, ${reason}, 10)
+      `;
+    });
+  }
+}
+
 async function processJob(
   sql: Sql,
   workerId: string,
@@ -1478,6 +2068,18 @@ async function processJob(
     | undefined,
   automation: MessagingAutomationOptions,
 ): Promise<void> {
+  if (job.job_type === "support.postcall.process") {
+    await processPostCall(sql, workerId, job, automation);
+    return;
+  }
+  if (job.job_type === "support.postcall.followup") {
+    await processPostCallFollowup(sql, workerId, job, automation);
+    return;
+  }
+  if (job.job_type === "support.postcall.reply") {
+    await processPostCallReply(sql, workerId, job);
+    return;
+  }
   if (
     (job.job_type === "whatsapp.media.retrieve" ||
       job.job_type === "field_service.whatsapp_media.retrieve") &&
@@ -1551,6 +2153,7 @@ async function processJob(
           return;
         }
       } else if (job.job_type === "cross_channel.whatsapp_followup.simulated") {
+        await requireTenantFeatures(transaction, ["whatsapp"]);
         await deliverSimulatedCallFollowup(
           transaction,
           job.id,
@@ -1561,6 +2164,7 @@ async function processJob(
         job.job_type === "simulator.broadcast.recipient" &&
         job.reference_id !== null
       ) {
+        await requireTenantFeatures(transaction, ["whatsapp"]);
         await deliverSimulatorBroadcastRecipient(transaction, job.reference_id);
       } else {
         throw new TypeError("unsupported messaging job");
@@ -1574,7 +2178,11 @@ async function processJob(
     });
   } catch (error) {
     const reason =
-      error instanceof TypeError ? error.message : "messaging job failed";
+      error instanceof TenantFeatureRuntimeError
+        ? error.code
+        : error instanceof TypeError
+          ? error.message
+          : "messaging job failed";
     await sql.begin(async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
       if (error instanceof TypeError) {
@@ -1602,9 +2210,70 @@ async function processJob(
   }
 }
 
+/**
+ * What `platform.current_voice_tenant_support_profile()` returns. The name is
+ * historical — the projection is the one tenant-identity source both
+ * conversational runtimes read, and neither of them may select the underlying
+ * `crm.tenant_settings` columns directly.
+ */
+interface TenantIdentityProjection {
+  readonly tenantName?: string | null;
+  readonly displayName?: string | null;
+  readonly businessName?: string | null;
+  readonly supportProfile?: {
+    readonly supportDisplayName?: string | null;
+  } | null;
+}
+
+/**
+ * The same precedence the voice runtime applies in
+ * `support_context.support_profile_from_database`: a name the tenant
+ * configured wins, then the legacy columns, and a blank string counts as
+ * unset rather than as an empty brand.
+ */
+function tenantDisplayNameFrom(
+  profile: TenantIdentityProjection | null,
+): string | null {
+  const candidates = [
+    profile?.supportProfile?.supportDisplayName,
+    profile?.businessName,
+    profile?.displayName,
+    profile?.tenantName,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim() !== "")
+      return candidate;
+  }
+  return null;
+}
+
 interface AiWork {
   readonly agentVersionId: string;
+  /** The resolved configuration this job runs under, pinned at admission. */
+  readonly contract: AgentExecutionContract;
+  readonly tenantDisplayName: string | null;
+  /**
+   * The lead this conversation is already collecting into, if any. Null until
+   * the agent saves something: a greeting does not create a lead.
+   */
+  readonly lead: {
+    readonly id: string;
+    readonly revision: number;
+    readonly collected: readonly {
+      readonly key: string;
+      readonly state: string;
+      readonly value: string | null;
+    }[];
+    readonly missingRequired: readonly string[];
+  } | null;
   readonly knowledge: readonly EligibleKnowledgeFact[];
+  /**
+   * Whether this version's escalations open or update a support ticket: it
+   * holds `ticket.open`, or it was published before capabilities existed and
+   * keeps the behaviour it was published with. A lead or survey agent still
+   * escalates to a person; it just does not turn that into a support issue.
+   */
+  readonly opensTickets: boolean;
   readonly ownershipEpoch: string;
   readonly authorizedUserId: string;
   readonly contactId: string;
@@ -1723,6 +2392,14 @@ async function loadAiWork(
         configuration: unknown;
         ownership_epoch: string;
         agent_version_id: string;
+        agent_profile_id: string;
+        agent_version: number;
+        agent_channels: string[];
+        agent_tool_permissions: unknown;
+        agent_channel_configuration: Record<string, unknown> | null;
+        agent_published_at: Date;
+        agent_validation_status: string;
+        agent_implicit_ticketing: boolean;
         contact_id: string;
         contact_name: string;
         contact_email: string | null;
@@ -1734,7 +2411,15 @@ async function loadAiWork(
     >`
       SELECT conversation.id AS conversation_id,
              conversation.ai_enabled_by_user_id,
-             agent.system_prompt, agent.locale, agent.id AS agent_version_id, conversation.ownership_epoch,
+             agent.system_prompt, agent.locale, agent.id AS agent_version_id,
+             agent.agent_profile_id, agent.version AS agent_version,
+             agent.channel_capabilities AS agent_channels,
+             agent.tool_permissions AS agent_tool_permissions,
+             agent.channel_configuration AS agent_channel_configuration,
+             agent.implicit_ticketing AS agent_implicit_ticketing,
+             agent.published_at AS agent_published_at,
+             agent.validation_status AS agent_validation_status,
+             conversation.ownership_epoch,
              channel.provider, channel.configuration, contact.id AS contact_id,
              contact.name AS contact_name, contact.email AS contact_email,
              contact.company AS contact_company, contact.lifecycle_status,
@@ -1774,6 +2459,71 @@ async function loadAiWork(
       transaction,
       row.conversation_id,
       triggerMessageId,
+    );
+    // One explicit execution configuration for this conversation, resolved
+    // server-side before the model is consulted. The conversation pins the
+    // version; an unpublished revision published mid-conversation does not
+    // reach an already admitted job, and a mismatched binding fails loudly
+    // rather than falling back to the tenant default.
+    const versionRow = {
+      agentProfileId: row.agent_profile_id,
+      agentProfileVersionId: row.agent_version_id,
+      version: row.agent_version,
+      systemPrompt: row.system_prompt,
+      locale: row.locale,
+      channelCapabilities: row.agent_channels,
+      toolPermissions: row.agent_tool_permissions,
+      channelConfiguration: row.agent_channel_configuration,
+      publishedAt: row.agent_published_at,
+      validationStatus: row.agent_validation_status,
+    };
+    const pinnedSchemaId = pinnedLeadFieldSchemaId(versionRow);
+    const contract = buildAgentExecutionContract({
+      tenantId: job.tenant_id,
+      contactId: row.contact_id,
+      channel: "whatsapp",
+      interaction: {
+        kind: "whatsapp_conversation",
+        id: row.conversation_id,
+        ownershipEpoch: row.ownership_epoch,
+      },
+      authorizedUserId: row.ai_enabled_by_user_id,
+      assignmentSource: "explicit_assignment",
+      version: versionRow,
+      expectedAgentVersionId: row.agent_version_id,
+      leadFieldSchema:
+        pinnedSchemaId === null
+          ? null
+          : await loadLeadFieldSchema(transaction, pinnedSchemaId),
+    });
+    await requireTenantFeatures(transaction, [
+      "whatsapp",
+      ...contract.capabilities.map(capabilityRequiredFeature),
+    ]);
+    const lead =
+      contract.leadFieldSchema === null ||
+      !hasCapability(contract.capabilities, "lead.read")
+        ? null
+        : await findInteractionLead(transaction, {
+            contactId: contract.contactId,
+            sourceChannel: "whatsapp",
+            capabilities: contract.capabilities,
+            actorUserId: row.ai_enabled_by_user_id,
+            recordedBy: "agent",
+            agentProfileVersionId: row.agent_version_id,
+            conversationId: contract.interaction.id,
+          });
+    // The tenant the agent speaks for. Its identity is not the agent's to
+    // choose, so it is read here rather than taken from the prompt — and read
+    // through the same tenant-bound projection the voice runtime uses, because
+    // this role is deliberately not allowed to select tenant_settings columns.
+    const identities = await transaction<
+      { profile: TenantIdentityProjection | null }[]
+    >`
+      SELECT platform.current_voice_tenant_support_profile() AS profile
+    `;
+    const tenantDisplayName = tenantDisplayNameFrom(
+      identities[0]?.profile ?? null,
     );
     const knowledge = await eligibleFacts(transaction, row.agent_version_id);
     const history = await transaction<
@@ -1959,7 +2709,27 @@ async function loadAiWork(
       voiceSessions.length > 0;
     return {
       agentVersionId: row.agent_version_id,
+      contract,
+      tenantDisplayName,
+      lead:
+        lead === null
+          ? null
+          : {
+              id: lead.id,
+              revision: lead.revision,
+              collected: lead.fields
+                .filter((field) => field.supersededAt === null)
+                .map((field) => ({
+                  key: field.key,
+                  state: field.state,
+                  value: field.normalizedValue,
+                })),
+              missingRequired: lead.completeness?.missing ?? [],
+            },
       knowledge,
+      opensTickets:
+        hasCapability(contract.capabilities, "ticket.open") ||
+        row.agent_implicit_ticketing,
       ownershipEpoch: row.ownership_epoch,
       conversationId: row.conversation_id,
       authorizedUserId: row.ai_enabled_by_user_id,
@@ -2025,6 +2795,280 @@ async function loadAiWork(
       })),
     };
   });
+}
+
+/** What is stored for this interaction's lead, after the latest action. */
+type AiLeadState = AiWork["lead"];
+
+/**
+ * The provider request for one pass of the turn.
+ *
+ * Built from the resolved contract rather than from the job row, so the prompt,
+ * the capabilities and the reviewed field list are the ones pinned at
+ * admission. `lead` is present whenever the agent version pins a schema, even
+ * before a lead exists: the agent needs to know what to ask.
+ */
+function aiRequestFor(
+  work: AiWork,
+  lead: AiLeadState,
+  receipts: readonly WhatsAppActionReceipt[],
+  options: { readonly replyOnly?: boolean } = {},
+): WhatsAppAiRequest {
+  const pinned = work.contract.leadFieldSchema;
+  return {
+    systemPrompt: work.contract.agentPrompt,
+    locale: work.locale,
+    capabilities: work.contract.capabilities,
+    ...(work.tenantDisplayName === null
+      ? {}
+      : { tenantDisplayName: work.tenantDisplayName }),
+    ...(pinned === null
+      ? {}
+      : {
+          lead: {
+            schema: pinned.schema,
+            collected: lead?.collected ?? [],
+            missingRequired:
+              lead?.missingRequired ??
+              leadCompleteness(pinned.schema, []).missing,
+          },
+        }),
+    ...(receipts.length === 0 ? {} : { actionReceipts: receipts }),
+    ...(options.replyOnly === true ? { replyOnly: true } : {}),
+    ...(work.serviceIntake === undefined
+      ? {}
+      : { serviceIntake: work.serviceIntake }),
+    contactContext: work.contactContext,
+    knowledge: work.knowledge,
+    messages: work.messages,
+  };
+}
+
+/**
+ * How many real lead actions one customer turn may take before the agent must
+ * answer. Bounded so a model that keeps choosing actions cannot spend the
+ * worker's budget or leave the customer without a reply.
+ */
+const maximumLeadActionsPerTurn = 3;
+
+/** The lead actions the model may return, and the tool each one runs. */
+const leadActionTools = {
+  lead_save: "lead_save_fields",
+  lead_finalize: "lead_finalize_collection",
+  lead_follow_up: "lead_request_follow_up",
+} as const satisfies Readonly<Record<string, LeadToolName>>;
+
+type LeadActionName = keyof typeof leadActionTools;
+
+function leadActionName(
+  decision: WhatsAppAiDecision,
+): LeadActionName | undefined {
+  return decision.action === "lead_save" ||
+    decision.action === "lead_finalize" ||
+    decision.action === "lead_follow_up"
+    ? decision.action
+    : undefined;
+}
+
+function leadToolInput(
+  decision: WhatsAppAiDecision & { readonly action: LeadActionName },
+): Readonly<Record<string, unknown>> {
+  if (decision.action === "lead_save")
+    return { observations: decision.observations };
+  if (decision.action === "lead_finalize") return { summary: decision.summary };
+  return { note: decision.note };
+}
+
+/**
+ * The commit a reply may point at, or nothing. A failed or absent action
+ * leaves the ordinary gate in force, so an agent that tried and could not save
+ * cannot tell the customer that it did.
+ */
+function committedRecordFrom(
+  receipts: readonly WhatsAppActionReceipt[],
+  lead: AiLeadState,
+): CommittedRecord | undefined {
+  if (lead === null || !receipts.some((receipt) => receipt.ok))
+    return undefined;
+  return { leadId: lead.id, revision: lead.revision };
+}
+
+function leadActionSummary(result: LeadToolResult): string {
+  const changed = result.receipt?.changed ?? [];
+  const missing = result.missingRequired;
+  return [
+    `revision ${String(result.receipt?.revision ?? 0)}`,
+    changed.length === 0 ? "no change" : `committed ${changed.join(", ")}`,
+    ...(result.rejected === undefined
+      ? []
+      : [`rejected ${result.rejected.map((item) => item.key).join(", ")}`]),
+    missing.length === 0
+      ? "nothing required is outstanding"
+      : `still missing ${missing.join(", ")}`,
+  ].join("; ");
+}
+
+/**
+ * Run one lead action for real, in its own transaction, and report what
+ * actually committed.
+ *
+ * Every guard the reply path applies is re-applied here, because this is a
+ * side effect and the model chose it: the authorising operator must still be
+ * active, the conversation must still be this AI generation's, and the trigger
+ * must still be the current customer turn. The operation key is derived from
+ * the job and the trigger message, so a retried job or a redelivered webhook
+ * replays the same operation instead of writing a second time.
+ *
+ * A refusal is not an exception the caller swallows: it comes back as a failed
+ * receipt, so the agent is told the truth and can say so.
+ */
+async function runWhatsAppLeadAction(
+  sql: Sql,
+  workerId: string,
+  job: JobRow,
+  work: AiWork,
+  lead: AiLeadState,
+  action: LeadActionName,
+  decision: WhatsAppAiDecision & { readonly action: LeadActionName },
+): Promise<{
+  readonly receipt: WhatsAppActionReceipt;
+  readonly lead: AiLeadState;
+}> {
+  const pinned = work.contract.leadFieldSchema;
+  const tool = leadActionTools[action];
+  // An action the published configuration never offered is a defect, not a
+  // conversational outcome: the envelope did not advertise it, so retrying it
+  // would only buy more provider calls. Fail the turn permanently and name the
+  // reason, rather than answering the customer as though a choice was made.
+  if (
+    pinned === null ||
+    !hasCapability(work.contract.capabilities, capabilityForTool(tool))
+  )
+    throw new WhatsAppAiProviderError("lead_action_not_permitted", false);
+  try {
+    return await sql.begin(async (transaction) => {
+      await setTenantContext(transaction, job.tenant_id);
+      await requireOwnedJob(transaction, workerId, job.id);
+      await transaction`
+        SELECT set_config('app.current_user', ${work.authorizedUserId}, true)
+      `;
+      const authorization = await transaction<{ authorized: boolean }[]>`
+        SELECT platform.messaging_ai_actor_authorized(
+          ${work.authorizedUserId}::uuid
+        ) AS authorized
+      `;
+      if (authorization[0]?.authorized !== true)
+        throw new TypeError("AI authorizing operator is no longer active");
+      await requireCurrentTrigger(
+        transaction,
+        work.conversationId,
+        work.triggerMessageId,
+      );
+      const binding: LeadBinding = {
+        contactId: work.contactId,
+        sourceChannel: "whatsapp",
+        capabilities: work.contract.capabilities,
+        actorUserId: work.authorizedUserId,
+        recordedBy: "agent",
+        agentProfileVersionId: work.agentVersionId,
+        conversationId: work.conversationId,
+        conversationOwnershipEpoch: work.ownershipEpoch,
+      };
+      // The lead is created by the first real save, not by the greeting that
+      // opened the conversation, and the key is the job's — a retry after a
+      // lost commit reuses it rather than opening a second lead.
+      const leadId =
+        lead?.id ??
+        (
+          await ensureLeadForInteraction(transaction, binding, {
+            operationKey: `whatsapp-ai-lead:${job.id}`,
+            fieldSchemaId: pinned.id,
+            fieldSchemaVersion: pinned.version,
+            sourceMessageId: work.triggerMessageId,
+            ...(work.contract.roleTitle === null
+              ? {}
+              : { businessObjective: work.contract.roleTitle }),
+          })
+        ).lead.id;
+      const context: LeadToolContext = {
+        leadId,
+        // Stable across restarts and retries: the job and the customer turn it
+        // answers, never a freshly generated call identifier.
+        interactionKey: `whatsapp:${work.conversationId}`,
+        turnKey: `${job.id}:${work.triggerMessageId}`,
+        schema: pinned.schema,
+        // Provenance the runtime can stand behind: the accepted message this
+        // turn answers, and the messages of this conversation as the only
+        // earlier turns the model is allowed to cite.
+        sourceReferenceId: work.triggerMessageId,
+        acceptedReferences: work.messages.map((message) => message.id),
+      };
+      const result = await executeLeadTool(
+        transaction,
+        binding,
+        context,
+        tool,
+        leadToolInput(decision),
+      );
+      return {
+        receipt: {
+          action,
+          ok: true,
+          reference: result.receipt?.reference ?? null,
+          detail: leadActionSummary(result),
+        },
+        lead: {
+          id: leadId,
+          revision: result.receipt?.revision ?? lead?.revision ?? 0,
+          collected: result.collected,
+          missingRequired: result.missingRequired,
+        },
+      };
+    });
+  } catch (error) {
+    // A rejected write is reported truthfully rather than failing the turn: the
+    // customer still gets an answer, and it is an answer that cannot claim a
+    // save happened. An unknown outcome is not treated as a rejection.
+    if (
+      error instanceof LeadToolError ||
+      error instanceof TypeError ||
+      (error instanceof Error &&
+        [
+          "LeadRevisionConflictError",
+          "LeadOwnershipError",
+          "LeadNotFoundError",
+          "LeadAuthorizationError",
+        ].includes(error.name))
+    )
+      return {
+        receipt: {
+          action,
+          ok: false,
+          reference: null,
+          detail:
+            error instanceof LeadToolError
+              ? error.reason
+              : "the action was refused",
+        },
+        lead,
+      };
+    throw error;
+  }
+}
+
+function capabilityForTool(
+  tool: LeadToolName,
+): "lead.read" | "lead.write" | "lead.finalize" | "lead.follow_up" {
+  switch (tool) {
+    case "lead_read_state":
+      return "lead.read";
+    case "lead_save_fields":
+      return "lead.write";
+    case "lead_finalize_collection":
+      return "lead.finalize";
+    case "lead_request_follow_up":
+      return "lead.follow_up";
+  }
 }
 
 /**
@@ -2207,6 +3251,9 @@ async function createAiHandoff(
             'conversation.ai_handoff', 'conversation', ${work.conversationId}::uuid,
             ${transaction.json({ reasonCode })})
   `;
+  // Only a ticketing agent turns its escalation into a support issue. The
+  // handoff, the task and the human ownership above happen for every agent.
+  if (!work.opensTickets) return receipt[0].id;
   // The escalation now also lives on the customer's ISSUE, beside the internal
   // work item rather than instead of it: `crm.tasks` keeps carrying the
   // operator's to-do and its existing notifications, deep links and audit, and
@@ -2260,6 +3307,8 @@ async function processWhatsAppAiReply(
     const identityConflict =
       work.serviceIntake?.customerResolutionStatus === "conflict";
     const intakeRequiresHuman = work.serviceIntake?.status === "handed_off";
+    const receipts: WhatsAppActionReceipt[] = [];
+    let leadState = work.lead;
     const classifiedDecision: WhatsAppAiDecision =
       identityConflict || intakeRequiresHuman
         ? {
@@ -2273,8 +3322,39 @@ async function processWhatsAppAiReply(
               reasonCode: "call_requested",
               text: "",
             }
-          : await (automation.aiProvider?.decide(work) ??
-              Promise.reject(new TypeError("WhatsApp AI is disabled")));
+          : await (async () => {
+              const provider = automation.aiProvider;
+              if (provider === undefined)
+                throw new TypeError("WhatsApp AI is disabled");
+              // A turn may take a few real actions and must still end in
+              // something the customer can read, so the budget is bounded and
+              // the last pass is offered no further actions.
+              for (let round = 0; ; round += 1) {
+                const last = round >= maximumLeadActionsPerTurn;
+                const proposed = await provider.decide(
+                  aiRequestFor(work, leadState, receipts, {
+                    ...(last ? { replyOnly: true } : {}),
+                  }),
+                );
+                const action = leadActionName(proposed);
+                if (action === undefined) return proposed;
+                if (last)
+                  throw new WhatsAppAiProviderError("ai_invalid_output", false);
+                const executed = await runWhatsAppLeadAction(
+                  sql,
+                  workerId,
+                  job,
+                  work,
+                  leadState,
+                  action,
+                  proposed as WhatsAppAiDecision & {
+                    readonly action: typeof action;
+                  },
+                );
+                receipts.push(executed.receipt);
+                leadState = executed.lead;
+              }
+            })();
     const decision = enforceStandaloneCallbackConsent(
       classifiedDecision,
       explicitCallRequested,
@@ -2312,6 +3392,10 @@ async function processWhatsAppAiReply(
         work.locale,
         await recentDeliveredReplies(transaction, work.conversationId),
         triggerText,
+        // Only a write that actually committed in this turn lets the reply say
+        // anything was recorded, and the revision it committed at travels with
+        // the message so delivery can check the same fact.
+        committedRecordFrom(receipts, leadState),
       );
       let responseText = grounded.text;
       let evidence:
@@ -2341,13 +3425,17 @@ async function processWhatsAppAiReply(
           try {
             // The issue exists BEFORE the dial is admitted, so every attempt —
             // including the retries and the ones that never connect — lands on
-            // one ticket instead of creating a trail of orphaned records.
-            const ticketId = await ticketForAiAction(
-              transaction,
-              work,
-              job.id,
-              "Customer requested a callback",
-            );
+            // one ticket instead of creating a trail of orphaned records. Only
+            // a ticketing agent has an issue to land them on; the callback
+            // itself belongs to every agent the customer asked to call back.
+            const ticketId = work.opensTickets
+              ? await ticketForAiAction(
+                  transaction,
+                  work,
+                  job.id,
+                  "Customer requested a callback",
+                )
+              : null;
             const receipt = await queueWhatsAppAutomaticCall(
               transaction,
               work.authorizedUserId,
@@ -2355,29 +3443,43 @@ async function processWhatsAppAiReply(
               work.triggerMessageId,
               `whatsapp-ai-call:${job.id}`,
             );
-            // Voice takes the issue while the call is outstanding. The
-            // messaging worker still persists inbound WhatsApp for this
-            // conversation; it must not run a second AI conversation about the
-            // same problem underneath the call.
-            await setTicketHandlingMode(
-              transaction,
-              work.authorizedUserId,
-              ticketId,
-              "ai_voice",
-              "Callback admitted; voice owns the issue.",
-            );
-            await recordTicketEvent(transaction, work.authorizedUserId, {
-              ticketId,
-              kind: "call_attempt",
-              actorKind: "ai",
-              summarySafe:
-                "Callback queued after an explicit customer request.",
-              evidence: {
+            if (ticketId !== null) {
+              // Voice takes the issue while the call is outstanding. The
+              // messaging worker still persists inbound WhatsApp for this
+              // conversation; it must not run a second AI conversation about
+              // the same problem underneath the call.
+              await setTicketHandlingMode(
+                transaction,
+                work.authorizedUserId,
+                ticketId,
+                "ai_voice",
+                "Callback admitted; voice owns the issue.",
+              );
+              // The attempt row exists before the dial is placed, so an
+              // accepted call whose response is lost has something to
+              // reconcile against and the post-call pipeline has somewhere to
+              // land.
+              const attempt = await openTicketCallAttempt(transaction, {
+                ticketId,
                 jobId: receipt.jobId,
-                flowId: receipt.flowId,
-                flowVersion: receipt.flowVersion,
-              },
-            });
+                handoffId: receipt.handoffId,
+                assuranceLevel: "channel_associated",
+              });
+              await recordTicketEvent(transaction, work.authorizedUserId, {
+                ticketId,
+                kind: "call_attempt",
+                actorKind: "ai",
+                summarySafe:
+                  "Callback queued after an explicit customer request.",
+                evidence: {
+                  jobId: receipt.jobId,
+                  flowId: receipt.flowId,
+                  flowVersion: receipt.flowVersion,
+                  attemptId: attempt.id,
+                  attemptNumber: attempt.attemptNumber,
+                },
+              });
+            }
             automaticCallQueued = true;
             evidence = {
               kind: "receipt",
@@ -2574,6 +3676,7 @@ async function loadAutomaticCallWork(
     throw new TypeError("automatic call job reference is invalid");
   return sql.begin(async (transaction) => {
     await setTenantContext(transaction, job.tenant_id);
+    await requireTenantFeatures(transaction, ["whatsapp", "voice"]);
     await requireOwnedJob(transaction, workerId, job.id);
     await requireCurrentTrigger(
       transaction,
@@ -2720,6 +3823,30 @@ async function processAutomaticCall(
     await sql.begin(async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
       await requireOwnedJob(transaction, workerId, job.id);
+      // Bind the canonical session to the issue's attempt. The unique index on
+      // (tenant, session) is what stops a replayed acceptance attaching one
+      // call to two attempts, and binding here is also the backstop for a call
+      // that reached a terminal status before this transaction ran.
+      const attempt = await transaction<{ id: string; ticket_id: string }[]>`
+        SELECT id, ticket_id FROM support.ticket_call_attempts
+        WHERE tenant_id = platform.current_tenant_id() AND job_id = ${job.id}::uuid
+        LIMIT 1
+      `;
+      const attemptRow = attempt[0];
+      if (attemptRow !== undefined) {
+        await bindTicketCallAttemptSession(
+          transaction,
+          attemptRow.id,
+          result.sessionId,
+        );
+        await recordTicketEvent(transaction, work.actorUserId, {
+          ticketId: attemptRow.ticket_id,
+          kind: "call_outcome",
+          actorKind: "system",
+          summarySafe: "The telephone call was accepted by the dispatcher.",
+          evidence: { sessionId: result.sessionId, attemptId: attemptRow.id },
+        });
+      }
       // A voice session is linked only when the trusted source conversation
       // resolves to one active service case. Ambiguous conversations remain
       // unlinked for an authorized operator to resolve; phone-number matching
@@ -2928,6 +4055,29 @@ function uuid(value: unknown): value is string {
   );
 }
 
+/**
+ * Re-prove at delivery that the lead write the reply relies on exists, belongs
+ * to this conversation and is at least the revision that was committed. A lead
+ * deleted, moved or rolled back between generation and delivery withdraws the
+ * permission to claim the save; a later revision does not, because the claim
+ * was true when it was made and remains true now.
+ */
+async function committedRecordStillHolds(
+  transaction: postgres.TransactionSql,
+  conversationId: string,
+  claimed: unknown,
+): Promise<boolean> {
+  const value = record(claimed);
+  if (!uuid(value.leadId) || typeof value.revision !== "number") return false;
+  const rows = await transaction<{ id: string }[]>`
+    SELECT id FROM crm.leads
+    WHERE id=${value.leadId}::uuid
+      AND source_conversation_id=${conversationId}::uuid
+      AND revision >= ${value.revision}
+  `;
+  return rows[0] !== undefined;
+}
+
 async function requireGroundedOutbound(
   transaction: postgres.TransactionSql,
   row: {
@@ -3012,6 +4162,11 @@ async function requireGroundedOutbound(
         locale: metadata.locale,
         recentAssistantMessages,
         latestCustomerMessage,
+        committedRecord: await committedRecordStillHolds(
+          transaction,
+          row.conversation_id,
+          evidence.record,
+        ),
       })
     )
       expected = row.content_text ?? "";
@@ -3061,6 +4216,7 @@ async function revalidateOutboundAttempt(
   await sql.begin(async (transaction) => {
     await setTenantContext(transaction, job.tenant_id);
     await requireOwnedJob(transaction, workerId, job.id);
+    await requireTenantFeatures(transaction, ["whatsapp"]);
     const rows = await transaction<
       {
         content_text: string | null;
@@ -3115,6 +4271,7 @@ async function loadOutboundWork(
   return sql.begin(async (transaction) => {
     await setTenantContext(transaction, job.tenant_id);
     await requireOwnedJob(transaction, workerId, job.id);
+    await requireTenantFeatures(transaction, ["whatsapp"]);
     const previous = await transaction<{ status: string }[]>`
       SELECT status FROM messaging.outbound_requests WHERE id=${job.reference_id}::uuid FOR UPDATE
     `;
@@ -3277,11 +4434,13 @@ async function processWhatsAppOutbound(
     )
       return;
     const failure = messageDeliveryFailure(
-      error instanceof WhatsAppProviderError
+      error instanceof TenantFeatureRuntimeError
         ? error.code
-        : work?.provider === "meta"
-          ? "delivery_outcome_unknown"
-          : "outbound_processing_failed",
+        : error instanceof WhatsAppProviderError
+          ? error.code
+          : work?.provider === "meta"
+            ? "delivery_outcome_unknown"
+            : "outbound_processing_failed",
       error instanceof WhatsAppProviderError ? error.diagnostic : null,
     ) ?? { code: "outbound_processing_failed", diagnostic: null };
     const code = failure.code;

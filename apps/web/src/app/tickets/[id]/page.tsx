@@ -1,7 +1,13 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 
-import { getContact, getTenantSettings, getTicketDetail } from "@or-on/crm";
+import {
+  getContact,
+  getTenantSettings,
+  getTicketDetail,
+  requireTenantFeature,
+  TenantFeatureDisabledError,
+} from "@or-on/crm";
 
 import { AccessDenied } from "../../../i18n/access-denied";
 import {
@@ -19,6 +25,7 @@ export default async function TicketDetailPage({
   const { id } = await params;
   try {
     const data = await withCurrentTenant("crm:read", async (sql) => {
+      await requireTenantFeature(sql, "tickets");
       const detail = await getTicketDetail(sql, id);
       if (detail === undefined) return undefined;
       const [contact, settings] = await Promise.all([
@@ -38,7 +45,11 @@ export default async function TicketDetailPage({
       </main>
     );
   } catch (error) {
-    if (error instanceof ForbiddenError) return <AccessDenied />;
+    if (
+      error instanceof ForbiddenError ||
+      error instanceof TenantFeatureDisabledError
+    )
+      return <AccessDenied />;
     if (error instanceof UnauthenticatedError) redirect("/login");
     throw error;
   }

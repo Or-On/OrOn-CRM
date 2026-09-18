@@ -1,7 +1,14 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
-import { getTenantSettings, listContacts, listTickets } from "@or-on/crm";
+import {
+  getTenantSettings,
+  listContacts,
+  listTickets,
+  summarizeTicketOutcomes,
+  requireTenantFeature,
+  TenantFeatureDisabledError,
+} from "@or-on/crm";
 
 import { AccessDenied } from "../../i18n/access-denied";
 import { ProductHeading } from "../../i18n/product-heading";
@@ -14,13 +21,21 @@ import { TicketsWorkspace } from "../../features/tickets";
 
 export default async function TicketsPage() {
   try {
+    const until = new Date();
+    const since = new Date(until.getTime() - 30 * 24 * 60 * 60 * 1000);
     const data = await withCurrentTenant("crm:read", async (sql) => {
-      const [page, contacts, settings] = await Promise.all([
+      await requireTenantFeature(sql, "tickets");
+      const [page, contacts, settings, metrics] = await Promise.all([
         listTickets(sql, { status: "open", limit: 25 }),
         listContacts(sql, { limit: 500 }),
         getTenantSettings(sql),
+        // Aggregate outcomes live on the register, never on a single ticket.
+        summarizeTicketOutcomes(sql, {
+          since: since.toISOString(),
+          until: until.toISOString(),
+        }),
       ]);
-      return { page, contacts, settings };
+      return { page, contacts, settings, metrics };
     });
     // Names are resolved here so the browser receives only the names belonging
     // to the page it is showing, never the tenant's contact table.
@@ -33,12 +48,17 @@ export default async function TicketsPage() {
         <TicketsWorkspace
           contactNames={contactNames}
           initialPage={data.page}
+          metrics={data.metrics}
           tenantTimeZone={data.settings.timezone}
         />
       </main>
     );
   } catch (error) {
-    if (error instanceof ForbiddenError) return <AccessDenied />;
+    if (
+      error instanceof ForbiddenError ||
+      error instanceof TenantFeatureDisabledError
+    )
+      return <AccessDenied />;
     if (error instanceof UnauthenticatedError) redirect("/login");
     throw error;
   }

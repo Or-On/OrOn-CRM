@@ -435,6 +435,25 @@ export function TenantWorkspace({
             name="timezone"
             required
           />
+          <Select
+            id="tenant-template"
+            defaultValue="blank"
+            label={he ? "תבנית עסקית" : "Business template"}
+            name="templateKey"
+          >
+            <option value="field_service">
+              {he ? "שירות שטח" : "Field Service"}
+            </option>
+            <option value="lead_generation">
+              {he ? "יצירת לידים" : "Lead Generation"}
+            </option>
+            <option value="customer_support">
+              {he ? "תמיכת לקוחות" : "Customer Support"}
+            </option>
+            <option value="blank">
+              {he ? "ריק / מותאם אישית" : "Blank / Custom"}
+            </option>
+          </Select>
           <fieldset className="tenant-admin-feature-selection">
             <legend>
               {he ? "יכולות אופציונליות" : "Optional capabilities"}

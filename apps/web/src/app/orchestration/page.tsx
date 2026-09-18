@@ -14,6 +14,7 @@ import {
   listHandoffs,
   getTenantSettings,
   listVoiceOutcomes,
+  TenantFeatureDisabledError,
   summarizeCrossChannelUsage,
 } from "@or-on/crm";
 
@@ -68,7 +69,11 @@ export default async function OrchestrationPage({
       </main>
     );
   } catch (error) {
-    if (error instanceof ForbiddenError) return <AccessDenied />;
+    if (
+      error instanceof ForbiddenError ||
+      error instanceof TenantFeatureDisabledError
+    )
+      return <AccessDenied />;
     if (error instanceof UnauthenticatedError) redirect("/login");
     throw error;
   }

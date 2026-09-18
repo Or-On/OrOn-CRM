@@ -1,4 +1,5 @@
 import type { Permission } from "@or-on/auth";
+import type { TenantFeatureKey } from "@or-on/crm";
 
 import { applicationPageForHref } from "./route-manifest";
 
@@ -16,11 +17,31 @@ export function destinationPermission(href: string): Permission {
     href === "/profile" ||
     href === "/email" ||
     href === "/tenants" ||
-    href === "/settings" ||
+    href.startsWith("/settings") ||
     href === "/system/health"
   )
     return "platform:read";
   return "crm:read";
+}
+
+/** UI projection of the same module checks enforced by pages and APIs. */
+export function requiredFeatureForHref(
+  href: string,
+): TenantFeatureKey | undefined {
+  if (href === "/inbox" || href === "/operations") return "whatsapp";
+  if (href === "/voice" || href === "/flows" || href.startsWith("/voice/"))
+    return "voice";
+  if (href === "/tickets" || href === "/tasks" || href.startsWith("/tickets/"))
+    return "tickets";
+  if (href === "/leads" || href.startsWith("/leads/")) return "leads";
+  if (href === "/contacts" || href.startsWith("/contacts/")) return "contacts";
+  if (href === "/pipelines") return "pipeline";
+  if (href === "/field-service" || href.startsWith("/field-service/"))
+    return "field_service";
+  if (href === "/orchestration") return "agents";
+  if (href === "/finance") return "billing";
+  if (href === "/calendar") return "appointments";
+  return undefined;
 }
 
 export type NavigationIcon =
@@ -30,6 +51,7 @@ export type NavigationIcon =
   | "calendar"
   | "tickets"
   | "tasks"
+  | "leads"
   | "contacts"
   | "pipeline"
   | "campaigns"
@@ -66,6 +88,10 @@ export const navigation = [
   // contextual destination beneath it: existing escalations still create those
   // internal work items and still link straight to them.
   { href: "/tickets", label: "Tickets", group: "Workspace", icon: "tickets" },
+  // Leads sits beside Tickets rather than inside Contacts: a lead is a
+  // commercial interest with its own lifecycle, not a property of the person
+  // who holds it, and one contact can hold several at once.
+  { href: "/leads", label: "Leads", group: "Workspace", icon: "leads" },
   {
     href: "/contacts",
     label: "Contacts",
@@ -170,6 +196,14 @@ export const contextualDestinations = [
     icon: "voice",
     parentHref: "/voice",
     translationKey: "flows",
+  },
+  {
+    href: "/settings/business",
+    label: "Business configuration",
+    group: "Platform",
+    icon: "settings",
+    parentHref: "/settings",
+    translationKey: "settings",
   },
 ] as const;
 

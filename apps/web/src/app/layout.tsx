@@ -23,7 +23,11 @@ import { AppShell } from "../features/shell";
 import { AccessProvider } from "../features/access";
 import { currentPublicSession } from "../features/auth";
 import { withCurrentTenant } from "../features/auth";
-import { getFieldServiceFeatureState, getTenantSettings } from "@or-on/crm";
+import {
+  getFieldServiceFeatureState,
+  getTenantFeatureSnapshot,
+  getTenantSettings,
+} from "@or-on/crm";
 import { Providers } from "./providers";
 import { product } from "../branding";
 
@@ -52,13 +56,19 @@ const currentShellContext = cache(async () => {
   if (session === undefined) return undefined;
   const presentation = await withCurrentTenant("platform:read", async (sql) => {
     const settings = await getTenantSettings(sql);
-    const fieldService = session.permissions.includes("field-service:read")
-      ? await getFieldServiceFeatureState(sql)
-      : undefined;
+    const [fieldService, features] = await Promise.all([
+      session.permissions.includes("field-service:read")
+        ? getFieldServiceFeatureState(sql)
+        : undefined,
+      getTenantFeatureSnapshot(sql),
+    ]);
     return {
       businessName: settings.businessName ?? session.tenant.tenantName,
       accentToken: settings.accentToken ?? null,
       fieldServiceEnabled: fieldService?.effective === true,
+      enabledFeatures: Object.values(features)
+        .filter((feature) => feature.effective)
+        .map((feature) => feature.key),
     };
   });
   return { session, ...presentation };
@@ -108,6 +118,7 @@ export default async function RootLayout({
                   fieldServiceEnabled={
                     shellContext?.fieldServiceEnabled === true
                   }
+                  enabledFeatures={shellContext?.enabledFeatures}
                   session={session}
                   {...(shellContext === undefined
                     ? {}

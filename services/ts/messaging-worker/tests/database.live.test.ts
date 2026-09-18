@@ -28,6 +28,31 @@ async function createWhatsAppContactFixture(
   transaction: postgres.TransactionSql,
   label: string,
 ) {
+  await transaction`
+    INSERT INTO tenants(id, name, slug, status)
+    VALUES(
+      ${tenantId}::uuid,
+      'Fictional messaging worker tenant',
+      'messaging-worker-fixture',
+      'active'
+    )
+    ON CONFLICT (id) DO NOTHING
+  `;
+  await transaction`
+    INSERT INTO users(id, email, display_name, status)
+    VALUES(
+      ${userId}::uuid,
+      'messaging-worker-fixture@example.invalid',
+      'Fictional messaging worker owner',
+      'active'
+    )
+    ON CONFLICT (id) DO NOTHING
+  `;
+  await transaction`
+    INSERT INTO memberships(tenant_id, user_id, role)
+    VALUES(${tenantId}::uuid, ${userId}::uuid, 'owner')
+    ON CONFLICT (tenant_id, user_id) DO NOTHING
+  `;
   const suffix = randomUUID();
   const phone = `+1202${String(
     BigInt(`0x${suffix.replaceAll("-", "").slice(0, 9)}`) % 10_000_000n,
@@ -135,6 +160,99 @@ describe.skipIf(databaseUrl === undefined)("durable messaging worker", () => {
         await admin`
           DELETE FROM platform.campaigns WHERE id = ${broadcastId}::uuid
              OR id = (SELECT campaign_id FROM messaging.broadcasts WHERE id = ${broadcastId}::uuid)
+        `;
+      }
+      await admin.end({ timeout: 2 });
+    }
+  });
+
+  it("refuses a queued WhatsApp send when the tenant module is disabled before claim", async () => {
+    if (databaseUrl === undefined)
+      throw new Error("MESSAGING_WORKER_TEST_DATABASE_URL is required");
+    const admin = postgres(databaseUrl, { max: 1, prepare: false });
+    let broadcastId: string | undefined;
+    const send = vi.fn(() =>
+      Promise.reject(new Error("disabled module must not call the provider")),
+    );
+    try {
+      broadcastId = await admin.begin(async (transaction) => {
+        await transaction`
+          SELECT set_config('app.current_tenant', ${tenantId}, true),
+                 set_config('app.current_user', ${userId}, true),
+                 set_config('app.current_role', 'owner', true)
+        `;
+        await createWhatsAppContactFixture(
+          transaction,
+          "Fictional disabled-module recipient",
+        );
+        await transaction`
+          INSERT INTO messaging.channels(
+            tenant_id,kind,provider,provider_account_id,status
+          ) VALUES(
+            ${tenantId}::uuid,'whatsapp','simulator',
+            ${`disabled-module-${randomUUID()}`},'active'
+          )
+        `;
+        const id = await createSimulatorBroadcast(
+          transaction,
+          userId,
+          "Fictional queued-before-disable test",
+          "This must never reach a provider",
+        );
+        expect(
+          await enqueueSimulatorBroadcast(transaction, id),
+        ).toBeGreaterThan(0);
+        return id;
+      });
+      await admin`
+        UPDATE platform.tenant_feature_entitlements SET enabled=false
+        WHERE tenant_id=${tenantId}::uuid AND feature_key='whatsapp'
+      `;
+      const store = createMessagingStore(
+        databaseUrl,
+        `disabled-module-${randomUUID()}`,
+        {
+          simulator: { name: "simulator", send },
+          meta: {
+            name: "meta",
+            send: vi.fn(() => Promise.reject(new Error("must not send"))),
+          },
+        },
+        undefined,
+        { simulatorEnabled: true },
+      );
+      try {
+        for (let turn = 0; turn < 200; turn += 1) {
+          await store.processAvailable();
+          const pending = await admin<{ count: number }[]>`
+            SELECT count(*)::integer AS count FROM ops.jobs
+            WHERE payload->>'broadcastId'=${broadcastId}
+              AND status IN ('queued','running')
+          `;
+          if (pending[0]?.count === 0) break;
+        }
+      } finally {
+        await store.close();
+      }
+      expect(send).not.toHaveBeenCalled();
+      const refused = await admin<{ count: number }[]>`
+        SELECT count(*)::integer AS count FROM ops.jobs
+        WHERE payload->>'broadcastId'=${broadcastId} AND status='dead'
+          AND last_error_safe='tenant_feature_disabled'
+      `;
+      expect(refused[0]?.count).toBeGreaterThan(0);
+    } finally {
+      await admin`
+        UPDATE platform.tenant_feature_entitlements SET enabled=true
+        WHERE tenant_id=${tenantId}::uuid AND feature_key='whatsapp'
+      `;
+      if (broadcastId !== undefined) {
+        await admin`
+          DELETE FROM ops.jobs WHERE payload->>'broadcastId'=${broadcastId}
+        `;
+        await admin`
+          DELETE FROM platform.campaigns WHERE id=${broadcastId}::uuid
+             OR id=(SELECT campaign_id FROM messaging.broadcasts WHERE id=${broadcastId}::uuid)
         `;
       }
       await admin.end({ timeout: 2 });

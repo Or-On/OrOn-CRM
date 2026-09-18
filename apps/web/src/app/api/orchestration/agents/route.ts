@@ -1,29 +1,16 @@
 import { NextResponse } from "next/server";
 
-import {
-  createAgentProfileDraft,
-  listAgentProfiles,
-  supportedChannels,
-  type SupportedChannel,
-} from "@or-on/crm";
+import { createAgentProfileDraft, listAgentProfiles } from "@or-on/crm";
 
+import {
+  capabilities,
+  channels,
+} from "../../../../features/agent-configuration";
 import { jsonObject, withCurrentTenant } from "../../../../features/auth";
 import {
   assertCrmMutation,
   crmErrorResponse,
 } from "../../../../features/crm-route";
-
-function channels(value: unknown): readonly SupportedChannel[] {
-  if (!Array.isArray(value)) throw new TypeError("channels must be an array");
-  const parsed = value.filter(
-    (entry): entry is SupportedChannel =>
-      typeof entry === "string" &&
-      supportedChannels.includes(entry as SupportedChannel),
-  );
-  if (parsed.length !== value.length)
-    throw new TypeError("only voice and whatsapp channels are supported");
-  return parsed;
-}
 
 export async function GET() {
   try {
@@ -50,6 +37,13 @@ export async function POST(request: Request) {
           : {}),
         ...(typeof body.locale === "string" ? { locale: body.locale } : {}),
         channels: channels(body.channels),
+        toolPermissions: capabilities(body.capabilities),
+        ...(typeof body.roleTitle === "string"
+          ? { roleTitle: body.roleTitle }
+          : {}),
+        ...(typeof body.leadFieldSchemaId === "string"
+          ? { leadFieldSchemaId: body.leadFieldSchemaId }
+          : {}),
       }),
     );
     return NextResponse.json({ id }, { status: 201 });

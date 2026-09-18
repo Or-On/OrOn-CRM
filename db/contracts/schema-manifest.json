@@ -1,5 +1,5 @@
 {
-  "alembic_head": "1b6e4d8a90c2",
+  "alembic_head": "f4c8a2d91e70",
   "expected_functions": [
     "agents.protect_approved_knowledge",
     "automation.protect_published_flow_version",
@@ -22,6 +22,7 @@
     "platform.fail_stale_voice_sessions",
     "platform.lock_current_authorization",
     "platform.auth_accept_invitation",
+    "platform.apply_tenant_template_for_administrator",
     "platform.auth_invitation_record",
     "platform.auth_login_record",
     "platform.auth_memberships_for_user",
@@ -40,7 +41,10 @@
     "platform.current_tenant_active",
     "platform.current_tenant_member_display_name",
     "platform.current_tenant_team",
+    "platform.current_tenant_running_agent_calls",
     "platform.current_tenant_invitations",
+    "platform.current_tenant_feature_enabled",
+    "platform.tenant_feature_enabled_for",
     "platform.current_voice_tenant_support_profile",
     "platform.current_user_id",
     "platform.current_user_avatar",
@@ -57,13 +61,30 @@
     "platform.resolve_api_key",
     "platform.revoke_inactive_tenant_keys",
     "platform.protect_last_tenant_owner",
+    "platform.provision_tenant_features",
     "platform.revoke_current_tenant_invitation",
     "platform.set_current_tenant_logo",
     "platform.set_current_user_avatar",
     "platform.list_tenant_field_service_entitlements_for_administrator",
     "platform.set_tenant_feature_entitlement",
+    "platform.set_current_tenant_feature",
+    "platform.enforce_tenant_feature_write",
     "platform.update_current_tenant_name",
     "platform.update_current_user_profile",
+    "platform.lead_bind",
+    "platform.lead_capture_state",
+    "platform.lead_claim_operation",
+    "platform.lead_commit",
+    "platform.lead_ensure_for_interaction",
+    "platform.lead_finalize",
+    "platform.lead_interaction_candidate",
+    "platform.lead_lock",
+    "platform.lead_operation_receipt",
+    "platform.lead_operator_save_fields",
+    "platform.lead_receipt",
+    "platform.lead_request_follow_up",
+    "platform.lead_save_fields",
+    "platform.lead_save_fields_core",
     "platform.initialize_voice_identity_verification",
     "platform.normalize_identity_name",
     "platform.verified_voice_handoff_context",
@@ -84,7 +105,9 @@
     "service.prevent_finalized_report_mutation",
     "service.prevent_signed_visit_mutation",
     "service.validate_report_attachment_context",
-    "service.validate_technician_user_link"
+    "service.validate_technician_user_link",
+    "support.enqueue_post_call",
+    "support.queue_post_call_from_session"
   ],
   "expected_indexes": [
     "ix_appointment_technician_time",
@@ -105,9 +128,13 @@
     "ix_expenses_tenant_status_incurred",
     "ix_flow_runs_status_time",
     "ix_flow_versions_published",
+    "ix_tenant_process_routing",
     "ix_inbound_message_origins_identity",
     "ix_jobs_claim",
     "ix_knowledge_chunks_fts",
+    "ix_lead_interactions_conversation",
+    "ix_lead_interactions_session",
+    "ix_leads_tenant_status_time",
     "ix_live_chats_tenant_updated",
     "ix_live_messages_chat_cursor",
     "ix_messages_conversation_cursor",
@@ -139,12 +166,21 @@
     "uq_inbound_provider_event",
     "uq_jobs_whatsapp_callback_trigger",
     "uq_knowledge_source_version",
+    "uq_lead_field_values_current",
+    "uq_lead_interactions_link",
+    "uq_lead_operations_tenant_key",
+    "uq_leads_open_interest",
+    "uq_leads_tenant_reference",
     "uq_messages_provider_id",
     "uq_report_editable_revision",
     "uq_report_finalized_revision",
     "uq_service_case_intake",
     "uq_support_tickets_attachment",
-    "uq_tenant_invitations_open_email"
+    "uq_tenant_invitations_open_email",
+    "uq_tenant_process_active_precedence",
+    "ix_support_attempts_post_call_open",
+    "ix_support_tickets_awaiting_customer",
+    "uq_support_call_attempts_job"
   ],
   "expected_schemas": [
     "agents",
@@ -172,15 +208,14 @@
       "model_configurations",
       "usage_events"
     ],
-    "audit": [
-      "records"
-    ],
+    "audit": ["records"],
     "automation": [
       "flow_definitions",
       "flow_runs",
       "flow_step_runs",
       "flow_versions",
       "handoffs",
+      "tenant_processes",
       "voice_identity_verifications"
     ],
     "billing": [
@@ -202,6 +237,11 @@
       "customer_profiles",
       "custom_field_definitions",
       "deals",
+      "lead_field_schemas",
+      "lead_field_values",
+      "lead_interactions",
+      "lead_operations",
+      "leads",
       "notes",
       "pipeline_stages",
       "pipelines",
@@ -210,9 +250,7 @@
       "tasks",
       "tenant_settings"
     ],
-    "finance": [
-      "expenses"
-    ],
+    "finance": ["expenses"],
     "live": [
       "chats",
       "messages",
@@ -236,9 +274,7 @@
       "outbound_requests",
       "quick_replies"
     ],
-    "objects": [
-      "object_metadata"
-    ],
+    "objects": ["object_metadata"],
     "ops": [
       "idempotency_keys",
       "import_items",
@@ -257,6 +293,7 @@
       "oauth_authorizations",
       "system_metadata",
       "tenant_feature_entitlements",
+      "tenant_template_applications",
       "tenant_invitations"
     ],
     "public": [
@@ -303,21 +340,11 @@
     ]
   },
   "extensions": {
-    "deferred": [
-      "pgcrypto"
-    ],
-    "optional": [
-      "vector"
-    ],
-    "required": [
-      "citext"
-    ]
+    "deferred": ["pgcrypto"],
+    "optional": ["vector"],
+    "required": ["citext"]
   },
-  "legacy_runtime_roles": [
-    "oron_app",
-    "oron_sessions_app",
-    "oron_tenancy_app"
-  ],
+  "legacy_runtime_roles": ["oron_app", "oron_sessions_app", "oron_tenancy_app"],
   "migration_role": "platform_migrator",
   "runtime_roles": [
     "platform_messaging",
@@ -340,6 +367,7 @@
     "automation.flow_step_runs",
     "automation.flow_versions",
     "automation.handoffs",
+    "automation.tenant_processes",
     "automation.voice_identity_verifications",
     "billing.ledger_entries",
     "billing.payment_profiles",
@@ -357,6 +385,11 @@
     "crm.customer_documents",
     "crm.customer_profiles",
     "crm.deals",
+    "crm.lead_field_schemas",
+    "crm.lead_field_values",
+    "crm.lead_interactions",
+    "crm.lead_operations",
+    "crm.leads",
     "crm.notes",
     "crm.pipeline_stages",
     "crm.pipelines",
@@ -395,6 +428,7 @@
     "platform.credential_records",
     "platform.oauth_authorizations",
     "platform.tenant_feature_entitlements",
+    "platform.tenant_template_applications",
     "platform.tenant_invitations",
     "public.api_keys",
     "public.campaign_contacts",

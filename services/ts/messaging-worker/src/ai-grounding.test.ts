@@ -677,6 +677,66 @@ describe("WhatsApp deterministic grounding (typed fixtures, no provider evaluati
   );
 
   it.each([
+    "רשמתי את הפרטים שלך.",
+    "שמרתי את שם החברה.",
+    "עדכנתי את השם.",
+    "I saved your details.",
+    "I have recorded your company name.",
+  ])("refuses an unbacked claim that information was kept: %s", (text) => {
+    expect(safeConversationalReply(text)).toBe(false);
+    expect(groundAiReply({ action: "reply", text }, [], "he").text).not.toBe(
+      text,
+    );
+  });
+
+  it.each([
+    ["רשמתי את הפרטים שלך.", "he"],
+    ["עדכנתי את השם.", "he"],
+    ["I saved your details.", "en"],
+  ])(
+    "admits the same claim once a lead write committed: %s",
+    (text, locale) => {
+      expect(
+        safeConversationalReply(text, { locale, committedRecord: true }),
+      ).toBe(true);
+      const grounded = groundAiReply(
+        { action: "reply", text },
+        [],
+        locale,
+        [],
+        "",
+        { leadId: "3f1d3d0c-6c52-4a5a-8c2b-6a9c1d2e4f70", revision: 2 },
+      );
+      expect(grounded.text).toBe(text);
+      expect(grounded.evidence).toMatchObject({
+        kind: "conversation",
+        code: "generated",
+        record: { leadId: "3f1d3d0c-6c52-4a5a-8c2b-6a9c1d2e4f70", revision: 2 },
+      });
+    },
+  );
+
+  it.each([
+    ["קבעתי לך פגישה למחר.", "he"],
+    ["I booked your appointment.", "en"],
+    ["זיכיתי אותך בסכום.", "he"],
+    ["Your refund has been delivered.", "en"],
+  ])(
+    "never admits an outcome a lead write cannot produce: %s",
+    (text, locale) => {
+      expect(
+        safeConversationalReply(text, { locale, committedRecord: true }),
+      ).toBe(false);
+      expect(
+        groundAiReply({ action: "reply", text }, [], locale, [], "", {
+          leadId: "3f1d3d0c-6c52-4a5a-8c2b-6a9c1d2e4f70",
+          revision: 2,
+        }).text,
+      ).not.toBe(text);
+    },
+  );
+
+  it.each([
     "המחיר הוא 150 ₪.",
     "You qualify for a 20% discount.",
     "The service costs USD 49.",

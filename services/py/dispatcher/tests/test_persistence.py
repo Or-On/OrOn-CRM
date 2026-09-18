@@ -124,9 +124,7 @@ async def test_published_agent_prompt_is_applied_to_flow_and_node_roles() -> Non
     assert resolved.nodes[0].role_message.startswith(resolved.role_message)
     node_prompt = resolved.nodes[0].role_message
     assert "Voice flow node instructions:\nYou are Google support." in node_prompt
-    assert node_prompt.endswith(
-        "you are the support representative of Fictional Tenant Support and no other organization."
-    )
+    assert node_prompt.endswith("you represent Fictional Tenant Support and no other organization.")
 
 
 @pytest.mark.asyncio

@@ -85,6 +85,7 @@ const localErrorCodes = new Set([
   "ai_trigger_superseded",
   "stale_worker_claim",
   "simulation_disabled",
+  "tenant_feature_disabled",
 ]);
 
 export function messageDeliveryFailure(

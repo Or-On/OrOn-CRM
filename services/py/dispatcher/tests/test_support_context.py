@@ -22,12 +22,69 @@ def test_tenant_identity_overrides_third_party_product_context_generically() -> 
 
     assert "You represent only Example Property Support" in prompt
     assert "third-party product does not make you an employee or representative" in prompt
-    assert prompt.endswith(
-        "you are the support representative of Example Property Support and no other organization."
-    )
+    assert prompt.endswith("you represent Example Property Support and no other organization.")
     # The compiler contains no provider-name replacement. The product remains
     # valid issue context while the tenant identity remains authoritative.
     assert "Google and Gmail products" in prompt
+
+
+def test_a_lead_coordinator_does_not_self_identify_as_a_support_representative() -> None:
+    profile = TenantSupportProfile(
+        displayName="Fictional Systems",
+        supportDisplayName="Fictional Systems",
+        primaryLanguage="he",
+    )
+
+    prompt = compile_voice_runtime_prompt(
+        profile,
+        agent_prompt=(
+            "You are the Hebrew-speaking lead coordinator for the configured "
+            "business. Collect the customer's interest in our business software."
+        ),
+        persona_gender="female",
+        agent_role_title="the lead coordinator",
+    )
+
+    # Tenant identity stays authoritative; the role noun belongs to the agent.
+    assert "You represent only Fictional Systems" in prompt
+    assert "lead coordinator" in prompt
+    assert "support representative" not in prompt
+    assert prompt.endswith("you represent Fictional Systems and no other organization.")
+
+
+def test_an_unconfigured_role_stays_neutral_rather_than_support() -> None:
+    profile = TenantSupportProfile(
+        displayName="Fictional Systems",
+        supportDisplayName="Fictional Systems",
+        primaryLanguage="he",
+    )
+
+    prompt = compile_voice_runtime_prompt(
+        profile,
+        agent_prompt="Run a three-question product research survey.",
+        persona_gender="neutral",
+    )
+
+    assert "the automated assistant of Fictional Systems" in prompt
+    assert "support representative" not in prompt
+
+
+def test_a_support_agent_keeps_its_configured_support_role() -> None:
+    profile = TenantSupportProfile(
+        displayName="Example Property",
+        supportDisplayName="Example Property Support",
+        primaryLanguage="he",
+    )
+
+    prompt = compile_voice_runtime_prompt(
+        profile,
+        agent_prompt="Help the resident with a technical fault.",
+        persona_gender="female",
+        agent_role_title="the support representative",
+    )
+
+    assert "Identify yourself as the support representative" in prompt
+    assert prompt.endswith("you represent Example Property Support and no other organization.")
 
 
 def test_tenant_terminology_feeds_recognition_and_pronunciation() -> None:
@@ -122,9 +179,7 @@ def test_tenant_authored_role_text_cannot_precede_the_safety_policy() -> None:
     binding_at = prompt.index("Final identity binding:")
 
     assert policy_at < role_at < binding_at
-    assert prompt.endswith(
-        "you are the support representative of Example Property Support and no other organization."
-    )
+    assert prompt.endswith("you represent Example Property Support and no other organization.")
 
 
 def test_questions_about_the_assistant_resolve_to_the_tenant_not_a_vendor() -> None:
@@ -141,7 +196,7 @@ def test_questions_about_the_assistant_resolve_to_the_tenant_not_a_vendor() -> N
         )
         assert (
             "If asked who you are, who made you, or what technology you run on, say you are "
-            f"the automated support assistant of {profile.supportDisplayName}."
+            f"the automated assistant of {profile.supportDisplayName}."
         ) in prompt
         assert "Never use placeholders such as [name]." in prompt
         assert "Google" not in prompt

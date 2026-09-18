@@ -759,6 +759,126 @@
         "title": "ReconciliationReport",
         "type": "object"
       },
+      "RecordingState": {
+        "description": "Honest readiness, matching `support.ticket_call_attempts.recording_state`.",
+        "enum": ["ready", "partial", "unavailable", "failed"],
+        "title": "RecordingState",
+        "type": "string"
+      },
+      "RecordingVerification": {
+        "properties": {
+          "byte_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Byte Size"
+          },
+          "channels": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Channels"
+          },
+          "checksum": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checksum"
+          },
+          "content_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Type"
+          },
+          "detail": {
+            "enum": [
+              "verified",
+              "no_uri",
+              "bytes_unavailable",
+              "empty_file",
+              "not_wav",
+              "unexpected_sample_format",
+              "header_only",
+              "short_but_present",
+              "too_large"
+            ],
+            "title": "Detail",
+            "type": "string"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          },
+          "sample_rate": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sample Rate"
+          },
+          "state": {
+            "$ref": "#/components/schemas/RecordingState"
+          },
+          "storage_backend": {
+            "anyOf": [
+              {
+                "enum": ["local", "gcs"],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storage Backend"
+          },
+          "storage_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storage Key"
+          }
+        },
+        "required": ["state", "detail"],
+        "title": "RecordingVerification",
+        "type": "object"
+      },
       "RegisterPhoneNumberRequest": {
         "properties": {
           "allowed_addresses": {
@@ -846,6 +966,137 @@
         "title": "SimulatedCallResult",
         "type": "object"
       },
+      "TranscriptState": {
+        "enum": ["valid", "partial", "empty", "missing", "failed"],
+        "title": "TranscriptState",
+        "type": "string"
+      },
+      "TranscriptTurn": {
+        "description": "One parsed turn, numbered from 1 so an analysis can cite it.",
+        "properties": {
+          "index": {
+            "title": "Index",
+            "type": "integer"
+          },
+          "interrupted": {
+            "default": false,
+            "title": "Interrupted",
+            "type": "boolean"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "timestamp": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timestamp"
+          }
+        },
+        "required": ["index", "role", "text"],
+        "title": "TranscriptTurn",
+        "type": "object"
+      },
+      "TranscriptVerification": {
+        "properties": {
+          "byte_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Byte Size"
+          },
+          "checksum": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checksum"
+          },
+          "content_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Type"
+          },
+          "detail": {
+            "enum": [
+              "verified",
+              "no_uri",
+              "bytes_unavailable",
+              "empty_file",
+              "no_turns",
+              "unparsable_tail",
+              "not_utf8",
+              "too_large"
+            ],
+            "title": "Detail",
+            "type": "string"
+          },
+          "interrupted_turn_count": {
+            "default": 0,
+            "title": "Interrupted Turn Count",
+            "type": "integer"
+          },
+          "state": {
+            "$ref": "#/components/schemas/TranscriptState"
+          },
+          "storage_backend": {
+            "anyOf": [
+              {
+                "enum": ["local", "gcs"],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storage Backend"
+          },
+          "storage_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storage Key"
+          },
+          "turn_count": {
+            "default": 0,
+            "title": "Turn Count",
+            "type": "integer"
+          }
+        },
+        "required": ["state", "detail"],
+        "title": "TranscriptVerification",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -880,6 +1131,30 @@
         },
         "required": ["loc", "msg", "type"],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "VoiceArtifactReport": {
+        "description": "What the bytes behind a session actually are.\n\nDistinct from `VoiceSessionDetail.recording_available`, which only reports\nthat a URI was written. The post-call pipeline needs the difference: the\nagent writes both URIs even on the failed path, so a call that dropped\nbefore any audio and a call with a full recording look identical on the row.",
+        "properties": {
+          "recording": {
+            "$ref": "#/components/schemas/RecordingVerification"
+          },
+          "session_id": {
+            "format": "uuid",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "transcript": {
+            "$ref": "#/components/schemas/TranscriptVerification"
+          },
+          "verified_at": {
+            "format": "date-time",
+            "title": "Verified At",
+            "type": "string"
+          }
+        },
+        "required": ["session_id", "recording", "transcript", "verified_at"],
+        "title": "VoiceArtifactReport",
         "type": "object"
       },
       "VoiceCampaignCreate": {
@@ -1456,6 +1731,30 @@
         ],
         "title": "VoiceSessionSummary",
         "type": "object"
+      },
+      "VoiceTranscript": {
+        "description": "The call's turns, parsed once by the reader that owns the format.",
+        "properties": {
+          "session_id": {
+            "format": "uuid",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "turns": {
+            "items": {
+              "$ref": "#/components/schemas/TranscriptTurn"
+            },
+            "title": "Turns",
+            "type": "array"
+          }
+        },
+        "required": ["session_id", "state", "turns"],
+        "title": "VoiceTranscript",
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -2007,6 +2306,53 @@
         "tags": ["voice"]
       }
     },
+    "/api/v1/voice/sessions/{session_id}/artifacts": {
+      "get": {
+        "description": "Report what a call's stored artifacts actually contain.\n\nRead-only and tenant-scoped exactly like playback. The post-call pipeline\ncalls this instead of trusting `recording_uri`, so `recording_state=ready`\non a ticket means these bytes were opened, parsed and found to be a call.",
+        "operationId": "verify_voice_artifacts",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceArtifactReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Verify Voice Artifacts",
+        "tags": ["voice"]
+      }
+    },
     "/api/v1/voice/sessions/{session_id}/control": {
       "get": {
         "operationId": "get_voice_session_control",
@@ -2104,6 +2450,53 @@
           }
         ],
         "summary": "Set Control",
+        "tags": ["voice"]
+      }
+    },
+    "/api/v1/voice/sessions/{session_id}/transcript": {
+      "get": {
+        "description": "Serve a call's parsed turns to the authenticated caller.",
+        "operationId": "get_voice_transcript",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceTranscript"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Voice Transcript",
         "tags": ["voice"]
       }
     },

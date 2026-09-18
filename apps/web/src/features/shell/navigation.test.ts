@@ -8,6 +8,7 @@ import {
   contextualDestinations,
   findDestinations,
   navigation,
+  requiredFeatureForHref,
 } from "./navigation";
 import {
   applicationPageManifest,
@@ -87,15 +88,42 @@ describe("operator navigation", () => {
     expect(isApplicationPageHref("/tasks")).toBe(true);
   });
 
+  it("gives Leads its own primary destination and detail route", () => {
+    // A lead is not a contact property and not a ticket: it needs a register of
+    // its own, and a deep link to one lead has to highlight that register.
+    const id = "22222222-2222-4222-8222-222222222222";
+    expect(navigation.map((item) => item.href)).toContain("/leads");
+    expect(activeDestination("/leads")).toBe("/leads");
+    expect(activeDestination(`/leads/${id}`)).toBe("/leads");
+    expect(isApplicationPageHref(`/leads/${id}`)).toBe(true);
+    expect(isApplicationPageHref("/leads/unknown/deeper")).toBe(false);
+    // Promoting Leads must not demote anything that was already primary.
+    for (const href of [
+      "/tickets",
+      "/contacts",
+      "/pipelines",
+      "/orchestration",
+    ])
+      expect(navigation.map((item) => item.href)).toContain(href);
+  });
+
   it("scopes each contextual destination to the module that owns it", () => {
     // parentHref used to be ignored, which put every subroute under Voice.
     const parents = new Set(
       contextualDestinations.map((item) => item.parentHref),
     );
 
-    expect(parents).toEqual(new Set(["/tickets", "/voice"]));
+    expect(parents).toEqual(new Set(["/tickets", "/voice", "/settings"]));
     for (const item of contextualDestinations)
       expect(navigation.map(({ href }) => href)).toContain(item.parentHref);
+  });
+
+  it("maps tenant modules independently from human permissions", () => {
+    expect(requiredFeatureForHref("/leads")).toBe("leads");
+    expect(requiredFeatureForHref("/tickets/fixture")).toBe("tickets");
+    expect(requiredFeatureForHref("/field-service/ocr")).toBe("field_service");
+    expect(requiredFeatureForHref("/orchestration")).toBe("agents");
+    expect(requiredFeatureForHref("/settings/business")).toBeUndefined();
   });
 
   it("searches available destinations and excludes deferred Live Lab", () => {
@@ -108,6 +136,7 @@ describe("operator navigation", () => {
       "/email",
       "/calendar",
       "/tickets",
+      "/leads",
       "/contacts",
       "/pipelines",
       "/field-service",

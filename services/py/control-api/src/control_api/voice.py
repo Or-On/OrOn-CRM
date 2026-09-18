@@ -20,6 +20,14 @@ from oron_flows.compose import Composition, expand
 from oron_flows.graph import FlowSpec
 from oron_sessions.artifacts import ArtifactUnavailable, read_artifact
 from oron_sessions.models import Session, SessionEvent, SessionStatus
+from oron_sessions.verification import (
+    RecordingVerification,
+    TranscriptTurn,
+    TranscriptVerification,
+    transcript_turns,
+    verify_recording,
+    verify_transcript,
+)
 from oron_tenancy.models import Flow, PhoneNumber
 from pydantic import BaseModel, Field
 from sqlalchemy import bindparam, func, select, text
@@ -102,6 +110,29 @@ class VoiceSessionDetail(VoiceSessionSummary):
 
 class VoiceSessionLookup(BaseModel):
     session_id: UUID
+
+
+class VoiceArtifactReport(BaseModel):
+    """What the bytes behind a session actually are.
+
+    Distinct from `VoiceSessionDetail.recording_available`, which only reports
+    that a URI was written. The post-call pipeline needs the difference: the
+    agent writes both URIs even on the failed path, so a call that dropped
+    before any audio and a call with a full recording look identical on the row.
+    """
+
+    session_id: UUID
+    recording: RecordingVerification
+    transcript: TranscriptVerification
+    verified_at: dt.datetime
+
+
+class VoiceTranscript(BaseModel):
+    """The call's turns, parsed once by the reader that owns the format."""
+
+    session_id: UUID
+    state: str
+    turns: list[TranscriptTurn]
 
 
 class PhoneNumberSummary(BaseModel):
@@ -242,7 +273,15 @@ class VoiceRepository(Protocol):
         self, principal: ServicePrincipal, session_id: UUID
     ) -> bytes | None: ...
 
+    async def verify_artifacts(
+        self, principal: ServicePrincipal, session_id: UUID
+    ) -> VoiceArtifactReport | None: ...
+
     async def get_transcript(
+        self, principal: ServicePrincipal, session_id: UUID
+    ) -> VoiceTranscript | None: ...
+
+    async def get_transcript_raw(
         self, principal: ServicePrincipal, session_id: UUID
     ) -> bytes | None: ...
 
@@ -372,7 +411,67 @@ class PostgresVoiceRepository:
         except ArtifactUnavailable:
             return None
 
-    async def get_transcript(self, principal: ServicePrincipal, session_id: UUID) -> bytes | None:
+    async def verify_artifacts(
+        self, principal: ServicePrincipal, session_id: UUID
+    ) -> VoiceArtifactReport | None:
+        """Read both artifacts and report what they are, not that a URI exists.
+
+        The URIs come off the tenant-scoped session row exactly as `get_recording`
+        takes them, so a `ready` verdict here is a statement about the same bytes
+        the authenticated playback endpoint will serve. The reads run outside the
+        database transaction: fetching a full call from object storage must not
+        hold a connection open.
+        """
+        async with self._sessionmaker() as database, database.begin():
+            await self._scope(database, principal)
+            session = (
+                await database.execute(select(Session).where(col(Session.session_id) == session_id))
+            ).scalar_one_or_none()
+            if session is None:
+                return None
+            recording_uri = session.recording_uri
+            transcript_uri = session.transcript_uri
+        return VoiceArtifactReport(
+            session_id=session_id,
+            recording=await verify_recording(recording_uri),
+            transcript=await verify_transcript(transcript_uri),
+            verified_at=dt.datetime.now(dt.UTC),
+        )
+
+    async def get_transcript(
+        self, principal: ServicePrincipal, session_id: UUID
+    ) -> VoiceTranscript | None:
+        """Return the call's parsed turns, or an honest empty state.
+
+        The post-call analysis cites turns by index, so the numbering has to
+        come from one reader rather than from whoever parsed the file last. A
+        stored URI with nothing behind it reports `missing` and no turns, which
+        is the distinction the caller needs to avoid summarising silence.
+        """
+        async with self._sessionmaker() as database, database.begin():
+            await self._scope(database, principal)
+            session = (
+                await database.execute(select(Session).where(col(Session.session_id) == session_id))
+            ).scalar_one_or_none()
+            if session is None:
+                return None
+            uri = session.transcript_uri
+        if not uri:
+            return VoiceTranscript(session_id=session_id, state="missing", turns=[])
+        try:
+            payload = await read_artifact(uri)
+        except ArtifactUnavailable:
+            return VoiceTranscript(session_id=session_id, state="missing", turns=[])
+        verified = await verify_transcript(uri)
+        return VoiceTranscript(
+            session_id=session_id,
+            state=str(verified.state),
+            turns=transcript_turns(payload),
+        )
+
+    async def get_transcript_raw(
+        self, principal: ServicePrincipal, session_id: UUID
+    ) -> bytes | None:
         """Read tenant-scoped transcript text without exposing its storage URI."""
         async with self._sessionmaker() as database, database.begin():
             await self._scope(database, principal)
@@ -1142,15 +1241,52 @@ def create_voice_router(
         )
 
     @router.get(
+        "/sessions/{session_id}/artifacts",
+        response_model=VoiceArtifactReport,
+        operation_id="verify_voice_artifacts",
+    )
+    async def verify_voice_artifacts(
+        session_id: UUID,
+        principal: ServicePrincipal = Depends(require_voice_read),
+        store: VoiceRepository = Depends(configured_repository),
+    ) -> VoiceArtifactReport:
+        """Report what a call's stored artifacts actually contain.
+
+        Read-only and tenant-scoped exactly like playback. The post-call pipeline
+        calls this instead of trusting `recording_uri`, so `recording_state=ready`
+        on a ticket means these bytes were opened, parsed and found to be a call.
+        """
+        report = await store.verify_artifacts(principal, session_id)
+        if report is None:
+            raise HTTPException(status_code=404, detail="voice session not found")
+        return report
+
+    @router.get(
         "/sessions/{session_id}/transcript",
-        include_in_schema=False,
+        response_model=VoiceTranscript,
+        operation_id="get_voice_transcript",
     )
     async def get_voice_transcript(
         session_id: UUID,
         principal: ServicePrincipal = Depends(require_voice_read),
         store: VoiceRepository = Depends(configured_repository),
-    ) -> Response:
+    ) -> VoiceTranscript:
+        """Serve a call's parsed turns to the authenticated caller."""
         transcript = await store.get_transcript(principal, session_id)
+        if transcript is None:
+            raise HTTPException(status_code=404, detail="voice session not found")
+        return transcript
+
+    @router.get(
+        "/sessions/{session_id}/transcript/raw",
+        include_in_schema=False,
+    )
+    async def get_voice_transcript_raw(
+        session_id: UUID,
+        principal: ServicePrincipal = Depends(require_voice_read),
+        store: VoiceRepository = Depends(configured_repository),
+    ) -> Response:
+        transcript = await store.get_transcript_raw(principal, session_id)
         if transcript is None:
             raise HTTPException(status_code=404, detail="voice transcript not found")
         return Response(

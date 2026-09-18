@@ -5,6 +5,7 @@ import type {
   AutomationSummary,
   JsonValue,
 } from "./types.js";
+import { requireTenantFeature } from "./tenant-features.js";
 
 interface AutomationRow {
   definition: JsonValue;
@@ -21,6 +22,7 @@ interface AutomationRow {
 export async function listAutomations(
   sql: postgres.TransactionSql,
 ): Promise<readonly AutomationSummary[]> {
+  await requireTenantFeature(sql, "agents");
   const rows = await sql<AutomationRow[]>`
     SELECT definition.id, definition.name, definition.description,
            version.version, version.published_at, version.validation_status,
@@ -57,6 +59,7 @@ export async function renameAutomation(
   definitionId: string,
   name: string,
 ): Promise<boolean> {
+  await requireTenantFeature(sql, "agents");
   const normalized = name.trim();
   if (!normalized || normalized.length > 120)
     throw new TypeError("flow name must contain 1–120 characters");
@@ -82,6 +85,7 @@ export async function archiveAutomation(
   actorUserId: string,
   definitionId: string,
 ): Promise<boolean> {
+  await requireTenantFeature(sql, "agents");
   const rows = await sql<{ id: string }[]>`
     UPDATE automation.flow_definitions
     SET archived_at=CURRENT_TIMESTAMP,
@@ -107,6 +111,8 @@ export async function createAutomationDraft(
   name: string,
   description?: string,
 ): Promise<string> {
+  await requireTenantFeature(sql, "agents");
+  await requireTenantFeature(sql, "whatsapp");
   const normalized = name.trim();
   if (!normalized) throw new TypeError("automation name is required");
   const definitions = await sql<{ id: string }[]>`
@@ -133,6 +139,8 @@ export async function publishAutomation(
   sql: postgres.TransactionSql,
   definitionId: string,
 ): Promise<boolean> {
+  await requireTenantFeature(sql, "agents");
+  await requireTenantFeature(sql, "whatsapp");
   const rows = await sql<{ id: string }[]>`
     UPDATE automation.flow_versions SET published_at = CURRENT_TIMESTAMP
     WHERE id = (SELECT id FROM automation.flow_versions
@@ -149,6 +157,8 @@ export async function runManualAutomation(
   sql: postgres.TransactionSql,
   definitionId: string,
 ): Promise<string> {
+  await requireTenantFeature(sql, "agents");
+  await requireTenantFeature(sql, "whatsapp");
   const rows = await sql<{ id: string }[]>`
     INSERT INTO automation.flow_runs
       (tenant_id, flow_version_id, trigger_type, trigger_metadata, status,
@@ -178,6 +188,7 @@ export async function runManualAutomation(
 export async function listAutomationRuns(
   sql: postgres.TransactionSql,
 ): Promise<readonly AutomationRunSummary[]> {
+  await requireTenantFeature(sql, "agents");
   const rows = await sql<
     {
       id: string;

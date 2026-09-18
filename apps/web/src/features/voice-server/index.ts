@@ -82,7 +82,7 @@ export async function voiceTranscriptResponse(
   const assertion = await issueControlApiGrant(resolved.session, "voice:read");
   const config = loadConfig(process.env, { service: "web" });
   const url = new URL(
-    `/api/v1/voice/sessions/${encodeURIComponent(sessionId)}/transcript`,
+    `/api/v1/voice/sessions/${encodeURIComponent(sessionId)}/transcript/raw`,
     config.controlApiUrl,
   );
   return fetch(url, {

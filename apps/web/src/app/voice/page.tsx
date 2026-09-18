@@ -2,7 +2,11 @@ import { productMetadata } from "../../i18n/product-metadata";
 import { AccessDenied } from "../../i18n/access-denied";
 import { ProductHeading } from "../../i18n/product-heading";
 import { redirect } from "next/navigation";
-import { getTenantSettings } from "@or-on/crm";
+import {
+  getTenantSettings,
+  requireTenantFeature,
+  TenantFeatureDisabledError,
+} from "@or-on/crm";
 
 import {
   ForbiddenError,
@@ -16,9 +20,10 @@ export default async function VoicePage() {
   try {
     const [client, timezone] = await Promise.all([
       voiceClient("voice:read"),
-      withCurrentTenant("voice:read", async (sql) =>
-        getTenantSettings(sql).then((settings) => settings.timezone),
-      ),
+      withCurrentTenant("voice:read", async (sql) => {
+        await requireTenantFeature(sql, "voice");
+        return getTenantSettings(sql).then((settings) => settings.timezone);
+      }),
     ]);
     const [sessions, numbers, flows, reconciliation] = await Promise.all([
       client.listVoiceSessions(),
@@ -39,7 +44,11 @@ export default async function VoicePage() {
       </main>
     );
   } catch (error) {
-    if (error instanceof ForbiddenError) return <AccessDenied />;
+    if (
+      error instanceof ForbiddenError ||
+      error instanceof TenantFeatureDisabledError
+    )
+      return <AccessDenied />;
     if (error instanceof UnauthenticatedError) redirect("/login");
     throw error;
   }

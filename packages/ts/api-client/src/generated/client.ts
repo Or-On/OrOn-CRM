@@ -20,6 +20,7 @@ import type {
   RegisterPhoneNumberRequest,
   SimulatedCallRequest,
   SimulatedCallResult,
+  VoiceArtifactReport,
   VoiceCampaignCreate,
   VoiceCampaignList,
   VoiceCampaignRun,
@@ -30,6 +31,7 @@ import type {
   VoiceSessionDetail,
   VoiceSessionList,
   VoiceSessionLookup,
+  VoiceTranscript,
 } from "./schema";
 
 export interface ApiResponse<T> {
@@ -178,6 +180,14 @@ export class GeneratedControlApiClient {
     return this.request<VoiceSessionList>("/api/v1/voice/sessions");
   }
 
+  public async verifyVoiceArtifacts(parameters: {
+    readonly session_id: string;
+  }): Promise<ApiResponse<VoiceArtifactReport>> {
+    return this.request<VoiceArtifactReport>(
+      `/api/v1/voice/sessions/${encodeURIComponent(String(parameters.session_id))}/artifacts`,
+    );
+  }
+
   public async getVoiceSessionControl(parameters: {
     readonly session_id: string;
   }): Promise<ApiResponse<VoiceControlStatus>> {
@@ -197,6 +207,14 @@ export class GeneratedControlApiClient {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
       },
+    );
+  }
+
+  public async getVoiceTranscript(parameters: {
+    readonly session_id: string;
+  }): Promise<ApiResponse<VoiceTranscript>> {
+    return this.request<VoiceTranscript>(
+      `/api/v1/voice/sessions/${encodeURIComponent(String(parameters.session_id))}/transcript`,
     );
   }
 

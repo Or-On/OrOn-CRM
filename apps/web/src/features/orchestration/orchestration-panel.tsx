@@ -44,6 +44,12 @@ import { AutomationRunHistory } from "../operations";
 import { AgentRegister } from "./agent-register";
 import { CanonicalFlowEditor } from "./canonical-flow-editor";
 import { FlowCanvas } from "./flow-canvas";
+import {
+  emptyLeadConfiguration,
+  LeadCapabilityFieldset,
+  leadRequestFields,
+  type LeadCapabilityConfiguration,
+} from "./lead-capability-fieldset";
 import { orchestrationLocation } from "./location";
 
 type OrchestrationTab = "agents" | "flows" | "activity" | "handoffs";
@@ -116,6 +122,8 @@ export function OrchestrationPanel({
   >(null);
   const [renameFlowId, setRenameFlowId] = useState<string>();
   const [deleteFlowId, setDeleteFlowId] = useState<string>();
+  const [creationLeads, setCreationLeads] =
+    useState<LeadCapabilityConfiguration>(emptyLeadConfiguration());
   const hasPublishedAgent = agents.some(
     (agent) => agent.published && agent.versionId,
   );
@@ -169,16 +177,20 @@ export function OrchestrationPanel({
     event.preventDefault();
     const form = event.currentTarget;
     const data = new FormData(form);
-    const saved = await run(() =>
+    const saved = await run(async () =>
       crmMutation("/api/orchestration/agents", {
         name: data.get("name"),
         systemPrompt: data.get("systemPrompt"),
         locale: data.get("locale"),
         channels: ["voice", "whatsapp"],
+        // Capabilities come only from the boxes the operator ticked; a field
+        // list they defined is published first so the agent can pin it.
+        ...(await leadRequestFields(creationLeads)),
       }),
     );
     if (saved) {
       form.reset();
+      setCreationLeads(emptyLeadConfiguration());
       setCreation(null);
     }
   }
@@ -461,6 +473,20 @@ export function OrchestrationPanel({
                   ),
                 )
               }
+              rebind={(id, versionId) =>
+                run(() =>
+                  crmMutation(`/api/orchestration/agents/${id}/rebind`, {
+                    versionId,
+                  }),
+                )
+              }
+              revise={(id, revision) =>
+                run(() =>
+                  crmMutation(`/api/orchestration/agents/${id}`, revision, {
+                    method: "PATCH",
+                  }),
+                )
+              }
             />
           ) : null}
 
@@ -497,10 +523,17 @@ export function OrchestrationPanel({
                 />
                 <Textarea
                   id="agent-prompt"
+                  dir="auto"
                   label={t("orchestration.prompt")}
                   name="systemPrompt"
                   required
                   rows={4}
+                />
+                <LeadCapabilityFieldset
+                  idPrefix="create-agent"
+                  value={creationLeads}
+                  onChange={setCreationLeads}
+                  disabled={pending || !canEdit}
                 />
                 <Button busy={pending} disabled={!canEdit} type="submit">
                   {t("orchestration.draft")}

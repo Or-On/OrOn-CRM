@@ -44,6 +44,8 @@ function fixture(
       const statement = parts.join("?");
       statements.push(statement);
       values.push(parameters);
+      if (statement.includes("current_tenant_feature_enabled"))
+        return Promise.resolve([{ enabled: true }]);
       return Promise.resolve(respond(statement, parameters));
     },
   );
@@ -176,8 +178,8 @@ describe("removed Inbox conversation guardrails", () => {
     await expect(
       archiveAgentProfile(archive.sql, actorId, definitionId),
     ).resolves.toBe("active");
-    expect(archive.statements[0]).toContain("pg_advisory_xact_lock");
-    expect(archive.statements[2]).toContain(
+    expect(archive.statements[1]).toContain("pg_advisory_xact_lock");
+    expect(archive.statements[3]).toContain(
       "conversation.removed_from_inbox_at IS NULL",
     );
   });
@@ -189,10 +191,10 @@ describe("removed Inbox conversation guardrails", () => {
     await expect(
       assignDefaultWhatsAppAi(automatic.sql, conversationId),
     ).resolves.toBe(false);
-    expect(automatic.statements).toHaveLength(3);
-    expect(automatic.statements[0]).toContain("profile.archived_at IS NULL");
-    expect(automatic.statements[1]).toContain("pg_advisory_xact_lock");
+    expect(automatic.statements).toHaveLength(5);
     expect(automatic.statements[2]).toContain("profile.archived_at IS NULL");
+    expect(automatic.statements[3]).toContain("pg_advisory_xact_lock");
+    expect(automatic.statements[4]).toContain("profile.archived_at IS NULL");
 
     const manual = fixture((statement) =>
       statement.includes("SELECT agent_profile_id")

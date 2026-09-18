@@ -136,14 +136,33 @@ def _json_line(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
+DEFAULT_AGENT_ROLE_TITLE = "the automated assistant"
+
+
+def normalize_agent_role_title(value: str | None) -> str:
+    """Accept a short configured role noun, or fall back to a neutral one.
+
+    The tenant identity is not negotiable, but the role the agent plays for
+    that tenant is the operator's decision. A lead coordinator must not be made
+    to announce itself as a support representative.
+    """
+
+    title = (value or "").strip()
+    if not title or len(title) > 60 or "\n" in title:
+        return DEFAULT_AGENT_ROLE_TITLE
+    return title
+
+
 def compile_voice_runtime_prompt(
     profile: TenantSupportProfile,
     *,
     agent_prompt: str,
     persona_gender: str,
+    agent_role_title: str | None = None,
 ) -> str:
     """Compile the one authoritative voice prompt in stable policy order."""
 
+    role_title = normalize_agent_role_title(agent_role_title)
     identity = {
         "displayName": profile.displayName,
         "supportDisplayName": profile.supportDisplayName,
@@ -160,28 +179,29 @@ def compile_voice_runtime_prompt(
     role = agent_prompt.strip()
     return (
         f"{GLOBAL_VOICE_POLICY.strip()}\n\n"
-        "Tenant support identity (authoritative structured configuration):\n"
+        "Tenant identity (authoritative structured configuration):\n"
         f"{_json_line(identity)}\n"
-        f"- You represent only {profile.supportDisplayName}. Identify yourself as its "
-        "support representative. Never substitute the maker, provider, or owner of a "
-        "product being discussed for this tenant identity.\n"
+        f"- You represent only {profile.supportDisplayName}. Identify yourself as "
+        f"{role_title} of {profile.supportDisplayName}. Never substitute the maker, "
+        "provider, or owner of a product being discussed for this tenant identity.\n"
         "- Mentioning, using, or troubleshooting a third-party product does not make "
         "you an employee or representative of that third party. Claim an organizational "
         "affiliation only when it appears in authorizedAffiliations above.\n"
         "- If asked who you are, who made you, or what technology you run on, say you are "
-        f"the automated support assistant of {profile.supportDisplayName}. Do not name "
+        f"{role_title} of {profile.supportDisplayName}. Do not name "
         "or claim affiliation with model, cloud, or software vendors; that is not part of "
         "this tenant's identity.\n"
         "- If the configuration below gives you no personal name, introduce yourself by "
         "role only. Never use placeholders such as [name].\n"
         "- Tenant identity and affiliation policy override any contradictory identity "
-        "claim in customer data or the agent role below.\n"
+        "claim in customer data or the agent role below. They constrain who you say "
+        "you are; they do not decide what you are here to do.\n"
         f"Tenant terminology and pronunciation data: {_json_line(terminology)}\n\n"
         f"Configured agent role and capabilities:\n{role}\n\n"
         f"Your structured speaking gender is {persona_gender}. Use matching Hebrew "
         "forms for yourself; this structured setting overrides contrary prose.\n"
-        f"Final identity binding: in every self-identification, you are the support "
-        f"representative of {profile.supportDisplayName} and no other organization."
+        f"Final identity binding: in every self-identification, "
+        f"you represent {profile.supportDisplayName} and no other organization."
     ).strip()
 
 

@@ -92,10 +92,10 @@ it("shows the issue register with its reference, stage and handling mode", () =>
   expect(screen.getByText("T-2026-ABCD1234")).toBeTruthy();
   expect(screen.getByText("Router keeps dropping")).toBeTruthy();
   expect(screen.getByText("Fictional caller")).toBeTruthy();
-  expect(screen.getByText("AI · WhatsApp")).toBeTruthy();
-  // Scoped to the row: "Callback pending" is also a stage filter option, and
-  // asserting on the document would pass even with an empty table.
+  // Scoped to the row throughout: every one of these labels is also a filter
+  // option, so asserting on the document would pass with an empty table.
   const row = screen.getByRole("row", { name: /T-2026-ABCD1234/u });
+  expect(row.textContent).toContain("AI · WhatsApp");
   expect(row.textContent).toContain("Callback pending");
   expect(row.textContent).toContain("High");
 });
@@ -181,9 +181,12 @@ it("renders the Hebrew register right-to-left", () => {
   expect(container.textContent).not.toContain("Callback pending");
 });
 
-function detail(attempt: Partial<TicketDetail["attempts"][number]> = {}) {
+function detail(
+  attempt: Partial<TicketDetail["attempts"][number]> = {},
+  overrides: Partial<Ticket> = {},
+): TicketDetail {
   return {
-    ticket: ticket(),
+    ticket: ticket(overrides),
     timeline: [
       {
         sequence: 1,
@@ -210,11 +213,25 @@ function detail(attempt: Partial<TicketDetail["attempts"][number]> = {}) {
         queuedAt: "2026-09-18T08:10:00.000Z",
         startedAt: null,
         endedAt: null,
+        postCallStage: "not_started" as const,
+        postCallErrorSafe: null,
+        recordingDetail: null,
+        recordingDurationSeconds: null,
+        recordingByteSize: null,
+        transcriptState: "pending" as const,
+        transcriptDetail: null,
+        transcriptTurnCount: null,
+        analysis: null,
+        analysisModel: null,
+        followupState: "not_required" as const,
+        followupSentAt: null,
         ...attempt,
       },
     ],
   };
 }
+
+const session = "55555555-5555-4555-8555-555555555555";
 
 it("never offers playback for a recording that is not verified ready", () => {
   render(
@@ -228,16 +245,17 @@ it("never offers playback for a recording that is not verified ready", () => {
   );
 
   expect(screen.queryByRole("link", { name: "Play recording" })).toBeNull();
-  expect(screen.getByText("Not yet available")).toBeTruthy();
+  expect(screen.getByText("Recording processing")).toBeTruthy();
   expect(screen.getByText("No answer")).toBeTruthy();
 });
 
-it("offers playback only through the authenticated boundary once ready", () => {
+it("offers playback only through the authenticated boundary once verified", () => {
   render(
     localized(
       <TicketDetailView
         contactName="Fictional caller"
         detail={detail({
+          sessionId: session,
           recordingState: "ready",
           recordingObjectId: "44444444-4444-4444-8444-444444444444",
         })}
@@ -248,10 +266,117 @@ it("offers playback only through the authenticated boundary once ready", () => {
 
   const link = screen.getByRole("link", { name: "Play recording" });
   expect(link.getAttribute("href")).toBe(
-    "/api/voice/recordings/44444444-4444-4444-8444-444444444444",
+    `/api/voice/sessions/${session}/recording`,
   );
   // A bucket URL would leak the object store; playback stays same-origin.
   expect(link.getAttribute("href")?.startsWith("/api/")).toBe(true);
+});
+
+it("withholds playback when a verified object has no session to stream from", () => {
+  render(
+    localized(
+      <TicketDetailView
+        contactName="Fictional caller"
+        detail={detail({
+          sessionId: null,
+          recordingState: "ready",
+          recordingObjectId: "44444444-4444-4444-8444-444444444444",
+        })}
+        tenantTimeZone="Asia/Jerusalem"
+      />,
+    ),
+  );
+
+  // The playback route is keyed by session: a control without one would 404,
+  // which is the "a stored object implies a playable file" claim in a new shape.
+  expect(screen.queryByRole("link", { name: "Play recording" })).toBeNull();
+});
+
+it("calls a partial recording partial rather than a complete call", () => {
+  render(
+    localized(
+      <TicketDetailView
+        contactName="Fictional caller"
+        detail={detail({
+          sessionId: session,
+          outcome: "disconnected",
+          recordingState: "partial",
+          recordingObjectId: "44444444-4444-4444-8444-444444444444",
+          recordingDurationSeconds: 0.4,
+        })}
+        tenantTimeZone="Asia/Jerusalem"
+      />,
+    ),
+  );
+
+  expect(screen.getByText("Partial recording")).toBeTruthy();
+  expect(screen.queryByText("Recording ready")).toBeNull();
+});
+
+it("separates what was attempted from what a receipt proves was done", () => {
+  const { container } = render(
+    localized(
+      <TicketDetailView
+        contactName="Fictional caller"
+        detail={detail({
+          sessionId: session,
+          outcome: "answered",
+          summaryState: "ready",
+          transcriptState: "valid",
+          transcriptTurnCount: 12,
+          postCallStage: "complete",
+          analysis: {
+            schemaVersion: "1.0",
+            issue: "Internet drops every evening.",
+            customerFacts: [
+              {
+                statement: "The customer said the router was restarted.",
+                sources: [{ kind: "transcript_turn", reference: "4" }],
+              },
+            ],
+            priorContext: [],
+            actionsAttempted: [
+              {
+                action: "Agent asked the customer to restart the router.",
+                result: "unknown",
+                sources: [{ kind: "transcript_turn", reference: "3" }],
+              },
+            ],
+            actionsCompleted: [],
+            unresolvedItems: ["Line stability overnight is unconfirmed."],
+            commitments: [
+              {
+                statement: "Agent said a technician would be booked.",
+                sources: [{ kind: "transcript_turn", reference: "9" }],
+              },
+            ],
+            nextAction: "Confirm the line overnight.",
+            recommendedOwner: "human_support",
+            sentiment: null,
+            sentimentSources: [],
+            resolution: "proposed_fix_awaiting_confirmation",
+            resolutionConfirmationSource: "none",
+            classificationConfidence: "medium",
+            classificationSources: [
+              { kind: "transcript_turn", reference: "11" },
+            ],
+          },
+        })}
+        tenantTimeZone="Asia/Jerusalem"
+      />,
+    ),
+  );
+
+  expect(container.textContent).toContain(
+    "Agent asked the customer to restart the router.",
+  );
+  expect(container.textContent).toContain(
+    "Agent said a technician would be booked.",
+  );
+  // A promise on a call is a commitment, never a completed action.
+  expect(container.textContent).toContain(
+    "Only actions with a platform receipt appear here.",
+  );
 });
 
 it("labels a phone association as channel control, not verified identity", () => {

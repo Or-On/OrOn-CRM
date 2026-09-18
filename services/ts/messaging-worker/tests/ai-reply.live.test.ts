@@ -297,6 +297,10 @@ describe.skipIf(sourceUrl === undefined)(
           systemPrompt: "Answer fictional customer questions safely.",
           channels: ["voice", "whatsapp"],
           locale: "en",
+          // Opening the customer's support ticket on escalation is a granted
+          // capability, not something every agent does implicitly. This one
+          // is a support assistant, so it holds it.
+          toolPermissions: ["ticket.open"],
         });
         knowledgeDocumentId = await createKnowledgeDraft(transaction, userId, {
           title: "Fictional opening hours",
@@ -844,7 +848,33 @@ describe.skipIf(sourceUrl === undefined)(
         "opened",
         "assignment",
         "call_attempt",
+        "call_outcome",
       ]);
+      // The attempt row is what the post-call pipeline will land on: created
+      // before the dial, then bound to the canonical session the dispatcher
+      // accepted, so a terminal call has somewhere to report itself.
+      const attempts = await admin<
+        {
+          attempt_number: number;
+          outcome: string;
+          post_call_stage: string;
+          recording_state: string;
+          session_id: string | null;
+          summary_state: string;
+        }[]
+      >`
+        SELECT attempt_number, session_id, outcome, recording_state,
+               summary_state, post_call_stage
+        FROM support.ticket_call_attempts WHERE ticket_id=${issue.id}::uuid
+      `;
+      expect(attempts).toHaveLength(1);
+      expect(attempts[0]?.attempt_number).toBe(1);
+      expect(attempts[0]?.session_id).not.toBeNull();
+      expect(attempts[0]?.outcome).toBe("dialing");
+      // Nothing is claimed about artifacts before the call has even ended.
+      expect(attempts[0]?.recording_state).toBe("pending");
+      expect(attempts[0]?.summary_state).toBe("pending");
+      expect(attempts[0]?.post_call_stage).toBe("not_started");
 
       const originalCalls = await admin<
         {

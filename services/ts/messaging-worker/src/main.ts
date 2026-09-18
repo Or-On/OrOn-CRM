@@ -15,6 +15,8 @@ import {
   SimulatorWhatsAppProvider,
 } from "./providers.js";
 import { OpenAiCompatibleChatProvider } from "./ai-provider.js";
+import { ControlApiArtifactVerifier } from "./artifact-verifier.js";
+import { OpenAiCompatiblePostCallProvider } from "./post-call-provider.js";
 import { DispatcherAutomaticCallProvider } from "./call-provider.js";
 import { OpenAiCompatibleFieldServiceProvider } from "./field-service-provider.js";
 import { WorkerHealthSignal } from "./health.js";
@@ -77,6 +79,13 @@ async function main(): Promise<void> {
           config.enableRealVoiceProviders,
         serviceSecret: config.secrets.authServiceSecret,
       }),
+      // Reads a finished call's artifacts through the service that owns them,
+      // so a `ready` recording on a ticket means the playback route can serve
+      // those bytes rather than that a URI was written.
+      artifactVerifier: new ControlApiArtifactVerifier({
+        controlApiUrl: config.controlApiUrl,
+        serviceSecret: config.secrets.authServiceSecret,
+      }),
       ...(llmOptions === undefined
         ? {}
         : {
@@ -84,6 +93,8 @@ async function main(): Promise<void> {
             fieldServiceProvider: new OpenAiCompatibleFieldServiceProvider(
               llmOptions,
             ),
+            postCallProvider: new OpenAiCompatiblePostCallProvider(llmOptions),
+            postCallModel: llmOptions.model,
           }),
       ...(protectedFieldKeys === undefined
         ? {}

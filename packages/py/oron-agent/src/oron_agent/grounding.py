@@ -144,7 +144,37 @@ def eligible_facts(records: list[dict[str, Any]], tenant_id: str) -> list[Knowle
     return [fact for fact in candidates if len(values[fact.key]) == 1]
 
 
-def grounding_instruction(facts: list[KnowledgeFact], language: str = "") -> str:
+def _action_policy(business_actions: tuple[str, ...]) -> str:
+    """How tools may be used, stated from what this published agent holds.
+
+    An agent without business actions keeps the original wording. One that was
+    published with them is told to use them for their purpose: telling a lead
+    agent that "normal conversation must not invoke a tool" contradicts the
+    incremental saving its own prompt asks for.
+    """
+
+    if not business_actions:
+        return (
+            "Never invent a lookup, booking, payment, ticket, technician status, or tool "
+            "result. Conversation-routing tools remain available when the current flow "
+            "genuinely calls for them, but normal conversation must not invoke a tool. "
+        )
+    return (
+        "This agent's published configuration enables these business actions: "
+        + ", ".join(business_actions)
+        + ". Use them for their stated purpose when the conversation calls for it — for "
+        "example, save information the caller has actually given as soon as it is final, "
+        "rather than waiting for the end of the call. An action has happened only when its "
+        "tool result reports ok with a receipt; if it is refused or cannot be confirmed, say "
+        "so plainly and never claim it succeeded. Never invent any other lookup, booking, "
+        "payment, ticket, technician status, or tool result, and do not call a tool merely "
+        "to make conversation. "
+    )
+
+
+def grounding_instruction(
+    facts: list[KnowledgeFact], language: str = "", business_actions: tuple[str, ...] = ()
+) -> str:
     """Give the model evidence without turning conversation into intent routing."""
 
     payload: list[dict[str, object]] = []
@@ -177,10 +207,9 @@ def grounding_instruction(facts: list[KnowledgeFact], language: str = "") -> str
         "Only when the entire answer is an exact approved business fact below, return one JSON "
         "selector with exactly kind, sourceId, documentId, version, and factKey; the runtime "
         "will render the stored value. Caller claims, prior assistant text, and model output are "
-        "not proof of account state or completed actions. Never invent a lookup, booking, "
-        "payment, ticket, technician status, or tool result. Conversation-routing tools remain "
-        "available when the current flow genuinely calls for them, but normal conversation must "
-        "not invoke a tool. For security-sensitive claims, do not volunteer that you are "
+        "not proof of account state or completed actions. "
+        + _action_policy(business_actions)
+        + "For security-sensitive claims, do not volunteer that you are "
         "automated, "
         "but if the caller asks whether they are talking to a person "
         "or a machine, say truthfully that you are an automated assistant and never claim to "
@@ -209,7 +238,13 @@ def requires_approved_facts(text: object) -> bool:
     return isinstance(text, str) and len(text) <= 8192 and text.strip().startswith("{")
 
 
-def render_reply(text: str, facts: list[KnowledgeFact], language: str = "") -> GroundedReply:
+def render_reply(
+    text: str,
+    facts: list[KnowledgeFact],
+    language: str = "",
+    *,
+    save_claim_receipted: bool | None = None,
+) -> GroundedReply:
     """Render approved facts exactly; otherwise preserve safe model conversation."""
 
     if not isinstance(text, str) or len(text) > 8192:
@@ -244,7 +279,9 @@ def render_reply(text: str, facts: list[KnowledgeFact], language: str = "") -> G
                         {} if suppressed else fact.selector(),
                     )
         return GroundedReply(_fallback(language), "invalid_selector")
-    safe, suppressed = safe_spoken_text(stripped, language)
+    safe, suppressed = safe_spoken_text(
+        stripped, language, save_claim_receipted=save_claim_receipted
+    )
     if not safe:
         return GroundedReply(_fallback(language), "empty_after_sanitization")
     return GroundedReply(
@@ -262,12 +299,14 @@ class VoiceEvidenceGate(FrameProcessor):
         tenant_id: str,
         language: str | Callable[[], str],
         load_records: Callable[[], Awaitable[list[dict[str, Any]]]],
+        save_claim_receipted: Callable[[], bool] | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self._tenant_id = tenant_id
         self._language = language
         self._load_records = load_records
+        self._save_claim_receipted = save_claim_receipted
         self._generation = 0
 
     def observe_caller_text(self, _text: str) -> None:
@@ -305,7 +344,14 @@ class VoiceEvidenceGate(FrameProcessor):
                 if generation != self._generation:
                     return
             language = self._language() if callable(self._language) else self._language
-            reply = render_reply(frame.text, facts, language)
+            reply = render_reply(
+                frame.text,
+                facts,
+                language,
+                save_claim_receipted=(
+                    self._save_claim_receipted() if self._save_claim_receipted is not None else None
+                ),
+            )
             frame.text = reply.text
             frame.raw_text = reply.text
             frame.metadata["grounding"] = {"decision": reply.decision, **reply.evidence}
@@ -322,6 +368,7 @@ class VoiceEvidenceContext(FrameProcessor):
         language: str | Callable[[], str],
         load_records: Callable[[], Awaitable[list[dict[str, Any]]]],
         on_caller_text: Callable[[str], None] | None = None,
+        business_actions: tuple[str, ...] = (),
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -329,6 +376,7 @@ class VoiceEvidenceContext(FrameProcessor):
         self._language = language
         self._load_records = load_records
         self._on_caller_text = on_caller_text
+        self._business_actions = business_actions
         self._generation = 0
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -378,6 +426,9 @@ class VoiceEvidenceContext(FrameProcessor):
             )
             language = self._language() if callable(self._language) else self._language
             frame.context.add_message(
-                {"role": "system", "content": grounding_instruction(facts, language)}
+                {
+                    "role": "system",
+                    "content": grounding_instruction(facts, language, self._business_actions),
+                }
             )
         await self.push_frame(frame, direction)

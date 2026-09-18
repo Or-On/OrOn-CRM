@@ -181,6 +181,30 @@ export interface ReconciliationReport {
   readonly provider_enabled?: boolean;
 }
 
+export type RecordingState = "ready" | "partial" | "unavailable" | "failed";
+
+export interface RecordingVerification {
+  readonly byte_size?: number | null;
+  readonly channels?: number | null;
+  readonly checksum?: string | null;
+  readonly content_type?: string | null;
+  readonly detail:
+    | "verified"
+    | "no_uri"
+    | "bytes_unavailable"
+    | "empty_file"
+    | "not_wav"
+    | "unexpected_sample_format"
+    | "header_only"
+    | "short_but_present"
+    | "too_large";
+  readonly duration_seconds?: number | null;
+  readonly sample_rate?: number | null;
+  readonly state: RecordingState;
+  readonly storage_backend?: "local" | "gcs" | null;
+  readonly storage_key?: string | null;
+}
+
 export interface RegisterPhoneNumberRequest {
   readonly allowed_addresses: Array<string>;
   readonly e164: string;
@@ -203,12 +227,50 @@ export interface SimulatedCallResult {
   readonly session: VoiceSessionSummary;
 }
 
+export type TranscriptState =
+  "valid" | "partial" | "empty" | "missing" | "failed";
+
+export interface TranscriptTurn {
+  readonly index: number;
+  readonly interrupted?: boolean;
+  readonly role: string;
+  readonly text: string;
+  readonly timestamp?: string | null;
+}
+
+export interface TranscriptVerification {
+  readonly byte_size?: number | null;
+  readonly checksum?: string | null;
+  readonly content_type?: string | null;
+  readonly detail:
+    | "verified"
+    | "no_uri"
+    | "bytes_unavailable"
+    | "empty_file"
+    | "no_turns"
+    | "unparsable_tail"
+    | "not_utf8"
+    | "too_large";
+  readonly interrupted_turn_count?: number;
+  readonly state: TranscriptState;
+  readonly storage_backend?: "local" | "gcs" | null;
+  readonly storage_key?: string | null;
+  readonly turn_count?: number;
+}
+
 export interface ValidationError {
   readonly ctx?: Record<string, unknown>;
   readonly input?: unknown;
   readonly loc: Array<string | number>;
   readonly msg: string;
   readonly type: string;
+}
+
+export interface VoiceArtifactReport {
+  readonly recording: RecordingVerification;
+  readonly session_id: string;
+  readonly transcript: TranscriptVerification;
+  readonly verified_at: string;
 }
 
 export interface VoiceCampaignCreate {
@@ -315,4 +377,10 @@ export interface VoiceSessionSummary {
   readonly session_id: string;
   readonly status: SessionStatus;
   readonly usage: CallUsage;
+}
+
+export interface VoiceTranscript {
+  readonly session_id: string;
+  readonly state: string;
+  readonly turns: Array<TranscriptTurn>;
 }

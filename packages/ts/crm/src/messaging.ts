@@ -858,6 +858,53 @@ export async function assignDefaultWhatsAppAi(
   sql: postgres.TransactionSql,
   conversationId: string,
 ): Promise<boolean> {
+  if (
+    (
+      await sql<{ enabled: boolean }[]>`
+      SELECT platform.current_tenant_feature_enabled('whatsapp') AS enabled
+    `
+    )[0]?.enabled !== true
+  )
+    return false;
+  const bindings = await sql<
+    { agent_profile_version_id: string; updated_by_user_id: string }[]
+  >`
+    SELECT process.agent_profile_version_id,process.updated_by_user_id
+    FROM automation.tenant_processes process
+    JOIN agents.agent_profile_versions version
+      ON version.id=process.agent_profile_version_id
+     AND version.tenant_id=process.tenant_id
+     AND version.published_at IS NOT NULL
+     AND version.validation_status='valid'
+     AND version.channel_capabilities @> ARRAY['whatsapp']::text[]
+    WHERE process.enabled AND process.trigger_key='whatsapp.new_conversation'
+      AND (process.channel='whatsapp' OR process.channel IS NULL)
+      AND process.agent_profile_version_id IS NOT NULL
+      AND process.updated_by_user_id IS NOT NULL
+      AND platform.messaging_ai_actor_authorized(process.updated_by_user_id)
+    ORDER BY process.priority,process.id
+    LIMIT 1
+  `;
+  const binding = bindings[0];
+  if (binding !== undefined) {
+    const assigned = await sql<{ id: string }[]>`
+      UPDATE messaging.conversations SET ownership_mode='ai',
+        ai_agent_profile_version_id=${binding.agent_profile_version_id}::uuid,
+        ai_enabled_by_user_id=${binding.updated_by_user_id}::uuid,
+        ai_enabled_at=CURRENT_TIMESTAMP,assigned_user_id=NULL,
+        updated_at=CURRENT_TIMESTAMP
+      WHERE id=${conversationId}::uuid
+        AND ownership_mode='human' AND assigned_user_id IS NULL
+        AND handoff_reason_safe IS NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM automation.handoffs handoff
+          WHERE handoff.conversation_id=${conversationId}::uuid
+            AND handoff.status IN ('pending','accepted')
+        )
+      RETURNING id
+    `;
+    return assigned.length === 1;
+  }
   const profiles = await sql<{ id: string }[]>`
     SELECT profile.id
     FROM crm.tenant_settings settings

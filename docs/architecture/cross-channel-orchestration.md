@@ -119,6 +119,13 @@ tenant-local PostgreSQL transaction.
   audit/outbox and job completion share one transaction; retries roll back effects.
   It has no selectable carrier/provider port. Stop/restart the control API after
   applying migration `3f6133842389` to enable the new lifecycle hook locally.
+- Call ended → ticket → WhatsApp: a terminal session write enqueues one durable
+  post-call workflow on the SAME ticket the issue has always had. Artifacts are
+  verified by reading the bytes, the summary is evidence-backed structure rather
+  than prose, the resolution follows deterministic rules the database also
+  enforces, and the wrap-up is a separate job so a messaging failure cannot undo
+  a correctly analysed call. See
+  [Customer support journey](support-journey.md).
 - Handoff: request keys are tenant-idempotent and accept/resolve/cancel updates
   use compare-and-set status predicates. Concurrent accepts yield one winner.
 
@@ -144,6 +151,8 @@ migration connection with permission to create disposable databases, then run:
 pnpm --filter @or-on/crm build
 pnpm --filter @or-on/messaging-worker exec vitest run tests/ai-reply.live.test.ts
 pnpm --filter @or-on/messaging-worker exec vitest run tests/call-followup.live.test.ts
+pnpm --filter @or-on/messaging-worker exec vitest run tests/support-tickets.live.test.ts
+pnpm --filter @or-on/messaging-worker exec vitest run tests/post-call.live.test.ts
 ```
 
 The suite migrates/seeds a new UUID-named database and removes it in teardown.

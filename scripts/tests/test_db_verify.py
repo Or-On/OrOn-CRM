@@ -20,10 +20,10 @@ def test_graph_has_preserved_oron_root_and_one_target_head() -> None:
     assert report.bases == ("0001",)
     assert report.heads == (manifest["alembic_head"],)
     assert report.branch_points == ("8eda5976c920",)
-    # Bumped by exactly one per deliberate migration; 84 resets the service
-    # case fixture data (1b6e4d8a90c2). An unexplained change here means a
-    # migration arrived that nobody reviewed.
-    assert report.revision_count == 84
+    # Bumped by exactly one per deliberate migration; 88 adds tenant modules,
+    # templates and explicit process bindings (f4c8a2d91e70). An unexplained
+    # change here means a migration arrived that nobody reviewed.
+    assert report.revision_count == 88
 
 
 def test_rendered_postgresql_contract_passes_static_security_checks() -> None:

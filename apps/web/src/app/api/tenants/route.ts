@@ -3,6 +3,9 @@ import {
   createTenantWithDefaults,
   listPlatformTenants,
   setFieldServiceEntitlement,
+  applyTenantTemplateForAdministrator,
+  tenantTemplateRegistry,
+  type TenantTemplateKey,
 } from "@or-on/crm";
 import {
   ForbiddenError,
@@ -31,6 +34,13 @@ export async function POST(request: Request) {
   try {
     await assertCrmMutation(request);
     const body = await jsonObject(request);
+    const templateKey =
+      typeof body.templateKey === "string" &&
+      body.templateKey in tenantTemplateRegistry
+        ? (body.templateKey as TenantTemplateKey)
+        : "blank";
+    const mutationRequestId =
+      request.headers.get("x-request-id") ?? crypto.randomUUID();
     const id = await withCurrentTenant(
       "platform:read",
       async (sql, session) => {
@@ -48,8 +58,15 @@ export async function POST(request: Request) {
         await setFieldServiceEntitlement(
           sql,
           tenantId,
-          body.fieldServiceAvailable === true,
-          request.headers.get("x-request-id") ?? crypto.randomUUID(),
+          body.fieldServiceAvailable === true ||
+            templateKey === "field_service",
+          mutationRequestId,
+        );
+        await applyTenantTemplateForAdministrator(
+          sql,
+          tenantId,
+          templateKey,
+          mutationRequestId,
         );
         return tenantId;
       },
