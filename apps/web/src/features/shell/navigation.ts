@@ -30,6 +30,7 @@ export type NavigationIcon =
   | "calendar"
   | "tickets"
   | "tasks"
+  | "leads"
   | "contacts"
   | "pipeline"
   | "campaigns"
@@ -66,6 +67,10 @@ export const navigation = [
   // contextual destination beneath it: existing escalations still create those
   // internal work items and still link straight to them.
   { href: "/tickets", label: "Tickets", group: "Workspace", icon: "tickets" },
+  // Leads sits beside Tickets rather than inside Contacts: a lead is a
+  // commercial interest with its own lifecycle, not a property of the person
+  // who holds it, and one contact can hold several at once.
+  { href: "/leads", label: "Leads", group: "Workspace", icon: "leads" },
   {
     href: "/contacts",
     label: "Contacts",

@@ -33,6 +33,22 @@ _UNVERIFIED_BUSINESS_CLAIM_RE = re.compile(
     re.IGNORECASE,
 )
 
+# "I saved your details" is a claim that a write committed. For an agent that
+# holds lead actions it is true only when the write returned a receipt, so it is
+# checked against that receipt rather than trusted from the model's wording.
+_UNVERIFIED_SAVE_CLAIM_RE = re.compile(
+    r"(?:"
+    r"(?:שמרתי|רשמתי|עדכנתי)\s+[^.?!]{0,40}(?:פרטים|הפרטים|המידע|התשובות|הבקשה|הפנייה)|"
+    r"(?:הפרטים|המידע|התשובות|הבקשה|הפנייה)\s+(?:שלך\s+|שלכם\s+)?(?:נשמרו|נשמר|נשמרה|נרשמו|נרשם|"
+    r"נרשמה|עודכנו|עודכן)|"
+    r"\b(?:i|we)(?:'ve|\s+have)?\s+(?:just\s+)?(?:saved|recorded|logged|updated|noted\s+down)\b"
+    r"[^.?!]{0,60}\b(?:details?|information|info|answers?|preferences?|request|enquiry|inquiry)\b|"
+    r"\b(?:your\s+)?(?:details?|information|answers?|request|enquiry|inquiry)\s+"
+    r"(?:(?:is|are|has|have)\s+been|(?:is|are)\s+now)\s+(?:saved|recorded|logged|updated)\b"
+    r")",
+    re.IGNORECASE,
+)
+
 _IDENTITY_COLLECTION_RE = re.compile(
     r"(?:אצטרך|צריך|מסור|למסור|תוכל\s+למסור|תוכלי\s+למסור)"
     r"\s+[^.?!]{0,50}(?:מספר\s+)?תעודת\s+הזהות",
@@ -58,14 +74,28 @@ def safe_spoken_text(
     language: str = "en",
     *,
     allow_identity_collection: bool = False,
+    save_claim_receipted: bool | None = None,
 ) -> tuple[str, bool]:
-    """Sanitize speech and replace unverifiable external-system claims."""
+    """Sanitize speech and replace unverifiable external-system claims.
+
+    ``save_claim_receipted`` is None for agents with no lead actions, whose
+    speech is checked exactly as before. For an agent that holds them it says
+    whether a committed receipt answers the caller's current turn; a save claim
+    without one is replaced like any other unverified claim.
+    """
 
     sanitized = sanitize_tts_markup(text)
     blocked_identity_request = (
         not allow_identity_collection and _IDENTITY_COLLECTION_RE.search(sanitized) is not None
     )
-    if not blocked_identity_request and not _UNVERIFIED_BUSINESS_CLAIM_RE.search(sanitized):
+    unreceipted_save = (
+        save_claim_receipted is False and _UNVERIFIED_SAVE_CLAIM_RE.search(sanitized) is not None
+    )
+    if (
+        not blocked_identity_request
+        and not unreceipted_save
+        and not _UNVERIFIED_BUSINESS_CLAIM_RE.search(sanitized)
+    ):
         return sanitized, False
     logger.warning("suppressed unverified business-system claim before TTS")
     if language.lower().startswith("he"):
@@ -83,19 +113,22 @@ def safe_spoken_text(
 class BusinessClaimGuardFilter(BaseTextFilter):
     """Suppress invented account, ticketing, scheduling, and delivery results.
 
-    The current voice handler registry contains only conversation-routing
-    functions. Until a verified business-tool result is carried to this guard,
-    no generated sentence may claim that an external system was read or
-    changed. This is a final spoken-boundary control, not another prompt hint.
+    Lead actions are the one business tool whose result reaches this guard:
+    their committed receipt, per caller turn, is what permits "I saved your
+    details". Every other claim that an external system was read or changed
+    stays suppressed. This is a final spoken-boundary control, not another
+    prompt hint.
     """
 
     def __init__(
         self,
         get_language: Callable[[], str] | None = None,
         allow_identity_collection: Callable[[], bool] | None = None,
+        save_claim_receipted: Callable[[], bool] | None = None,
     ):
         self._get_language = get_language
         self._allow_identity_collection = allow_identity_collection
+        self._save_claim_receipted = save_claim_receipted
 
     async def filter(self, text: str) -> str:
         language = self._get_language() if self._get_language is not None else "en"
@@ -104,4 +137,11 @@ class BusinessClaimGuardFilter(BaseTextFilter):
             if self._allow_identity_collection is not None
             else False
         )
-        return safe_spoken_text(text, language, allow_identity_collection=allowed)[0]
+        return safe_spoken_text(
+            text,
+            language,
+            allow_identity_collection=allowed,
+            save_claim_receipted=(
+                self._save_claim_receipted() if self._save_claim_receipted is not None else None
+            ),
+        )[0]

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from loguru import logger
@@ -76,6 +76,7 @@ from oron_agent.identity_verification import (
 )
 from oron_agent.idle import UserIdlePoker
 from oron_agent.language import language_profile
+from oron_agent.lead_capture import AcceptedTurns, VoiceLeadTools, parse_lead_field_schema
 from oron_agent.llm import LlmProvider, build_llm, warm_prompt_cache
 from oron_agent.ownership_stt import OwnershipSonioxSTTService
 from oron_agent.pipeline import build_agent_processors
@@ -166,6 +167,58 @@ def _flow_voice_for(voice: FlowVoice, provider: TtsProvider) -> str | None:
     return voice.tts_voice
 
 
+async def build_voice_lead_tools(
+    sessions: Any, ctx: CallContext, configuration: dict, turns: AcceptedTurns
+) -> VoiceLeadTools | None:
+    """The pinned agent version's lead actions for this call, or None.
+
+    An agent published with lead capabilities that this runtime cannot honour
+    stops the call rather than running as a different agent without them.
+    Only the absence of a known contact — an unidentified inbound caller —
+    leaves the actions off, because a lead belongs to a person.
+    """
+
+    capabilities = [
+        capability
+        for capability in configuration.get("capabilities") or []
+        if isinstance(capability, str) and capability.startswith("lead.")
+    ]
+    if not capabilities:
+        return None
+    schema_id = configuration.get("leadFieldSchemaId")
+    agent_version_id = configuration.get("agentVersionId")
+    schema_reader = getattr(sessions, "get_lead_field_schema", None)
+    store_factory = getattr(sessions, "lead_store", None)
+    if (
+        not isinstance(schema_id, str)
+        or not isinstance(agent_version_id, str)
+        or schema_reader is None
+        or store_factory is None
+    ):
+        raise StoredFlowUnavailable("published lead capture configuration cannot be executed")
+    if ctx.contact_id is None:
+        logger.info(
+            "lead actions unavailable: call has no known contact (session={})", ctx.session_id
+        )
+        return None
+    pinned = await schema_reader(schema_id, tenant_id=ctx.tenant_id)
+    if pinned is None:
+        raise StoredFlowUnavailable("pinned lead field schema is unavailable")
+    role_title = configuration.get("roleTitle")
+    return VoiceLeadTools(
+        store=store_factory(
+            ctx,
+            agent_version_id=agent_version_id,
+            schema=pinned,
+            business_objective=role_title if isinstance(role_title, str) else None,
+        ),
+        schema=parse_lead_field_schema(pinned["definition"]),
+        capabilities=capabilities,
+        interaction_key=str(ctx.session_id),
+        turns=turns,
+    )
+
+
 def pipeline_params() -> PipelineParams:
     """BOTH metrics flags, and that is the whole point of this function existing.
 
@@ -232,6 +285,11 @@ async def run_bot(
             else "context_unlocked"
         )
     }
+    # Final caller turns only; provisional recognition never gets an identifier.
+    accepted_turns = AcceptedTurns()
+    lead_tools = await build_voice_lead_tools(sessions, ctx, configuration, accepted_turns)
+    # None for an agent without lead actions: its spoken checks stay as they were.
+    save_claim_receipted = accepted_turns.receipt_for_current_turn if lead_tools else None
     session_dir = SessionDir(ctx.session_id)
     text_diagnostics = (
         VoiceTextDiagnostics(
@@ -450,6 +508,7 @@ async def run_bot(
                     verification_runtime_state["state"]
                     in {"identity_required", "collecting_identity", "verifying_identity"}
                 ),
+                save_claim_receipted,
             ),
         ],
         text_aggregation_mode=st.tts_text_aggregation,
@@ -556,6 +615,7 @@ async def run_bot(
         tenant_id=str(ctx.tenant_id),
         language=lambda: conversation_language.current,
         load_records=load_knowledge,
+        save_claim_receipted=save_claim_receipted,
     )
     processors = build_agent_processors(
         transport.input(),
@@ -575,6 +635,11 @@ async def run_bot(
             language=lambda: conversation_language.current,
             load_records=load_knowledge,
             on_caller_text=evidence_gate.observe_caller_text,
+            business_actions=(
+                tuple(descriptor.name for descriptor in lead_tools.descriptors)
+                if lead_tools
+                else ()
+            ),
         ),
         evidence_gate=evidence_gate,
         response_language=response_language,
@@ -711,6 +776,8 @@ async def run_bot(
     @context_aggregator.user().event_handler("on_user_turn_stopped")
     async def on_user_turn_stopped(aggregator, strategy, message):
         if message.content:
+            # The turn a lead value may cite, and the turn a "saved" must answer.
+            accepted_turns.accept()
             if text_diagnostics is not None:
                 text_diagnostics.record_stt(message.content, conversation_language.current)
             await transcript_handler.save_message(
@@ -845,7 +912,15 @@ async def run_bot(
             await voice_control.refresh()
             worker.create_task(voice_control.run())
         action_guard = voice_control.action if voice_control else None
-        entry = initial_node_from_spec(spec, action_guard=action_guard)
+        # The published agent's lead actions ride on every conversing node. A
+        # secured callback's identity gate node carries none of them: they
+        # appear only once verification unlocks the handoff, and the database
+        # refuses them before that regardless.
+        entry = initial_node_from_spec(
+            spec,
+            action_guard=action_guard,
+            call_functions=lead_tools.functions(action_guard) if lead_tools else (),
+        )
         if verification_requirements is not None:
             if verify_identity is None or load_handoff_context is None:
                 raise StoredFlowUnavailable("secure handoff verification runtime is unavailable")

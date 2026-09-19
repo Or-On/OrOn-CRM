@@ -25,12 +25,26 @@ export const conversationReplyCodes = [
 export type ConversationReplyCode = (typeof conversationReplyCodes)[number];
 export const recentReplyWindowSize = 8;
 
+/**
+ * A lead write that actually committed in this turn. It is the only thing that
+ * entitles a reply to say information was recorded, and it is carried into the
+ * stored evidence so delivery can check the same commit again.
+ */
+export interface CommittedRecord {
+  readonly leadId: string;
+  readonly revision: number;
+  // Stored verbatim in the message's grounding metadata, which is typed as
+  // plain JSON.
+  readonly [field: string]: string | number;
+}
+
 export interface GroundedReply {
   readonly text: string;
   readonly evidence:
     | {
         readonly kind: "conversation";
         readonly code: ConversationReplyCode | "generated";
+        readonly record?: CommittedRecord;
       }
     | {
         readonly kind: "knowledge";
@@ -107,6 +121,11 @@ export interface ConversationalReplyContext {
   readonly locale?: string;
   readonly recentAssistantMessages?: readonly string[];
   readonly latestCustomerMessage?: string;
+  /**
+   * A lead write committed in this same turn. It admits "I saved that" and
+   * nothing further: an appointment, a refund or a repair remains unsayable.
+   */
+  readonly committedRecord?: boolean;
 }
 
 function normalizedReply(value: string): string {
@@ -336,8 +355,24 @@ function nonRepeatingClarification(
   throw new TypeError("clarification fallback pool exhausted");
 }
 
-function passesConversationalSafety(text: string): boolean {
+// Outcomes nothing in this conversation can produce. No receipt available on
+// this channel makes them sayable, so they are refused unconditionally.
+const consequentialClaimPattern =
+  /\b(?:booked|refunded|delivered|connected|verified|scheduled|charged|paid|approved|fixed|resolved)\b|(?:קבעתי|תיאמתי|פתחתי|זיכיתי|אימתתי|חיברתי|תוקן|נפתר|בוצע|אישר(?:תי|ה|ו)?|אושר(?:ה)?|שולם|נקבע|נמסר)/iu;
+
+// Claims that a lead write can back — and only a lead write. Without a
+// committed receipt in this turn they are refused exactly like the rest,
+// which also closes the gap where "רשמתי" was never checked at all.
+const recordClaimPattern =
+  /\b(?:saved|recorded|noted|logged|updated|sent)\b|(?:שמרתי|רשמתי|עדכנתי|תיעדתי|רשמנו|שלחתי|נשמר(?:ו|ה)?|נרשמ(?:ו|ה)?|נשלח)/iu;
+
+function passesConversationalSafety(
+  text: string,
+  committedRecord = false,
+): boolean {
   return (
+    !consequentialClaimPattern.test(text) &&
+    (committedRecord || !recordClaimPattern.test(text)) &&
     text.length > 0 &&
     text.length <= 1000 &&
     !/[\p{Cc}\p{Cf}<>`]/u.test(text) &&
@@ -354,9 +389,6 @@ function passesConversationalSafety(text: string): boolean {
     // eligible knowledge fact rather than unconstrained model prose.
     !/(?:[$€£₪]|\b(?:USD|EUR|GBP|NIS|ILS)\b)\s*\d|\d(?:[\d,. ]{0,16})\s*(?:%|[$€£₪]|\b(?:USD|EUR|GBP|NIS|ILS)\b)/iu.test(
       text,
-    ) &&
-    !/\b(?:booked|refunded|delivered|connected|verified|scheduled|charged|paid|updated|sent|approved|fixed|resolved)\b|(?:קבעתי|תיאמתי|שלחתי|פתחתי|עדכנתי|זיכיתי|אימתתי|חיברתי|תוקן|נפתר|בוצע|נשלח|אישר(?:תי|ה|ו)?|אושר(?:ה)?|שולם|נקבע|נמסר)/iu.test(
-      text,
     )
   );
 }
@@ -372,7 +404,7 @@ export function safeConversationalReply(
   const text = value.trim();
   const latestCustomerMessage = context.latestCustomerMessage?.trim();
   return (
-    passesConversationalSafety(text) &&
+    passesConversationalSafety(text, context.committedRecord === true) &&
     !asksMoreThanOneQuestion(text) &&
     (context.locale === undefined ||
       matchesRequestedLocale(text, context.locale)) &&
@@ -523,6 +555,7 @@ export function groundAiReply(
   locale: string,
   recentAssistantMessages: readonly string[] = [],
   latestCustomerMessage = "",
+  committedRecord?: CommittedRecord,
 ): GroundedReply {
   const spokenContext = latestCustomerMessage.trim()
     ? [...recentAssistantMessages, latestCustomerMessage]
@@ -574,6 +607,7 @@ export function groundAiReply(
         locale,
         recentAssistantMessages,
         latestCustomerMessage,
+        committedRecord: committedRecord !== undefined,
       })
     ) {
       return {
@@ -581,10 +615,19 @@ export function groundAiReply(
         // Natural diagnostic questions must retain a distinct evidence code.
         // Treating them as the canned `clarify` reply makes the delivery-time
         // revalidation compare different text and reject every useful answer.
-        evidence: { kind: "conversation", code: "generated" },
+        evidence: {
+          kind: "conversation",
+          code: "generated",
+          // Carried so delivery can re-check the same commit rather than
+          // re-deciding on trust.
+          ...(committedRecord === undefined ? {} : { record: committedRecord }),
+        },
       };
     }
-    return passesConversationalSafety(decision.text.trim())
+    return passesConversationalSafety(
+      decision.text.trim(),
+      committedRecord !== undefined,
+    )
       ? nonRepeatingClarification(locale, spokenContext)
       : nonRepeatingClarification(
           locale,

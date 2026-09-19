@@ -1,9 +1,22 @@
 import type postgres from "postgres";
 
 import type { JsonValue } from "./types.js";
+import type { AgentCapability } from "./agent-capabilities.js";
+import {
+  capabilityChannelConflicts,
+  effectiveCapabilities,
+  hasCapability,
+  parseAgentCapabilities,
+  requireAgentCapabilities,
+} from "./agent-capabilities.js";
+import {
+  reviewAgentPublication,
+  type AgentPublicationReview,
+} from "./agent-publication-review.js";
 import { parseKnowledgeSourceIds } from "./agent-quality.js";
 import { assertAgentKnowledgePublishable } from "./agent-quality-store.js";
 import { assertKnowledgeManager } from "./knowledge.js";
+import { parseLeadFieldSchema } from "./lead-schema.js";
 
 export const supportedChannels = ["voice", "whatsapp"] as const;
 export type SupportedChannel = (typeof supportedChannels)[number];
@@ -263,6 +276,42 @@ export interface AgentProfileSummary {
   readonly systemPrompt?: string | null;
   readonly locale?: string | null;
   readonly isDefaultWhatsApp?: boolean;
+  /**
+   * The actions this version really holds, and the version an operator has
+   * already published. A publish screen needs both: the newest version may be
+   * an unpublished draft whose capabilities differ from what is live.
+   */
+  readonly capabilities: readonly AgentCapability[];
+  readonly roleTitle: string | null;
+  readonly leadFieldSchemaId: string | null;
+  readonly publishedVersion: number | null;
+  readonly publishedVersionId: string | null;
+  /** The reviewed field list the newest version is pinned to, by name. */
+  readonly leadFieldSchema: {
+    readonly id: string;
+    readonly name: string;
+    readonly version: number;
+  } | null;
+  /** What the newest version can do, for the publish screen. */
+  readonly review: AgentPublicationReview;
+  /**
+   * Published before capabilities existed, so its escalations keep opening
+   * support tickets as they always did. A new version must be granted
+   * `ticket.open` to keep doing so.
+   */
+  readonly implicitTicketing: boolean;
+  /**
+   * Draft, Published, Assigned and Running are different facts. A conversation
+   * pinned to an older published version keeps running it until an operator
+   * explicitly rebinds; `staleConversations` counts those.
+   */
+  readonly lifecycle: {
+    readonly draftVersion: number | null;
+    readonly assignedConversations: number;
+    readonly staleConversations: number;
+    readonly assignedFlows: number;
+    readonly runningCalls: number;
+  };
 }
 
 interface AgentProfileRow {
@@ -277,6 +326,28 @@ interface AgentProfileRow {
   system_prompt: string | null;
   locale: string | null;
   is_default_whatsapp: boolean;
+  tool_permissions: unknown;
+  channel_configuration: Record<string, unknown> | null;
+  published_version: number | null;
+  published_version_id: string | null;
+  implicit_ticketing: boolean | null;
+  schema_id: string | null;
+  schema_name: string | null;
+  schema_version: number | null;
+  schema_definition: unknown;
+  assigned_conversations: number;
+  stale_conversations: number;
+  assigned_flows: number;
+  running_calls: number;
+}
+
+/** Read a managed `channel_configuration` string without trusting its shape. */
+function configuredText(
+  configuration: Record<string, unknown> | null,
+  key: string,
+): string | null {
+  const value = configuration?.[key];
+  return typeof value === "string" && value !== "" ? value : null;
 }
 
 export async function listAgentProfiles(
@@ -287,34 +358,174 @@ export async function listAgentProfiles(
            version.id AS version_id,
            version.channel_capabilities, version.published_at,
            version.validation_status, version.system_prompt, version.locale,
+           version.tool_permissions, version.channel_configuration,
+           version.implicit_ticketing,
+           live.version AS published_version, live.id AS published_version_id,
            COALESCE(settings.whatsapp_ai_agent_profile_id = profile.id, false)
-             AS is_default_whatsapp
+             AS is_default_whatsapp,
+           schema.id AS schema_id, schema.name AS schema_name,
+           schema.version AS schema_version, schema.definition AS schema_definition,
+           COALESCE(assigned.conversations, 0)::int AS assigned_conversations,
+           COALESCE(assigned.stale, 0)::int AS stale_conversations,
+           COALESCE(flows.count, 0)::int AS assigned_flows,
+           COALESCE(running.count, 0)::int AS running_calls
     FROM agents.agent_profiles profile
     LEFT JOIN crm.tenant_settings settings ON settings.tenant_id = profile.tenant_id
     LEFT JOIN LATERAL (
       SELECT candidate.id, candidate.version, candidate.channel_capabilities,
              candidate.published_at, candidate.validation_status,
-             candidate.system_prompt, candidate.locale
+             candidate.system_prompt, candidate.locale,
+             candidate.tool_permissions, candidate.channel_configuration,
+             candidate.implicit_ticketing
       FROM agents.agent_profile_versions candidate
       WHERE candidate.agent_profile_id = profile.id
       ORDER BY candidate.version DESC LIMIT 1
     ) version ON true
+    LEFT JOIN LATERAL (
+      SELECT candidate.id, candidate.version
+      FROM agents.agent_profile_versions candidate
+      WHERE candidate.agent_profile_id = profile.id
+        AND candidate.published_at IS NOT NULL
+      ORDER BY candidate.version DESC LIMIT 1
+    ) live ON true
+    LEFT JOIN crm.lead_field_schemas schema
+      ON schema.tenant_id = profile.tenant_id
+     AND schema.id::text = version.channel_configuration->>'leadFieldSchemaId'
+    LEFT JOIN LATERAL (
+      -- Conversations an AI currently answers with some version of this agent.
+      -- Human-owned ones are not assignments of the agent at all.
+      SELECT count(*) AS conversations,
+             count(*) FILTER (WHERE pinned.id <> live.id) AS stale
+      FROM messaging.conversations conversation
+      JOIN agents.agent_profile_versions pinned
+        ON pinned.id = conversation.ai_agent_profile_version_id
+      WHERE pinned.agent_profile_id = profile.id
+        AND conversation.ownership_mode = 'ai'
+    ) assigned ON true
+    LEFT JOIN LATERAL (
+      SELECT count(DISTINCT flow.flow_definition_id) AS count
+      FROM automation.flow_versions flow
+      JOIN agents.agent_profile_versions bound
+        ON bound.id = flow.agent_profile_version_id
+      WHERE bound.agent_profile_id = profile.id AND flow.published_at IS NOT NULL
+    ) flows ON true
+    LEFT JOIN LATERAL (
+      -- Calls admitted with a version of this agent and still in progress:
+      -- each keeps the version it was admitted with until it ends.
+      SELECT sum(calls.running) AS count
+      FROM platform.current_tenant_running_agent_calls() calls
+      JOIN agents.agent_profile_versions admitted
+        ON admitted.id = calls.agent_profile_version_id
+      WHERE admitted.agent_profile_id = profile.id
+    ) running ON true
     WHERE profile.archived_at IS NULL
     ORDER BY profile.updated_at DESC, profile.id DESC
   `;
-  return rows.map((row) => ({
-    id: row.id,
-    name: row.name,
-    description: row.description,
-    version: row.version,
-    versionId: row.version_id,
-    channels: row.channel_capabilities ?? [],
-    published: row.published_at !== null,
-    validationStatus: row.validation_status,
-    systemPrompt: row.system_prompt,
-    locale: row.locale,
-    isDefaultWhatsApp: row.is_default_whatsapp,
-  }));
+  return rows.map((row) => {
+    const capabilities = parseAgentCapabilities(row.tool_permissions);
+    // The schema columns come from a LEFT JOIN: an agent that collects nothing
+    // has none of them. The strict field parser only runs once the join
+    // actually produced a schema, so reading the register never depends on it.
+    const schema =
+      typeof row.schema_id === "string" &&
+      typeof row.schema_name === "string" &&
+      typeof row.schema_version === "number"
+        ? {
+            id: row.schema_id,
+            name: row.schema_name,
+            version: row.schema_version,
+            fields: parseLeadFieldSchema(row.schema_definition).fields,
+          }
+        : null;
+    return {
+      id: row.id,
+      name: row.name,
+      description: row.description,
+      version: row.version,
+      versionId: row.version_id,
+      channels: row.channel_capabilities ?? [],
+      published: row.published_at !== null,
+      validationStatus: row.validation_status,
+      systemPrompt: row.system_prompt,
+      locale: row.locale,
+      isDefaultWhatsApp: row.is_default_whatsapp,
+      capabilities,
+      roleTitle: configuredText(row.channel_configuration, "roleTitle"),
+      leadFieldSchemaId: configuredText(
+        row.channel_configuration,
+        "leadFieldSchemaId",
+      ),
+      publishedVersion: row.published_version,
+      publishedVersionId: row.published_version_id,
+      leadFieldSchema:
+        schema === null
+          ? null
+          : { id: schema.id, name: schema.name, version: schema.version },
+      review: reviewAgentPublication({
+        prompt: row.system_prompt ?? "",
+        capabilities,
+        leadFields: schema?.fields ?? null,
+        implicitTicketing: row.implicit_ticketing === true,
+      }),
+      implicitTicketing: row.implicit_ticketing === true,
+      lifecycle: {
+        draftVersion: row.published_at === null ? row.version : null,
+        assignedConversations: row.assigned_conversations,
+        staleConversations: row.stale_conversations,
+        assignedFlows: row.assigned_flows,
+        runningCalls: row.running_calls,
+      },
+    };
+  });
+}
+
+/**
+ * Move this agent's AI-owned conversations onto its newest published version.
+ *
+ * Explicit on purpose: publishing a revision changes nothing that is already
+ * running. `expectedVersionId` is the version the operator saw, so a publish
+ * that lands between looking and clicking is refused instead of rebinding to
+ * a version nobody reviewed. Human-owned conversations are never touched, and
+ * the conversation's ownership epoch advances, fencing any reply an older
+ * worker was still preparing under the previous version.
+ */
+export async function rebindAgentConversations(
+  sql: postgres.TransactionSql,
+  actorUserId: string,
+  profileId: string,
+  expectedVersionId: string,
+): Promise<{ readonly versionId: string; readonly rebound: number } | null> {
+  const live = await sql<{ id: string }[]>`
+    SELECT id FROM agents.agent_profile_versions
+    WHERE agent_profile_id=${profileId}::uuid AND published_at IS NOT NULL
+      AND validation_status='valid'
+    ORDER BY version DESC LIMIT 1
+  `;
+  const target = live[0]?.id;
+  if (target === undefined) return null;
+  if (target !== expectedVersionId)
+    throw new TypeError(
+      "a newer version was published; review it before rebinding",
+    );
+  const rows = await sql<{ id: string }[]>`
+    UPDATE messaging.conversations conversation
+    SET ai_agent_profile_version_id=${target}::uuid, updated_at=CURRENT_TIMESTAMP
+    FROM agents.agent_profile_versions pinned
+    WHERE pinned.id = conversation.ai_agent_profile_version_id
+      AND pinned.agent_profile_id = ${profileId}::uuid
+      AND pinned.id <> ${target}::uuid
+      AND conversation.ownership_mode = 'ai'
+    RETURNING conversation.id
+  `;
+  await auditAction(
+    sql,
+    actorUserId,
+    "agent_profile.rebound",
+    "agent_profile",
+    profileId,
+    { versionId: target, conversations: rows.length },
+  );
+  return { versionId: target, rebound: rows.length };
 }
 
 export async function renameAgentProfile(
@@ -452,6 +663,97 @@ export interface AgentProfileDraftInput {
   readonly channels: readonly SupportedChannel[];
   readonly toolPermissions?: readonly string[];
   readonly escalation?: Readonly<Record<string, JsonValue>>;
+  /**
+   * How this agent names itself, e.g. "the lead coordinator". Identity still
+   * belongs to the tenant; only the role noun is the operator's.
+   */
+  readonly roleTitle?: string;
+  /** Which reviewed lead field schema a lead-collecting agent is pinned to. */
+  readonly leadFieldSchemaId?: string;
+}
+
+/** The deterministically checked parts of a proposed agent version. */
+interface ReviewedAgentConfiguration {
+  readonly prompt: string;
+  readonly locale: string;
+  readonly channels: readonly SupportedChannel[];
+  readonly capabilities: readonly AgentCapability[];
+  readonly channelConfiguration: Record<string, JsonValue>;
+}
+
+/**
+ * Check everything about a proposed version that can be decided without a
+ * model: unknown capabilities, capabilities the selected channels cannot
+ * execute, an over-long role title, and a lead schema pinned to an agent with
+ * no lead capability. The publish screen shows the result of this review, so
+ * it has to reject rather than quietly drop what it does not recognise.
+ *
+ * It deliberately does not judge the prose. A prompt may promise anything; only
+ * the capability list decides what the agent can actually do.
+ */
+async function reviewAgentConfiguration(
+  sql: postgres.TransactionSql,
+  input: AgentProfileDraftInput,
+): Promise<ReviewedAgentConfiguration> {
+  const prompt = input.systemPrompt.trim();
+  const locale = input.locale?.trim();
+  const channels = sortedUniqueChannels(input.channels);
+  if (!prompt) throw new TypeError("system prompt is required");
+  if (prompt.length > 16000)
+    throw new TypeError("system prompt must be 16000 characters or fewer");
+  if (channels.length === 0)
+    throw new TypeError("at least one channel is required");
+  // Reject an unknown capability outright rather than dropping it silently: a
+  // publish screen must show the actions the agent will really hold.
+  const capabilities = requireAgentCapabilities(input.toolPermissions ?? []);
+  const conflicts = capabilityChannelConflicts(capabilities, channels);
+  if (conflicts.length > 0)
+    throw new TypeError(
+      `capability not executable on a selected channel: ${conflicts
+        .map(({ capability, channel }) => `${capability} on ${channel}`)
+        .join("; ")}`,
+    );
+  const roleTitle = input.roleTitle?.trim();
+  if (roleTitle !== undefined && roleTitle.length > 60)
+    throw new TypeError("role title must be 60 characters or fewer");
+  const leadFieldSchemaId = input.leadFieldSchemaId;
+  const collectsLeads = hasCapability(
+    effectiveCapabilities(capabilities),
+    "lead.read",
+  );
+  // Both runtimes act only against a reviewed field list: voice stops a call
+  // whose published lead actions have none, and WhatsApp withholds the tools.
+  // Refusing here tells the operator at authoring time instead.
+  if (collectsLeads && leadFieldSchemaId === undefined)
+    throw new TypeError(
+      "lead capabilities require a reviewed lead field schema",
+    );
+  if (leadFieldSchemaId !== undefined) {
+    if (!collectsLeads)
+      throw new TypeError(
+        "a lead field schema requires at least one lead capability",
+      );
+    // Resolve the reference now: an agent pinned to a schema that does not
+    // exist in this tenant would fail at the first customer answer instead.
+    const schemas = await sql<{ id: string }[]>`
+      SELECT id FROM crm.lead_field_schemas
+      WHERE id=${leadFieldSchemaId}::uuid AND published_at IS NOT NULL
+    `;
+    if (schemas.length === 0)
+      throw new TypeError(
+        "selected lead field schema is unavailable in this tenant",
+      );
+  }
+  return {
+    prompt,
+    locale: locale === undefined || locale === "" ? "en" : locale,
+    channels,
+    capabilities,
+    channelConfiguration: {
+      ...(roleTitle === undefined || roleTitle === "" ? {} : { roleTitle }),
+      ...(leadFieldSchemaId === undefined ? {} : { leadFieldSchemaId }),
+    },
+  };
 }
 
 export async function createAgentProfileDraft(
@@ -460,14 +762,10 @@ export async function createAgentProfileDraft(
   input: AgentProfileDraftInput,
 ): Promise<string> {
   const name = input.name.trim();
-  const prompt = input.systemPrompt.trim();
   const description = input.description?.trim();
-  const locale = input.locale?.trim();
-  const channels = sortedUniqueChannels(input.channels);
   if (!name) throw new TypeError("agent name is required");
-  if (!prompt) throw new TypeError("system prompt is required");
-  if (channels.length === 0)
-    throw new TypeError("at least one channel is required");
+  const { prompt, locale, channels, capabilities, channelConfiguration } =
+    await reviewAgentConfiguration(sql, input);
   const profiles = await sql<{ id: string }[]>`
     INSERT INTO agents.agent_profiles
       (tenant_id, name, description, created_by_user_id)
@@ -480,11 +778,13 @@ export async function createAgentProfileDraft(
   await sql`
     INSERT INTO agents.agent_profile_versions
       (tenant_id, agent_profile_id, version, system_prompt, locale,
-       channel_capabilities, tool_permissions, escalation_configuration,
+       channel_capabilities, tool_permissions, channel_configuration,
+       escalation_configuration,
        validation_status, validation_errors, created_by_user_id)
     VALUES (platform.current_tenant_id(), ${profileId}::uuid, 1, ${prompt},
-            ${locale === "" ? "en" : (locale ?? "en")}, ${channels},
-            ${sql.json(input.toolPermissions ?? [])},
+            ${locale}, ${channels},
+            ${sql.json([...capabilities])},
+            ${sql.json(channelConfiguration)},
             ${sql.json(input.escalation ?? {})}, 'valid', NULL,
             ${actorUserId}::uuid)
   `;
@@ -496,9 +796,94 @@ export async function createAgentProfileDraft(
     profileId,
     {
       channels,
+      capabilities: [...capabilities],
     },
   );
   return profileId;
+}
+
+export interface AgentProfileRevisionInput extends Omit<
+  AgentProfileDraftInput,
+  "name" | "description"
+> {
+  /** The version the operator actually reviewed, to detect a concurrent edit. */
+  readonly baseVersionId: string;
+}
+
+export interface AgentProfileRevision {
+  readonly versionId: string;
+  readonly version: number;
+}
+
+/**
+ * Draft a new version of an existing agent.
+ *
+ * The new row starts unpublished, so a live interaction admitted against the
+ * current published version keeps running that version's prompt, capabilities
+ * and schema until an operator both publishes this revision and rebinds the
+ * interaction. `baseVersionId` makes a concurrent edit visible instead of
+ * letting the later writer silently win.
+ */
+export async function createAgentProfileRevision(
+  sql: postgres.TransactionSql,
+  actorUserId: string,
+  profileId: string,
+  input: AgentProfileRevisionInput,
+): Promise<AgentProfileRevision | null> {
+  const profiles = await sql<{ id: string }[]>`
+    SELECT id FROM agents.agent_profiles
+    WHERE id=${profileId}::uuid AND archived_at IS NULL
+    FOR UPDATE
+  `;
+  if (profiles.length === 0) return null;
+  const { prompt, locale, channels, capabilities, channelConfiguration } =
+    await reviewAgentConfiguration(sql, { name: "unused", ...input });
+  const latest = await sql<{ id: string; version: number }[]>`
+    SELECT id, version FROM agents.agent_profile_versions
+    WHERE agent_profile_id=${profileId}::uuid
+    ORDER BY version DESC LIMIT 1
+  `;
+  const current = latest[0];
+  if (current === undefined) return null;
+  if (current.id !== input.baseVersionId)
+    throw new TypeError("agent version changed; refresh before saving");
+  const rows = await sql<{ id: string; version: number }[]>`
+    INSERT INTO agents.agent_profile_versions
+      (tenant_id, agent_profile_id, version, schema_version, system_prompt,
+       locale, model_configuration_id, channel_capabilities, tool_permissions,
+       knowledge_configuration, channel_configuration,
+       escalation_configuration, validation_status, validation_errors,
+       created_by_user_id)
+    SELECT tenant_id, agent_profile_id, ${current.version + 1},
+           schema_version, ${prompt}, ${locale}, model_configuration_id,
+           ${channels}, ${sql.json([...capabilities])},
+           knowledge_configuration,
+           -- Drop the managed keys before merging so clearing a role title or
+           -- unpinning a lead schema actually takes effect in the new version.
+           (channel_configuration - 'roleTitle' - 'leadFieldSchemaId')
+             || ${sql.json(channelConfiguration)},
+           ${input.escalation === undefined ? sql`escalation_configuration` : sql.json(input.escalation)},
+           'valid', NULL, ${actorUserId}::uuid
+    FROM agents.agent_profile_versions
+    WHERE id=${input.baseVersionId}::uuid
+      AND agent_profile_id=${profileId}::uuid
+    RETURNING id, version
+  `;
+  const row = rows[0];
+  if (row === undefined) return null;
+  await sql`
+    UPDATE agents.agent_profiles SET updated_at=CURRENT_TIMESTAMP
+    WHERE id=${profileId}::uuid
+  `;
+  await auditAction(
+    sql,
+    actorUserId,
+    "agent_profile.revised",
+    "agent_profile",
+    profileId,
+    { version: row.version, capabilities: [...capabilities], channels },
+  );
+  return { versionId: row.id, version: row.version };
 }
 
 export async function publishAgentProfile(

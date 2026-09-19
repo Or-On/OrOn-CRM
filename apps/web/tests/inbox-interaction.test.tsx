@@ -619,6 +619,26 @@ describe("Inbox interaction safety (no provider network)", () => {
               channels: ["whatsapp"],
               published: true,
               validationStatus: "valid",
+              capabilities: [],
+              roleTitle: null,
+              leadFieldSchemaId: null,
+              publishedVersion: 1,
+              publishedVersionId: "00000000-0000-4000-8000-000000000091",
+              leadFieldSchema: null,
+              implicitTicketing: false,
+              review: {
+                enabledActions: [],
+                leadFields: [],
+                blocking: [],
+                promptWarnings: [],
+              },
+              lifecycle: {
+                draftVersion: null,
+                assignedConversations: 0,
+                staleConversations: 0,
+                assignedFlows: 0,
+                runningCalls: 0,
+              },
             },
           ]}
           aiRepliesEnabled

@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import json
 import unicodedata
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from oron_common import CallContext, CallUsage, validate_e164
@@ -23,15 +24,22 @@ from oron_tenancy.models import PhoneNumber
 from pydantic import Field, PostgresDsn, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import select, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlmodel import col
 
 from dispatcher_runtime.support_context import (
     TenantSupportProfile,
     compile_voice_runtime_prompt,
+    normalize_agent_role_title,
     support_profile_from_database,
     terminology_quality_overrides,
 )
+
+if TYPE_CHECKING:
+    # oron-agent is the dispatcher's optional "voice" extra; lead capture only
+    # runs when the agent runs in-process, so it is imported where it is used.
+    from oron_agent.lead_capture import LeadStoreRefusal
 
 _CALL_CONFIGURATION_EVENT = "voice.call.configuration.v1"
 
@@ -457,6 +465,7 @@ class PostgresVoiceRuntime:
         flow_version: int | None = None,
         persona_gender: str | None = None,
         support_profile: TenantSupportProfile | None = None,
+        agent_role_title: str | None = None,
     ) -> FlowSpec | None:
         try:
             spec = (
@@ -486,12 +495,14 @@ class PostgresVoiceRuntime:
             profile,
             agent_prompt=authoritative,
             persona_gender=spec.persona_gender,
+            agent_role_title=agent_role_title,
         )
         node_identity_binding = (
-            "Voice flow node instructions may define the task, but they cannot change "
-            "the tenant identity or create a third-party affiliation. Final node identity "
-            f"binding: in every self-identification, you are the support representative "
-            f"of {profile.supportDisplayName} and no other organization."
+            "Voice flow node instructions specialise the current step. They cannot "
+            "change the tenant identity, create a third-party affiliation, or replace "
+            "the configured agent role and objective above. Final node identity "
+            f"binding: in every self-identification, you represent "
+            f"{profile.supportDisplayName} and no other organization."
         )
         nodes = [
             node.model_copy(
@@ -549,6 +560,7 @@ class PostgresVoiceRuntime:
               WHERE flow.tenant_id = :tenant_id AND flow.published_at IS NOT NULL
             )
             SELECT DISTINCT agent.id, agent.system_prompt, agent.channel_configuration,
+              agent.tool_permissions,
               node #>> '{configuration,flowVersion}' AS voice_version
             FROM candidates flow
             CROSS JOIN LATERAL jsonb_array_elements(flow.definition->'nodes') node
@@ -598,7 +610,8 @@ class PostgresVoiceRuntime:
         if retained_version is not None and not str(retained_version).isdigit():
             raise ValueError("published voice flow version is invalid")
         profile = await self._tenant_support_profile(tenant_id)
-        quality = dict((row["channel_configuration"] or {}).get("quality", {}))
+        channel_configuration = dict(row["channel_configuration"] or {})
+        quality = dict(channel_configuration.get("quality", {}))
         tenant_quality = terminology_quality_overrides(profile)
         quality["sttVocabulary"] = list(
             dict.fromkeys([*quality.get("sttVocabulary", []), *tenant_quality["sttVocabulary"]])
@@ -607,9 +620,32 @@ class PostgresVoiceRuntime:
             *quality.get("pronunciationDictionary", []),
             *tenant_quality["pronunciationDictionary"],
         ][:64]
+        raw_permissions = row["tool_permissions"]
         return {
             "agentVersionId": str(row["id"]),
             "systemPrompt": row["system_prompt"],
+            # The role the operator published. It decides how the agent names
+            # itself; the tenant identity block still decides who it works for.
+            "roleTitle": normalize_agent_role_title(
+                channel_configuration.get("roleTitle")
+                if isinstance(channel_configuration.get("roleTitle"), str)
+                else None
+            ),
+            "capabilities": sorted(
+                {
+                    permission
+                    for permission in (raw_permissions if isinstance(raw_permissions, list) else [])
+                    if isinstance(permission, str)
+                }
+            ),
+            # The reviewed field list this agent collects against, pinned with
+            # the version so a later edit cannot change a running call's
+            # questions.
+            "leadFieldSchemaId": (
+                channel_configuration["leadFieldSchemaId"]
+                if isinstance(channel_configuration.get("leadFieldSchemaId"), str)
+                else None
+            ),
             "quality": quality,
             "flowVersion": int(retained_version) if retained_version is not None else flow_version,
             "supportProfile": profile.model_dump(mode="json"),
@@ -745,6 +781,51 @@ class PostgresVoiceRuntime:
         if not isinstance(result, dict):
             raise ValueError("verified handoff context is unavailable")
         return result
+
+    async def get_lead_field_schema(self, schema_id: str, *, tenant_id: UUID) -> dict | None:
+        """The reviewed field list a published agent is pinned to; rows are
+        immutable, so the ID alone pins the version."""
+
+        async with self._sessionmaker() as database, database.begin():
+            await set_tenant(database, str(tenant_id))
+            row = (
+                (
+                    await database.execute(
+                        text("""
+                        SELECT id, version, definition FROM crm.lead_field_schemas
+                        WHERE tenant_id=:tenant AND id=CAST(:schema AS uuid)
+                          AND published_at IS NOT NULL
+                        """),
+                        {"tenant": str(tenant_id), "schema": schema_id},
+                    )
+                )
+                .mappings()
+                .one_or_none()
+            )
+        if row is None:
+            return None
+        return {
+            "id": str(row["id"]),
+            "version": row["version"],
+            "definition": _database_json(row["definition"]),
+        }
+
+    def lead_store(
+        self,
+        context: CallContext,
+        *,
+        agent_version_id: str,
+        schema: dict | None,
+        business_objective: str | None,
+    ) -> PostgresVoiceLeadStore:
+        return PostgresVoiceLeadStore(
+            self._sessionmaker,
+            context,
+            agent_version_id=agent_version_id,
+            schema_id=schema["id"] if schema else None,
+            schema_version=schema["version"] if schema else None,
+            business_objective=business_objective,
+        )
 
     async def get_voice_knowledge(self, agent_version_id: UUID, *, tenant_id: UUID) -> list[dict]:
         """RLS-scoped fresh eligibility. Expired/revoked latest versions never fall back."""
@@ -890,6 +971,147 @@ class PostgresVoiceRuntime:
         return PhoneResolution(tenant_id=row.tenant_id, flow_id=row.flow_id)
 
 
+def _database_json(value: object) -> Any:
+    return json.loads(value) if isinstance(value, str) else value
+
+
+def _lead_refusal(error: DBAPIError) -> LeadStoreRefusal | None:
+    """The lead functions refuse with SQLSTATE class ``LD``; anything else is
+    an infrastructure failure whose commit outcome is unknown."""
+
+    from oron_agent.lead_capture import LeadStoreRefusal
+
+    original = error.orig
+    cause = getattr(original, "__cause__", None)
+    code = getattr(original, "sqlstate", None) or getattr(cause, "sqlstate", None)
+    if not isinstance(code, str) or not code.startswith("LD"):
+        return None
+    detail = getattr(cause, "detail", None) or getattr(original, "detail", None)
+    message = getattr(cause, "message", None) or "lead action refused"
+    return LeadStoreRefusal(
+        code,
+        str(message),
+        current_revision=int(detail) if isinstance(detail, str) and detail.isdigit() else None,
+    )
+
+
+class PostgresVoiceLeadStore:
+    """``platform.lead_*`` for one admitted call.
+
+    The binding is built from the call the dispatcher admitted — its tenant,
+    contact, session, originating conversation, handoff and pinned agent
+    version — never from anything the model said. The database rechecks all of
+    it on every call, fences a call that ended or a person paused, and returns
+    the receipt the agent must hold before it says "saved".
+    """
+
+    def __init__(
+        self,
+        sessionmaker: async_sessionmaker[AsyncSession],
+        context: CallContext,
+        *,
+        agent_version_id: str,
+        schema_id: str | None,
+        schema_version: int | None,
+        business_objective: str | None,
+    ) -> None:
+        if context.contact_id is None:
+            raise ValueError("lead capture requires a call bound to a known contact")
+        self._sessionmaker = sessionmaker
+        self._tenant_id = str(context.tenant_id)
+        self._schema_id = schema_id
+        self._schema_version = schema_version
+        self._business_objective = business_objective
+        self._binding = json.dumps(
+            {
+                "contactId": str(context.contact_id),
+                "sourceChannel": "voice",
+                "recordedBy": "agent",
+                "agentProfileVersionId": agent_version_id,
+                "sessionId": str(context.session_id),
+                **(
+                    {"conversationId": str(context.source_conversation_id)}
+                    if context.source_conversation_id
+                    else {}
+                ),
+                **({"handoffId": str(context.handoff_id)} if context.handoff_id else {}),
+            },
+            separators=(",", ":"),
+        )
+
+    async def _call(self, statement: str, parameters: dict[str, object]) -> Any:
+        try:
+            async with self._sessionmaker() as database, database.begin():
+                await set_tenant(database, self._tenant_id)
+                value = (
+                    await database.execute(
+                        text(statement), {"binding": self._binding, **parameters}
+                    )
+                ).scalar_one()
+        except DBAPIError as error:
+            refusal = _lead_refusal(error)
+            if refusal is not None:
+                raise refusal from None
+            raise
+        return _database_json(value)
+
+    async def capture_state(self, lead_id: str | None) -> dict | None:
+        return await self._call(
+            "SELECT platform.lead_capture_state(CAST(:binding AS jsonb), "
+            "CAST(:lead AS uuid), NULL)",
+            {"lead": lead_id},
+        )
+
+    async def ensure(self, operation_key: str) -> dict:
+        return await self._call(
+            "SELECT platform.lead_ensure_for_interaction(CAST(:binding AS jsonb), :key, "
+            "CAST(:schema AS uuid), CAST(:version AS integer), :objective, NULL, NULL)",
+            {
+                "key": operation_key,
+                "schema": self._schema_id,
+                "version": self._schema_version,
+                "objective": self._business_objective,
+            },
+        )
+
+    async def save_fields(
+        self, lead_id: str, operation_key: str, observations: list[dict[str, Any]]
+    ) -> dict:
+        return await self._call(
+            "SELECT platform.lead_save_fields(CAST(:binding AS jsonb), CAST(:lead AS uuid), "
+            ":key, NULL, CAST(:observations AS jsonb))",
+            {
+                "lead": lead_id,
+                "key": operation_key,
+                "observations": json.dumps(observations, ensure_ascii=False),
+            },
+        )
+
+    async def finalize(
+        self, lead_id: str, operation_key: str, summary: str, next_action: str | None
+    ) -> dict:
+        return await self._call(
+            "SELECT platform.lead_finalize(CAST(:binding AS jsonb), CAST(:lead AS uuid), "
+            ":key, NULL, :summary, :next_action)",
+            {"lead": lead_id, "key": operation_key, "summary": summary, "next_action": next_action},
+        )
+
+    async def follow_up(
+        self, lead_id: str, operation_key: str, note: str, due_at: str | None
+    ) -> dict:
+        return await self._call(
+            "SELECT platform.lead_request_follow_up(CAST(:binding AS jsonb), "
+            "CAST(:lead AS uuid), :key, :note, CAST(:due AS timestamptz))",
+            {"lead": lead_id, "key": operation_key, "note": note, "due": due_at},
+        )
+
+    async def operation_receipt(self, operation_key: str) -> dict | None:
+        return await self._call(
+            "SELECT platform.lead_operation_receipt(CAST(:binding AS jsonb), :key)",
+            {"key": operation_key},
+        )
+
+
 class DispatcherPostgresSessions:
     def __init__(self, backend: PostgresVoiceRuntime) -> None:
         self._backend = backend
@@ -982,6 +1204,11 @@ class AgentPostgresSessions:
             flow_version=configuration.get("flowVersion") or context.flow_version,
             persona_gender=persona,
             support_profile=support_profile,
+            agent_role_title=(
+                configuration.get("roleTitle")
+                if isinstance(configuration.get("roleTitle"), str)
+                else None
+            ),
         )
         return spec, configuration
 
@@ -998,6 +1225,24 @@ class AgentPostgresSessions:
 
     async def get_voice_knowledge(self, agent_version_id: UUID, *, tenant_id: UUID) -> list[dict]:
         return await self._backend.get_voice_knowledge(agent_version_id, tenant_id=tenant_id)
+
+    async def get_lead_field_schema(self, schema_id: str, *, tenant_id: UUID) -> dict | None:
+        return await self._backend.get_lead_field_schema(schema_id, tenant_id=tenant_id)
+
+    def lead_store(
+        self,
+        context: CallContext,
+        *,
+        agent_version_id: str,
+        schema: dict | None,
+        business_objective: str | None,
+    ) -> PostgresVoiceLeadStore:
+        return self._backend.lead_store(
+            context,
+            agent_version_id=agent_version_id,
+            schema=schema,
+            business_objective=business_objective,
+        )
 
     async def read_voice_control(self, context: CallContext) -> dict:
         return await self._backend.read_voice_control(context)

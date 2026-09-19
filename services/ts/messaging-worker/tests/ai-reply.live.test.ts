@@ -297,6 +297,10 @@ describe.skipIf(sourceUrl === undefined)(
           systemPrompt: "Answer fictional customer questions safely.",
           channels: ["voice", "whatsapp"],
           locale: "en",
+          // Opening the customer's support ticket on escalation is a granted
+          // capability, not something every agent does implicitly. This one
+          // is a support assistant, so it holds it.
+          toolPermissions: ["ticket.open"],
         });
         knowledgeDocumentId = await createKnowledgeDraft(transaction, userId, {
           title: "Fictional opening hours",

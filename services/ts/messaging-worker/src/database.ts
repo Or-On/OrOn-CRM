@@ -48,6 +48,20 @@ import {
   sanitizeIntakeProposal,
   stagePrivateObject,
   updateWhatsAppServiceIntake,
+  buildAgentExecutionContract,
+  ensureLeadForInteraction,
+  executeLeadTool,
+  findInteractionLead,
+  hasCapability,
+  leadCompleteness,
+  loadLeadFieldSchema,
+  pinnedLeadFieldSchemaId,
+  LeadToolError,
+  type AgentExecutionContract,
+  type LeadBinding,
+  type LeadToolContext,
+  type LeadToolName,
+  type LeadToolResult,
   type ProtectedFieldKeys,
   type PrivateObjectStorageOptions,
   type StagedPrivateObject,
@@ -58,9 +72,11 @@ import type { WhatsAppProvider, WhatsAppSendRequest } from "./providers.js";
 import { WhatsAppProviderError } from "./providers.js";
 import {
   WhatsAppAiProviderError,
+  type WhatsAppActionReceipt,
   type WhatsAppAiDecision,
   type WhatsAppAiEscalationReason,
   type WhatsAppAiProvider,
+  type WhatsAppAiRequest,
 } from "./ai-provider.js";
 import {
   AutomaticCallProviderError,
@@ -77,6 +93,7 @@ import {
   latestMessageLocale,
   recentReplyWindowSize,
   safeConversationalReply,
+  type CommittedRecord,
   type EligibleKnowledgeFact,
   type GroundedReply,
 } from "./ai-grounding.js";
@@ -2145,9 +2162,70 @@ async function processJob(
   }
 }
 
+/**
+ * What `platform.current_voice_tenant_support_profile()` returns. The name is
+ * historical — the projection is the one tenant-identity source both
+ * conversational runtimes read, and neither of them may select the underlying
+ * `crm.tenant_settings` columns directly.
+ */
+interface TenantIdentityProjection {
+  readonly tenantName?: string | null;
+  readonly displayName?: string | null;
+  readonly businessName?: string | null;
+  readonly supportProfile?: {
+    readonly supportDisplayName?: string | null;
+  } | null;
+}
+
+/**
+ * The same precedence the voice runtime applies in
+ * `support_context.support_profile_from_database`: a name the tenant
+ * configured wins, then the legacy columns, and a blank string counts as
+ * unset rather than as an empty brand.
+ */
+function tenantDisplayNameFrom(
+  profile: TenantIdentityProjection | null,
+): string | null {
+  const candidates = [
+    profile?.supportProfile?.supportDisplayName,
+    profile?.businessName,
+    profile?.displayName,
+    profile?.tenantName,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim() !== "")
+      return candidate;
+  }
+  return null;
+}
+
 interface AiWork {
   readonly agentVersionId: string;
+  /** The resolved configuration this job runs under, pinned at admission. */
+  readonly contract: AgentExecutionContract;
+  readonly tenantDisplayName: string | null;
+  /**
+   * The lead this conversation is already collecting into, if any. Null until
+   * the agent saves something: a greeting does not create a lead.
+   */
+  readonly lead: {
+    readonly id: string;
+    readonly revision: number;
+    readonly collected: readonly {
+      readonly key: string;
+      readonly state: string;
+      readonly value: string | null;
+    }[];
+    readonly missingRequired: readonly string[];
+  } | null;
   readonly knowledge: readonly EligibleKnowledgeFact[];
+  /**
+   * Whether this version's escalations open or update a support ticket: it
+   * holds `ticket.open`, or it was published before capabilities existed and
+   * keeps the behaviour it was published with. A lead or survey agent still
+   * escalates to a person; it just does not turn that into a support issue.
+   */
+  readonly opensTickets: boolean;
   readonly ownershipEpoch: string;
   readonly authorizedUserId: string;
   readonly contactId: string;
@@ -2266,6 +2344,14 @@ async function loadAiWork(
         configuration: unknown;
         ownership_epoch: string;
         agent_version_id: string;
+        agent_profile_id: string;
+        agent_version: number;
+        agent_channels: string[];
+        agent_tool_permissions: unknown;
+        agent_channel_configuration: Record<string, unknown> | null;
+        agent_published_at: Date;
+        agent_validation_status: string;
+        agent_implicit_ticketing: boolean;
         contact_id: string;
         contact_name: string;
         contact_email: string | null;
@@ -2277,7 +2363,15 @@ async function loadAiWork(
     >`
       SELECT conversation.id AS conversation_id,
              conversation.ai_enabled_by_user_id,
-             agent.system_prompt, agent.locale, agent.id AS agent_version_id, conversation.ownership_epoch,
+             agent.system_prompt, agent.locale, agent.id AS agent_version_id,
+             agent.agent_profile_id, agent.version AS agent_version,
+             agent.channel_capabilities AS agent_channels,
+             agent.tool_permissions AS agent_tool_permissions,
+             agent.channel_configuration AS agent_channel_configuration,
+             agent.implicit_ticketing AS agent_implicit_ticketing,
+             agent.published_at AS agent_published_at,
+             agent.validation_status AS agent_validation_status,
+             conversation.ownership_epoch,
              channel.provider, channel.configuration, contact.id AS contact_id,
              contact.name AS contact_name, contact.email AS contact_email,
              contact.company AS contact_company, contact.lifecycle_status,
@@ -2317,6 +2411,67 @@ async function loadAiWork(
       transaction,
       row.conversation_id,
       triggerMessageId,
+    );
+    // One explicit execution configuration for this conversation, resolved
+    // server-side before the model is consulted. The conversation pins the
+    // version; an unpublished revision published mid-conversation does not
+    // reach an already admitted job, and a mismatched binding fails loudly
+    // rather than falling back to the tenant default.
+    const versionRow = {
+      agentProfileId: row.agent_profile_id,
+      agentProfileVersionId: row.agent_version_id,
+      version: row.agent_version,
+      systemPrompt: row.system_prompt,
+      locale: row.locale,
+      channelCapabilities: row.agent_channels,
+      toolPermissions: row.agent_tool_permissions,
+      channelConfiguration: row.agent_channel_configuration,
+      publishedAt: row.agent_published_at,
+      validationStatus: row.agent_validation_status,
+    };
+    const pinnedSchemaId = pinnedLeadFieldSchemaId(versionRow);
+    const contract = buildAgentExecutionContract({
+      tenantId: job.tenant_id,
+      contactId: row.contact_id,
+      channel: "whatsapp",
+      interaction: {
+        kind: "whatsapp_conversation",
+        id: row.conversation_id,
+        ownershipEpoch: row.ownership_epoch,
+      },
+      authorizedUserId: row.ai_enabled_by_user_id,
+      assignmentSource: "explicit_assignment",
+      version: versionRow,
+      expectedAgentVersionId: row.agent_version_id,
+      leadFieldSchema:
+        pinnedSchemaId === null
+          ? null
+          : await loadLeadFieldSchema(transaction, pinnedSchemaId),
+    });
+    const lead =
+      contract.leadFieldSchema === null ||
+      !hasCapability(contract.capabilities, "lead.read")
+        ? null
+        : await findInteractionLead(transaction, {
+            contactId: contract.contactId,
+            sourceChannel: "whatsapp",
+            capabilities: contract.capabilities,
+            actorUserId: row.ai_enabled_by_user_id,
+            recordedBy: "agent",
+            agentProfileVersionId: row.agent_version_id,
+            conversationId: contract.interaction.id,
+          });
+    // The tenant the agent speaks for. Its identity is not the agent's to
+    // choose, so it is read here rather than taken from the prompt — and read
+    // through the same tenant-bound projection the voice runtime uses, because
+    // this role is deliberately not allowed to select tenant_settings columns.
+    const identities = await transaction<
+      { profile: TenantIdentityProjection | null }[]
+    >`
+      SELECT platform.current_voice_tenant_support_profile() AS profile
+    `;
+    const tenantDisplayName = tenantDisplayNameFrom(
+      identities[0]?.profile ?? null,
     );
     const knowledge = await eligibleFacts(transaction, row.agent_version_id);
     const history = await transaction<
@@ -2502,7 +2657,27 @@ async function loadAiWork(
       voiceSessions.length > 0;
     return {
       agentVersionId: row.agent_version_id,
+      contract,
+      tenantDisplayName,
+      lead:
+        lead === null
+          ? null
+          : {
+              id: lead.id,
+              revision: lead.revision,
+              collected: lead.fields
+                .filter((field) => field.supersededAt === null)
+                .map((field) => ({
+                  key: field.key,
+                  state: field.state,
+                  value: field.normalizedValue,
+                })),
+              missingRequired: lead.completeness?.missing ?? [],
+            },
       knowledge,
+      opensTickets:
+        hasCapability(contract.capabilities, "ticket.open") ||
+        row.agent_implicit_ticketing,
       ownershipEpoch: row.ownership_epoch,
       conversationId: row.conversation_id,
       authorizedUserId: row.ai_enabled_by_user_id,
@@ -2568,6 +2743,280 @@ async function loadAiWork(
       })),
     };
   });
+}
+
+/** What is stored for this interaction's lead, after the latest action. */
+type AiLeadState = AiWork["lead"];
+
+/**
+ * The provider request for one pass of the turn.
+ *
+ * Built from the resolved contract rather than from the job row, so the prompt,
+ * the capabilities and the reviewed field list are the ones pinned at
+ * admission. `lead` is present whenever the agent version pins a schema, even
+ * before a lead exists: the agent needs to know what to ask.
+ */
+function aiRequestFor(
+  work: AiWork,
+  lead: AiLeadState,
+  receipts: readonly WhatsAppActionReceipt[],
+  options: { readonly replyOnly?: boolean } = {},
+): WhatsAppAiRequest {
+  const pinned = work.contract.leadFieldSchema;
+  return {
+    systemPrompt: work.contract.agentPrompt,
+    locale: work.locale,
+    capabilities: work.contract.capabilities,
+    ...(work.tenantDisplayName === null
+      ? {}
+      : { tenantDisplayName: work.tenantDisplayName }),
+    ...(pinned === null
+      ? {}
+      : {
+          lead: {
+            schema: pinned.schema,
+            collected: lead?.collected ?? [],
+            missingRequired:
+              lead?.missingRequired ??
+              leadCompleteness(pinned.schema, []).missing,
+          },
+        }),
+    ...(receipts.length === 0 ? {} : { actionReceipts: receipts }),
+    ...(options.replyOnly === true ? { replyOnly: true } : {}),
+    ...(work.serviceIntake === undefined
+      ? {}
+      : { serviceIntake: work.serviceIntake }),
+    contactContext: work.contactContext,
+    knowledge: work.knowledge,
+    messages: work.messages,
+  };
+}
+
+/**
+ * How many real lead actions one customer turn may take before the agent must
+ * answer. Bounded so a model that keeps choosing actions cannot spend the
+ * worker's budget or leave the customer without a reply.
+ */
+const maximumLeadActionsPerTurn = 3;
+
+/** The lead actions the model may return, and the tool each one runs. */
+const leadActionTools = {
+  lead_save: "lead_save_fields",
+  lead_finalize: "lead_finalize_collection",
+  lead_follow_up: "lead_request_follow_up",
+} as const satisfies Readonly<Record<string, LeadToolName>>;
+
+type LeadActionName = keyof typeof leadActionTools;
+
+function leadActionName(
+  decision: WhatsAppAiDecision,
+): LeadActionName | undefined {
+  return decision.action === "lead_save" ||
+    decision.action === "lead_finalize" ||
+    decision.action === "lead_follow_up"
+    ? decision.action
+    : undefined;
+}
+
+function leadToolInput(
+  decision: WhatsAppAiDecision & { readonly action: LeadActionName },
+): Readonly<Record<string, unknown>> {
+  if (decision.action === "lead_save")
+    return { observations: decision.observations };
+  if (decision.action === "lead_finalize") return { summary: decision.summary };
+  return { note: decision.note };
+}
+
+/**
+ * The commit a reply may point at, or nothing. A failed or absent action
+ * leaves the ordinary gate in force, so an agent that tried and could not save
+ * cannot tell the customer that it did.
+ */
+function committedRecordFrom(
+  receipts: readonly WhatsAppActionReceipt[],
+  lead: AiLeadState,
+): CommittedRecord | undefined {
+  if (lead === null || !receipts.some((receipt) => receipt.ok))
+    return undefined;
+  return { leadId: lead.id, revision: lead.revision };
+}
+
+function leadActionSummary(result: LeadToolResult): string {
+  const changed = result.receipt?.changed ?? [];
+  const missing = result.missingRequired;
+  return [
+    `revision ${String(result.receipt?.revision ?? 0)}`,
+    changed.length === 0 ? "no change" : `committed ${changed.join(", ")}`,
+    ...(result.rejected === undefined
+      ? []
+      : [`rejected ${result.rejected.map((item) => item.key).join(", ")}`]),
+    missing.length === 0
+      ? "nothing required is outstanding"
+      : `still missing ${missing.join(", ")}`,
+  ].join("; ");
+}
+
+/**
+ * Run one lead action for real, in its own transaction, and report what
+ * actually committed.
+ *
+ * Every guard the reply path applies is re-applied here, because this is a
+ * side effect and the model chose it: the authorising operator must still be
+ * active, the conversation must still be this AI generation's, and the trigger
+ * must still be the current customer turn. The operation key is derived from
+ * the job and the trigger message, so a retried job or a redelivered webhook
+ * replays the same operation instead of writing a second time.
+ *
+ * A refusal is not an exception the caller swallows: it comes back as a failed
+ * receipt, so the agent is told the truth and can say so.
+ */
+async function runWhatsAppLeadAction(
+  sql: Sql,
+  workerId: string,
+  job: JobRow,
+  work: AiWork,
+  lead: AiLeadState,
+  action: LeadActionName,
+  decision: WhatsAppAiDecision & { readonly action: LeadActionName },
+): Promise<{
+  readonly receipt: WhatsAppActionReceipt;
+  readonly lead: AiLeadState;
+}> {
+  const pinned = work.contract.leadFieldSchema;
+  const tool = leadActionTools[action];
+  // An action the published configuration never offered is a defect, not a
+  // conversational outcome: the envelope did not advertise it, so retrying it
+  // would only buy more provider calls. Fail the turn permanently and name the
+  // reason, rather than answering the customer as though a choice was made.
+  if (
+    pinned === null ||
+    !hasCapability(work.contract.capabilities, capabilityForTool(tool))
+  )
+    throw new WhatsAppAiProviderError("lead_action_not_permitted", false);
+  try {
+    return await sql.begin(async (transaction) => {
+      await setTenantContext(transaction, job.tenant_id);
+      await requireOwnedJob(transaction, workerId, job.id);
+      await transaction`
+        SELECT set_config('app.current_user', ${work.authorizedUserId}, true)
+      `;
+      const authorization = await transaction<{ authorized: boolean }[]>`
+        SELECT platform.messaging_ai_actor_authorized(
+          ${work.authorizedUserId}::uuid
+        ) AS authorized
+      `;
+      if (authorization[0]?.authorized !== true)
+        throw new TypeError("AI authorizing operator is no longer active");
+      await requireCurrentTrigger(
+        transaction,
+        work.conversationId,
+        work.triggerMessageId,
+      );
+      const binding: LeadBinding = {
+        contactId: work.contactId,
+        sourceChannel: "whatsapp",
+        capabilities: work.contract.capabilities,
+        actorUserId: work.authorizedUserId,
+        recordedBy: "agent",
+        agentProfileVersionId: work.agentVersionId,
+        conversationId: work.conversationId,
+        conversationOwnershipEpoch: work.ownershipEpoch,
+      };
+      // The lead is created by the first real save, not by the greeting that
+      // opened the conversation, and the key is the job's — a retry after a
+      // lost commit reuses it rather than opening a second lead.
+      const leadId =
+        lead?.id ??
+        (
+          await ensureLeadForInteraction(transaction, binding, {
+            operationKey: `whatsapp-ai-lead:${job.id}`,
+            fieldSchemaId: pinned.id,
+            fieldSchemaVersion: pinned.version,
+            sourceMessageId: work.triggerMessageId,
+            ...(work.contract.roleTitle === null
+              ? {}
+              : { businessObjective: work.contract.roleTitle }),
+          })
+        ).lead.id;
+      const context: LeadToolContext = {
+        leadId,
+        // Stable across restarts and retries: the job and the customer turn it
+        // answers, never a freshly generated call identifier.
+        interactionKey: `whatsapp:${work.conversationId}`,
+        turnKey: `${job.id}:${work.triggerMessageId}`,
+        schema: pinned.schema,
+        // Provenance the runtime can stand behind: the accepted message this
+        // turn answers, and the messages of this conversation as the only
+        // earlier turns the model is allowed to cite.
+        sourceReferenceId: work.triggerMessageId,
+        acceptedReferences: work.messages.map((message) => message.id),
+      };
+      const result = await executeLeadTool(
+        transaction,
+        binding,
+        context,
+        tool,
+        leadToolInput(decision),
+      );
+      return {
+        receipt: {
+          action,
+          ok: true,
+          reference: result.receipt?.reference ?? null,
+          detail: leadActionSummary(result),
+        },
+        lead: {
+          id: leadId,
+          revision: result.receipt?.revision ?? lead?.revision ?? 0,
+          collected: result.collected,
+          missingRequired: result.missingRequired,
+        },
+      };
+    });
+  } catch (error) {
+    // A rejected write is reported truthfully rather than failing the turn: the
+    // customer still gets an answer, and it is an answer that cannot claim a
+    // save happened. An unknown outcome is not treated as a rejection.
+    if (
+      error instanceof LeadToolError ||
+      error instanceof TypeError ||
+      (error instanceof Error &&
+        [
+          "LeadRevisionConflictError",
+          "LeadOwnershipError",
+          "LeadNotFoundError",
+          "LeadAuthorizationError",
+        ].includes(error.name))
+    )
+      return {
+        receipt: {
+          action,
+          ok: false,
+          reference: null,
+          detail:
+            error instanceof LeadToolError
+              ? error.reason
+              : "the action was refused",
+        },
+        lead,
+      };
+    throw error;
+  }
+}
+
+function capabilityForTool(
+  tool: LeadToolName,
+): "lead.read" | "lead.write" | "lead.finalize" | "lead.follow_up" {
+  switch (tool) {
+    case "lead_read_state":
+      return "lead.read";
+    case "lead_save_fields":
+      return "lead.write";
+    case "lead_finalize_collection":
+      return "lead.finalize";
+    case "lead_request_follow_up":
+      return "lead.follow_up";
+  }
 }
 
 /**
@@ -2750,6 +3199,9 @@ async function createAiHandoff(
             'conversation.ai_handoff', 'conversation', ${work.conversationId}::uuid,
             ${transaction.json({ reasonCode })})
   `;
+  // Only a ticketing agent turns its escalation into a support issue. The
+  // handoff, the task and the human ownership above happen for every agent.
+  if (!work.opensTickets) return receipt[0].id;
   // The escalation now also lives on the customer's ISSUE, beside the internal
   // work item rather than instead of it: `crm.tasks` keeps carrying the
   // operator's to-do and its existing notifications, deep links and audit, and
@@ -2803,6 +3255,8 @@ async function processWhatsAppAiReply(
     const identityConflict =
       work.serviceIntake?.customerResolutionStatus === "conflict";
     const intakeRequiresHuman = work.serviceIntake?.status === "handed_off";
+    const receipts: WhatsAppActionReceipt[] = [];
+    let leadState = work.lead;
     const classifiedDecision: WhatsAppAiDecision =
       identityConflict || intakeRequiresHuman
         ? {
@@ -2816,8 +3270,39 @@ async function processWhatsAppAiReply(
               reasonCode: "call_requested",
               text: "",
             }
-          : await (automation.aiProvider?.decide(work) ??
-              Promise.reject(new TypeError("WhatsApp AI is disabled")));
+          : await (async () => {
+              const provider = automation.aiProvider;
+              if (provider === undefined)
+                throw new TypeError("WhatsApp AI is disabled");
+              // A turn may take a few real actions and must still end in
+              // something the customer can read, so the budget is bounded and
+              // the last pass is offered no further actions.
+              for (let round = 0; ; round += 1) {
+                const last = round >= maximumLeadActionsPerTurn;
+                const proposed = await provider.decide(
+                  aiRequestFor(work, leadState, receipts, {
+                    ...(last ? { replyOnly: true } : {}),
+                  }),
+                );
+                const action = leadActionName(proposed);
+                if (action === undefined) return proposed;
+                if (last)
+                  throw new WhatsAppAiProviderError("ai_invalid_output", false);
+                const executed = await runWhatsAppLeadAction(
+                  sql,
+                  workerId,
+                  job,
+                  work,
+                  leadState,
+                  action,
+                  proposed as WhatsAppAiDecision & {
+                    readonly action: typeof action;
+                  },
+                );
+                receipts.push(executed.receipt);
+                leadState = executed.lead;
+              }
+            })();
     const decision = enforceStandaloneCallbackConsent(
       classifiedDecision,
       explicitCallRequested,
@@ -2855,6 +3340,10 @@ async function processWhatsAppAiReply(
         work.locale,
         await recentDeliveredReplies(transaction, work.conversationId),
         triggerText,
+        // Only a write that actually committed in this turn lets the reply say
+        // anything was recorded, and the revision it committed at travels with
+        // the message so delivery can check the same fact.
+        committedRecordFrom(receipts, leadState),
       );
       let responseText = grounded.text;
       let evidence:
@@ -2884,13 +3373,17 @@ async function processWhatsAppAiReply(
           try {
             // The issue exists BEFORE the dial is admitted, so every attempt —
             // including the retries and the ones that never connect — lands on
-            // one ticket instead of creating a trail of orphaned records.
-            const ticketId = await ticketForAiAction(
-              transaction,
-              work,
-              job.id,
-              "Customer requested a callback",
-            );
+            // one ticket instead of creating a trail of orphaned records. Only
+            // a ticketing agent has an issue to land them on; the callback
+            // itself belongs to every agent the customer asked to call back.
+            const ticketId = work.opensTickets
+              ? await ticketForAiAction(
+                  transaction,
+                  work,
+                  job.id,
+                  "Customer requested a callback",
+                )
+              : null;
             const receipt = await queueWhatsAppAutomaticCall(
               transaction,
               work.authorizedUserId,
@@ -2898,40 +3391,43 @@ async function processWhatsAppAiReply(
               work.triggerMessageId,
               `whatsapp-ai-call:${job.id}`,
             );
-            // Voice takes the issue while the call is outstanding. The
-            // messaging worker still persists inbound WhatsApp for this
-            // conversation; it must not run a second AI conversation about the
-            // same problem underneath the call.
-            await setTicketHandlingMode(
-              transaction,
-              work.authorizedUserId,
-              ticketId,
-              "ai_voice",
-              "Callback admitted; voice owns the issue.",
-            );
-            // The attempt row exists before the dial is placed, so an accepted
-            // call whose response is lost has something to reconcile against
-            // and the post-call pipeline has somewhere to land.
-            const attempt = await openTicketCallAttempt(transaction, {
-              ticketId,
-              jobId: receipt.jobId,
-              handoffId: receipt.handoffId,
-              assuranceLevel: "channel_associated",
-            });
-            await recordTicketEvent(transaction, work.authorizedUserId, {
-              ticketId,
-              kind: "call_attempt",
-              actorKind: "ai",
-              summarySafe:
-                "Callback queued after an explicit customer request.",
-              evidence: {
+            if (ticketId !== null) {
+              // Voice takes the issue while the call is outstanding. The
+              // messaging worker still persists inbound WhatsApp for this
+              // conversation; it must not run a second AI conversation about
+              // the same problem underneath the call.
+              await setTicketHandlingMode(
+                transaction,
+                work.authorizedUserId,
+                ticketId,
+                "ai_voice",
+                "Callback admitted; voice owns the issue.",
+              );
+              // The attempt row exists before the dial is placed, so an
+              // accepted call whose response is lost has something to
+              // reconcile against and the post-call pipeline has somewhere to
+              // land.
+              const attempt = await openTicketCallAttempt(transaction, {
+                ticketId,
                 jobId: receipt.jobId,
-                flowId: receipt.flowId,
-                flowVersion: receipt.flowVersion,
-                attemptId: attempt.id,
-                attemptNumber: attempt.attemptNumber,
-              },
-            });
+                handoffId: receipt.handoffId,
+                assuranceLevel: "channel_associated",
+              });
+              await recordTicketEvent(transaction, work.authorizedUserId, {
+                ticketId,
+                kind: "call_attempt",
+                actorKind: "ai",
+                summarySafe:
+                  "Callback queued after an explicit customer request.",
+                evidence: {
+                  jobId: receipt.jobId,
+                  flowId: receipt.flowId,
+                  flowVersion: receipt.flowVersion,
+                  attemptId: attempt.id,
+                  attemptNumber: attempt.attemptNumber,
+                },
+              });
+            }
             automaticCallQueued = true;
             evidence = {
               kind: "receipt",
@@ -3506,6 +4002,29 @@ function uuid(value: unknown): value is string {
   );
 }
 
+/**
+ * Re-prove at delivery that the lead write the reply relies on exists, belongs
+ * to this conversation and is at least the revision that was committed. A lead
+ * deleted, moved or rolled back between generation and delivery withdraws the
+ * permission to claim the save; a later revision does not, because the claim
+ * was true when it was made and remains true now.
+ */
+async function committedRecordStillHolds(
+  transaction: postgres.TransactionSql,
+  conversationId: string,
+  claimed: unknown,
+): Promise<boolean> {
+  const value = record(claimed);
+  if (!uuid(value.leadId) || typeof value.revision !== "number") return false;
+  const rows = await transaction<{ id: string }[]>`
+    SELECT id FROM crm.leads
+    WHERE id=${value.leadId}::uuid
+      AND source_conversation_id=${conversationId}::uuid
+      AND revision >= ${value.revision}
+  `;
+  return rows[0] !== undefined;
+}
+
 async function requireGroundedOutbound(
   transaction: postgres.TransactionSql,
   row: {
@@ -3590,6 +4109,11 @@ async function requireGroundedOutbound(
         locale: metadata.locale,
         recentAssistantMessages,
         latestCustomerMessage,
+        committedRecord: await committedRecordStillHolds(
+          transaction,
+          row.conversation_id,
+          evidence.record,
+        ),
       })
     )
       expected = row.content_text ?? "";

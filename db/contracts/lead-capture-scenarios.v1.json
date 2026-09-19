@@ -1,0 +1,1243 @@
+{
+  "$comment": "Behavioural corpus for lead capture, written once and replayed by every harness. packages/py/oron-agent/tests/test_lead_scenario_corpus.py replays it against an in-memory store that models the platform functions' semantics, including the fault injections no database can be asked to produce on demand; db/tests/postgres/test_lead_scenario_corpus.py replays every fault-free scenario against the real platform.lead_* functions under the platform_voice role. packages/py/oron-agent/tests/eval/test_lead_capture_eval.py sends the scenarios marked providerEval to a model, and is skipped unless a provider evaluation is separately authorized. A scenario states what the caller said, the tool calls a correct agent makes, and the durable outcome; it never states what the model should say.",
+  "corpusVersion": 1,
+  "schemas": {
+    "software": [
+      { "key": "name", "label": "Preferred name", "type": "text", "required": true, "maxLength": 80 },
+      { "key": "company", "label": "Company", "type": "text", "required": true },
+      {
+        "key": "service",
+        "label": "Service",
+        "type": "choice",
+        "required": true,
+        "choices": ["CRM", "ERP", "Consulting"]
+      },
+      { "key": "users", "label": "Users", "type": "number", "required": false, "minimum": 1, "maximum": 100000 },
+      { "key": "budget", "label": "Budget", "type": "currency", "required": false, "minimum": 0 },
+      { "key": "start_date", "label": "Start", "type": "date", "required": false },
+      { "key": "email", "label": "Email", "type": "email", "required": false },
+      { "key": "newsletter", "label": "Newsletter", "type": "boolean", "required": false }
+    ],
+    "property": [
+      { "key": "area", "label": "Area", "type": "text", "required": true },
+      { "key": "rooms", "label": "Rooms", "type": "number", "required": true, "minimum": 1, "maximum": 12 },
+      { "key": "max_price", "label": "Maximum price", "type": "currency", "required": false, "minimum": 0 },
+      { "key": "move_in", "label": "Move in", "type": "date", "required": false },
+      { "key": "parking", "label": "Parking needed", "type": "boolean", "required": false },
+      {
+        "key": "visit_slot",
+        "label": "Preferred viewing time",
+        "type": "choice",
+        "required": false,
+        "choices": ["morning", "afternoon", "evening"]
+      }
+    ]
+  },
+  "scenarios": [
+    {
+      "id": "he-two-fields-in-one-turn",
+      "intent": "The caller introduces herself and her company in one sentence.",
+      "locale": "he",
+      "channel": "voice",
+      "schema": "software",
+      "providerEval": true,
+      "turns": [
+        {
+          "caller": "שלום, מדברת דנה מחברת אופק.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": {
+                "observations": [
+                  { "key": "name", "state": "known", "value": "דנה" },
+                  { "key": "company", "state": "known", "value": "אופק" }
+                ]
+              },
+              "expect": { "ok": true, "saved": true }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "fields": { "name": { "state": "known", "value": "דנה" }, "company": { "state": "known", "value": "אופק" } },
+        "missingRequired": ["service"],
+        "status": "collecting",
+        "saveClaimAllowed": true
+      }
+    },
+    {
+      "id": "he-a-correction-supersedes-the-first-answer",
+      "intent": "The caller corrects the company name a turn later.",
+      "locale": "he",
+      "channel": "voice",
+      "schema": "software",
+      "providerEval": true,
+      "turns": [
+        {
+          "caller": "אני מחברת אופק.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": { "observations": [{ "key": "company", "state": "known", "value": "אופק" }] },
+              "expect": { "ok": true, "saved": true }
+            }
+          ]
+        },
+        {
+          "caller": "רגע, השם המלא הוא אופק טכנולוגיות.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": {
+                "observations": [{ "key": "company", "state": "known", "value": "אופק טכנולוגיות" }]
+              },
+              "expect": { "ok": true, "saved": true }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "fields": { "company": { "state": "known", "value": "אופק טכנולוגיות" } },
+        "missingRequired": ["name", "service"],
+        "status": "collecting",
+        "saveClaimAllowed": true
+      }
+    },
+    {
+      "id": "en-a-declined-answer-is-recorded-as-declined",
+      "intent": "The caller refuses to give a budget; refusing is an answer, not a gap.",
+      "locale": "en",
+      "channel": "voice",
+      "schema": "software",
+      "providerEval": true,
+      "turns": [
+        {
+          "caller": "I would rather not discuss budget on the phone.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": { "observations": [{ "key": "budget", "state": "declined" }] },
+              "expect": { "ok": true, "saved": true }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "fields": { "budget": { "state": "declined", "value": null } },
+        "missingRequired": ["name", "company", "service"],
+        "status": "collecting",
+        "saveClaimAllowed": true
+      }
+    },
+    {
+      "id": "en-an-unknown-answer-is-not-an-empty-value",
+      "intent": "The caller does not know the seat count yet.",
+      "locale": "en",
+      "channel": "voice",
+      "schema": "software",
+      "turns": [
+        {
+          "caller": "I have no idea how many people will use it.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": { "observations": [{ "key": "users", "state": "unknown" }] },
+              "expect": { "ok": true, "saved": true }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "fields": { "users": { "state": "unknown", "value": null } },
+        "status": "collecting",
+        "saveClaimAllowed": true
+      }
+    },
+    {
+      "id": "en-a-question-that-does-not-apply",
+      "intent": "A question that cannot apply to this caller is recorded as such.",
+      "locale": "en",
+      "channel": "voice",
+      "schema": "software",
+      "turns": [
+        {
+          "caller": "We are a public body, marketing email is not something we can take.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": { "observations": [{ "key": "newsletter", "state": "not_applicable" }] },
+              "expect": { "ok": true, "saved": true }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "fields": { "newsletter": { "state": "not_applicable", "value": null } },
+        "status": "collecting",
+        "saveClaimAllowed": true
+      }
+    },
+    {
+      "id": "en-a-choice-is-matched-to-the-configured-spelling",
+      "intent": "The caller says the option in their own case.",
+      "locale": "en",
+      "channel": "voice",
+      "schema": "software",
+      "providerEval": true,
+      "turns": [
+        {
+          "caller": "We are looking at your crm.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": { "observations": [{ "key": "service", "state": "known", "value": "crm" }] },
+              "expect": { "ok": true, "saved": true }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "fields": { "service": { "state": "known", "value": "CRM" } },
+        "missingRequired": ["name", "company"],
+        "status": "collecting",
+        "saveClaimAllowed": true
+      }
+    },
+    {
+      "id": "en-an-option-the-tenant-never-configured-is-refused",
+      "intent": "The agent may not invent a service the tenant does not offer.",
+      "locale": "en",
+      "channel": "voice",
+      "schema": "software",
+      "turns": [
+        {
+          "caller": "Do you do hosting?",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": { "observations": [{ "key": "service", "state": "known", "value": "Hosting" }] },
+              "expect": { "ok": false, "field": "service" }
+            }
+          ]
+        }
+      ],
+      "expect": { "fields": {}, "status": "new", "saveClaimAllowed": false }
+    },
+    {
+      "id": "en-a-seat-count-below-the-configured-minimum",
+      "intent": "Zero users is outside what the tenant asked to collect.",
+      "locale": "en",
+      "channel": "voice",
+      "schema": "software",
+      "turns": [
+        {
+          "caller": "Nobody uses it yet, zero people.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": { "observations": [{ "key": "users", "state": "known", "value": "0" }] },
+              "expect": { "ok": false, "field": "users" }
+            }
+          ]
+        }
+      ],
+      "expect": { "fields": {}, "status": "new", "saveClaimAllowed": false }
+    },
+    {
+      "id": "en-a-seat-count-above-the-configured-maximum",
+      "intent": "An implausible seat count is refused rather than stored.",
+      "locale": "en",
+      "channel": "voice",
+      "schema": "software",
+      "turns": [
+        {
+          "caller": "Two hundred and fifty thousand users.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": { "observations": [{ "key": "users", "state": "known", "value": "250000" }] },
+              "expect": { "ok": false, "field": "users" }
+            }
+          ]
+        }
+      ],
+      "expect": { "fields": {}, "status": "new", "saveClaimAllowed": false }
+    },
+    {
+      "id": "en-a-spoken-number-is-not-a-number",
+      "intent": "The agent may not turn a vague phrase into a figure.",
+      "locale": "en",
+      "channel": "voice",
+      "schema": "software",
+      "turns": [
+        {
+          "caller": "About twenty, give or take.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": { "observations": [{ "key": "users", "state": "known", "value": "about twenty" }] },
+              "expect": { "ok": false, "field": "users" }
+            }
+          ]
+        }
+      ],
+      "expect": { "fields": {}, "status": "new", "saveClaimAllowed": false }
+    },
+    {
+      "id": "he-an-amount-without-a-currency-is-not-guessed",
+      "intent": "A number on its own is not money.",
+      "locale": "he",
+      "channel": "voice",
+      "schema": "software",
+      "turns": [
+        {
+          "caller": "התקציב הוא חמישים אלף.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": { "observations": [{ "key": "budget", "state": "known", "value": "50000" }] },
+              "expect": { "ok": false, "field": "budget" }
+            }
+          ]
+        }
+      ],
+      "expect": { "fields": {}, "status": "new", "saveClaimAllowed": false }
+    },
+    {
+      "id": "he-an-amount-with-its-currency",
+      "intent": "The caller names the currency, so the amount can be stored.",
+      "locale": "he",
+      "channel": "voice",
+      "schema": "software",
+      "providerEval": true,
+      "turns": [
+        {
+          "caller": "התקציב הוא חמישים אלף שקל.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": {
+                "observations": [{ "key": "budget", "state": "known", "value": "50,000", "currency": "ils" }]
+              },
+              "expect": { "ok": true, "saved": true }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "fields": { "budget": { "state": "known", "value": "50000.00", "currency": "ILS" } },
+        "status": "collecting",
+        "saveClaimAllowed": true
+      }
+    },
+    {
+      "id": "en-an-address-is-stored-in-one-spelling",
+      "intent": "Two callers spelling an address differently produce one stored value.",
+      "locale": "en",
+      "channel": "voice",
+      "schema": "software",
+      "turns": [
+        {
+          "caller": "It is Roni at Example dot co dot il, capital R.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": {
+                "observations": [{ "key": "email", "state": "known", "value": "Roni@Example.CO.IL" }]
+              },
+              "expect": { "ok": true, "saved": true }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "fields": { "email": { "state": "known", "value": "roni@example.co.il" } },
+        "status": "collecting",
+        "saveClaimAllowed": true
+      }
+    },
+    {
+      "id": "en-a-half-heard-address-is-refused",
+      "intent": "A partially recognised address must be asked again, not stored.",
+      "locale": "en",
+      "channel": "voice",
+      "schema": "software",
+      "turns": [
+        {
+          "caller": "Roni at… sorry, the line cut.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": { "observations": [{ "key": "email", "state": "known", "value": "roni@" }] },
+              "expect": { "ok": false, "field": "email" }
+            }
+          ]
+        }
+      ],
+      "expect": { "fields": {}, "status": "new", "saveClaimAllowed": false }
+    },
+    {
+      "id": "en-an-exact-date",
+      "intent": "A date the caller states exactly is stored as a calendar date.",
+      "locale": "en",
+      "channel": "voice",
+      "schema": "software",
+      "turns": [
+        {
+          "caller": "We want to start on the first of October 2026.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": { "observations": [{ "key": "start_date", "state": "known", "value": "2026-10-01" }] },
+              "expect": { "ok": true, "saved": true }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "fields": { "start_date": { "state": "known", "value": "2026-10-01" } },
+        "status": "collecting",
+        "saveClaimAllowed": true
+      }
+    },
+    {
+      "id": "en-a-date-that-does-not-exist",
+      "intent": "A misheard date is refused rather than silently moved.",
+      "locale": "en",
+      "channel": "voice",
+      "schema": "software",
+      "turns": [
+        {
+          "caller": "The thirtieth of February.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": { "observations": [{ "key": "start_date", "state": "known", "value": "2026-02-30" }] },
+              "expect": { "ok": false, "field": "start_date" }
+            }
+          ]
+        }
+      ],
+      "expect": { "fields": {}, "status": "new", "saveClaimAllowed": false }
+    },
+    {
+      "id": "en-an-ambiguous-local-date-format",
+      "intent": "01/10/2026 means two different days in two countries, so it is refused.",
+      "locale": "en",
+      "channel": "voice",
+      "schema": "software",
+      "turns": [
+        {
+          "caller": "Let us say 01/10/2026.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": { "observations": [{ "key": "start_date", "state": "known", "value": "01/10/2026" }] },
+              "expect": { "ok": false, "field": "start_date" }
+            }
+          ]
+        }
+      ],
+      "expect": { "fields": {}, "status": "new", "saveClaimAllowed": false }
+    },
+    {
+      "id": "he-a-yes-in-hebrew-is-a-yes",
+      "intent": "The consent question is answered in the caller's language.",
+      "locale": "he",
+      "channel": "voice",
+      "schema": "software",
+      "turns": [
+        {
+          "caller": "כן, אפשר לשלוח לי עדכונים.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": { "observations": [{ "key": "newsletter", "state": "known", "value": "כן" }] },
+              "expect": { "ok": true, "saved": true }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "fields": { "newsletter": { "state": "known", "value": "true" } },
+        "status": "collecting",
+        "saveClaimAllowed": true
+      }
+    },
+    {
+      "id": "en-a-hedged-answer-is-not-consent",
+      "intent": "\"Sometimes\" is not a yes and must not be stored as one.",
+      "locale": "en",
+      "channel": "voice",
+      "schema": "software",
+      "turns": [
+        {
+          "caller": "Sometimes, depends what you send.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": { "observations": [{ "key": "newsletter", "state": "known", "value": "sometimes" }] },
+              "expect": { "ok": false, "field": "newsletter" }
+            }
+          ]
+        }
+      ],
+      "expect": { "fields": {}, "status": "new", "saveClaimAllowed": false }
+    },
+    {
+      "id": "en-an-empty-answer-is-not-an-answer",
+      "intent": "Silence recorded as a known value would read as a real answer later.",
+      "locale": "en",
+      "channel": "voice",
+      "schema": "software",
+      "turns": [
+        {
+          "caller": "…",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": { "observations": [{ "key": "company", "state": "known", "value": "   " }] },
+              "expect": { "ok": false, "field": "company" }
+            }
+          ]
+        }
+      ],
+      "expect": { "fields": {}, "status": "new", "saveClaimAllowed": false }
+    },
+    {
+      "id": "en-a-value-attached-to-an-unknown-state-is-refused",
+      "intent": "\"Unknown\" carrying a value would hide a guess inside a gap.",
+      "locale": "en",
+      "channel": "voice",
+      "schema": "software",
+      "turns": [
+        {
+          "caller": "I am not sure, maybe Acme?",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": { "observations": [{ "key": "company", "state": "unknown", "value": "Acme" }] },
+              "expect": { "ok": false, "field": "company" }
+            }
+          ]
+        }
+      ],
+      "expect": { "fields": {}, "status": "new", "saveClaimAllowed": false }
+    },
+    {
+      "id": "en-an-identifier-the-tenant-never-asked-for",
+      "intent": "A caller volunteering a national identifier must not have it stored; the configured questions are the whole permitted surface.",
+      "locale": "en",
+      "channel": "voice",
+      "schema": "software",
+      "turns": [
+        {
+          "caller": "My ID number is 123456782 if that helps.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": {
+                "observations": [{ "key": "national_id", "state": "known", "value": "123456782" }]
+              },
+              "expect": { "ok": false, "field": "national_id" }
+            }
+          ]
+        }
+      ],
+      "expect": { "fields": {}, "status": "new", "saveClaimAllowed": false }
+    },
+    {
+      "id": "en-an-answer-longer-than-the-field-allows",
+      "intent": "A rambling answer is refused rather than truncated into a false value.",
+      "locale": "en",
+      "channel": "voice",
+      "schema": "software",
+      "turns": [
+        {
+          "caller": "My name is a very long one, let me spell the whole thing out for you.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": {
+                "observations": [
+                  {
+                    "key": "name",
+                    "state": "known",
+                    "value": "Alexandra Bartholomew Christopher Dominique Evangelista Fitzgerald Montgomery Wellington the Third"
+                  }
+                ]
+              },
+              "expect": { "ok": false, "field": "name" }
+            }
+          ]
+        }
+      ],
+      "expect": { "fields": {}, "status": "new", "saveClaimAllowed": false }
+    },
+    {
+      "id": "en-nothing-may-be-saved-before-the-caller-has-said-anything",
+      "intent": "A tool call that precedes the first accepted turn has no source to cite.",
+      "locale": "en",
+      "channel": "voice",
+      "schema": "software",
+      "turns": [
+        {
+          "caller": null,
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": { "observations": [{ "key": "company", "state": "known", "value": "Acme" }] },
+              "expect": { "ok": false, "errorContains": "accepted" }
+            }
+          ]
+        }
+      ],
+      "expect": { "fields": {}, "status": "new", "saveClaimAllowed": false }
+    },
+    {
+      "id": "en-a-repeated-call-in-the-same-turn-writes-once",
+      "intent": "The model retries an unanswered call; the customer's record must not move twice.",
+      "locale": "en",
+      "channel": "voice",
+      "schema": "software",
+      "turns": [
+        {
+          "caller": "We are Acme Industries.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": { "observations": [{ "key": "company", "state": "known", "value": "Acme Industries" }] },
+              "expect": { "ok": true, "saved": true }
+            },
+            {
+              "tool": "lead_save_fields",
+              "arguments": { "observations": [{ "key": "company", "state": "known", "value": "Acme Industries" }] },
+              "expect": { "ok": true, "saved": true, "sameRevisionAsPrevious": true }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "fields": { "company": { "state": "known", "value": "Acme Industries" } },
+        "status": "collecting",
+        "saveClaimAllowed": true,
+        "writes": 1
+      }
+    },
+    {
+      "id": "he-a-lost-answer-that-did-commit-is-reported-as-saved",
+      "intent": "The connection drops after the write lands; the receipt is found, so the agent may say it is saved.",
+      "locale": "he",
+      "channel": "voice",
+      "schema": "software",
+      "faults": true,
+      "turns": [
+        {
+          "caller": "החברה נקראת אופק.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": { "observations": [{ "key": "company", "state": "known", "value": "אופק" }] },
+              "fault": "commit_then_drop",
+              "expect": { "ok": true, "saved": true }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "fields": { "company": { "state": "known", "value": "אופק" } },
+        "status": "collecting",
+        "saveClaimAllowed": true
+      }
+    },
+    {
+      "id": "he-a-lost-answer-that-did-not-commit-is-never-claimed",
+      "intent": "The write never landed and no receipt exists, so nothing may be called saved.",
+      "locale": "he",
+      "channel": "voice",
+      "schema": "software",
+      "faults": true,
+      "turns": [
+        {
+          "caller": "החברה נקראת אופק.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": { "observations": [{ "key": "company", "state": "known", "value": "אופק" }] },
+              "fault": "drop_before_commit",
+              "expect": { "ok": false, "code": "outcome_unknown" }
+            }
+          ]
+        }
+      ],
+      "expect": { "fields": {}, "status": "new", "saveClaimAllowed": false }
+    },
+    {
+      "id": "he-a-superseded-worker-is-refused",
+      "intent": "The database fences a worker whose ownership was taken over; the refusal reaches the model as a refusal.",
+      "locale": "he",
+      "channel": "voice",
+      "schema": "software",
+      "faults": true,
+      "turns": [
+        {
+          "caller": "החברה נקראת אופק.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": { "observations": [{ "key": "company", "state": "known", "value": "אופק" }] },
+              "fault": "refuse:LD410",
+              "expect": { "ok": false, "code": "LD410" }
+            }
+          ]
+        }
+      ],
+      "expect": { "fields": {}, "status": "new", "saveClaimAllowed": false }
+    },
+    {
+      "id": "en-handing-over-needs-a-summary",
+      "intent": "A handover with no summary tells the reviewer nothing.",
+      "locale": "en",
+      "channel": "voice",
+      "schema": "software",
+      "turns": [
+        {
+          "caller": "That is everything from me.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": { "observations": [{ "key": "company", "state": "known", "value": "Acme" }] },
+              "expect": { "ok": true, "saved": true }
+            },
+            {
+              "tool": "lead_finalize_collection",
+              "arguments": { "summary": "   " },
+              "expect": { "ok": false, "errorContains": "summary" }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "fields": { "company": { "state": "known", "value": "Acme" } },
+        "status": "collecting",
+        "saveClaimAllowed": true
+      }
+    },
+    {
+      "id": "en-nothing-to-hand-over-yet",
+      "intent": "Finalizing before anything was collected has nothing to hand to a person.",
+      "locale": "en",
+      "channel": "voice",
+      "schema": "software",
+      "turns": [
+        {
+          "caller": "Just pass me to someone.",
+          "calls": [
+            {
+              "tool": "lead_finalize_collection",
+              "arguments": { "summary": "Caller asked for a person straight away." },
+              "expect": { "ok": false, "errorContains": "nothing" }
+            }
+          ]
+        }
+      ],
+      "expect": { "fields": {}, "status": "new", "saveClaimAllowed": false }
+    },
+    {
+      "id": "en-a-complete-enquiry-is-handed-to-a-person",
+      "intent": "Every configured question answered, then handed over for review — not qualified, not booked.",
+      "locale": "en",
+      "channel": "voice",
+      "schema": "software",
+      "providerEval": true,
+      "turns": [
+        {
+          "caller": "This is Noa from Acme, we want the ERP, about forty people.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": {
+                "observations": [
+                  { "key": "name", "state": "known", "value": "Noa" },
+                  { "key": "company", "state": "known", "value": "Acme" },
+                  { "key": "service", "state": "known", "value": "ERP" },
+                  { "key": "users", "state": "known", "value": "40" }
+                ]
+              },
+              "expect": { "ok": true, "saved": true, "missingRequired": [] }
+            }
+          ]
+        },
+        {
+          "caller": "Yes, please have someone call me back about it.",
+          "calls": [
+            {
+              "tool": "lead_finalize_collection",
+              "arguments": {
+                "summary": "Acme want ERP for about forty people and asked for a callback.",
+                "nextAction": "Call Noa back about the ERP enquiry."
+              },
+              "expect": { "ok": true, "saved": true }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "fields": {
+          "name": { "state": "known", "value": "Noa" },
+          "company": { "state": "known", "value": "Acme" },
+          "service": { "state": "known", "value": "ERP" },
+          "users": { "state": "known", "value": "40" }
+        },
+        "missingRequired": [],
+        "status": "ready_for_review",
+        "saveClaimAllowed": true
+      }
+    },
+    {
+      "id": "en-a-follow-up-is-recorded-against-the-lead",
+      "intent": "The caller wants a person later; that request is durable, not a promise in the transcript.",
+      "locale": "en",
+      "channel": "voice",
+      "schema": "software",
+      "providerEval": true,
+      "turns": [
+        {
+          "caller": "We are Acme. Can someone call me on Thursday?",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": { "observations": [{ "key": "company", "state": "known", "value": "Acme" }] },
+              "expect": { "ok": true, "saved": true }
+            },
+            {
+              "tool": "lead_request_follow_up",
+              "arguments": { "note": "Caller asked to be called back on Thursday." },
+              "expect": { "ok": true, "saved": true }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "fields": { "company": { "state": "known", "value": "Acme" } },
+        "status": "collecting",
+        "saveClaimAllowed": true
+      }
+    },
+    {
+      "id": "en-a-follow-up-needs-to-say-what-is-wanted",
+      "intent": "An empty follow-up note leaves the next person guessing.",
+      "locale": "en",
+      "channel": "voice",
+      "schema": "software",
+      "turns": [
+        {
+          "caller": "We are Acme, call me back.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": { "observations": [{ "key": "company", "state": "known", "value": "Acme" }] },
+              "expect": { "ok": true, "saved": true }
+            },
+            {
+              "tool": "lead_request_follow_up",
+              "arguments": { "note": "" },
+              "expect": { "ok": false, "errorContains": "note" }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "fields": { "company": { "state": "known", "value": "Acme" } },
+        "status": "collecting",
+        "saveClaimAllowed": true
+      }
+    },
+    {
+      "id": "en-a-survey-agent-has-no-lead-tools-at-all",
+      "intent": "An agent published without lead capabilities cannot write a lead, however it is prompted.",
+      "locale": "en",
+      "channel": "voice",
+      "schema": "software",
+      "capabilities": [],
+      "expectToolCount": 0,
+      "turns": [
+        {
+          "caller": "Put me down as interested, I am from Acme.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": { "observations": [{ "key": "company", "state": "known", "value": "Acme" }] },
+              "expect": { "ok": false, "errorContains": "not enabled" }
+            }
+          ]
+        }
+      ],
+      "expect": { "fields": {}, "status": "new", "saveClaimAllowed": false }
+    },
+    {
+      "id": "en-a-read-only-agent-may-look-but-not-write",
+      "intent": "Reading the enquiry is a separate capability from changing it.",
+      "locale": "en",
+      "channel": "voice",
+      "schema": "software",
+      "capabilities": ["lead.read"],
+      "expectToolCount": 1,
+      "turns": [
+        {
+          "caller": "What do you already have for me?",
+          "calls": [
+            { "tool": "lead_read_state", "arguments": {}, "expect": { "ok": true } },
+            {
+              "tool": "lead_save_fields",
+              "arguments": { "observations": [{ "key": "company", "state": "known", "value": "Acme" }] },
+              "expect": { "ok": false, "errorContains": "not enabled" }
+            }
+          ]
+        }
+      ],
+      "expect": { "fields": {}, "status": "new", "saveClaimAllowed": false }
+    },
+    {
+      "id": "en-an-agent-without-the-handover-capability-cannot-finalize",
+      "intent": "Writing answers does not imply the right to hand the enquiry on.",
+      "locale": "en",
+      "channel": "voice",
+      "schema": "software",
+      "capabilities": ["lead.read", "lead.write"],
+      "expectToolCount": 2,
+      "turns": [
+        {
+          "caller": "We are Acme, that is all.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": { "observations": [{ "key": "company", "state": "known", "value": "Acme" }] },
+              "expect": { "ok": true, "saved": true }
+            },
+            {
+              "tool": "lead_finalize_collection",
+              "arguments": { "summary": "Acme enquiry." },
+              "expect": { "ok": false, "errorContains": "not enabled" }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "fields": { "company": { "state": "known", "value": "Acme" } },
+        "status": "collecting",
+        "saveClaimAllowed": true
+      }
+    },
+    {
+      "id": "he-a-viewing-enquiry-uses-the-questions-that-tenant-configured",
+      "intent": "The same runtime collects an entirely different set of answers for a property agency.",
+      "locale": "he",
+      "channel": "voice",
+      "schema": "property",
+      "providerEval": true,
+      "turns": [
+        {
+          "caller": "אני מחפש שלושה חדרים ברמת גן.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": {
+                "observations": [
+                  { "key": "area", "state": "known", "value": "רמת גן" },
+                  { "key": "rooms", "state": "known", "value": "3" }
+                ]
+              },
+              "expect": { "ok": true, "saved": true, "missingRequired": [] }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "fields": {
+          "area": { "state": "known", "value": "רמת גן" },
+          "rooms": { "state": "known", "value": "3" }
+        },
+        "missingRequired": [],
+        "status": "collecting",
+        "saveClaimAllowed": true
+      }
+    },
+    {
+      "id": "he-a-viewing-time-and-a-declined-price",
+      "intent": "A choice configured by one tenant and a refusal, in the same turn.",
+      "locale": "he",
+      "channel": "voice",
+      "schema": "property",
+      "turns": [
+        {
+          "caller": "בוקר מתאים לי, ועל המחיר אני מעדיף לא לדבר עכשיו.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": {
+                "observations": [
+                  { "key": "visit_slot", "state": "known", "value": "morning" },
+                  { "key": "max_price", "state": "declined" }
+                ]
+              },
+              "expect": { "ok": true, "saved": true }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "fields": {
+          "visit_slot": { "state": "known", "value": "morning" },
+          "max_price": { "state": "declined", "value": null }
+        },
+        "missingRequired": ["area", "rooms"],
+        "status": "collecting",
+        "saveClaimAllowed": true
+      }
+    },
+    {
+      "id": "en-a-room-count-outside-what-the-agency-lists",
+      "intent": "The second tenant's own limits are enforced the same way as the first tenant's.",
+      "locale": "en",
+      "channel": "voice",
+      "schema": "property",
+      "turns": [
+        {
+          "caller": "Something with twenty rooms.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": { "observations": [{ "key": "rooms", "state": "known", "value": "20" }] },
+              "expect": { "ok": false, "field": "rooms" }
+            }
+          ]
+        }
+      ],
+      "expect": { "fields": {}, "status": "new", "saveClaimAllowed": false }
+    },
+    {
+      "id": "he-a-parking-question-answered-in-hebrew",
+      "intent": "A yes/no question in the second schema, answered in the caller's language.",
+      "locale": "he",
+      "channel": "voice",
+      "schema": "property",
+      "turns": [
+        {
+          "caller": "כן, חובה חניה.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": { "observations": [{ "key": "parking", "state": "known", "value": "כן" }] },
+              "expect": { "ok": true, "saved": true }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "fields": { "parking": { "state": "known", "value": "true" } },
+        "missingRequired": ["area", "rooms"],
+        "status": "collecting",
+        "saveClaimAllowed": true
+      }
+    },
+    {
+      "id": "he-a-callback-continues-the-same-enquiry",
+      "intent": "What was collected on the first channel is present on the callback; the caller is not asked again.",
+      "locale": "he",
+      "channel": "voice",
+      "schema": "software",
+      "continuesAfterTurn": 1,
+      "turns": [
+        {
+          "caller": "היי, מדברת דנה מאופק.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": {
+                "observations": [
+                  { "key": "name", "state": "known", "value": "דנה" },
+                  { "key": "company", "state": "known", "value": "אופק" }
+                ]
+              },
+              "expect": { "ok": true, "saved": true }
+            }
+          ]
+        },
+        {
+          "caller": "כן, זאת אני. אנחנו רוצים CRM.",
+          "calls": [
+            {
+              "tool": "lead_read_state",
+              "arguments": {},
+              "expect": { "ok": true, "collectedKeys": ["company", "name"] }
+            },
+            {
+              "tool": "lead_save_fields",
+              "arguments": { "observations": [{ "key": "service", "state": "known", "value": "CRM" }] },
+              "expect": { "ok": true, "saved": true, "missingRequired": [] }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "fields": {
+          "name": { "state": "known", "value": "דנה" },
+          "company": { "state": "known", "value": "אופק" },
+          "service": { "state": "known", "value": "CRM" }
+        },
+        "missingRequired": [],
+        "status": "collecting",
+        "saveClaimAllowed": true
+      }
+    },
+    {
+      "id": "en-a-refusal-can-be-revisited-later-in-the-call",
+      "intent": "A caller who declines and then changes their mind ends with the answer they gave.",
+      "locale": "en",
+      "channel": "voice",
+      "schema": "software",
+      "turns": [
+        {
+          "caller": "I would rather not say the budget.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": { "observations": [{ "key": "budget", "state": "declined" }] },
+              "expect": { "ok": true, "saved": true }
+            }
+          ]
+        },
+        {
+          "caller": "Actually, we have around thirty thousand shekels.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": {
+                "observations": [
+                  { "key": "budget", "state": "known", "value": "30000", "currency": "ILS", "confirmed": true }
+                ]
+              },
+              "expect": { "ok": true, "saved": true }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "fields": {
+          "budget": {
+            "state": "known",
+            "value": "30000.00",
+            "currency": "ILS",
+            "confirmation": "customer_confirmed"
+          }
+        },
+        "status": "collecting",
+        "saveClaimAllowed": true
+      }
+    },
+    {
+      "id": "en-a-citation-of-a-turn-that-never-happened-is-not-trusted",
+      "intent": "A model citing an invented turn still has its value attributed to the turn it actually spoke in.",
+      "locale": "en",
+      "channel": "voice",
+      "schema": "software",
+      "turns": [
+        {
+          "caller": "We are Acme.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": {
+                "observations": [
+                  { "key": "company", "state": "known", "value": "Acme", "sourceReference": "turn-99" }
+                ]
+              },
+              "expect": { "ok": true, "saved": true, "sourceReference": "turn-1" }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "fields": { "company": { "state": "known", "value": "Acme" } },
+        "status": "collecting",
+        "saveClaimAllowed": true
+      }
+    },
+    {
+      "id": "en-more-observations-than-one-call-may-carry",
+      "intent": "A model dumping an entire transcript into one call is refused.",
+      "locale": "en",
+      "channel": "voice",
+      "schema": "software",
+      "turns": [
+        {
+          "caller": "Let me give you everything at once.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": { "observations": "__oversized__" },
+              "expect": { "ok": false, "errorContains": "at most" }
+            }
+          ]
+        }
+      ],
+      "expect": { "fields": {}, "status": "new", "saveClaimAllowed": false }
+    },
+    {
+      "id": "en-an-empty-save-is-not-a-save",
+      "intent": "A call with no observations must not count as having stored anything.",
+      "locale": "en",
+      "channel": "voice",
+      "schema": "software",
+      "turns": [
+        {
+          "caller": "Right.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": { "observations": [] },
+              "expect": { "ok": false, "errorContains": "at least one" }
+            }
+          ]
+        }
+      ],
+      "expect": { "fields": {}, "status": "new", "saveClaimAllowed": false }
+    },
+    {
+      "id": "en-a-failed-save-after-a-good-one-does-not-license-a-claim",
+      "intent": "The caller's newest answer failed, so the agent may not say that answer is saved.",
+      "locale": "en",
+      "channel": "voice",
+      "schema": "software",
+      "turns": [
+        {
+          "caller": "We are Acme.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": { "observations": [{ "key": "company", "state": "known", "value": "Acme" }] },
+              "expect": { "ok": true, "saved": true }
+            }
+          ]
+        },
+        {
+          "caller": "And we want hosting.",
+          "calls": [
+            {
+              "tool": "lead_save_fields",
+              "arguments": { "observations": [{ "key": "service", "state": "known", "value": "Hosting" }] },
+              "expect": { "ok": false, "field": "service" }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "fields": { "company": { "state": "known", "value": "Acme" } },
+        "missingRequired": ["name", "service"],
+        "status": "collecting",
+        "saveClaimAllowed": false
+      }
+    }
+  ]
+}

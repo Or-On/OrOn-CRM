@@ -12,12 +12,12 @@ fetched value is spoken on this very entry.
 Nothing here knows about components, appointments or Hebrew.
 """
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
 from oron_flows.graph import FlowSpec
 from oron_flows.node import FlowNode, FunctionSpec
-from pipecat.flows import FlowsFunctionSchema, NodeConfig
+from pipecat.flows import FlowsDirectFunction, FlowsFunctionSchema, NodeConfig
 from pipecat.frames.frames import TTSSpeakFrame
 from pydantic import BaseModel, ConfigDict
 
@@ -121,6 +121,7 @@ def _build(
     handlers: HandlerRegistry,
     enters: dict[str, EnterHandler],
     action_guard: Callable[..., Awaitable[Any]] | None = None,
+    call_functions: Sequence[FlowsFunctionSchema] = (),
 ) -> NodeConfig:
     config: NodeConfig = {
         "name": node.name,
@@ -140,10 +141,18 @@ def _build(
         config["post_actions"] = [
             a.model_dump(exclude_none=True, mode="json") for a in node.post_actions
         ]
-    if node.functions:
-        config["functions"] = [
-            _bind_function(fn, handlers, configs, enters, action_guard) for fn in node.functions
-        ]
+    # Declared at the node's own element type so extending it below stays
+    # assignable: NodeConfig accepts a direct callable there too.
+    functions: list[FlowsFunctionSchema | FlowsDirectFunction] = [
+        _bind_function(fn, handlers, configs, enters, action_guard) for fn in node.functions
+    ]
+    # Business actions the published agent holds are available on every step
+    # that still converses, not only where a flow author remembered them. A
+    # terminal node is ending the call and gets none.
+    if not node.is_terminal:
+        functions.extend(call_functions)
+    if functions:
+        config["functions"] = functions
 
     if node.respond_immediately is not None:
         config["respond_immediately"] = node.respond_immediately
@@ -159,6 +168,7 @@ def bind_flow(
     *,
     handlers: HandlerRegistry,
     action_guard: Callable[..., Awaitable[Any]] | None = None,
+    call_functions: Sequence[FlowsFunctionSchema] = (),
 ) -> BoundFlow:
     # Resolved here so an unknown on_enter handler is a bind-time KeyError, the
     # same as an unknown function handler.
@@ -171,5 +181,7 @@ def bind_flow(
     # Handlers close over `configs`, fully populated before any handler runs, so
     # forward references resolve.
     for node in spec.nodes:
-        configs[node.name] = _build(spec, node, configs, handlers, enters, action_guard)
+        configs[node.name] = _build(
+            spec, node, configs, handlers, enters, action_guard, call_functions
+        )
     return BoundFlow(spec=spec, configs=configs)

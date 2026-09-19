@@ -20,10 +20,12 @@ def test_graph_has_preserved_oron_root_and_one_target_head() -> None:
     assert report.bases == ("0001",)
     assert report.heads == (manifest["alembic_head"],)
     assert report.branch_points == ("8eda5976c920",)
-    # Bumped by exactly one per deliberate migration; 83 adds the durable
-    # post-call pipeline (b8d5e21f7a04). An unexplained change here means a
-    # migration arrived that nobody reviewed.
-    assert report.revision_count == 83
+    # Bumped by exactly one per deliberate migration; 84 adds the canonical
+    # lead capture domain (c7a41d6e9b52) and 85 moves every lead write behind
+    # the platform functions that own binding, concurrency and receipts
+    # (e3b9d7f1a2c6). An unexplained change here means a migration arrived
+    # that nobody reviewed.
+    assert report.revision_count == 85
 
 
 def test_rendered_postgresql_contract_passes_static_security_checks() -> None:

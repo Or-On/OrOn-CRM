@@ -37,6 +37,8 @@ export const applicationPageManifest = [
   { template: "/he" },
   { template: "/inbox", navigationParent: "/inbox" },
   { template: "/invite" },
+  { template: "/leads", navigationParent: "/leads" },
+  { template: "/leads/[id]", navigationParent: "/leads" },
   { template: "/login" },
   { template: "/operations", navigationParent: "/operations" },
   { template: "/orchestration", navigationParent: "/orchestration" },
