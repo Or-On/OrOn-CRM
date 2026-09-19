@@ -9,7 +9,7 @@ import json
 import unicodedata
 from uuid import UUID
 
-from oron_common import CallContext, CallUsage, validate_e164
+from oron_common import CallContext, CallUsage, Direction, validate_e164
 from oron_db import make_engine, make_sessionmaker, set_tenant
 from oron_dispatcher.dispatcher import IdempotencyConflict
 from oron_dispatcher.tenancy_client import PhoneResolution
@@ -221,29 +221,6 @@ class PostgresVoiceRuntime:
         room: str,
         idempotency_key: str | None,
     ) -> bool:
-        fingerprint = hmac.new(
-            self._blind_index_key,
-            json.dumps(
-                {
-                    "tenant": str(context.tenant_id),
-                    "flow": str(context.flow_id),
-                    "flow_version": context.flow_version,
-                    "agent_version": str(context.agent_version_id)
-                    if context.agent_version_id
-                    else None,
-                    "to": context.to_number,
-                    "contact": str(context.contact_id) if context.contact_id else None,
-                    "address": context.caller_gender,
-                    "source_conversation": str(context.source_conversation_id)
-                    if context.source_conversation_id
-                    else None,
-                    "handoff": str(context.handoff_id) if context.handoff_id else None,
-                },
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode(),
-            hashlib.sha256,
-        ).hexdigest()
         if idempotency_key is not None and context.agent_version_id is not None:
             # Refuse a mismatched canonical callback before room/SIP side effects.
             await self.get_voice_configuration(
@@ -262,6 +239,47 @@ class PostgresVoiceRuntime:
                     text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
                     {"key": f"voice-admission:{context.tenant_id}:{context.session_id}"},
                 )
+            if (
+                context.contact_id is None
+                and context.direction is Direction.INBOUND
+                and context.from_number
+            ):
+                try:
+                    caller_number = validate_e164(context.from_number)
+                except ValueError:
+                    caller_number = None
+                if caller_number is not None:
+                    resolved = (
+                        await database.execute(
+                            text("SELECT platform.resolve_voice_caller_contact(:phone)"),
+                            {"phone": caller_number},
+                        )
+                    ).scalar_one_or_none()
+                    if resolved is not None:
+                        context.contact_id = UUID(str(resolved))
+            fingerprint = hmac.new(
+                self._blind_index_key,
+                json.dumps(
+                    {
+                        "tenant": str(context.tenant_id),
+                        "flow": str(context.flow_id),
+                        "flow_version": context.flow_version,
+                        "agent_version": str(context.agent_version_id)
+                        if context.agent_version_id
+                        else None,
+                        "to": context.to_number,
+                        "contact": str(context.contact_id) if context.contact_id else None,
+                        "address": context.caller_gender,
+                        "source_conversation": str(context.source_conversation_id)
+                        if context.source_conversation_id
+                        else None,
+                        "handoff": str(context.handoff_id) if context.handoff_id else None,
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode(),
+                hashlib.sha256,
+            ).hexdigest()
             existing = await database.get(Session, context.session_id)
             if existing is not None:
                 if idempotency_key is not None:
@@ -446,6 +464,26 @@ class PostgresVoiceRuntime:
                 session_in=SessionUpdate(usage=usage),
             )
             return row is not None
+
+    async def open_support_ticket(
+        self, context: CallContext, *, subject: str, summary: str
+    ) -> dict:
+        async with self._sessionmaker() as database, database.begin():
+            await set_tenant(database, str(context.tenant_id))
+            receipt = (
+                await database.execute(
+                    text(
+                        "SELECT support.open_ticket_from_voice_session"
+                        "(:session_id,:subject,:summary)"
+                    ),
+                    {
+                        "session_id": str(context.session_id),
+                        "subject": subject,
+                        "summary": summary,
+                    },
+                )
+            ).scalar_one()
+            return dict(receipt)
 
     async def get_flow(
         self,
@@ -953,6 +991,9 @@ class AgentPostgresSessions:
             tenant_id,
             usage=usage,
         )
+
+    async def open_support_ticket(self, ctx: CallContext, *, subject: str, summary: str) -> dict:
+        return await self._backend.open_support_ticket(ctx, subject=subject, summary=summary)
 
     async def get_flow(self, flow_id: UUID, *, tenant_id: UUID) -> FlowSpec | None:
         return await self._backend.get_flow(flow_id, tenant_id=tenant_id)

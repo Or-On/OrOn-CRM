@@ -135,10 +135,8 @@ async def test_a_sentence_end_is_not_split_from_the_digits_after_it():
     assert not any(chunk.endswith("29.") for chunk in spoken), spoken
 
 
-def test_the_default_installs_the_aggregator_end_to_end():
-    """Guards the DEFAULT, which the wiring test cannot: that one passes
-    first_clause explicitly, so flipping the default back to False leaves it
-    green while production quietly reverts."""
+def test_the_default_preserves_whole_sentence_prosody_end_to_end():
+    """The production default must not split a sentence at its first comma."""
     from oron_agent.config import Settings
     from oron_agent.tts import build_tts
     from oron_flows import TtsProvider
@@ -159,4 +157,4 @@ def test_the_default_installs_the_aggregator_end_to_end():
         gemini_model="g",
         google_credentials_path=None,
     )
-    assert isinstance(service._text_aggregator, FirstClauseAggregator)
+    assert not isinstance(service._text_aggregator, FirstClauseAggregator)

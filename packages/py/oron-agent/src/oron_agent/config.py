@@ -215,7 +215,7 @@ class Settings(BaseSettings):
     # Speak the turn's opening clause without waiting for its sentence; off
     # falls back to whole sentences. The wait it removes is the largest slice of
     # a turn after the LLM's first token.
-    tts_first_clause: bool = Field(default=True, validation_alias="TTS_FIRST_CLAUSE")
+    tts_first_clause: bool = Field(default=False, validation_alias="TTS_FIRST_CLAUSE")
     # Soniox: ~310ms to first audio vs Gemini's ~830ms on Hebrew, warm.
     tts_provider: TtsProvider = Field(default=TtsProvider.SONIOX, validation_alias="TTS_PROVIDER")
     # Whether to point Hebrew before sending it to the vendor. Off until a

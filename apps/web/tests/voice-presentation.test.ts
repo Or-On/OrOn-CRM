@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { VoiceSessionSummary } from "@or-on/api-client";
-import { summarizeVoiceSample, transcriptEntries } from "../src/features/voice";
+import {
+  summarizeVoiceSample,
+  transcriptArtifactEntries,
+  transcriptEntries,
+} from "../src/features/voice";
 
 function session(
   overrides: Partial<VoiceSessionSummary> = {},
@@ -73,6 +77,27 @@ describe("truthful Voice sample presentations", () => {
         text: "Fictional transcript",
         speaker: null,
         occurredAt: common.occurred_at,
+      },
+    ]);
+  });
+  it("parses durable transcript artifacts when no transcript events were emitted", () => {
+    expect(
+      transcriptArtifactEntries(
+        "[2026-09-19T18:34:00Z] assistant: Hello.\nuser [interrupted]: Help me\n",
+        "2026-09-19T18:33:00Z",
+      ),
+    ).toEqual([
+      {
+        sequence: 0,
+        text: "Hello.",
+        speaker: "assistant",
+        occurredAt: "2026-09-19T18:34:00.000Z",
+      },
+      {
+        sequence: 1,
+        text: "Help me",
+        speaker: "user",
+        occurredAt: "2026-09-19T18:33:00Z",
       },
     ]);
   });

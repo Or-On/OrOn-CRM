@@ -76,6 +76,31 @@ read_private_config_value() {
   printf '%s' "${value}"
 }
 
+set_private_config_value() {
+  local config_file="$1"
+  local key="$2"
+  local value="$3"
+  local temporary
+  temporary="$(mktemp "${config_file}.XXXXXX")"
+  if ! awk -v key="${key}" -v value="${value}" '
+    BEGIN { count = 0 }
+    index($0, key "=") == 1 { print key "=" value; count += 1; next }
+    { print }
+    END { if (count != 1) exit 1 }
+  ' "${config_file}" >"${temporary}"; then
+    rm -f -- "${temporary}"
+    echo "Required ${key} configuration is missing or duplicated in ${config_file}" >&2
+    exit 1
+  fi
+  install -m 0600 -o root -g root "${temporary}" "${config_file}"
+  rm -f -- "${temporary}"
+}
+
+# Whole sentences give the speech engine their intended punctuation and
+# intonation. The retired first-clause optimization split one thought into
+# multiple synthesis sessions and made live speech sound clipped.
+set_private_config_value "${DISPATCHER_CONFIG}" TTS_FIRST_CLAUSE false
+
 # Older DEV hosts were provisioned before the session sweeper existed. Reuse
 # the dispatcher's already-provisioned voice DSN for that first release so a
 # missing derived config does not block a safe deployment. Existing files are

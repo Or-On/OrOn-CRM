@@ -46,3 +46,11 @@ async def test_perfect_tense_unverified_action_claim_is_suppressed():
     assert output == (
         "I don't have verified access to that system in this call, so I can't confirm that action."
     )
+
+
+@pytest.mark.asyncio
+async def test_ticket_claim_is_allowed_only_after_a_verified_receipt():
+    claim = "פתחתי עבורך קריאת שירות מספר T-2026-12345678."
+
+    assert await BusinessClaimGuardFilter(lambda: "he").filter(claim) != claim
+    assert await BusinessClaimGuardFilter(lambda: "he", None, lambda: True).filter(claim) == claim

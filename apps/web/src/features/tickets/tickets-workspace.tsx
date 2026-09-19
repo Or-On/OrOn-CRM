@@ -1,7 +1,16 @@
 "use client";
 
 import type { Ticket, TicketPage, TicketStage, TicketStatus } from "@or-on/crm";
-import { Button, Input, Select } from "@or-on/ui";
+import {
+  Badge,
+  Button,
+  DataTable,
+  Input,
+  PageHeader,
+  Select,
+  Surface,
+} from "@or-on/ui";
+import { ChevronRight } from "lucide-react";
 import { useLocale } from "next-intl";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
@@ -131,6 +140,14 @@ const STAGES: readonly TicketStage[] = [
   "closed",
 ];
 
+function stageTone(stage: TicketStage) {
+  if (stage === "closed") return "positive" as const;
+  if (stage === "awaiting_human" || stage === "callback_pending")
+    return "warning" as const;
+  if (stage === "in_call" || stage === "ai_handling") return "info" as const;
+  return "neutral" as const;
+}
+
 interface Cursor {
   readonly activityAt: string;
   readonly id: string;
@@ -206,17 +223,22 @@ export function TicketsWorkspace({
 
   return (
     <section className={styles.workspace ?? ""}>
-      <header className={styles.header ?? ""}>
-        <div>
-          <h1>{t.title}</h1>
-          <p>{t.subtitle}</p>
-        </div>
-        <Link className={styles.legacy ?? ""} href="/tasks">
-          {t.legacyTasks}
-        </Link>
-      </header>
+      <PageHeader
+        actions={
+          <Link className="or-button or-button--secondary" href="/tasks">
+            {t.legacyTasks}
+          </Link>
+        }
+        description={t.subtitle}
+        title={t.title}
+      />
 
-      <div className={styles.filters ?? ""} role="group" aria-label={t.title}>
+      <Surface
+        className={styles.filters ?? ""}
+        level="raised"
+        role="group"
+        aria-label={t.title}
+      >
         <div className={styles.statusTabs ?? ""} role="tablist">
           {(["open", "closed", "all"] as const).map((value) => (
             <button
@@ -258,7 +280,7 @@ export function TicketsWorkspace({
           type="search"
           value={query}
         />
-      </div>
+      </Surface>
 
       {failed ? (
         <div className={styles.empty ?? ""} role="alert">
@@ -278,38 +300,69 @@ export function TicketsWorkspace({
           <p>{t.emptyHint}</p>
         </div>
       ) : (
-        <table className={styles.table ?? ""}>
-          <thead>
-            <tr>
-              <th scope="col">{t.reference}</th>
-              <th scope="col">{t.subject}</th>
-              <th scope="col">{t.contact}</th>
-              <th scope="col">{t.stage}</th>
-              <th scope="col">{t.priority}</th>
-              <th scope="col">{t.handling}</th>
-              <th scope="col">{t.outcome}</th>
-              <th scope="col">{t.nextAction}</th>
-              <th scope="col">{t.lastActivity}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {tickets.map((ticket) => (
-              <tr key={ticket.id}>
-                <td>
-                  <Link href={`/tickets/${ticket.id}`}>{ticket.reference}</Link>
-                </td>
-                <td>{ticket.subject}</td>
-                <td>{contactNames[ticket.contactId] ?? ticket.contactId}</td>
-                <td>{t.stages[ticket.stage]}</td>
-                <td>{t.priorities[ticket.priority]}</td>
-                <td>{t.handlingModes[ticket.handlingMode]}</td>
-                <td>{t.resolutions[ticket.resolutionClassification]}</td>
-                <td>{ticket.nextAction ?? t.noNextAction}</td>
-                <td>{formatter.format(new Date(ticket.lastActivityAt))}</td>
+        <Surface className={styles.directory ?? ""} level="raised">
+          <DataTable label={t.title} minWidth="62rem">
+            <thead>
+              <tr>
+                <th scope="col">{t.reference}</th>
+                <th scope="col">{t.contact}</th>
+                <th scope="col">{t.subject}</th>
+                <th scope="col">{t.stage}</th>
+                <th scope="col">{t.handling}</th>
+                <th scope="col">{t.nextAction}</th>
+                <th>
+                  <span className="or-visually-hidden">Open</span>
+                </th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {tickets.map((ticket) => (
+                <tr key={ticket.id}>
+                  <td>
+                    <Link
+                      className={styles.primaryCell ?? ""}
+                      href={`/tickets/${ticket.id}`}
+                    >
+                      <strong dir="ltr">{ticket.reference}</strong>
+                      <small>{t.priorities[ticket.priority]}</small>
+                    </Link>
+                  </td>
+                  <td>
+                    <strong dir="auto">
+                      {contactNames[ticket.contactId] ?? ticket.contactId}
+                    </strong>
+                    <small>
+                      {formatter.format(new Date(ticket.lastActivityAt))}
+                    </small>
+                  </td>
+                  <td>
+                    <strong dir="auto">{ticket.subject}</strong>
+                    <small>
+                      {t.resolutions[ticket.resolutionClassification]}
+                    </small>
+                  </td>
+                  <td>
+                    <Badge
+                      label={t.stages[ticket.stage]}
+                      tone={stageTone(ticket.stage)}
+                    />
+                  </td>
+                  <td>{t.handlingModes[ticket.handlingMode]}</td>
+                  <td>{ticket.nextAction ?? t.noNextAction}</td>
+                  <td>
+                    <Link
+                      className={styles.openRow ?? ""}
+                      aria-label={`${t.reference} ${ticket.reference}`}
+                      href={`/tickets/${ticket.id}`}
+                    >
+                      <ChevronRight aria-hidden="true" size={17} />
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </DataTable>
+        </Surface>
       )}
 
       {cursor !== null && !failed ? (

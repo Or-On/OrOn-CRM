@@ -24,6 +24,8 @@ from pydantic import BaseModel, ConfigDict
 from oron_agent.flows.render import render_node
 from oron_agent.flows.runtime import Handler, HandlerContext, HandlerRegistry
 
+RuntimeFunctionFactory = Callable[[str, dict[str, NodeConfig]], FlowsFunctionSchema]
+
 
 class EnterHandler(BaseModel):
     """A node's on_enter handler, resolved to a callable at bind time."""
@@ -121,6 +123,7 @@ def _build(
     handlers: HandlerRegistry,
     enters: dict[str, EnterHandler],
     action_guard: Callable[..., Awaitable[Any]] | None = None,
+    runtime_function_factories: tuple[RuntimeFunctionFactory, ...] = (),
 ) -> NodeConfig:
     config: NodeConfig = {
         "name": node.name,
@@ -140,10 +143,15 @@ def _build(
         config["post_actions"] = [
             a.model_dump(exclude_none=True, mode="json") for a in node.post_actions
         ]
+    functions: list[Any] = []
     if node.functions:
-        config["functions"] = [
+        functions.extend(
             _bind_function(fn, handlers, configs, enters, action_guard) for fn in node.functions
-        ]
+        )
+    if not node.is_terminal:
+        functions.extend(factory(node.name, configs) for factory in runtime_function_factories)
+    if functions:
+        config["functions"] = functions
 
     if node.respond_immediately is not None:
         config["respond_immediately"] = node.respond_immediately
@@ -159,6 +167,7 @@ def bind_flow(
     *,
     handlers: HandlerRegistry,
     action_guard: Callable[..., Awaitable[Any]] | None = None,
+    runtime_function_factories: tuple[RuntimeFunctionFactory, ...] = (),
 ) -> BoundFlow:
     # Resolved here so an unknown on_enter handler is a bind-time KeyError, the
     # same as an unknown function handler.
@@ -171,5 +180,13 @@ def bind_flow(
     # Handlers close over `configs`, fully populated before any handler runs, so
     # forward references resolve.
     for node in spec.nodes:
-        configs[node.name] = _build(spec, node, configs, handlers, enters, action_guard)
+        configs[node.name] = _build(
+            spec,
+            node,
+            configs,
+            handlers,
+            enters,
+            action_guard,
+            runtime_function_factories,
+        )
     return BoundFlow(spec=spec, configs=configs)

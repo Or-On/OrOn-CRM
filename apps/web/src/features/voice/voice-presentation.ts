@@ -54,3 +54,26 @@ export function transcriptEntries(events: VoiceSessionDetail["events"]) {
     ];
   });
 }
+
+const ARTIFACT_LINE =
+  /^(?:\[([^\]]+)\]\s+)?([^:\s]+)(?:\s+\[interrupted\])?:\s*(.+)$/;
+
+/** Parse the durable transcript artifact written by the voice runtime. */
+export function transcriptArtifactEntries(text: string, fallbackTime: string) {
+  return text.split(/\r?\n/).flatMap((line, index) => {
+    const match = ARTIFACT_LINE.exec(line.trim());
+    if (!match?.[3]?.trim()) return [];
+    const parsedTime = match[1] ? new Date(match[1]) : null;
+    return [
+      {
+        sequence: index,
+        text: match[3].trim(),
+        speaker: match[2] ?? null,
+        occurredAt:
+          parsedTime && !Number.isNaN(parsedTime.valueOf())
+            ? parsedTime.toISOString()
+            : fallbackTime,
+      },
+    ];
+  });
+}

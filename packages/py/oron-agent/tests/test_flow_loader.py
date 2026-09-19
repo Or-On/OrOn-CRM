@@ -1,6 +1,8 @@
 import uuid
 
 from oron_agent.flows.loader import initial_node_from_composition, initial_node_from_spec
+from oron_agent.support_ticket import support_ticket_function_factory
+from oron_common import CallContext, Direction
 from oron_flows.components.library import Announce, Converse
 from oron_flows.compose import Composition, FlowMeta
 from oron_flows.graph import FlowSpec
@@ -121,3 +123,29 @@ def test_a_broken_stored_flow_keeps_its_authoritative_role_on_recovery():
 
     assert node["role_message"] == spec.role_message
     assert "configured speech language code 'he'" in node["task_messages"][0]["content"]
+
+
+def test_a_conversational_node_receives_the_verified_ticket_tool_without_phone_fields():
+    context = CallContext(
+        call_id="call-1",
+        direction=Direction.INBOUND,
+        from_number="+972501234567",
+        flow_id=uuid.uuid4(),
+        tenant_id=uuid.uuid4(),
+    )
+    spec = FlowSpec(
+        id=context.flow_id,
+        version=1,
+        language="he",
+        entry="open",
+        nodes=[FlowNode(name="open", task_messages=[Message(content="Help the caller.")])],
+    )
+
+    node = initial_node_from_spec(
+        spec,
+        runtime_function_factories=(support_ticket_function_factory(object(), context, {}),),
+    )
+
+    ticket_tool = next(fn for fn in node["functions"] if fn.name == "open_support_ticket")
+    assert ticket_tool.required == ["subject", "summary"]
+    assert "phone" not in ticket_tool.properties

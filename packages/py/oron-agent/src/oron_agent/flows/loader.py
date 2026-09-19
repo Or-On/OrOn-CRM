@@ -7,7 +7,7 @@ from oron_flows.graph import FlowSpec
 from oron_flows.packs import build_persona, load_language_pack
 from pipecat.flows import NodeConfig
 
-from oron_agent.flows.binder import bind_flow
+from oron_agent.flows.binder import RuntimeFunctionFactory, bind_flow
 from oron_agent.flows.greeting import create_greeting_node
 from oron_agent.flows.handlers.library import standard_handlers
 from oron_agent.flows.runtime import HandlerRegistry
@@ -46,13 +46,19 @@ def _with_safe_entry_opener(node: NodeConfig, language: str) -> NodeConfig:
 
 
 def initial_node_from_spec(
-    spec: FlowSpec, *, action_guard: Callable[..., Awaitable[Any]] | None = None
+    spec: FlowSpec,
+    *,
+    action_guard: Callable[..., Awaitable[Any]] | None = None,
+    runtime_function_factories: tuple[RuntimeFunctionFactory, ...] = (),
 ) -> NodeConfig:
     """Entry NodeConfig for a stored spec, or a safe model opener on any failure —
     a bad flow must never kill a call."""
     try:
         node = bind_flow(
-            spec, handlers=HandlerRegistry(handlers=standard_handlers()), action_guard=action_guard
+            spec,
+            handlers=HandlerRegistry(handlers=standard_handlers()),
+            action_guard=action_guard,
+            runtime_function_factories=runtime_function_factories,
         ).initial_node()
         return _with_safe_entry_opener(node, spec.language)
     except Exception as e:  # noqa: BLE001

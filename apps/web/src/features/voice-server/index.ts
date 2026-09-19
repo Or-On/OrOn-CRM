@@ -73,3 +73,27 @@ export async function voiceRecordingResponse(
     headers: { authorization: `Bearer ${assertion}` },
   });
 }
+
+export async function voiceTranscriptResponse(
+  sessionId: string,
+): Promise<Response> {
+  const resolved = await currentRawSession();
+  if (resolved === undefined) throw new UnauthenticatedError();
+  const assertion = await issueControlApiGrant(resolved.session, "voice:read");
+  const config = loadConfig(process.env, { service: "web" });
+  const url = new URL(
+    `/api/v1/voice/sessions/${encodeURIComponent(sessionId)}/transcript`,
+    config.controlApiUrl,
+  );
+  return fetch(url, {
+    cache: "no-store",
+    headers: { authorization: `Bearer ${assertion}` },
+  });
+}
+
+export async function voiceTranscriptText(
+  sessionId: string,
+): Promise<string | null> {
+  const response = await voiceTranscriptResponse(sessionId);
+  return response.ok ? response.text() : null;
+}

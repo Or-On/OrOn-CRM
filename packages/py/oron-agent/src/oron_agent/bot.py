@@ -85,6 +85,7 @@ from oron_agent.runtime_sessions import RuntimeSessions
 from oron_agent.session_recorder import SessionRecorder, finish_after_cancellation
 from oron_agent.spoken_safety import BusinessClaimGuardFilter
 from oron_agent.storage import build_artifact_store, save_audio_file
+from oron_agent.support_ticket import support_ticket_function_factory
 from oron_agent.text_diagnostics import ModelTextDiagnosticsObserver, VoiceTextDiagnostics
 from oron_agent.tokens import mint_room_token
 from oron_agent.tool_call_guard import HallucinatedToolCallGuard
@@ -425,6 +426,7 @@ async def run_bot(
     elif configured_caller_gender is None:
         logger.info("Caller gender classification disabled; using neutral address")
 
+    ticket_receipt_state: dict[str, object] = {}
     tts = build_tts(
         st.tts_provider,
         language=profile.tts_language,
@@ -450,6 +452,7 @@ async def run_bot(
                     verification_runtime_state["state"]
                     in {"identity_required", "collecting_identity", "verifying_identity"}
                 ),
+                lambda: bool(ticket_receipt_state.get("ticketId")),
             ),
         ],
         text_aggregation_mode=st.tts_text_aggregation,
@@ -473,10 +476,9 @@ async def run_bot(
             g2p if st.tts_niqqud else None,
             lambda: caller_gender.tts_value,
             persona_gender=spec.persona_gender,
-            # The platform name appears in retained scripted greetings and
-            # never reaches the LLM prompt. Give it a Hebrew spoken form at the
-            # final pronunciation boundary; a tenant-authored value still wins.
-            pronunciations={"Or-On": "אוֹר אוֹן", **spec.pronunciations},
+            # Pronunciation is tenant-authored and published with the flow. Do
+            # not bake a single company's wording into the shared runtime.
+            pronunciations=spec.pronunciations,
         )
     )
     if text_diagnostics is not None:
@@ -845,7 +847,23 @@ async def run_bot(
             await voice_control.refresh()
             worker.create_task(voice_control.run())
         action_guard = voice_control.action if voice_control else None
-        entry = initial_node_from_spec(spec, action_guard=action_guard)
+        runtime_factories = (
+            (
+                support_ticket_function_factory(
+                    sessions,
+                    ctx,
+                    ticket_receipt_state,
+                    action_guard,
+                ),
+            )
+            if sessions is not None and callable(getattr(sessions, "open_support_ticket", None))
+            else ()
+        )
+        entry = initial_node_from_spec(
+            spec,
+            action_guard=action_guard,
+            runtime_function_factories=runtime_factories,
+        )
         if verification_requirements is not None:
             if verify_identity is None or load_handoff_context is None:
                 raise StoredFlowUnavailable("secure handoff verification runtime is unavailable")

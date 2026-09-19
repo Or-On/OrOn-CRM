@@ -18,17 +18,27 @@ _UNVERIFIED_BUSINESS_CLAIM_RE = re.compile(
     r"מצאתי\s+את\s+פרטי\s+המנוי|"
     r"בדקתי\s+(?:ב?מערכת|את\s+המערכת)|"
     r"אני\s+רואה\s+ש(?:המנוי|הממיר|החשבון)|"
-    r"(?:פתחתי|אפתח)\s+[^.?!]{0,60}קריאת\s+שירות|"
     r"(?:תיאמתי|קבעתי)\s+[^.?!]{0,60}(?:טכנאי|פגישה|תור)|"
     r"(?:שלחתי|אשלח)\s+[^.?!]{0,60}(?:ווטסאפ|וואטסאפ|WhatsApp)|"
     r"קריאת\s+השירות\s+(?:נפתחה|פתוחה)|"
     r"הטכנאי\s+יגיע|"
     r"\b(?:i|we)\s+(?:(?:have|just)\s+)?(?:checked|found|opened|created|scheduled|booked|confirmed|"
-    r"refunded|processed|sent)\b[^.?!]{0,80}\b(?:account|subscriber|ticket|"
-    r"service\s+request|appointment|technician|refund|payment|whatsapp|message)\b|"
-    r"\b(?:your\s+)?(?:appointment|technician|refund|payment|booking|ticket|"
-    r"service\s+request)\s+(?:is|has\s+been)\s+(?:confirmed|scheduled|booked|"
-    r"approved|processed|opened|on\s+the\s+way)\b"
+    r"refunded|processed|sent)\b[^.?!]{0,80}\b(?:account|subscriber|"
+    r"appointment|technician|refund|payment|whatsapp|message)\b|"
+    r"\b(?:your\s+)?(?:appointment|technician|refund|payment|booking)"
+    r"\s+(?:is|has\s+been)\s+(?:confirmed|scheduled|booked|"
+    r"approved|processed|on\s+the\s+way)\b"
+    r")",
+    re.IGNORECASE,
+)
+
+_TICKET_CLAIM_RE = re.compile(
+    r"(?:"
+    r"(?:פתחתי|אפתח)\s+[^.?!]{0,60}קריאת\s+שירות|"
+    r"קריאת\s+השירות\s+(?:נפתחה|פתוחה)|"
+    r"\b(?:i|we)\s+(?:(?:have|just)\s+)?(?:opened|created)\b[^.?!]{0,80}"
+    r"\b(?:ticket|service\s+request)\b|"
+    r"\b(?:your\s+)?(?:ticket|service\s+request)\s+(?:is|has\s+been)\s+opened\b"
     r")",
     re.IGNORECASE,
 )
@@ -58,6 +68,7 @@ def safe_spoken_text(
     language: str = "en",
     *,
     allow_identity_collection: bool = False,
+    allow_ticket_claim: bool = False,
 ) -> tuple[str, bool]:
     """Sanitize speech and replace unverifiable external-system claims."""
 
@@ -65,7 +76,12 @@ def safe_spoken_text(
     blocked_identity_request = (
         not allow_identity_collection and _IDENTITY_COLLECTION_RE.search(sanitized) is not None
     )
-    if not blocked_identity_request and not _UNVERIFIED_BUSINESS_CLAIM_RE.search(sanitized):
+    blocked_ticket_claim = not allow_ticket_claim and _TICKET_CLAIM_RE.search(sanitized) is not None
+    if (
+        not blocked_identity_request
+        and not blocked_ticket_claim
+        and not _UNVERIFIED_BUSINESS_CLAIM_RE.search(sanitized)
+    ):
         return sanitized, False
     logger.warning("suppressed unverified business-system claim before TTS")
     if language.lower().startswith("he"):
@@ -93,9 +109,11 @@ class BusinessClaimGuardFilter(BaseTextFilter):
         self,
         get_language: Callable[[], str] | None = None,
         allow_identity_collection: Callable[[], bool] | None = None,
+        allow_ticket_claim: Callable[[], bool] | None = None,
     ):
         self._get_language = get_language
         self._allow_identity_collection = allow_identity_collection
+        self._allow_ticket_claim = allow_ticket_claim
 
     async def filter(self, text: str) -> str:
         language = self._get_language() if self._get_language is not None else "en"
@@ -104,4 +122,12 @@ class BusinessClaimGuardFilter(BaseTextFilter):
             if self._allow_identity_collection is not None
             else False
         )
-        return safe_spoken_text(text, language, allow_identity_collection=allowed)[0]
+        ticket_allowed = (
+            self._allow_ticket_claim() if self._allow_ticket_claim is not None else False
+        )
+        return safe_spoken_text(
+            text,
+            language,
+            allow_identity_collection=allowed,
+            allow_ticket_claim=ticket_allowed,
+        )[0]

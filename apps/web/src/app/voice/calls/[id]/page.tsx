@@ -14,9 +14,13 @@ import {
 import {
   CallRecordingPlayer,
   LiveCallSummary,
+  transcriptArtifactEntries,
   transcriptEntries,
 } from "../../../../features/voice";
-import { voiceClient } from "../../../../features/voice-server";
+import {
+  voiceClient,
+  voiceTranscriptText,
+} from "../../../../features/voice-server";
 
 export default async function CallDetailPage({
   params,
@@ -32,7 +36,14 @@ export default async function CallDetailPage({
     ).getVoiceSession({ session_id: id });
     if (result.status === 404) notFound();
     const call = result.data;
-    const transcript = transcriptEntries(call.events);
+    const eventTranscript = transcriptEntries(call.events);
+    const artifactText =
+      eventTranscript.length === 0 && call.transcript_available
+        ? await voiceTranscriptText(call.session_id)
+        : null;
+    const transcript = artifactText
+      ? transcriptArtifactEntries(artifactText, call.created_at)
+      : eventTranscript;
     return (
       <main className="page page--wide call-detail-page">
         <PageHeader

@@ -1,5 +1,5 @@
 {
-  "alembic_head": "e4c71a9d2b83",
+  "alembic_head": "0f7b3c9d2a61",
   "expected_functions": [
     "agents.protect_approved_knowledge",
     "automation.protect_published_flow_version",
@@ -52,6 +52,7 @@
     "platform.voice_flow_available",
     "platform.voice_control_actor_allowed",
     "platform.request_voice_control",
+    "platform.resolve_voice_caller_contact",
     "platform.voice_simulation_eligible",
     "platform.resolve_api_key",
     "platform.revoke_inactive_tenant_keys",
@@ -69,6 +70,7 @@
     "platform.verify_voice_caller_identity",
     "platform.voice_identity_verification_requirements",
     "platform.write_voice_session_outcome",
+    "support.open_ticket_from_voice_session",
     "service.configure_current_tenant",
     "service.current_actor_can_access_case",
     "service.current_actor_can_access_object",

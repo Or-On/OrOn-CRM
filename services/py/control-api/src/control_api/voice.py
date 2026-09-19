@@ -242,6 +242,10 @@ class VoiceRepository(Protocol):
         self, principal: ServicePrincipal, session_id: UUID
     ) -> bytes | None: ...
 
+    async def get_transcript(
+        self, principal: ServicePrincipal, session_id: UUID
+    ) -> bytes | None: ...
+
     async def simulate_call(
         self, principal: ServicePrincipal, command: SimulatedCallRequest
     ) -> SimulatedCallResult: ...
@@ -361,6 +365,21 @@ class PostgresVoiceRepository:
                 await database.execute(select(Session).where(col(Session.session_id) == session_id))
             ).scalar_one_or_none()
             uri = session.recording_uri if session is not None else None
+        if not uri:
+            return None
+        try:
+            return await read_artifact(uri)
+        except ArtifactUnavailable:
+            return None
+
+    async def get_transcript(self, principal: ServicePrincipal, session_id: UUID) -> bytes | None:
+        """Read tenant-scoped transcript text without exposing its storage URI."""
+        async with self._sessionmaker() as database, database.begin():
+            await self._scope(database, principal)
+            session = (
+                await database.execute(select(Session).where(col(Session.session_id) == session_id))
+            ).scalar_one_or_none()
+            uri = session.transcript_uri if session is not None else None
         if not uri:
             return None
         try:
@@ -1120,6 +1139,24 @@ def create_voice_router(
                 "Cache-Control": "private, no-store",
                 "Content-Disposition": f'inline; filename="call-{session_id}.wav"',
             },
+        )
+
+    @router.get(
+        "/sessions/{session_id}/transcript",
+        include_in_schema=False,
+    )
+    async def get_voice_transcript(
+        session_id: UUID,
+        principal: ServicePrincipal = Depends(require_voice_read),
+        store: VoiceRepository = Depends(configured_repository),
+    ) -> Response:
+        transcript = await store.get_transcript(principal, session_id)
+        if transcript is None:
+            raise HTTPException(status_code=404, detail="voice transcript not found")
+        return Response(
+            content=transcript,
+            media_type="text/plain; charset=utf-8",
+            headers={"Cache-Control": "private, no-store"},
         )
 
     @router.post(

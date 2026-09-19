@@ -73,6 +73,10 @@ class FakeVoiceRepository:
         self.principal = principal
         return b"RIFFfixture-wave"
 
+    async def get_transcript(self, principal: ServicePrincipal, session_id: UUID) -> bytes | None:
+        self.principal = principal
+        return b"[2026-09-19T18:34:00Z] assistant: How can I help?\n"
+
     async def close(self) -> None:
         self.closed = True
 
@@ -157,6 +161,32 @@ async def test_voice_recording_is_tenant_authorized_and_streamed_as_wav() -> Non
     assert accepted.content == b"RIFFfixture-wave"
     assert repository.principal is not None
     assert repository.principal.tenant_id == tenant_id
+
+
+async def test_voice_transcript_is_tenant_authorized_and_streamed_as_text() -> None:
+    tenant_id = uuid4()
+    repository = FakeVoiceRepository()
+    app = create_app(
+        settings=_settings(),
+        database_probe=FakeProbe(),
+        voice_repository=repository,
+        assertion_verifier=ServiceAssertionVerifier(SECRET),
+    )
+    async with (
+        app.router.lifespan_context(app),
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client,
+    ):
+        denied = await client.get(f"/api/v1/voice/sessions/{uuid4()}/transcript")
+        accepted = await client.get(
+            f"/api/v1/voice/sessions/{uuid4()}/transcript",
+            headers={"authorization": f"Bearer {_token(tenant_id=tenant_id)}"},
+        )
+
+    assert denied.status_code == 401
+    assert accepted.status_code == 200
+    assert accepted.headers["content-type"].startswith("text/plain")
+    assert accepted.headers["cache-control"] == "private, no-store"
+    assert "assistant: How can I help?" in accepted.text
 
 
 async def test_voice_sessions_reject_wrong_audience_and_missing_capability() -> None:
