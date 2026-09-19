@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { getTenantSettings, listContacts, listTickets } from "@or-on/crm";
 
 import { AccessDenied } from "../../i18n/access-denied";
+import { ProductHeading } from "../../i18n/product-heading";
 import {
   ForbiddenError,
   UnauthenticatedError,
@@ -27,7 +28,8 @@ export default async function TicketsPage() {
       data.contacts.map((contact) => [contact.id, contact.name]),
     );
     return (
-      <main className="page page--wide">
+      <main className="page page--wide page--workspace-premium">
+        <ProductHeading page="tickets" premium />
         <TicketsWorkspace
           contactNames={contactNames}
           initialPage={data.page}

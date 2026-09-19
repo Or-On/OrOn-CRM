@@ -18,6 +18,10 @@ const knownErrors: Readonly<Record<string, string>> = {
   "real WhatsApp provider is disabled": "errors.disabled",
   "real WhatsApp delivery requires explicit confirmation": "errors.confirm",
   "real WhatsApp channel is not configured": "errors.configuration",
+  "WhatsApp AI is disabled by the platform operator": "inbox.aiDisabled",
+  "a published WhatsApp agent is required": "inbox.noAiAgent",
+  "Move active conversations to human ownership before deleting this agent.":
+    "orchestration.agentHasActiveConversations",
   "conversation has no valid WhatsApp recipient": "errors.phone",
   "This conversation still has queued or in-progress work. Wait for it to finish before deleting.":
     "inbox.deleteInProgress",

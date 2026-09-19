@@ -137,6 +137,34 @@ describe("English and Hebrew interface contracts", () => {
     expect(output).toBe(he.common.changeFailed);
     expect(output).not.toContain("secret");
   });
+  it("explains agent ownership conflicts and WhatsApp responder requirements", () => {
+    const translate = createTranslator({ locale: "en", messages: en });
+    const t = (key: string) =>
+      translate(key as Parameters<typeof translate>[0]);
+    expect(
+      errorMessage(
+        new Error(
+          "Move active conversations to human ownership before deleting this agent.",
+        ),
+        t,
+        "orchestration.failed",
+      ),
+    ).toBe(en.orchestration.agentHasActiveConversations);
+    expect(
+      errorMessage(
+        new Error("a published WhatsApp agent is required"),
+        t,
+        "inbox.updateFailed",
+      ),
+    ).toBe(en.inbox.noAiAgent);
+    expect(
+      errorMessage(
+        new Error("WhatsApp AI is disabled by the platform operator"),
+        t,
+        "inbox.updateFailed",
+      ),
+    ).toBe(en.inbox.aiDisabled);
+  });
 });
 
 describe("currency-safe pipeline presentation", () => {

@@ -1,15 +1,7 @@
 "use client";
 
 import type { Ticket, TicketPage, TicketStage, TicketStatus } from "@or-on/crm";
-import {
-  Badge,
-  Button,
-  DataTable,
-  Input,
-  PageHeader,
-  Select,
-  Surface,
-} from "@or-on/ui";
+import { Badge, Button, DataTable, Input, Select, Surface } from "@or-on/ui";
 import { ChevronRight } from "lucide-react";
 import { useLocale } from "next-intl";
 import Link from "next/link";
@@ -21,8 +13,8 @@ import styles from "./tickets-workspace.module.css";
 const COPY = {
   en: {
     title: "Tickets",
-    subtitle:
-      "One customer issue, one ticket — every message, call and handover on it.",
+    viewCount: (count: number) =>
+      `${String(count)} ${count === 1 ? "ticket" : "tickets"} in this view`,
     open: "Open",
     closed: "Closed",
     all: "All",
@@ -76,7 +68,7 @@ const COPY = {
   },
   he: {
     title: "פניות",
-    subtitle: "בעיה אחת של לקוח, פנייה אחת — כל הודעה, שיחה והעברה עליה.",
+    viewCount: (count: number) => `${String(count)} פניות בתצוגה`,
     open: "פתוחות",
     closed: "סגורות",
     all: "הכול",
@@ -223,147 +215,146 @@ export function TicketsWorkspace({
 
   return (
     <section className={styles.workspace ?? ""}>
-      <PageHeader
-        actions={
+      <Surface
+        aria-label={t.title}
+        className={styles.resource ?? ""}
+        level="raised"
+        role="group"
+      >
+        <header className={styles.resourceHeader ?? ""}>
+          <p>{t.viewCount(tickets.length)}</p>
           <Link className="or-button or-button--secondary" href="/tasks">
             {t.legacyTasks}
           </Link>
-        }
-        description={t.subtitle}
-        title={t.title}
-      />
+        </header>
 
-      <Surface
-        className={styles.filters ?? ""}
-        level="raised"
-        role="group"
-        aria-label={t.title}
-      >
-        <div className={styles.statusTabs ?? ""} role="tablist">
-          {(["open", "closed", "all"] as const).map((value) => (
-            <button
-              aria-selected={status === value}
-              className={styles.statusTab ?? ""}
-              key={value}
+        <div className={styles.filters ?? ""}>
+          <div className={styles.statusTabs ?? ""} role="tablist">
+            {(["open", "closed", "all"] as const).map((value) => (
+              <button
+                aria-selected={status === value}
+                className={styles.statusTab ?? ""}
+                key={value}
+                onClick={() => {
+                  setStatus(value);
+                }}
+                role="tab"
+                type="button"
+              >
+                {t[value]}
+              </button>
+            ))}
+          </div>
+          <Select
+            id="ticket-stage"
+            label={t.stage}
+            onChange={(event) => {
+              setStage(event.target.value as TicketStage | "");
+            }}
+            value={stage}
+          >
+            <option value="">{t.allStages}</option>
+            {STAGES.map((value) => (
+              <option key={value} value={value}>
+                {t.stages[value]}
+              </option>
+            ))}
+          </Select>
+          <Input
+            id="ticket-search"
+            label={t.search}
+            onChange={(event) => {
+              setQuery(event.target.value);
+            }}
+            placeholder={t.search}
+            type="search"
+            value={query}
+          />
+        </div>
+
+        {failed ? (
+          <div className={styles.empty ?? ""} role="alert">
+            <p>{t.failed}</p>
+            <Button
               onClick={() => {
-                setStatus(value);
+                void load(null);
               }}
-              role="tab"
               type="button"
             >
-              {t[value]}
-            </button>
-          ))}
-        </div>
-        <Select
-          id="ticket-stage"
-          label={t.stage}
-          onChange={(event) => {
-            setStage(event.target.value as TicketStage | "");
-          }}
-          value={stage}
-        >
-          <option value="">{t.allStages}</option>
-          {STAGES.map((value) => (
-            <option key={value} value={value}>
-              {t.stages[value]}
-            </option>
-          ))}
-        </Select>
-        <Input
-          id="ticket-search"
-          label={t.search}
-          onChange={(event) => {
-            setQuery(event.target.value);
-          }}
-          placeholder={t.search}
-          type="search"
-          value={query}
-        />
-      </Surface>
-
-      {failed ? (
-        <div className={styles.empty ?? ""} role="alert">
-          <p>{t.failed}</p>
-          <Button
-            onClick={() => {
-              void load(null);
-            }}
-            type="button"
-          >
-            {t.retry}
-          </Button>
-        </div>
-      ) : tickets.length === 0 && !busy ? (
-        <div className={styles.empty ?? ""}>
-          <p>{t.empty}</p>
-          <p>{t.emptyHint}</p>
-        </div>
-      ) : (
-        <Surface className={styles.directory ?? ""} level="raised">
-          <DataTable label={t.title} minWidth="62rem">
-            <thead>
-              <tr>
-                <th scope="col">{t.reference}</th>
-                <th scope="col">{t.contact}</th>
-                <th scope="col">{t.subject}</th>
-                <th scope="col">{t.stage}</th>
-                <th scope="col">{t.handling}</th>
-                <th scope="col">{t.nextAction}</th>
-                <th>
-                  <span className="or-visually-hidden">Open</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {tickets.map((ticket) => (
-                <tr key={ticket.id}>
-                  <td>
-                    <Link
-                      className={styles.primaryCell ?? ""}
-                      href={`/tickets/${ticket.id}`}
-                    >
-                      <strong dir="ltr">{ticket.reference}</strong>
-                      <small>{t.priorities[ticket.priority]}</small>
-                    </Link>
-                  </td>
-                  <td>
-                    <strong dir="auto">
-                      {contactNames[ticket.contactId] ?? ticket.contactId}
-                    </strong>
-                    <small>
-                      {formatter.format(new Date(ticket.lastActivityAt))}
-                    </small>
-                  </td>
-                  <td>
-                    <strong dir="auto">{ticket.subject}</strong>
-                    <small>
-                      {t.resolutions[ticket.resolutionClassification]}
-                    </small>
-                  </td>
-                  <td>
-                    <Badge
-                      label={t.stages[ticket.stage]}
-                      tone={stageTone(ticket.stage)}
-                    />
-                  </td>
-                  <td>{t.handlingModes[ticket.handlingMode]}</td>
-                  <td>{ticket.nextAction ?? t.noNextAction}</td>
-                  <td>
-                    <Link
-                      className={styles.openRow ?? ""}
-                      aria-label={`${t.reference} ${ticket.reference}`}
-                      href={`/tickets/${ticket.id}`}
-                    >
-                      <ChevronRight aria-hidden="true" size={17} />
-                    </Link>
-                  </td>
+              {t.retry}
+            </Button>
+          </div>
+        ) : tickets.length === 0 && !busy ? (
+          <div className={styles.empty ?? ""}>
+            <p>{t.empty}</p>
+            <p>{t.emptyHint}</p>
+          </div>
+        ) : (
+          <div className={styles.directory ?? ""}>
+            <DataTable label={t.title} minWidth="62rem">
+              <thead>
+                <tr>
+                  <th scope="col">{t.reference}</th>
+                  <th scope="col">{t.contact}</th>
+                  <th scope="col">{t.subject}</th>
+                  <th scope="col">{t.stage}</th>
+                  <th scope="col">{t.handling}</th>
+                  <th scope="col">{t.nextAction}</th>
+                  <th>
+                    <span className="or-visually-hidden">Open</span>
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </DataTable>
-        </Surface>
-      )}
+              </thead>
+              <tbody>
+                {tickets.map((ticket) => (
+                  <tr key={ticket.id}>
+                    <td>
+                      <Link
+                        className={styles.primaryCell ?? ""}
+                        href={`/tickets/${ticket.id}`}
+                      >
+                        <strong dir="ltr">{ticket.reference}</strong>
+                        <small>{t.priorities[ticket.priority]}</small>
+                      </Link>
+                    </td>
+                    <td>
+                      <strong dir="auto">
+                        {contactNames[ticket.contactId] ?? ticket.contactId}
+                      </strong>
+                      <small>
+                        {formatter.format(new Date(ticket.lastActivityAt))}
+                      </small>
+                    </td>
+                    <td>
+                      <strong dir="auto">{ticket.subject}</strong>
+                      <small>
+                        {t.resolutions[ticket.resolutionClassification]}
+                      </small>
+                    </td>
+                    <td>
+                      <Badge
+                        label={t.stages[ticket.stage]}
+                        tone={stageTone(ticket.stage)}
+                      />
+                    </td>
+                    <td>{t.handlingModes[ticket.handlingMode]}</td>
+                    <td>{ticket.nextAction ?? t.noNextAction}</td>
+                    <td>
+                      <Link
+                        className={styles.openRow ?? ""}
+                        aria-label={`${t.reference} ${ticket.reference}`}
+                        href={`/tickets/${ticket.id}`}
+                      >
+                        <ChevronRight aria-hidden="true" size={17} />
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </DataTable>
+          </div>
+        )}
+      </Surface>
 
       {cursor !== null && !failed ? (
         <Button

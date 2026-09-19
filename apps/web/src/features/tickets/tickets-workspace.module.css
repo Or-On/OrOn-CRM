@@ -4,12 +4,32 @@
   min-inline-size: 0;
 }
 
-.filters {
+.resource {
+  overflow: hidden;
+  padding: 0;
+}
+
+.resourceHeader {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+.resourceHeader p {
+  margin: 0;
+  color: var(--or-text-muted);
+  font-size: var(--or-text-meta);
+}
+
+.filters {
+  display: grid;
+  grid-template-columns: auto minmax(10rem, 0.55fr) minmax(16rem, 1fr);
+  align-items: end;
   gap: 0.75rem;
-  flex-wrap: wrap;
-  padding: 0.75rem;
+  padding: 1rem;
+  border-block-start: 1px solid var(--or-border);
 }
 
 .statusTabs {
@@ -37,7 +57,7 @@
 
 .directory {
   overflow: hidden;
-  padding: 0;
+  border-block-start: 1px solid var(--or-border);
 }
 
 .directory :global(.or-data-table) {
@@ -109,6 +129,7 @@
   padding: 2.5rem 1rem;
   color: var(--or-text-muted);
   text-align: center;
+  border-block-start: 1px solid var(--or-border);
 }
 
 .legacyHint {
@@ -118,6 +139,15 @@
 }
 
 @media (max-width: 60rem) {
+  .filters {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .statusTabs {
+    inline-size: fit-content;
+  }
+
   .directory {
     overflow: visible;
     padding: 0;
@@ -171,6 +201,13 @@
   .directory :global(td:nth-child(7)) {
     grid-column: 2;
     grid-row: 1;
+  }
+}
+
+@media (max-width: 35rem) {
+  .resourceHeader {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
 
