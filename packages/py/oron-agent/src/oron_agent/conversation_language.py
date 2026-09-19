@@ -54,10 +54,12 @@ def conversation_language_instruction(language: str) -> str:
     return (
         f"SPEECH LANGUAGE METADATA: Soniox identified the latest completed caller "
         f"utterance as language code '{language}'. Treat the full utterance as a "
-        "normal user message and respond to every meaningful part. Normally reply "
-        "in the language the caller is currently using; if they request another "
-        "language, follow that request. This metadata controls delivery only and "
-        "must not route, classify, reject, or replace the caller's message."
+        "normal user message and respond to every meaningful part. Choose the reply "
+        "language from the dominant meaningful content of the complete utterance, not "
+        "from a brief filler, acknowledgement, loanword, or its first word alone. A "
+        "deliberate language switch or explicit request should be followed immediately. "
+        "This metadata is a delivery hint only and must not route, classify, reject, or "
+        "replace the caller's message."
     )
 
 

@@ -51,6 +51,14 @@ _IDENTITY_COLLECTION_RE = re.compile(
 
 _TTS_CONTROL_TAG = re.compile(r"\[[^\[\]\r\n]{1,48}\]")
 
+_SENSITIVE_READBACK_RE = re.compile(
+    r"(?:"
+    r"\b[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}\b|"
+    r"(?<![\w-])\+?(?:\d[\s().-]?){8,}\d(?![\w-])"
+    r")",
+    re.IGNORECASE,
+)
+
 
 def sanitize_tts_markup(text: str) -> str:
     """Remove all bracketed control tags from model/user-derived speech.
@@ -77,19 +85,25 @@ def safe_spoken_text(
         not allow_identity_collection and _IDENTITY_COLLECTION_RE.search(sanitized) is not None
     )
     blocked_ticket_claim = not allow_ticket_claim and _TICKET_CLAIM_RE.search(sanitized) is not None
+    blocked_sensitive_readback = _SENSITIVE_READBACK_RE.search(sanitized) is not None
     if (
         not blocked_identity_request
         and not blocked_ticket_claim
+        and not blocked_sensitive_readback
         and not _UNVERIFIED_BUSINESS_CLAIM_RE.search(sanitized)
     ):
         return sanitized, False
     logger.warning("suppressed unverified business-system claim before TTS")
     if language.lower().startswith("he"):
+        if blocked_sensitive_readback:
+            return "תודה, קיבלתי את הפרטים. מטעמי פרטיות לא אחזור עליהם בקול.", True
         # Gender-neutral wording: the persona may be female or male.
         return (
             "אין לי גישה מאומתת למערכת הזאת בשיחה הנוכחית, ולכן אי אפשר לאשר מכאן שבוצעה פעולה.",
             True,
         )
+    if blocked_sensitive_readback:
+        return "Thank you, I have the details. For privacy, I won't repeat them aloud.", True
     return (
         "I don't have verified access to that system in this call, so I can't confirm that action.",
         True,

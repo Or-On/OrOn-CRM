@@ -54,3 +54,19 @@ async def test_ticket_claim_is_allowed_only_after_a_verified_receipt():
 
     assert await BusinessClaimGuardFilter(lambda: "he").filter(claim) != claim
     assert await BusinessClaimGuardFilter(lambda: "he", None, lambda: True).filter(claim) == claim
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "readback",
+    [
+        "מספר הטלפון שלך הוא 052-6657692.",
+        "כתובת המייל היא fictional.person@example.com.",
+    ],
+)
+async def test_sensitive_contact_details_are_never_read_back_aloud(readback):
+    output = await BusinessClaimGuardFilter(lambda: "he").filter(readback)
+
+    assert "052" not in output
+    assert "@" not in output
+    assert output == "תודה, קיבלתי את הפרטים. מטעמי פרטיות לא אחזור עליהם בקול."
