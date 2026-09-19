@@ -115,7 +115,7 @@ def test_release_validator_rejects_unsafe_or_incomplete_archives(
 def test_ci_preserves_deploy_exit_status_and_binds_archive_checksum() -> None:
     workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     assert "deployer_sha256=$(sha256sum scripts/deploy-dev.sh" in workflow
-    assert 'scripts/deploy-dev.sh "oron-dev:${remote_deployer}"' in workflow
+    assert 'scripts/deploy-dev.sh "${DEV_VM}:${remote_deployer}"' in workflow
     assert "sha256sum '${remote_deployer}'" in workflow
     assert (
         "sudo bash '${remote_deployer}' '${GITHUB_SHA}' "
@@ -124,6 +124,75 @@ def test_ci_preserves_deploy_exit_status_and_binds_archive_checksum() -> None:
     assert "trap 'rm -f ${remote_archive} ${remote_deployer}' EXIT" in workflow
     assert "/opt/oron-dev/scripts/deploy-dev.sh" not in workflow
     assert "deploy-dev.sh '${GITHUB_SHA}' '${remote_archive}'; rm -f" not in workflow
+
+
+def test_ci_uses_one_ephemeral_os_login_key_for_the_complete_dev_deploy() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+    assert "id-token: write" in workflow
+    assert "google-github-actions/auth@" in workflow
+    assert "workload_identity_provider:" in workflow
+    assert "service_account:" in workflow
+    assert "credentials_json" not in workflow
+    assert "SSH_PRIVATE_KEY" not in workflow
+    assert "${{ secrets." not in workflow
+
+    assert 'key="${RUNNER_TEMP}/oron-dev-deploy"' in workflow
+    assert "ssh-keygen -t rsa -b 3072" in workflow
+    assert "gcloud compute os-login ssh-keys add" in workflow
+    assert '--key-file="${key}.pub" --ttl=30m' in workflow
+    assert 'echo "ORON_DEPLOY_SSH_KEY=${key}" >>"${GITHUB_ENV}"' in workflow
+
+    transfer_commands = []
+    lines = workflow.splitlines()
+    for index, line in enumerate(lines):
+        if "gcloud compute ssh " not in line and "gcloud compute scp " not in line:
+            continue
+        command = line.strip()
+        while command.endswith("\\"):
+            index += 1
+            command = f"{command} {lines[index].strip()}"
+        transfer_commands.append(command)
+
+    assert len(transfer_commands) == 3
+    for command in transfer_commands:
+        assert '--ssh-key-file="${ORON_DEPLOY_SSH_KEY}"' in command
+        assert "--tunnel-through-iap" in command
+        assert '--project="${GCP_PROJECT_ID}"' in command
+        assert '--zone="${GCP_ZONE}"' in command
+
+
+def test_ci_bounds_dev_ssh_readiness_and_scp_retries() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+    assert "for attempt in $(seq 1 12); do" in workflow
+    assert 'echo "SSH readiness attempt ${attempt}/12"' in workflow
+    assert '--command="true"' in workflow
+    assert "DEV SSH authentication never became ready" in workflow
+
+    assert "for attempt in $(seq 1 5); do" in workflow
+    assert 'echo "SCP attempt ${attempt}/5: ${source}"' in workflow
+    assert "SCP failed after 5 attempts" in workflow
+    assert workflow.count("transfer_with_retry ") == 2
+
+
+def test_ci_cleans_up_ephemeral_key_and_keeps_portable_dev_entry_points() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    cleanup = workflow[workflow.index("- name: Remove ephemeral DEV SSH key") :]
+
+    assert "if: always()" in cleanup
+    assert "continue-on-error: true" in cleanup
+    assert "gcloud compute os-login ssh-keys remove" in cleanup
+    assert '--key-file="${key}.pub"' in cleanup
+    assert 'rm -f "${key}" "${key}.pub"' in cleanup
+
+    assert "workflow_dispatch:" in workflow
+    assert "github.event_name == 'workflow_dispatch'" in workflow
+    assert "group: deploy-gcp-dev" in workflow
+    assert "cancel-in-progress: false" in workflow
+    assert "scripts/deploy-dev.sh" in workflow
+    assert "Verify the public DEV endpoint" in workflow
+    assert "https://dev.or-on.io/login" in workflow
 
 
 def test_release_images_carry_and_enforce_source_revision() -> None:

@@ -7,7 +7,7 @@ keeps the platform secure and repeatable. It does not duplicate production
 high availability.
 
 ```text
-GitHub main push
+GitHub main push or manual workflow run on main
   -> existing CI (all jobs must succeed)
   -> GitHub OIDC / Workload Identity Federation
   -> immutable SHA images in Artifact Registry
@@ -117,9 +117,13 @@ line.
 ## CI and continuous deployment
 
 `.github/workflows/ci.yml` remains the sole CI workflow. On an exact push to
-`main`, its container job authenticates with GitHub OIDC, publishes five
-commit-SHA images, and records no mutable deployment tag. `deploy-dev` has
-`needs` on every CI job, so a failed or cancelled check cannot deploy.
+`main`, or a manual `workflow_dispatch` run that selects `main`, its container
+job authenticates with GitHub OIDC, publishes five commit-SHA images, and
+records no mutable deployment tag. The manual path deliberately selects
+`main` because the Workload Identity provider is restricted to that ref.
+`deploy-dev` has `needs` on every CI job, so neither path can bypass a failed or
+cancelled check. Job-level concurrency serializes deployments without
+cancelling an in-progress DEV release.
 
 The `github-oron-dev/oron-crm-main` Workload Identity provider trusts only
 `Abssel-AI/OrOn-CRM` on
@@ -155,6 +159,16 @@ were removed from this VM; unrelated rules and VMs were not changed. A host
 firewall is intentionally not layered over Docker NAT because the VPC rules are
 the authoritative ingress boundary and no Compose service publishes an
 internal port.
+
+For each deploy job, GitHub Actions creates one RSA key under `RUNNER_TEMP`,
+registers its public half in the deployment identity's OS Login profile with a
+30-minute TTL, and proves that exact key can authenticate through IAP before
+transferring anything. Every readiness SSH, release SCP, and deployment SSH
+operation explicitly reuses the same private key. SSH readiness is bounded to
+12 attempts and each SCP transfer to five attempts, both 10 seconds apart.
+An `always()` cleanup removes the public key from OS Login and deletes both
+local key files; the TTL is a fallback if cleanup cannot reach Google Cloud.
+The private key is never stored in GitHub Secrets, cached, logged, or uploaded.
 
 The deploy job resolves every tag to an immutable digest, creates a secret-free
 release archive, transfers it over IAP, and runs:

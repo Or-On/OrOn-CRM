@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches:
@@ -271,16 +272,22 @@ jobs:
       - run: docker build --build-arg ORON_SOURCE_REVISION="$GITHUB_SHA" --file infra/images/dispatcher.Dockerfile --tag or-on/dispatcher:ci .
       - run: docker build --build-arg ORON_SOURCE_REVISION="$GITHUB_SHA" --file infra/images/migrator.Dockerfile --tag or-on/migrator:ci .
       - name: Authenticate to Google Cloud for immutable DEV images
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: >-
+          github.ref == 'refs/heads/main' &&
+          (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
           workload_identity_provider: projects/157867817612/locations/global/workloadIdentityPools/github-oron-dev/providers/oron-crm-main
           service_account: oron-github-dev@website-478708.iam.gserviceaccount.com
       - name: Configure the regional Artifact Registry
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: >-
+          github.ref == 'refs/heads/main' &&
+          (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
       - name: Publish immutable DEV images
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: >-
+          github.ref == 'refs/heads/main' &&
+          (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         shell: bash
         env:
           REGISTRY: me-west1-docker.pkg.dev/website-478708/or-on-platform
@@ -294,7 +301,9 @@ jobs:
 
   deploy-dev:
     name: Deploy GCP DEV
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     needs:
       [
         typescript,
@@ -305,6 +314,11 @@ jobs:
         containers,
       ]
     runs-on: ubuntu-latest
+    env:
+      DEV_VM: oron-dev
+      GCP_PROJECT_ID: website-478708
+      GCP_ZONE: me-west1-b
+      REGISTRY: me-west1-docker.pkg.dev/website-478708/or-on-platform
     concurrency:
       group: deploy-gcp-dev
       cancel-in-progress: false
@@ -323,11 +337,40 @@ jobs:
           service_account: oron-github-dev@website-478708.iam.gserviceaccount.com
       - name: Install Google Cloud CLI
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
+      - name: Create ephemeral DEV SSH key
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          key="${RUNNER_TEMP}/oron-dev-deploy"
+          rm -f "${key}" "${key}.pub"
+          ssh-keygen -t rsa -b 3072 -N "" -f "${key}" \
+            -C "github-actions-oron-dev-${GITHUB_RUN_ID}"
+          gcloud compute os-login ssh-keys add \
+            --key-file="${key}.pub" --ttl=30m \
+            --project="${GCP_PROJECT_ID}" --quiet
+          echo "ORON_DEPLOY_SSH_KEY=${key}" >>"${GITHUB_ENV}"
+      - name: Wait for DEV SSH authentication
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for attempt in $(seq 1 12); do
+            echo "SSH readiness attempt ${attempt}/12"
+            if gcloud compute ssh "${DEV_VM}" --quiet --tunnel-through-iap \
+              --ssh-key-file="${ORON_DEPLOY_SSH_KEY}" \
+              --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" \
+              --command="true"; then
+              echo "DEV SSH authentication is ready"
+              exit 0
+            fi
+            if (( attempt < 12 )); then
+              sleep 10
+            fi
+          done
+          echo "DEV SSH authentication never became ready" >&2
+          exit 1
       - name: Assemble the release payload
         id: release
         shell: bash
-        env:
-          REGISTRY: me-west1-docker.pkg.dev/website-478708/or-on-platform
         run: |
           set -Eeuo pipefail
           release_dir="${RUNNER_TEMP}/oron-dev-${GITHUB_SHA}"
@@ -364,14 +407,30 @@ jobs:
           set -Eeuo pipefail
           remote_archive="/tmp/oron-dev-release-${GITHUB_SHA}.tar.gz"
           remote_deployer="/tmp/oron-dev-deploy-${GITHUB_SHA}.sh"
-          gcloud compute scp --quiet --tunnel-through-iap \
-            --project website-478708 --zone me-west1-b \
-            "${ARCHIVE}" "oron-dev:${remote_archive}"
-          gcloud compute scp --quiet --tunnel-through-iap \
-            --project website-478708 --zone me-west1-b \
-            scripts/deploy-dev.sh "oron-dev:${remote_deployer}"
-          gcloud compute ssh oron-dev --quiet --tunnel-through-iap \
-            --project website-478708 --zone me-west1-b \
+          transfer_with_retry() {
+            local source="$1"
+            local destination="$2"
+            local attempt
+            for attempt in $(seq 1 5); do
+              echo "SCP attempt ${attempt}/5: ${source}"
+              if gcloud compute scp --quiet --tunnel-through-iap \
+                --ssh-key-file="${ORON_DEPLOY_SSH_KEY}" \
+                --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" \
+                "${source}" "${destination}"; then
+                return 0
+              fi
+              if (( attempt < 5 )); then
+                sleep 10
+              fi
+            done
+            echo "SCP failed after 5 attempts: ${source}" >&2
+            return 1
+          }
+          transfer_with_retry "${ARCHIVE}" "${DEV_VM}:${remote_archive}"
+          transfer_with_retry scripts/deploy-dev.sh "${DEV_VM}:${remote_deployer}"
+          gcloud compute ssh "${DEV_VM}" --quiet --tunnel-through-iap \
+            --ssh-key-file="${ORON_DEPLOY_SSH_KEY}" \
+            --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" \
             --command="set -e; trap 'rm -f ${remote_archive} ${remote_deployer}' EXIT; test \"\$(sha256sum '${remote_deployer}' | cut -d' ' -f1)\" = '${DEPLOYER_SHA256}'; sudo bash '${remote_deployer}' '${GITHUB_SHA}' '${remote_archive}' '${ARCHIVE_SHA256}'"
       - name: Verify the public DEV endpoint
         shell: bash
@@ -380,3 +439,16 @@ jobs:
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
             --max-time 15 http://dev.or-on.io/)" = "308"
           curl --fail --silent --show-error --max-time 15 https://dev.or-on.io/login >/dev/null
+      - name: Remove ephemeral DEV SSH key
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          key="${ORON_DEPLOY_SSH_KEY:-${RUNNER_TEMP}/oron-dev-deploy}"
+          if [[ -f "${key}.pub" ]]; then
+            gcloud compute os-login ssh-keys remove \
+              --key-file="${key}.pub" --project="${GCP_PROJECT_ID}" --quiet || \
+              echo "OS Login key removal failed; the 30-minute TTL remains in force" >&2
+          fi
+          rm -f "${key}" "${key}.pub"
