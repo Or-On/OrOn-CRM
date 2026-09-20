@@ -21,10 +21,11 @@ def test_graph_has_preserved_oron_root_and_one_target_head() -> None:
     assert report.heads == (manifest["alembic_head"],)
     assert report.branch_points == ("8eda5976c920",)
     # Bumped by exactly one per deliberate migration; 89 adds configurable service
-    # workflows (a6d30b9f4c12), 90 reviewed tenant packages (c7e29a1b5d40), and 91
-    # executable lead-workflow validation (d2f6b8a13c90). An unexplained
-    # change here means a migration arrived that nobody reviewed.
-    assert report.revision_count == 91
+    # workflows (a6d30b9f4c12), 90 reviewed tenant packages (c7e29a1b5d40), 91
+    # executable lead-workflow validation (d2f6b8a13c90), and 92 protected voice
+    # retention inspection (e1c4b7a92d10). An unexplained change here means a
+    # migration arrived that nobody reviewed.
+    assert report.revision_count == 92
 
 
 def test_lead_workflow_guard_is_present_in_the_final_configuration_validator() -> None:
