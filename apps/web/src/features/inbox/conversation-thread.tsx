@@ -540,13 +540,13 @@ export function ConversationThread({
               >
                 <option value="human">{t("inbox.humanResponder")}</option>
                 {agentProfiles.flatMap((profile) =>
-                  profile.versionId === null
+                  profile.publishedVersionId === null
                     ? []
                     : [
                         <option
                           disabled={!aiRepliesEnabled}
-                          key={profile.versionId}
-                          value={profile.versionId}
+                          key={profile.publishedVersionId}
+                          value={profile.publishedVersionId}
                         >
                           {t("inbox.aiResponder", { name: profile.name })}
                         </option>,

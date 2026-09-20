@@ -218,6 +218,7 @@ describe("persisted agent quality workspace", () => {
               leadFieldSchemaId: null,
               publishedVersion: 1,
               publishedVersionId: version.id,
+              publishedChannels: ["voice"],
               leadFieldSchema: null,
               implicitTicketing: false,
               review: {
