@@ -16,6 +16,10 @@
       "types": "./src/service-workflow.ts",
       "default": "./dist/service-workflow.js"
     },
+    "./support-profile-text": {
+      "types": "./src/support-profile-text.ts",
+      "default": "./dist/support-profile-text.js"
+    },
     "./tenant-configuration-client": {
       "types": "./src/tenant-configuration-client.ts",
       "default": "./dist/tenant-configuration-client.js"

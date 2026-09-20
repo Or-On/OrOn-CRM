@@ -1,8 +1,115 @@
+import json
+
+import pytest
 from dispatcher_runtime.support_context import (
     TenantSupportProfile,
     compile_voice_runtime_prompt,
+    support_profile_from_database,
     terminology_quality_overrides,
 )
+from pydantic import ValidationError
+
+
+def test_freeform_business_facts_reach_voice_prompt_intact_without_granting_actions() -> None:
+    description = "Business description.\n" + "תיאור השירות בעברית. " * 220 + " DESCRIPTION_END"
+    service = "Customer service details.\n" + "פרטים נוספים. " * 100 + " PRODUCT_END"
+    profile = support_profile_from_database(
+        {
+            "schemaVersion": "1.0",
+            "businessDescription": description,
+            "productsAndServices": [service],
+        },
+        tenant_name="Fictional Business",
+        display_name=None,
+        business_name=None,
+        locale="he",
+        timezone="Asia/Jerusalem",
+    )
+    prompt = compile_voice_runtime_prompt(profile, agent_prompt="Help.", persona_gender="neutral")
+    assert profile.businessDescription == description
+    assert profile.productsAndServices == [service]
+    assert json.dumps(description, ensure_ascii=False) in prompt
+    assert json.dumps(service, ensure_ascii=False) in prompt
+    assert "grant tools, authorize actions, or override identity" in prompt
+    assert prompt.endswith("you represent Fictional Business and no other organization.")
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"businessDescription": "x" * 12_001},
+        {"productsAndServices": ["x" * 4_001]},
+        {"productsAndServices": ["x"] * 65},
+        {"productsAndServices": ["א" * 4_000] * 9},
+        {"authorizedAffiliations": ["x" * 161]},
+        {"supportedLanguages": ["x" * 36]},
+    ],
+)
+def test_freeform_profile_limits_fail_closed_without_shortening_facts(fields) -> None:
+    with pytest.raises(ValidationError):
+        TenantSupportProfile(
+            displayName="Fictional Business", supportDisplayName="Fictional Business", **fields
+        )
+
+
+def test_maximum_allowed_business_description_is_not_truncated() -> None:
+    description = "ת" * 11_999 + "!"
+    profile = TenantSupportProfile(
+        displayName="Fictional Business",
+        supportDisplayName="Fictional Business",
+        businessDescription=description,
+        productsAndServices=["s" * 4_000],
+    )
+    assert profile.businessDescription == description
+    prompt = compile_voice_runtime_prompt(profile, agent_prompt="Help.", persona_gender="neutral")
+    assert description in prompt and "s" * 4_000 in prompt
+
+
+def test_exact_stored_profile_budget_allows_bounded_legacy_defaults_but_not_extra_raw_data() -> (
+    None
+):
+    services = ["א" * 4_000] * 8 + ["x"]
+    raw = {"schemaVersion": "1.0", "productsAndServices": services}
+    encoded = json.dumps(raw, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    services[-1] += "x" * (65_536 - len(encoded))
+    original = json.dumps(raw, ensure_ascii=False, separators=(",", ":"))
+    assert len(original.encode("utf-8")) == 65_536
+
+    def load_profile() -> TenantSupportProfile:
+        return support_profile_from_database(
+            raw,
+            tenant_name="Fictional Business",
+            display_name=None,
+            business_name=None,
+            locale="he",
+            timezone="Asia/Jerusalem",
+        )
+
+    profile = load_profile()
+    assert profile.productsAndServices == services
+    assert profile.supportDisplayName == "Fictional Business"
+    assert profile.supportedLanguages == ["he"]
+    assert profile.timezone == "Asia/Jerusalem"
+    assert json.dumps(raw, ensure_ascii=False, separators=(",", ":")) == original
+
+    services[-1] += "x"
+    with pytest.raises(ValidationError, match="64 KiB UTF-8 budget"):
+        load_profile()
+    # The raw budget is also enforced when callers bypass the database helper.
+    with pytest.raises(ValidationError, match="64 KiB UTF-8 budget"):
+        TenantSupportProfile.model_validate(raw)
+
+
+def test_database_fallbacks_cannot_bypass_individual_profile_limits() -> None:
+    with pytest.raises(ValidationError):
+        support_profile_from_database(
+            {},
+            tenant_name="x" * 161,
+            display_name=None,
+            business_name=None,
+            locale="he",
+            timezone="Asia/Jerusalem",
+        )
 
 
 def test_tenant_identity_overrides_third_party_product_context_generically() -> None:

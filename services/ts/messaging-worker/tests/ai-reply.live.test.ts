@@ -190,6 +190,19 @@ describe.skipIf(sourceUrl === undefined)(
     }
 
     it("runs signed inbound to AI reply and starts an explicitly requested durable call", async () => {
+      const businessProfile = {
+        businessDescription:
+          "Fictional business details.\n" +
+          "Long business description. ".repeat(100),
+        productsAndServices: [
+          "Fictional service details.\n" +
+            "Useful product context. ".repeat(40),
+        ],
+      };
+      await admin`UPDATE crm.tenant_settings SET support_profile=support_profile || ${admin.json(businessProfile)}::jsonb WHERE tenant_id=${tenantId}::uuid`;
+      const unrelatedTenant = randomUUID();
+      await admin`INSERT INTO tenants(id,name,slug) VALUES(${unrelatedTenant}::uuid,'Unrelated business',${`unrelated-${unrelatedTenant}`})`;
+      await admin`INSERT INTO crm.tenant_settings(tenant_id,support_profile) VALUES(${unrelatedTenant}::uuid,'{"schemaVersion":"1.0","businessDescription":"OTHER_TENANT_BUSINESS_FACTS"}')`;
       let knowledgeDocumentId = "";
       let whatsAppAgentVersionId = "";
       let voiceAgentVersionId = "";
@@ -684,6 +697,7 @@ describe.skipIf(sourceUrl === undefined)(
       expect(aiDecide).toHaveBeenCalledTimes(5);
       const firstAiRequest = aiDecide.mock.calls[0]?.[0] as
         | {
+            businessProfile?: typeof businessProfile;
             contactContext?: {
               tickets?: { id: string; title: string }[];
               identity?: {
@@ -693,6 +707,10 @@ describe.skipIf(sourceUrl === undefined)(
             };
           }
         | undefined;
+      expect(firstAiRequest?.businessProfile).toEqual(businessProfile);
+      expect(JSON.stringify(firstAiRequest)).not.toContain(
+        "OTHER_TENANT_BUSINESS_FACTS",
+      );
       expect(firstAiRequest?.contactContext?.tickets).toEqual([
         expect.objectContaining({
           id: linkedTicketId,

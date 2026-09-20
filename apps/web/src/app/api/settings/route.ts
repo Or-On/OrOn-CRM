@@ -5,6 +5,7 @@ import {
   updateTenantSettings,
   type IdentityVerificationPolicy,
   type TenantSupportProfile,
+  tenantSupportTextLimits,
 } from "@or-on/crm";
 
 import {
@@ -20,7 +21,9 @@ import {
 export async function PATCH(request: Request) {
   try {
     await assertCrmMutation(request);
-    const body = await jsonObject(request);
+    const body = await jsonObject(request, {
+      maximumBytes: tenantSupportTextLimits.profileBytes + 16_384,
+    });
     if (
       typeof body.defaultCurrency !== "string" ||
       typeof body.locale !== "string" ||

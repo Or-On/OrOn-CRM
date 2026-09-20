@@ -7,6 +7,10 @@ import type {
   TenantTerminologyEntry,
 } from "@or-on/crm";
 import {
+  tenantSupportTextLimits,
+  validateTenantSupportText,
+} from "@or-on/crm/support-profile-text";
+import {
   Button,
   Checkbox,
   InlineFeedback,
@@ -188,6 +192,7 @@ export function TenantSupportSettings({
         onFailure: formText(form, "onFailure") as "human_handoff" | "end_call",
         contextDisclosure: "after_verification",
       };
+      validateTenantSupportText(supportProfile);
       await crmMutation(
         "/api/settings",
         {
@@ -296,7 +301,9 @@ export function TenantSupportSettings({
                   defaultValue={profile.businessDescription ?? ""}
                   id="support-business-description"
                   label={t("businessDescription")}
-                  maxLength={2000}
+                  hint={t("businessDescriptionHint", {
+                    maximum: tenantSupportTextLimits.businessDescription,
+                  })}
                   name="businessDescription"
                   rows={4}
                 />
@@ -305,6 +312,10 @@ export function TenantSupportSettings({
                     defaultValue={listText(profile.productsAndServices)}
                     id="support-products"
                     label={t("productsAndServices")}
+                    hint={t("productsAndServicesHint", {
+                      maximumItems: tenantSupportTextLimits.productsAndServices,
+                      maximumLength: tenantSupportTextLimits.productOrService,
+                    })}
                     name="productsAndServices"
                     rows={5}
                   />

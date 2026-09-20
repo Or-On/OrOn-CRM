@@ -1,4 +1,5 @@
 import type postgres from "postgres";
+import { validateTenantSupportText } from "./support-profile-text.js";
 
 import type {
   NotificationSummary,
@@ -310,11 +311,11 @@ function validOptionalText(
 function validateTenantSupportProfile(value: unknown): void {
   if (!plainRecord(value) || value.schemaVersion !== "1.0")
     throw new TypeError("tenant support profile is invalid");
+  validateTenantSupportText(value);
   const validText = [
     ["displayName", 160],
     ["supportDisplayName", 160],
     ["legalName", 240],
-    ["businessDescription", 2_000],
     ["primaryLanguage", 35],
     ["timezone", 100],
   ].every(([key, maximum]) =>
@@ -381,7 +382,6 @@ function validateTenantSupportProfile(value: unknown): void {
       }));
   if (
     !validText ||
-    !validStringList("productsAndServices", 64, 160) ||
     !validStringList("authorizedAffiliations", 32, 160) ||
     !validStringList("supportedLanguages", 16, 35) ||
     !validBusinessHours ||

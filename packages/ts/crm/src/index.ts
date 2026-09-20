@@ -22,6 +22,7 @@ export * from "./contacts.js";
 export * from "./csv.js";
 export * from "./messaging.js";
 export * from "./management.js";
+export * from "./support-profile-text.js";
 export * from "./phone.js";
 export * from "./protected-national-id.js";
 export * from "./private-object-storage.js";

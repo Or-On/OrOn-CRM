@@ -101,6 +101,10 @@ import {
   type GroundedReply,
 } from "./ai-grounding.js";
 import {
+  tenantBusinessContext,
+  type TenantBusinessContext,
+} from "./tenant-business-context.js";
+import {
   FieldServiceAiProviderError,
   type FieldServiceAiProvider,
 } from "./field-service-provider.js";
@@ -2342,6 +2346,8 @@ interface TenantIdentityProjection {
   readonly businessName?: string | null;
   readonly supportProfile?: {
     readonly supportDisplayName?: string | null;
+    readonly businessDescription?: unknown;
+    readonly productsAndServices?: unknown;
   } | null;
 }
 
@@ -2372,6 +2378,7 @@ interface AiWork {
   /** The resolved configuration this job runs under, pinned at admission. */
   readonly contract: AgentExecutionContract;
   readonly tenantDisplayName: string | null;
+  readonly businessProfile?: TenantBusinessContext;
   /**
    * The lead this conversation is already collecting into, if any. Null until
    * the agent saves something: a greeting does not create a lead.
@@ -2645,6 +2652,9 @@ async function loadAiWork(
     const tenantDisplayName = tenantDisplayNameFrom(
       identities[0]?.profile ?? null,
     );
+    const businessProfile = tenantBusinessContext(
+      identities[0]?.profile?.supportProfile,
+    );
     const knowledge = await eligibleFacts(transaction, row.agent_version_id);
     const history = await transaction<
       {
@@ -2842,6 +2852,7 @@ async function loadAiWork(
       agentVersionId: row.agent_version_id,
       contract,
       tenantDisplayName,
+      ...(businessProfile === undefined ? {} : { businessProfile }),
       lead:
         lead === null
           ? null
@@ -2953,6 +2964,9 @@ function aiRequestFor(
     ...(work.tenantDisplayName === null
       ? {}
       : { tenantDisplayName: work.tenantDisplayName }),
+    ...(work.businessProfile === undefined
+      ? {}
+      : { businessProfile: work.businessProfile }),
     ...(pinned === null
       ? {}
       : {

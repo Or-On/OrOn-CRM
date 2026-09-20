@@ -10,6 +10,29 @@ function request(body: string | Uint8Array, declared?: string) {
 }
 
 describe("bounded authenticated JSON request reader", () => {
+  it("allows a route-selected larger bound without changing the default limit", async () => {
+    const text = "א".repeat(20_000);
+    const body = JSON.stringify({ text });
+    await expect(jsonObject(request(body))).rejects.toThrow(
+      "request body is too large",
+    );
+    await expect(
+      jsonObject(request(body), { maximumBytes: 81_920 }),
+    ).resolves.toEqual({ text });
+    await expect(
+      jsonObject(request(JSON.stringify({ text: "x".repeat(81_920) }), "1"), {
+        maximumBytes: 81_920,
+      }),
+    ).rejects.toThrow("request body is too large");
+  });
+  it.each([0, -1, Infinity, NaN, 131_073, 1.5])(
+    "refuses invalid server-selected byte bounds: %s",
+    async (maximumBytes) => {
+      await expect(jsonObject(request("{}"), { maximumBytes })).rejects.toThrow(
+        "request body limit is invalid",
+      );
+    },
+  );
   it.each([undefined, "1"])(
     "rejects actual bytes over limit despite content-length %s",
     async (length) => {

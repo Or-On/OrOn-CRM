@@ -36,7 +36,9 @@ function transaction(results: readonly unknown[][]) {
     },
   );
   return {
-    sql: execute as unknown as postgres.TransactionSql,
+    sql: Object.assign(execute, {
+      json: (value: unknown) => value,
+    }) as unknown as postgres.TransactionSql,
     statements,
     values,
   };
@@ -356,6 +358,59 @@ describe("tenant settings repository", () => {
       }),
     ).rejects.toThrow("identity verification policy is invalid");
     expect(fixture.statements).toHaveLength(0);
+  });
+
+  it("persists full company paragraphs and service lines longer than the former 160-character limit", async () => {
+    const profile = {
+      schemaVersion: "1.0" as const,
+      businessDescription:
+        "Fictional company scope and operating details. ".repeat(70),
+      productsAndServices: [
+        "Fictional service includes onboarding, assistance, and ongoing guidance. ".repeat(
+          12,
+        ),
+      ],
+    };
+    const fixture = transaction([
+      [
+        {
+          display_name: "Fictional workspace",
+          default_currency: "USD",
+          locale: "en",
+          timezone: "UTC",
+          business_name: null,
+          business_email: null,
+          business_phone: null,
+          business_address: null,
+          accent_token: null,
+          report_header: null,
+          report_footer: null,
+          support_profile: profile,
+          identity_verification_policy: {
+            schemaVersion: "1.0",
+            enabled: true,
+            requiredFactors: ["phone"],
+            maxAttempts: 3,
+            onFailure: "human_handoff",
+            contextDisclosure: "after_verification",
+          },
+        },
+      ],
+    ]);
+    const saved = await updateTenantSettings(fixture.sql, {
+      displayName: "Fictional workspace",
+      defaultCurrency: "USD",
+      locale: "en",
+      timezone: "UTC",
+      supportProfile: profile,
+    });
+    expect(saved.supportProfile).toEqual(profile);
+    expect(fixture.values[0]).toContainEqual(profile);
+    expect(fixture.statements).toHaveLength(1);
+    expect(fixture.statements[0]).toContain("INSERT INTO crm.tenant_settings");
+    expect(fixture.statements[0]).not.toMatch(
+      /publish|entitlement|knowledge_documents/u,
+    );
   });
 });
 

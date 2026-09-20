@@ -126,6 +126,24 @@ def test_recognition_context_stays_far_under_the_provider_ceiling():
     assert len(dumped.get("terms", [])) <= 128
 
 
+def test_long_freeform_business_profile_keeps_stt_hints_within_provider_budget():
+    # The conversational prompt gets full business prose; speech recognition
+    # still gets only bounded vocabulary hints, never the whole knowledge text.
+    profile = RecognitionContextProfile.from_configuration(
+        {
+            "supportProfile": {
+                "supportDisplayName": "Fictional Business",
+                "businessDescription": "תיאור עסק. " * 1_000,
+                "productsAndServices": ["מוצר ארוך. " * 300] * 6,
+            }
+        }
+    )
+    context = _dumped(build_soniox_context(VoiceQualityConfig(), profile))
+    assert len(repr(context)) < 8_000
+    assert all(len(item["value"]) <= 240 for item in context["general"])
+    assert all(len(term) <= 80 for term in context.get("terms", []))
+
+
 def test_absent_or_malformed_support_profile_degrades_to_vocabulary_only():
     for configuration in ({}, {"supportProfile": None}, {"supportProfile": "nope"}):
         profile = RecognitionContextProfile.from_configuration(configuration)

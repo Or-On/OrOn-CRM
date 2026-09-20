@@ -7,8 +7,16 @@ export function requestId(request: Request): string {
 
 export async function jsonObject(
   request: Request,
+  options: { readonly maximumBytes?: number } = {},
 ): Promise<Record<string, unknown>> {
-  const maximumBytes = 16_384;
+  // Only route code chooses the bound; never derive it from request data.
+  const maximumBytes = options.maximumBytes ?? 16_384;
+  if (
+    !Number.isSafeInteger(maximumBytes) ||
+    maximumBytes < 1 ||
+    maximumBytes > 131_072
+  )
+    throw new TypeError("request body limit is invalid");
   const declared = request.headers.get("content-length");
   if (
     declared &&
