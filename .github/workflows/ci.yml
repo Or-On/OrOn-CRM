@@ -123,7 +123,9 @@ jobs:
         with:
           version: 0.12.7
           python-version: 3.14.7
-      - run: uv sync --all-packages --locked
+      # PostgreSQL integration tests exercise the production voice lead tool
+      # layer directly, so install the root voice dependency group here too.
+      - run: uv sync --all-packages --locked --group voice
       - run: uv run python scripts/db_verify.py offline
       - run: uv run alembic -c db/alembic/alembic.ini upgrade head
       - run: uv run alembic -c db/alembic/alembic.ini current --check-heads
