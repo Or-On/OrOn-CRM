@@ -43,6 +43,7 @@ const agents: readonly AgentProfileSummary[] = [
     leadFieldSchemaId: null,
     publishedVersion: 1,
     publishedVersionId: "v1",
+    publishedChannels: ["voice"],
     leadFieldSchema: null,
     implicitTicketing: false,
     review: {
@@ -75,6 +76,7 @@ const agents: readonly AgentProfileSummary[] = [
     leadFieldSchemaId: null,
     publishedVersion: null,
     publishedVersionId: null,
+    publishedChannels: [],
     leadFieldSchema: null,
     implicitTicketing: false,
     review: {

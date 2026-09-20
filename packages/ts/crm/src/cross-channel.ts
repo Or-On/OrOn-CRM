@@ -286,6 +286,12 @@ export interface AgentProfileSummary {
   readonly leadFieldSchemaId: string | null;
   readonly publishedVersion: number | null;
   readonly publishedVersionId: string | null;
+  /**
+   * The channels the live version really carries. The newest version may be a
+   * draft that adds or drops one, so anything that binds an interaction to an
+   * agent reads these, not `channels`.
+   */
+  readonly publishedChannels: readonly SupportedChannel[];
   /** The reviewed field list the newest version is pinned to, by name. */
   readonly leadFieldSchema: {
     readonly id: string;
@@ -330,6 +336,7 @@ interface AgentProfileRow {
   channel_configuration: Record<string, unknown> | null;
   published_version: number | null;
   published_version_id: string | null;
+  published_channel_capabilities: SupportedChannel[] | null;
   implicit_ticketing: boolean | null;
   schema_id: string | null;
   schema_name: string | null;
@@ -361,6 +368,7 @@ export async function listAgentProfiles(
            version.tool_permissions, version.channel_configuration,
            version.implicit_ticketing,
            live.version AS published_version, live.id AS published_version_id,
+           live.channel_capabilities AS published_channel_capabilities,
            COALESCE(settings.whatsapp_ai_agent_profile_id = profile.id, false)
              AS is_default_whatsapp,
            schema.id AS schema_id, schema.name AS schema_name,
@@ -382,10 +390,13 @@ export async function listAgentProfiles(
       ORDER BY candidate.version DESC LIMIT 1
     ) version ON true
     LEFT JOIN LATERAL (
-      SELECT candidate.id, candidate.version
+      -- The live version, stated exactly as every runtime gate reads it, so a
+      -- screen that offers it cannot offer a version assignment would refuse.
+      SELECT candidate.id, candidate.version, candidate.channel_capabilities
       FROM agents.agent_profile_versions candidate
       WHERE candidate.agent_profile_id = profile.id
         AND candidate.published_at IS NOT NULL
+        AND candidate.validation_status = 'valid'
       ORDER BY candidate.version DESC LIMIT 1
     ) live ON true
     LEFT JOIN crm.lead_field_schemas schema
@@ -457,6 +468,7 @@ export async function listAgentProfiles(
       ),
       publishedVersion: row.published_version,
       publishedVersionId: row.published_version_id,
+      publishedChannels: row.published_channel_capabilities ?? [],
       leadFieldSchema:
         schema === null
           ? null

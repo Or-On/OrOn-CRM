@@ -38,6 +38,43 @@ describe("tenant agent configuration projection", () => {
     expect(parts.join("")).not.toMatch(/INSERT|UPDATE|DELETE/u);
   });
 
+  it("separates the live version from the newest draft it is being revised into", async () => {
+    // Everything that binds an interaction to an agent runs the live version,
+    // so the projection must state it apart from the draft on top of it.
+    const query = vi.fn().mockResolvedValue([
+      {
+        id: "agent",
+        name: "Fictional agent",
+        description: null,
+        version: 3,
+        version_id: "draft",
+        channel_capabilities: ["voice"],
+        published_at: null,
+        validation_status: "valid",
+        published_version: 2,
+        published_version_id: "live",
+        published_channel_capabilities: ["whatsapp"],
+      },
+    ]);
+
+    const records = await listAgentProfiles(
+      query as unknown as postgres.TransactionSql,
+    );
+
+    expect(records[0]).toMatchObject({
+      published: false,
+      versionId: "draft",
+      channels: ["voice"],
+      publishedVersionId: "live",
+      publishedChannels: ["whatsapp"],
+    });
+    const parts = query.mock.calls[0]?.[0] as TemplateStringsArray;
+    expect(parts.join("")).toContain(
+      "live.channel_capabilities AS published_channel_capabilities",
+    );
+    expect(parts.join("")).toContain("candidate.validation_status = 'valid'");
+  });
+
   it("projects an agent with no pinned lead schema instead of failing the list", async () => {
     // The lead schema arrives through a LEFT JOIN, so an agent that collects
     // nothing leaves those columns empty. Reading the register must survive

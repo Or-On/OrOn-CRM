@@ -88,12 +88,14 @@ export default async function InboxPage({
         selectedId: first?.id,
         quickReplies,
         teamMembers,
+        // An operator may hand a conversation only to the agent version the
+        // platform would actually run: the live one. The newest version is
+        // routinely an unpublished draft, and offering that would bind the
+        // conversation to something the ownership gate refuses.
         agentProfiles: agentProfiles.filter(
           (profile) =>
-            profile.published &&
-            profile.validationStatus === "valid" &&
-            profile.versionId !== null &&
-            profile.channels.includes("whatsapp"),
+            profile.publishedVersionId !== null &&
+            profile.publishedChannels.includes("whatsapp"),
         ),
         canOperate:
           session.isSuperuser ||

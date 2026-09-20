@@ -605,42 +605,46 @@ describe("Inbox interaction safety (no provider network)", () => {
     ).toBeNull();
   });
 
+  // An agent whose newest version is an unpublished draft: the ordinary state
+  // after editing one. The conversation must still be handed to the live
+  // version, which is what the platform would actually run.
+  const draftAheadAgent = {
+    id: "agent",
+    name: "Fictional support agent",
+    description: null,
+    version: 2,
+    versionId: "00000000-0000-4000-8000-000000000092",
+    channels: ["whatsapp"] as const,
+    published: false,
+    validationStatus: "valid" as const,
+    capabilities: [],
+    roleTitle: null,
+    leadFieldSchemaId: null,
+    publishedVersion: 1,
+    publishedVersionId: "00000000-0000-4000-8000-000000000091",
+    publishedChannels: ["whatsapp"] as const,
+    leadFieldSchema: null,
+    implicitTicketing: false,
+    review: {
+      enabledActions: [],
+      leadFields: [],
+      blocking: [],
+      promptWarnings: [],
+    },
+    lifecycle: {
+      draftVersion: 2,
+      assignedConversations: 0,
+      staleConversations: 0,
+      assignedFlows: 0,
+      runningCalls: 0,
+    },
+  };
+
   it("lets an operator explicitly switch between a published AI agent and human takeover", async () => {
     render(
       localized(
         <InboxWorkspace
-          agentProfiles={[
-            {
-              id: "agent",
-              name: "Fictional support agent",
-              description: null,
-              version: 1,
-              versionId: "00000000-0000-4000-8000-000000000091",
-              channels: ["whatsapp"],
-              published: true,
-              validationStatus: "valid",
-              capabilities: [],
-              roleTitle: null,
-              leadFieldSchemaId: null,
-              publishedVersion: 1,
-              publishedVersionId: "00000000-0000-4000-8000-000000000091",
-              leadFieldSchema: null,
-              implicitTicketing: false,
-              review: {
-                enabledActions: [],
-                leadFields: [],
-                blocking: [],
-                promptWarnings: [],
-              },
-              lifecycle: {
-                draftVersion: null,
-                assignedConversations: 0,
-                staleConversations: 0,
-                assignedFlows: 0,
-                runningCalls: 0,
-              },
-            },
-          ]}
+          agentProfiles={[draftAheadAgent]}
           aiRepliesEnabled
           conversations={conversations}
           initialMessages={messagesA}
@@ -677,6 +681,43 @@ describe("Inbox interaction safety (no provider network)", () => {
         expect.objectContaining({ ownershipMode: "human" }),
         { method: "PATCH" },
       ),
+    );
+    expect(transport.mutate).not.toHaveBeenCalledWith(
+      "/api/messaging/conversations/alpha",
+      expect.objectContaining({
+        agentProfileVersionId: "00000000-0000-4000-8000-000000000092",
+      }),
+      expect.anything(),
+    );
+  });
+
+  it("tells an operator why an AI handover was refused instead of a generic failure", async () => {
+    transport.mutate.mockRejectedValueOnce(
+      new Error("WhatsApp AI is disabled by the platform operator"),
+    );
+    render(
+      localized(
+        <InboxWorkspace
+          agentProfiles={[draftAheadAgent]}
+          aiRepliesEnabled
+          conversations={conversations}
+          initialMessages={messagesA}
+          quickReplies={[]}
+          teamMembers={[]}
+          realWhatsAppEnabled={false}
+          canOperate
+        />,
+      ),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Conversation controls" }),
+    );
+    fireEvent.change(
+      screen.getByRole("combobox", { name: "Conversation responder" }),
+      { target: { value: "00000000-0000-4000-8000-000000000091" } },
+    );
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "WhatsApp AI is disabled by the platform operator",
     );
   });
 

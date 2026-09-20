@@ -137,6 +137,25 @@ describe("English and Hebrew interface contracts", () => {
     expect(output).toBe(he.common.changeFailed);
     expect(output).not.toContain("secret");
   });
+  it("tells an operator what blocked an AI handover, in their language", () => {
+    const translate = createTranslator({ locale: "he", messages: he });
+    const t = (key: string) =>
+      translate(key as Parameters<typeof translate>[0]);
+    expect(
+      errorMessage(
+        new Error("WhatsApp AI is disabled by the platform operator"),
+        t,
+        "inbox.updateFailed",
+      ),
+    ).toBe(he.inbox.aiDisabled);
+    expect(
+      errorMessage(
+        new Error("a published WhatsApp agent is required"),
+        t,
+        "inbox.updateFailed",
+      ),
+    ).toBe(he.inbox.noAiAgent);
+  });
 });
 
 describe("currency-safe pipeline presentation", () => {

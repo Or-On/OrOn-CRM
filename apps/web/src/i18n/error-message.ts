@@ -21,6 +21,11 @@ const knownErrors: Readonly<Record<string, string>> = {
   "conversation has no valid WhatsApp recipient": "errors.phone",
   "This conversation still has queued or in-progress work. Wait for it to finish before deleting.":
     "inbox.deleteInProgress",
+  // Handing a conversation to AI has preconditions the operator can act on.
+  // Both already have a translated explanation in the responder panel; saying
+  // "could not update" instead leaves them with nothing to fix.
+  "WhatsApp AI is disabled by the platform operator": "inbox.aiDisabled",
+  "a published WhatsApp agent is required": "inbox.noAiAgent",
   "This conversation is retained as technician case evidence and cannot be deleted from the Inbox.":
     "inbox.deleteRetainedEvidence",
   "recipient must be strict E.164": "errors.phone",

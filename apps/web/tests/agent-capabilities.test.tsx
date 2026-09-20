@@ -48,6 +48,7 @@ function coordinator(
     leadFieldSchemaId: "schema-1",
     publishedVersion: 2,
     publishedVersionId: v2,
+    publishedChannels: ["voice", "whatsapp"],
     leadFieldSchema: {
       id: "schema-1",
       name: "Business software enquiry",
