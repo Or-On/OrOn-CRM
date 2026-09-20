@@ -1,5 +1,5 @@
 {
-  "alembic_head": "d2f6b8a13c90",
+  "alembic_head": "e1c4b7a92d10",
   "expected_functions": [
     "agents.protect_approved_knowledge",
     "automation.protect_published_flow_version",
@@ -80,6 +80,7 @@
     "platform.current_tenant_requires_approved_routing",
     "platform.enforce_approved_service_activation",
     "platform.enforce_approved_conversation_agent",
+    "platform.conversation_has_voice_identity_verification",
     "service.current_workflow_policy",
     "service.pin_intake_workflow",
     "service.validate_workflow_policy",

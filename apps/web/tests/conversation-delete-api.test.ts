@@ -100,7 +100,7 @@ describe("conversation deletion API", () => {
     );
   });
 
-  it("removes protected technician evidence from the Inbox without deleting it", async () => {
+  it("removes protected business evidence from the Inbox without deleting it", async () => {
     state.deleteConversation.mockResolvedValue({
       status: "removed_retained_evidence",
     });

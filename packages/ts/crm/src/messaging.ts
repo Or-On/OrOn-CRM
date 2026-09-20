@@ -1214,8 +1214,11 @@ export type ConversationDeletionResult =
  * for it to reach a terminal state before deleting the thread. A pending human
  * handoff is different: explicitly removing the conversation cancels that
  * internal queue item atomically so it cannot leave the thread undeletable.
- * A conversation that became part of a technician case is retained because its
- * original messages and media are case evidence, not disposable Inbox state.
+ * A conversation that became part of a durable business record is retained
+ * because its original messages and media are evidence, not disposable Inbox
+ * state. This includes technician cases, support tickets, leads, and verified
+ * voice handoffs. The retention check mirrors every restricted conversation or
+ * message foreign key so a valid removal cannot become a generic database error.
  * Unshared message-owned objects are tombstoned in the same transaction; the
  * caller may remove their physical files only after this transaction commits.
  */
@@ -1355,6 +1358,23 @@ export async function deleteConversation(
            OR message.object_id = attachment.object_id
          )
         WHERE message.conversation_id = ${conversationId}::uuid
+      ) OR EXISTS (
+        SELECT 1
+        FROM support.tickets ticket
+        WHERE ticket.tenant_id = platform.current_tenant_id()
+          AND ticket.source_conversation_id = ${conversationId}::uuid
+      ) OR platform.conversation_has_voice_identity_verification(
+        ${conversationId}::uuid
+      ) OR EXISTS (
+        SELECT 1
+        FROM crm.leads lead
+        WHERE lead.tenant_id = platform.current_tenant_id()
+          AND lead.source_conversation_id = ${conversationId}::uuid
+      ) OR EXISTS (
+        SELECT 1
+        FROM crm.lead_interactions interaction
+        WHERE interaction.tenant_id = platform.current_tenant_id()
+          AND interaction.conversation_id = ${conversationId}::uuid
       )
     ) AS retained
   `;

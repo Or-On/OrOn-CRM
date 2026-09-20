@@ -490,6 +490,11 @@ describe("Inbox interaction safety (no provider network)", () => {
     const confirmation = screen.getByRole("dialog", {
       name: "Remove this conversation?",
     });
+    expect(
+      within(confirmation).getByText(
+        /tickets, leads, service cases or call verification/,
+      ),
+    ).toBeTruthy();
     expect(transport.mutate).not.toHaveBeenCalled();
     fireEvent.click(
       within(confirmation).getByRole("button", { name: "Cancel" }),
@@ -521,7 +526,7 @@ describe("Inbox interaction safety (no provider network)", () => {
     expect(screen.getByText("Conversation deleted.")).toBeTruthy();
   });
 
-  it("removes protected technician evidence from the Inbox with an honest notice", async () => {
+  it("removes protected business evidence from the Inbox with an honest notice", async () => {
     transport.read.mockImplementation((url: string) =>
       Promise.resolve(
         url === "/api/messaging/conversations"
@@ -551,7 +556,7 @@ describe("Inbox interaction safety (no provider network)", () => {
 
     expect(
       await screen.findByText(
-        "Conversation removed from the Inbox. Technician-case evidence was preserved in the case dossier.",
+        "Conversation removed from the Inbox. Messages and media linked to business records were preserved.",
       ),
     ).toBeTruthy();
     expect(

@@ -295,6 +295,40 @@ describe.skipIf(databaseUrl === undefined)(
       });
     });
 
+    it("removes conversations linked to support tickets without violating the source foreign key", async () => {
+      await isolated(async (transaction) => {
+        const record = await fixture(transaction);
+        await transaction`
+          INSERT INTO support.tickets(
+            tenant_id, reference, attachment_key, contact_id, subject,
+            source_channel, source_conversation_id
+          ) VALUES(
+            platform.current_tenant_id(), ${`T-${randomUUID()}`},
+            ${`conversation:${randomUUID()}`}, ${record.contactId}::uuid,
+            'Fictional support ticket', 'whatsapp',
+            ${record.conversationId}::uuid
+          )
+        `;
+
+        expect(
+          await deleteConversation(transaction, record.conversationId, userId),
+        ).toEqual({ status: "removed_retained_evidence" });
+        expect(
+          await transaction`
+            SELECT id FROM support.tickets
+            WHERE source_conversation_id=${record.conversationId}::uuid
+          `,
+        ).toHaveLength(1);
+        expect(
+          await transaction`
+            SELECT id FROM messaging.conversations
+            WHERE id=${record.conversationId}::uuid
+              AND removed_from_inbox_at IS NOT NULL
+          `,
+        ).toHaveLength(1);
+      });
+    });
+
     it("refuses deletion when active work is bound only through its callback message", async () => {
       await isolated(async (transaction) => {
         const record = await fixture(transaction);
