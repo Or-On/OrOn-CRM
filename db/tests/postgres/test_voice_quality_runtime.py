@@ -182,8 +182,9 @@ async def test_voice_configuration_pins_exact_agent_and_rejects_ambiguous_bindin
                     "INSERT INTO agents.agent_profile_versions(id,tenant_id,agent_profile_id,"
                     "version,system_prompt,channel_capabilities,validation_status,published_at) "
                     "VALUES(:agent,:tenant,:profile,1,'Version one',ARRAY['voice'],'valid',now())",
-                    "INSERT INTO automation.flow_definitions(id,tenant_id,name) "
-                    "VALUES(:flow,:tenant,'Binding fixture')",
+                    "INSERT INTO automation.flow_definitions"
+                    "(id,tenant_id,name,channel_capabilities) "
+                    "VALUES(:flow,:tenant,'Binding fixture',ARRAY['voice'])",
                     "INSERT INTO automation.flow_versions(tenant_id,flow_definition_id,version,"
                     "schema_version,definition,validation_status,published_at,agent_profile_version_id)"
                     " VALUES(:tenant,:flow,1,'1.0',CAST(:definition AS jsonb),"
@@ -209,6 +210,30 @@ async def test_voice_configuration_pins_exact_agent_and_rejects_ambiguous_bindin
                     await runtime.get_voice_configuration(
                         retained, tenant_id=uuid4(), agent_version_id=agent, flow_version=3
                     )
+                # Both the tenant module and declared flow channel remain mandatory.
+                for disable, restore in [
+                    (
+                        "UPDATE platform.tenant_feature_entitlements SET enabled=false "
+                        "WHERE tenant_id=:tenant AND feature_key='voice'",
+                        "UPDATE platform.tenant_feature_entitlements SET enabled=true "
+                        "WHERE tenant_id=:tenant AND feature_key='voice'",
+                    ),
+                    (
+                        "UPDATE automation.flow_definitions "
+                        "SET channel_capabilities=ARRAY['whatsapp'] "
+                        "WHERE id=:flow",
+                        "UPDATE automation.flow_definitions "
+                        "SET channel_capabilities=ARRAY['voice'] "
+                        "WHERE id=:flow",
+                    ),
+                ]:
+                    await connection.execute(text("RESET ROLE"))
+                    await connection.execute(text(disable), params)
+                    await connection.execute(text("SET LOCAL ROLE platform_voice"))
+                    with pytest.raises(ValueError, match="unavailable"):
+                        await runtime.get_voice_configuration(retained, tenant_id=tenant)
+                    await connection.execute(text("RESET ROLE"))
+                    await connection.execute(text(restore), params)
                 await connection.execute(text("RESET ROLE"))
                 successor = uuid4()
                 params["successor"] = successor
@@ -241,8 +266,9 @@ async def test_voice_configuration_pins_exact_agent_and_rejects_ambiguous_bindin
                 params["flow"] = uuid4()
                 await connection.execute(
                     text(
-                        "INSERT INTO automation.flow_definitions(id,tenant_id,name) "
-                        "VALUES(:flow,:tenant,'Conflicting binding fixture')"
+                        "INSERT INTO automation.flow_definitions"
+                        "(id,tenant_id,name,channel_capabilities) "
+                        "VALUES(:flow,:tenant,'Conflicting binding fixture',ARRAY['voice'])"
                     ),
                     params,
                 )
