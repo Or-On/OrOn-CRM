@@ -54,6 +54,8 @@ const en = {
     "lead.read": "Read what was already collected",
     "ticket.open":
       "Open or update a support ticket when escalating to a person",
+    "service.intake":
+      "Collect service details and open a field-service incident",
   },
   roleTitle: "Role title (how the agent names its role)",
   schemaChoice: "Field list",
@@ -147,6 +149,7 @@ const he: Copy = {
     "lead.follow_up": "תיעוד שאדם צריך לחזור ללקוח",
     "lead.read": "קריאת מה שכבר נאסף",
     "ticket.open": "פתיחה או עדכון של קריאת שירות בעת העברה לאדם",
+    "service.intake": "איסוף פרטי תקלה ופתיחת אירוע לטכנאי שטח",
   },
   roleTitle: "כינוי תפקיד (כיצד הסוכן מציג את תפקידו)",
   schemaChoice: "רשימת שדות",

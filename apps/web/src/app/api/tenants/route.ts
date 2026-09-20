@@ -3,7 +3,8 @@ import {
   createTenantWithDefaults,
   listPlatformTenants,
   setFieldServiceEntitlement,
-  applyTenantTemplateForAdministrator,
+  initializeTenantConfiguration,
+  configurationFromTemplate,
   tenantTemplateRegistry,
   type TenantTemplateKey,
 } from "@or-on/crm";
@@ -36,7 +37,7 @@ export async function POST(request: Request) {
     const body = await jsonObject(request);
     const templateKey =
       typeof body.templateKey === "string" &&
-      body.templateKey in tenantTemplateRegistry
+      Object.hasOwn(tenantTemplateRegistry, body.templateKey)
         ? (body.templateKey as TenantTemplateKey)
         : "blank";
     const mutationRequestId =
@@ -62,10 +63,10 @@ export async function POST(request: Request) {
             templateKey === "field_service",
           mutationRequestId,
         );
-        await applyTenantTemplateForAdministrator(
+        await initializeTenantConfiguration(
           sql,
           tenantId,
-          templateKey,
+          configurationFromTemplate(templateKey),
           mutationRequestId,
         );
         return tenantId;

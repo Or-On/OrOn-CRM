@@ -20,7 +20,6 @@ _UNVERIFIED_BUSINESS_CLAIM_RE = re.compile(
     r"אני\s+רואה\s+ש(?:המנוי|הממיר|החשבון)|"
     r"(?:תיאמתי|קבעתי)\s+[^.?!]{0,60}(?:טכנאי|פגישה|תור)|"
     r"(?:שלחתי|אשלח)\s+[^.?!]{0,60}(?:ווטסאפ|וואטסאפ|WhatsApp)|"
-    r"קריאת\s+השירות\s+(?:נפתחה|פתוחה)|"
     r"הטכנאי\s+יגיע|"
     r"\b(?:i|we)\s+(?:(?:have|just)\s+)?(?:checked|found|opened|created|scheduled|booked|confirmed|"
     r"refunded|processed|sent)\b[^.?!]{0,80}\b(?:account|subscriber|"
@@ -35,10 +34,13 @@ _UNVERIFIED_BUSINESS_CLAIM_RE = re.compile(
 _TICKET_CLAIM_RE = re.compile(
     r"(?:"
     r"(?:פתחתי|אפתח)\s+[^.?!]{0,60}קריאת\s+שירות|"
-    r"קריאת\s+השירות\s+(?:נפתחה|פתוחה)|"
+    r"(?:פתחתי|יצרתי)\s+[^.?!]{0,60}(?:אירוע(?:\s+שירות)?|פנייה|פניה|קריאה)|"
+    r"(?:קריאת\s+השירות|הפנייה|הפניה)\s+(?:נפתחה|פתוחה|נוצרה)|"
+    r"(?:אירוע\s+השירות|אירוע\s+שירות|האירוע)\s+(?:נפתח|פתוח|נוצר)|"
     r"\b(?:i|we)\s+(?:(?:have|just)\s+)?(?:opened|created)\b[^.?!]{0,80}"
-    r"\b(?:ticket|service\s+request)\b|"
-    r"\b(?:your\s+)?(?:ticket|service\s+request)\s+(?:is|has\s+been)\s+opened\b"
+    r"\b(?:ticket|service\s+request|(?:service\s+)?incident)\b|"
+    r"\b(?:your\s+)?(?:ticket|service\s+request|(?:service\s+)?incident)"
+    r"\s+(?:is|has\s+been)\s+(?:opened|created)\b"
     r")",
     re.IGNORECASE,
 )

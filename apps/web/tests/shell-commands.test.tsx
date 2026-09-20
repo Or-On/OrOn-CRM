@@ -121,6 +121,28 @@ describe("route-backed workspace commands", () => {
     vi.unstubAllGlobals();
   });
 
+  it("hides empty navigation groups and unavailable commands in leads-only workspaces", () => {
+    const { container } = render(
+      localized(
+        <AppShell session={session} enabledFeatures={["contacts", "leads"]}>
+          Workspace
+        </AppShell>,
+      ),
+    );
+    expect(
+      [...container.querySelectorAll(".nav__group-label")].map(
+        (element) => element.textContent,
+      ),
+    ).not.toContain("Operations");
+    expect(container.querySelector('a[href="/inbox"]')).toBeNull();
+    expect(container.querySelector('a[href="/voice"]')).toBeNull();
+    expect(container.querySelector('a[href="/tickets"]')).toBeNull();
+    openPalette();
+    const palette = screen.getByRole("dialog");
+    expect(within(palette).queryByText("Start campaign")).toBeNull();
+    expect(within(palette).queryByText("Open agents")).toBeNull();
+  });
+
   it("switches the header from dark to light through the shared theme behavior", () => {
     render(localized(<AppShell session={session}>Workspace</AppShell>));
 

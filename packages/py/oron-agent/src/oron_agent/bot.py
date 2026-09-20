@@ -83,6 +83,7 @@ from oron_agent.pipeline import build_agent_processors
 from oron_agent.quality_observer import VoiceQualityObserver, component_latency_observer
 from oron_agent.recognition import RecognitionAcceptanceProcessor
 from oron_agent.runtime_sessions import RuntimeSessions
+from oron_agent.service_intake import build_voice_service_intake, service_intake_instruction
 from oron_agent.session_recorder import SessionRecorder, finish_after_cancellation
 from oron_agent.spoken_safety import BusinessClaimGuardFilter
 from oron_agent.storage import build_artifact_store, save_audio_file
@@ -288,9 +289,44 @@ async def run_bot(
     }
     # Final caller turns only; provisional recognition never gets an identifier.
     accepted_turns = AcceptedTurns()
+    ticket_receipt_state: dict[str, Any] = {}
     lead_tools = await build_voice_lead_tools(sessions, ctx, configuration, accepted_turns)
-    # None for an agent without lead actions: its spoken checks stay as they were.
-    save_claim_receipted = accepted_turns.receipt_for_current_turn if lead_tools else None
+    service_intake = await build_voice_service_intake(
+        sessions,
+        ctx,
+        configuration,
+        accepted_turns,
+        ticket_receipt_state,
+        context_locked=verification_runtime_state["state"] != "context_unlocked",
+    )
+    if service_intake is not None:
+        intake_prompt = service_intake_instruction(service_intake.initial)
+        spec = spec.model_copy(
+            update={
+                "role_message": f"{spec.role_message or ''}\n\n{intake_prompt}",
+                "nodes": [
+                    node.model_copy(
+                        update={"role_message": f"{node.role_message}\n\n{intake_prompt}"}
+                    )
+                    if node.role_message
+                    else node
+                    for node in spec.nodes
+                ],
+            }
+        )
+    ticket_enabled = (
+        "ticket.open" in (configuration.get("capabilities") or [])
+        and service_intake is None
+        and callable(getattr(sessions, "open_support_ticket", None))
+    )
+    save_claim_receipted = (
+        accepted_turns.receipt_for_current_turn if lead_tools or service_intake else None
+    )
+    business_actions = (
+        (tuple(descriptor.name for descriptor in lead_tools.descriptors) if lead_tools else ())
+        + (service_intake.tool_names if service_intake else ())
+        + (("open_support_ticket",) if ticket_enabled else ())
+    )
     session_dir = SessionDir(ctx.session_id)
     text_diagnostics = (
         VoiceTextDiagnostics(
@@ -484,7 +520,6 @@ async def run_bot(
     elif configured_caller_gender is None:
         logger.info("Caller gender classification disabled; using neutral address")
 
-    ticket_receipt_state: dict[str, object] = {}
     tts = build_tts(
         st.tts_provider,
         language=profile.tts_language,
@@ -618,6 +653,7 @@ async def run_bot(
         language=lambda: conversation_language.current,
         load_records=load_knowledge,
         save_claim_receipted=save_claim_receipted,
+        allow_ticket_claim=lambda: bool(ticket_receipt_state.get("ticketId")),
     )
     processors = build_agent_processors(
         transport.input(),
@@ -637,11 +673,7 @@ async def run_bot(
             language=lambda: conversation_language.current,
             load_records=load_knowledge,
             on_caller_text=evidence_gate.observe_caller_text,
-            business_actions=(
-                tuple(descriptor.name for descriptor in lead_tools.descriptors)
-                if lead_tools
-                else ()
-            ),
+            business_actions=business_actions,
         ),
         evidence_gate=evidence_gate,
         response_language=response_language,
@@ -923,9 +955,11 @@ async def run_bot(
                     action_guard,
                 ),
             )
-            if sessions is not None and callable(getattr(sessions, "open_support_ticket", None))
+            if ticket_enabled
             else ()
         )
+        if service_intake is not None:
+            runtime_factories += service_intake.factories(action_guard)
         entry = initial_node_from_spec(
             spec,
             action_guard=action_guard,
@@ -945,7 +979,11 @@ async def run_bot(
                 return result
 
             async def fetch_unlocked_context() -> dict:
-                return await load_handoff_context(ctx)
+                unlocked = await load_handoff_context(ctx)
+                if service_intake is not None:
+                    service_context = await service_intake.refresh_context()
+                    return {**unlocked, "serviceIntake": service_context}
+                return unlocked
 
             if verification_requirements.state == "context_unlocked":
                 entry = unlocked_handoff_entry(entry, await fetch_unlocked_context())

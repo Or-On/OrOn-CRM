@@ -134,6 +134,9 @@ describe("removed Inbox conversation guardrails", () => {
     expect(automatic.statements[0]).toContain(
       "conversation.removed_from_inbox_at IS NULL",
     );
+    expect(automatic.statements[0]).toContain(
+      "platform.approved_flow_for_channel(flow.id,voice_agent.id,'voice')",
+    );
 
     const handoff = fixture(() => []);
     await expect(

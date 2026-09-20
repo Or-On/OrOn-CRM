@@ -24,6 +24,7 @@ export const agentCapabilities = [
   // customer's support ticket while doing so is a grant. A lead coordinator's
   // escalation is not a support issue, and a survey's is not either.
   "ticket.open",
+  "service.intake",
 ] as const;
 
 export type AgentCapability = (typeof agentCapabilities)[number];
@@ -39,6 +40,8 @@ export function capabilityRequiredFeature(
       return "leads";
     case "ticket.open":
       return "tickets";
+    case "service.intake":
+      return "field_service";
   }
 }
 
@@ -59,6 +62,7 @@ function capabilityChannels(
     case "lead.finalize":
     case "lead.follow_up":
     case "ticket.open":
+    case "service.intake":
       // A WhatsApp escalation opens the ticket; a call only ever updates the
       // ticket its callback already belongs to. Both channels may hold it.
       return supportedChannels;

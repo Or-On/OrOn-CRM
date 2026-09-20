@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import {
   getTenantFeatureSnapshot,
+  getTenantConfigurationState,
   listTenantProcesses,
   listTenantProcessOptions,
   tenantFeatureRegistry,
@@ -21,14 +22,18 @@ export default async function BusinessConfigurationPage() {
   try {
     const locale = await getLocale();
     const he = locale.startsWith("he");
-    const data = await withCurrentTenant("tenant:manage", async (sql) => {
-      const [features, processes, options] = await Promise.all([
-        getTenantFeatureSnapshot(sql),
-        listTenantProcesses(sql),
-        listTenantProcessOptions(sql),
-      ]);
-      return { features, processes, options };
-    });
+    const data = await withCurrentTenant(
+      "tenant:manage",
+      async (sql, session) => {
+        const [features, processes, options, governance] = await Promise.all([
+          getTenantFeatureSnapshot(sql),
+          listTenantProcesses(sql),
+          listTenantProcessOptions(sql),
+          getTenantConfigurationState(sql, session.isSuperuser),
+        ]);
+        return { features, processes, options, governance };
+      },
+    );
     return (
       <main className="page page--wide page--workspace-premium">
         <PageHeader
@@ -36,14 +41,15 @@ export default async function BusinessConfigurationPage() {
           title={he ? "הגדרת העסק" : "Business configuration"}
           description={
             he
-              ? "בחרו את המודולים הזמינים בסביבת העבודה, ואז שייכו אירועי לקוח לגרסאות מדויקות שפורסמו של סוכנים ו-Flows."
-              : "Choose the modules this workspace can use, then bind customer events to exact published Agents and Flows."
+              ? "התאימו יכולות ותהליכים לעסק, בדקו את חוויית הלקוח ושלחו לאישור לפני הפרסום."
+              : "Tailor the workspace and workflows to this business, review the experience, and approve changes before publication."
           }
         />
         <BusinessConfiguration
           definitions={tenantFeatureRegistry}
           initialFeatures={data.features}
           initialProcesses={data.processes}
+          initialGovernance={data.governance}
           options={data.options}
           templates={tenantTemplateRegistry}
         />

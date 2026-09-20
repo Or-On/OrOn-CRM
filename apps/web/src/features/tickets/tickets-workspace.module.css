@@ -315,3 +315,12 @@
     gap: 0.15rem;
   }
 }
+.outcomeMetrics {
+  padding: 0 var(--or-space-4) var(--or-space-4);
+}
+
+.outcomeMetrics h2 {
+  margin-block: 0 var(--or-space-2);
+  font-size: 1rem;
+  font-weight: 600;
+}

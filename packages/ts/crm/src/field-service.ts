@@ -15,7 +15,14 @@ import {
   type WarrantyStatus,
 } from "./field-service-domain.js";
 import { normalizeE164 } from "./phone.js";
-import { requireFieldService } from "./tenant-features.js";
+import {
+  requireFieldService,
+  requireTenantFeature,
+} from "./tenant-features.js";
+import {
+  parseServiceWorkflowPolicy,
+  type ServiceWorkflowPolicy,
+} from "./service-workflow.js";
 
 export interface CustomerClassification {
   readonly id: string;
@@ -91,6 +98,7 @@ export interface TechnicianSummary {
 }
 
 export interface ServiceCaseSummary {
+  readonly workflowPolicy?: ServiceWorkflowPolicy;
   readonly id: string;
   readonly reference: string;
   readonly customerContactId: string;
@@ -1287,6 +1295,7 @@ export async function updateTechnician(
 }
 
 interface ServiceCaseRow {
+  readonly workflow_policy?: unknown;
   readonly id: string;
   readonly reference: string;
   readonly customer_contact_id: string;
@@ -1308,6 +1317,7 @@ interface ServiceCaseRow {
 
 function serviceCase(row: ServiceCaseRow): ServiceCaseSummary {
   return {
+    workflowPolicy: parseServiceWorkflowPolicy(row.workflow_policy),
     id: row.id,
     reference: row.reference,
     customerContactId: row.customer_contact_id,
@@ -1338,7 +1348,7 @@ const caseProjection = `
          service_case.warranty_status, service_case.product_type,
          service_case.product_model,
          service_case.serial_number, service_case.priority,
-         service_case.created_at, service_case.updated_at
+         service_case.created_at, service_case.updated_at, service_case.workflow_policy
   FROM service.cases service_case
   JOIN crm.contacts customer ON customer.id = service_case.customer_contact_id
   LEFT JOIN crm.service_locations location ON location.id = service_case.service_location_id
@@ -1457,6 +1467,7 @@ export async function createServiceCase(
     readonly conversationId?: string | null;
     readonly title: string;
     readonly faultDescription: string;
+    readonly exactFailure?: string;
     readonly warrantyStatus?: WarrantyStatus;
     readonly productType?: string | null;
     readonly productModel?: string | null;
@@ -1466,6 +1477,12 @@ export async function createServiceCase(
   },
 ): Promise<ServiceCaseSummary> {
   await requireFieldService(sql);
+  const configured = await sql<{ configured: boolean }[]>`
+    SELECT coalesce(bool_or(configuration ? 'workflow'),false) AS configured
+    FROM platform.tenant_feature_entitlements WHERE feature_key='field_service'
+  `;
+  if (input.source === "whatsapp" || configured[0]?.configured === true)
+    await requireTenantFeature(sql, "tickets");
   if ((actor.userId === undefined) === (actor.service === undefined))
     throw new TypeError("Exactly one case actor is required");
   if (
@@ -1475,7 +1492,7 @@ export async function createServiceCase(
     const locations = await sql<{ id: string }[]>`
       SELECT id FROM crm.service_locations
       WHERE id=${input.serviceLocationId}::uuid
-        AND customer_contact_id=${input.customerContactId}::uuid
+        AND (customer_contact_id=${input.customerContactId}::uuid OR customer_contact_id IS NULL OR chain_id IS NOT NULL)
         AND archived_at IS NULL
       FOR SHARE
     `;
@@ -1499,7 +1516,7 @@ export async function createServiceCase(
       ${input.serviceLocationId ?? null}::uuid, ${input.intakeDraftId ?? null}::uuid,
       ${input.conversationId ?? null}::uuid,
       ${requiredText(input.title, "Case title", 200)},
-      ${requiredText(input.faultDescription, "Fault description", 10_000)},
+      ${requiredText([input.faultDescription, input.exactFailure].filter(Boolean).join("\n"), "Fault description", 10_000)},
       ${input.warrantyStatus ?? "unknown"}, ${nullableText(input.productType, 160)},
       ${nullableText(input.productModel, 160)}, ${nullableText(input.serialNumber, 160)},
       ${input.priority ?? "normal"}, ${input.source ?? "manual"},
@@ -3725,12 +3742,14 @@ export async function finalizeReportRevision(
       departure_signed: boolean;
       has_fault_photo: boolean;
       has_module_photo: boolean;
+      workflow_policy: unknown;
     }[]
   >`
     SELECT revision.id, revision.report_id, revision.version, revision.status,
            revision.diagnosis, revision.work_performed, revision.part_replaced,
            revision.replacement_part_details, revision.technician_notes,
            revision.finalized_at,
+           service_case.workflow_policy,
            visit.arrival_signature_object_id IS NOT NULL AS arrival_signed,
            visit.departure_signature_object_id IS NOT NULL AS departure_signed,
            EXISTS (
@@ -3747,6 +3766,7 @@ export async function finalizeReportRevision(
            ) AS has_module_photo
     FROM service.report_revisions revision
     JOIN service.reports report ON report.id = revision.report_id
+    JOIN service.cases service_case ON service_case.id=report.case_id
     JOIN service.visits visit ON visit.id = report.visit_id
     WHERE revision.id = ${revisionId}::uuid
       AND revision.status IN ('draft','review_required')
@@ -3756,16 +3776,20 @@ export async function finalizeReportRevision(
   const row = rows[0];
   if (row === undefined)
     throw new TypeError("Editable report revision was not found");
-  const errors = reportCompletionErrors({
-    arrivalSigned: row.arrival_signed,
-    departureSigned: row.departure_signed,
-    hasFaultPhoto: row.has_fault_photo,
-    hasModulePhoto: row.has_module_photo,
-    diagnosis: row.diagnosis,
-    workPerformed: row.work_performed,
-    partReplaced: row.part_replaced,
-    replacementPartDetails: row.replacement_part_details,
-  });
+  const reportPolicy = parseServiceWorkflowPolicy(row.workflow_policy);
+  const errors = reportCompletionErrors(
+    {
+      arrivalSigned: row.arrival_signed,
+      departureSigned: row.departure_signed,
+      hasFaultPhoto: row.has_fault_photo,
+      hasModulePhoto: row.has_module_photo,
+      diagnosis: row.diagnosis,
+      workPerformed: row.work_performed,
+      partReplaced: row.part_replaced,
+      replacementPartDetails: row.replacement_part_details,
+    },
+    reportPolicy.requiredReportFields,
+  );
   if (errors.length > 0)
     throw new TypeError(`Report is incomplete: ${errors.join("; ")}`);
   await sql`
@@ -3907,7 +3931,7 @@ export async function finalizeReportRevision(
     UPDATE service.visits visit SET status='reported', updated_at=CURRENT_TIMESTAMP
     FROM service.reports report
     WHERE report.id=${row.report_id}::uuid AND visit.id=report.visit_id
-      AND visit.status='departed'
+      AND visit.status IN ('assigned','arrived','departed')
   `;
   await sql`
     INSERT INTO audit.records(
@@ -3922,6 +3946,8 @@ export async function finalizeReportRevision(
 }
 
 interface IntakeDraftRecord {
+  readonly has_photo?: boolean;
+  readonly workflow_policy?: unknown;
   readonly id: string;
   readonly conversation_id: string;
   readonly reporting_contact_id: string;
@@ -3948,6 +3974,7 @@ interface IntakeDraftRecord {
 }
 
 export interface ServiceIntakeDraft {
+  readonly workflowPolicy: ServiceWorkflowPolicy;
   readonly id: string;
   readonly conversationId: string;
   readonly reportingContactId: string;
@@ -3957,7 +3984,7 @@ export interface ServiceIntakeDraft {
   readonly status: IntakeDraftRecord["status"];
   readonly fields: ServiceIntakeFields;
   readonly nationalIdMasked: string | null;
-  readonly missingFields: readonly IntakeRequiredField[];
+  readonly missingFields: readonly (IntakeRequiredField | "photos")[];
 }
 
 function intakeDraft(row: IntakeDraftRecord): ServiceIntakeDraft {
@@ -3968,13 +3995,26 @@ function intakeDraft(row: IntakeDraftRecord): ServiceIntakeDraft {
     ...row.collected_fields,
     ...(row.national_id_hint === null ? {} : { nationalId: "protected" }),
   };
-  const missingFields = [...missingIntakeFields(fields, overrides)];
+  const missingFields: (IntakeRequiredField | "photos")[] = [
+    ...missingIntakeFields(
+      fields,
+      overrides,
+      parseServiceWorkflowPolicy(row.workflow_policy).requiredIntakeFields,
+    ),
+  ];
+  if (
+    parseServiceWorkflowPolicy(row.workflow_policy).photoPolicy ===
+      "required" &&
+    row.has_photo !== true
+  )
+    missingFields.push("photos");
   if (
     row.customer_resolution_status === "invalid_phone" &&
     !missingFields.includes("customerPhone")
   )
     missingFields.unshift("customerPhone");
   return {
+    workflowPolicy: parseServiceWorkflowPolicy(row.workflow_policy),
     id: row.id,
     conversationId: row.conversation_id,
     reportingContactId: row.reporting_contact_id,
@@ -4107,12 +4147,12 @@ export async function openWhatsAppServiceIntake(
   const rows = await sql<IntakeDraftRecord[]>`
     INSERT INTO service.intake_drafts(
       tenant_id, conversation_id, reporting_contact_id, correlation_key,
-      last_message_at
+      last_message_at, collected_fields
     ) VALUES (
       platform.current_tenant_id(), ${input.conversationId}::uuid,
       ${input.reportingContactId}::uuid,
       ${requiredText(input.correlationKey, "Correlation key", 200)},
-      ${new Date(input.occurredAt)}
+      ${new Date(input.occurredAt)}, service.contact_intake_context(${input.reportingContactId}::uuid)->'knownFields'
     ) ON CONFLICT (tenant_id, correlation_key) DO UPDATE SET
       last_message_at = GREATEST(
         service.intake_drafts.last_message_at, EXCLUDED.last_message_at
@@ -4120,8 +4160,7 @@ export async function openWhatsAppServiceIntake(
     RETURNING id, conversation_id, reporting_contact_id, customer_contact_id,
       customer_resolution_status, customer_resolution_evidence,
       correlation_key, status, collected_fields, national_id_hint,
-      national_id_blind_index,
-      required_field_overrides
+      national_id_blind_index, workflow_policy, required_field_overrides, service.intake_has_photo(service.intake_drafts.id) AS has_photo
   `;
   const row = rows[0];
   if (row === undefined) throw new Error("Intake creation returned no row");
@@ -4160,8 +4199,7 @@ export async function findOpenWhatsAppServiceIntake(
     SELECT id, conversation_id, reporting_contact_id, customer_contact_id,
       customer_resolution_status, customer_resolution_evidence,
       correlation_key, status, collected_fields, national_id_hint,
-      national_id_blind_index,
-      required_field_overrides
+      national_id_blind_index, workflow_policy, required_field_overrides, service.intake_has_photo(service.intake_drafts.id) AS has_photo
     FROM service.intake_drafts
     WHERE conversation_id = ${conversationId}::uuid
       AND status IN ('collecting','awaiting_confirmation')
@@ -4232,8 +4270,7 @@ export async function updateWhatsAppServiceIntake(
     SELECT id, conversation_id, reporting_contact_id, customer_contact_id,
       customer_resolution_status, customer_resolution_evidence,
       correlation_key, status, collected_fields, national_id_hint,
-      national_id_blind_index,
-      required_field_overrides
+      national_id_blind_index, workflow_policy, required_field_overrides, service.intake_has_photo(service.intake_drafts.id) AS has_photo
     FROM service.intake_drafts
     WHERE id = ${intakeId}::uuid AND status IN ('collecting','awaiting_confirmation')
     FOR UPDATE
@@ -4261,7 +4298,14 @@ export async function updateWhatsAppServiceIntake(
   const status =
     resolution.status !== "invalid_phone" &&
     resolution.status !== "conflict" &&
-    missingIntakeFields(preview, overrides).length === 0
+    (parseServiceWorkflowPolicy(row.workflow_policy).photoPolicy !==
+      "required" ||
+      row.has_photo === true) &&
+    missingIntakeFields(
+      preview,
+      overrides,
+      parseServiceWorkflowPolicy(row.workflow_policy).requiredIntakeFields,
+    ).length === 0
       ? "awaiting_confirmation"
       : "collecting";
   const updated = await sql<IntakeDraftRecord[]>`
@@ -4281,8 +4325,7 @@ export async function updateWhatsAppServiceIntake(
     RETURNING id, conversation_id, reporting_contact_id, customer_contact_id,
       customer_resolution_status, customer_resolution_evidence,
       correlation_key, status, collected_fields, national_id_hint,
-      national_id_blind_index,
-      required_field_overrides
+      national_id_blind_index, workflow_policy, required_field_overrides, service.intake_has_photo(service.intake_drafts.id) AS has_photo
   `;
   const updatedRow = updated[0];
   if (updatedRow === undefined)
@@ -4346,7 +4389,7 @@ export async function confirmWhatsAppServiceIntake(
     SELECT id, conversation_id, reporting_contact_id, customer_contact_id,
       customer_resolution_status, customer_resolution_evidence,
       correlation_key, status, collected_fields, national_id_hint,
-      national_id_ciphertext, national_id_blind_index, required_field_overrides
+      national_id_ciphertext, national_id_blind_index, workflow_policy, required_field_overrides, service.intake_has_photo(service.intake_drafts.id) AS has_photo
     FROM service.intake_drafts WHERE id = ${intakeId}::uuid FOR UPDATE
   `;
   const row = rows[0];
@@ -4358,9 +4401,23 @@ export async function confirmWhatsAppServiceIntake(
     ...row.collected_fields,
     ...(row.national_id_ciphertext === null ? {} : { nationalId: "protected" }),
   };
-  const missing = missingIntakeFields(fields, overrides);
+  const policy = parseServiceWorkflowPolicy(row.workflow_policy);
+  const missing = missingIntakeFields(
+    fields,
+    overrides,
+    policy.requiredIntakeFields,
+  );
   if (missing.length > 0)
     throw new TypeError(`Intake is incomplete: ${missing.join(", ")}`);
+  if (policy.photoPolicy === "required") {
+    const photos = await sql<
+      { found: boolean }[]
+    >`SELECT EXISTS(SELECT 1 FROM service.intake_messages im JOIN messaging.messages m ON m.id=im.message_id JOIN objects.object_metadata o ON o.id=m.object_id WHERE im.intake_draft_id=${intakeId}::uuid AND m.content_type='image' AND o.status='available' AND o.deleted_at IS NULL) AS found`;
+    if (!photos[0]?.found)
+      throw new TypeError(
+        "A customer photo is required before confirming this intake",
+      );
+  }
   const normalizedCustomerPhone =
     fields.customerPhone === undefined
       ? undefined
@@ -4459,6 +4516,9 @@ export async function confirmWhatsAppServiceIntake(
       resolutionStatus = "created";
     }
   }
+  if (fields.customerName !== undefined) {
+    await sql`UPDATE crm.contacts SET name=${fields.customerName},updated_at=CURRENT_TIMESTAMP WHERE id=${customerContactId}::uuid AND name ~ '^\\+?[0-9 ()-]{7,}$'`;
+  }
   await sql`
     UPDATE service.intake_drafts SET
       customer_contact_id=${customerContactId}::uuid,
@@ -4483,7 +4543,16 @@ export async function confirmWhatsAppServiceIntake(
       },
       address: fields.serviceAddress ?? null,
     });
-  const locationId = await createServiceLocation(sql, {
+  let locationId: string | undefined;
+  if (fields.storeId !== undefined) {
+    const stores = await sql<
+      { id: string }[]
+    >`SELECT id FROM crm.service_locations WHERE id=${fields.storeId}::uuid AND archived_at IS NULL`;
+    if (!stores[0])
+      throw new TypeError("The store is not in this tenant directory");
+    locationId = stores[0].id;
+  }
+  locationId ??= await createServiceLocation(sql, {
     customerContactId,
     name: fields.storeName ?? "Service location",
     address: fields.serviceAddress ?? null,
@@ -4501,6 +4570,9 @@ export async function confirmWhatsAppServiceIntake(
       conversationId: row.conversation_id,
       title: fields.faultDescription?.slice(0, 200) ?? "Service request",
       faultDescription: fields.faultDescription ?? "Service request",
+      ...(fields.exactFailure === undefined
+        ? {}
+        : { exactFailure: fields.exactFailure }),
       warrantyStatus: fields.warrantyStatus ?? "unknown",
       ...(fields.productType === undefined
         ? {}
@@ -4514,6 +4586,7 @@ export async function confirmWhatsAppServiceIntake(
       source: "whatsapp",
     },
   );
+  await sql`UPDATE service.cases SET workflow_policy=${sql.json(databaseJson(policy))} WHERE id=${created.id}::uuid`;
   await sql`
     INSERT INTO service.report_attachments(
       tenant_id, case_id, message_id, object_id, category, source,
@@ -4542,9 +4615,9 @@ export async function confirmWhatsAppServiceIntake(
   `;
   await sql`
     INSERT INTO audit.records(
-      tenant_id, action, target_type, target_id, metadata
+      tenant_id, actor_service, action, target_type, target_id, metadata
     ) VALUES (
-      platform.current_tenant_id(), 'field_service.intake.customer_resolved',
+      platform.current_tenant_id(), 'whatsapp-intake', 'field_service.intake.customer_resolved',
       'intake_draft', ${intakeId}::uuid,
       ${sql.json({
         customerContactId,

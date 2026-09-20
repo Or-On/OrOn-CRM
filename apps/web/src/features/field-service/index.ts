@@ -5,6 +5,7 @@ export {
   type FieldServiceSection,
 } from "./field-service-navigation";
 export { FieldServiceWorkspace } from "./field-service-workspace";
+export { TechnicianQueue } from "./technician-queue";
 export { OcrReviewWorkspace } from "./ocr-review-workspace";
 export { ReportActions } from "./report-actions";
 export { ReportsWorkspace } from "./reports-workspace";

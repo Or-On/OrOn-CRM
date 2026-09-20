@@ -1,5 +1,17 @@
 import { renderMarkup as renderToStaticMarkup } from "./localized";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const enabled = vi.hoisted(() => ({
+  features: [
+    "contacts",
+    "leads",
+    "tickets",
+    "whatsapp",
+    "voice",
+    "agents",
+    "pipeline",
+  ],
+}));
 
 vi.mock("../src/features/auth", () => ({
   ForbiddenError: class ForbiddenError extends Error {},
@@ -7,9 +19,35 @@ vi.mock("../src/features/auth", () => ({
   withCurrentTenant: (
     _permission: string,
     operation: (sql: object, session: object) => Promise<unknown>,
-  ) => operation({}, { tenant: { tenantName: "Aurora Operations" } }),
+  ) =>
+    operation(
+      {},
+      {
+        isSuperuser: false,
+        tenant: { tenantName: "Aurora Operations", role: "owner" },
+      },
+    ),
 }));
 vi.mock("@or-on/crm", () => ({
+  getTenantFeatureSnapshot: () =>
+    Promise.resolve(
+      Object.fromEntries(
+        [
+          "contacts",
+          "leads",
+          "tickets",
+          "whatsapp",
+          "voice",
+          "agents",
+          "pipeline",
+          "field_service",
+        ].map((key) => [
+          key,
+          { key, effective: enabled.features.includes(key) },
+        ]),
+      ),
+    ),
+  countLeads: () => Promise.resolve({ total: 5 }),
   dashboardMetrics: () =>
     Promise.resolve({
       contacts: 23,
@@ -54,6 +92,17 @@ import OverviewPage from "../src/app/page";
 import { directionForLocale } from "../src/i18n/direction";
 
 describe("unified web shell", () => {
+  beforeEach(() => {
+    enabled.features = [
+      "contacts",
+      "leads",
+      "tickets",
+      "whatsapp",
+      "voice",
+      "agents",
+      "pipeline",
+    ];
+  });
   it("renders scoped operational metrics without claiming provider health", async () => {
     const markup = renderToStaticMarkup(await OverviewPage());
     expect(markup).toContain("Workspace overview");
@@ -74,5 +123,24 @@ describe("unified web shell", () => {
   it("provides an explicit Hebrew RTL direction strategy", () => {
     expect(directionForLocale("he")).toBe("rtl");
     expect(directionForLocale("en")).toBe("ltr");
+  });
+
+  it("tailors a leads-only dashboard without unavailable channels or ticket actions", async () => {
+    enabled.features = ["contacts", "leads"];
+    const markup = renderToStaticMarkup(await OverviewPage());
+    expect(markup).toContain("5 leads in your workspace");
+    expect(markup).toContain('href="/leads"');
+    for (const destination of [
+      "/inbox",
+      "/operations",
+      "/voice",
+      "/tickets",
+      "/field-service",
+      "/orchestration?tab=agents",
+    ])
+      expect(markup).not.toContain(`href="${destination}"`);
+    expect(markup).not.toContain("Last 14 days · UTC");
+    expect(markup).not.toContain("Needs attention");
+    expect(markup).not.toContain("No unread messages");
   });
 });

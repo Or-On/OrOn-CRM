@@ -249,7 +249,7 @@ function OutcomeMetrics({
       ? null
       : percent(metrics.aiOnlyResolved, metrics.eligible);
   return (
-    <section aria-label={t.metricsTitle}>
+    <section className={styles.outcomeMetrics} aria-label={t.metricsTitle}>
       <h2>{t.metricsTitle}</h2>
       {rate === null ? (
         <p className={styles.legacyHint ?? ""}>{t.metricsEmpty}</p>

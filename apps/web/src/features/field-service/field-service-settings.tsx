@@ -81,7 +81,7 @@ export function FieldServiceSettings({
       const payload = await crmMutation<{ feature: FieldServiceFeatureState }>(
         "/api/settings/field-service",
         {
-          enabled: form.get("enabled") === "on",
+          enabled: feature.enabled,
           whatsAppIntakeEnabled: form.get("whatsAppIntakeEnabled") === "on",
           aiSchedulingEnabled: form.get("aiSchedulingEnabled") === "on",
           ocrEnabled: form.get("ocrEnabled") === "on",
@@ -185,16 +185,16 @@ export function FieldServiceSettings({
           className="field-service-settings__form"
           onSubmit={(event) => void save(event)}
         >
-          <Checkbox defaultChecked={feature.enabled} name="enabled">
-            <span>
-              <strong>{he ? "הפעלת המודול" : "Enable module"}</strong>
-              <small>
-                {he
-                  ? "כיבוי עוצר פעולות חדשות ושומר את ההיסטוריה לקריאה ויצוא מורשים."
-                  : "Turning it off blocks new work while preserving authorized archive and export access."}
-              </small>
-            </span>
-          </Checkbox>
+          <InlineFeedback
+            description={
+              he
+                ? "הפעלה וכיבוי של יכולות דורשים אישור בהגדרת העסק. כאן מנהלים את החיבורים של היכולות שאושרו."
+                : "Feature activation is approved in Business configuration. Manage the connections for your approved features here."
+            }
+          />
+          <Link className="text-link" href="/settings/business">
+            {he ? "בדיקת היכולות והתהליכים" : "Review features & workflows"}
+          </Link>
           <div className="field-service-settings__options">
             <Checkbox
               defaultChecked={feature.whatsAppIntakeEnabled}

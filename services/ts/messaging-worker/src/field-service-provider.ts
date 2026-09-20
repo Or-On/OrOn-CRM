@@ -2,6 +2,7 @@ import {
   fieldServiceIntakeSystemPrompt,
   sanitizeIntakeProposal,
   type ServiceIntakeFields,
+  type ServiceWorkflowPolicy,
 } from "@or-on/crm";
 
 export interface FieldServiceIntakeExtractionRequest {
@@ -15,6 +16,8 @@ export interface FieldServiceIntakeExtractionRequest {
     readonly occurredAt: string;
   }[];
   readonly intakeAlreadyOpen: boolean;
+  readonly workflowPolicy?: ServiceWorkflowPolicy;
+  readonly storeOptions?: readonly unknown[];
 }
 
 export interface FieldServiceIntakeExtraction {
@@ -79,6 +82,9 @@ const intakeSchema = {
         customerPhone: nullableIntakeField,
         nationalId: nullableIntakeField,
         storeName: nullableIntakeField,
+        chainName: nullableIntakeField,
+        storeId: nullableIntakeField,
+        exactFailure: nullableIntakeField,
         serviceAddress: nullableIntakeField,
         latitude: { type: ["number", "null"], minimum: -90, maximum: 90 },
         longitude: {
@@ -100,6 +106,9 @@ const intakeSchema = {
         "customerPhone",
         "nationalId",
         "storeName",
+        "chainName",
+        "storeId",
+        "exactFailure",
         "serviceAddress",
         "latitude",
         "longitude",
@@ -302,6 +311,8 @@ export class OpenAiCompatibleFieldServiceProvider implements FieldServiceAiProvi
             kind: "untrusted_customer_service_intake_evidence",
             intakeAlreadyOpen: request.intakeAlreadyOpen,
             existingFields: request.existingFields,
+            workflowPolicy: request.workflowPolicy,
+            storeOptions: request.storeOptions,
             messages: request.messages.slice(-30).map((message) => ({
               ...message,
               text: message.text?.slice(0, 2_000) ?? null,

@@ -244,6 +244,7 @@ def render_reply(
     language: str = "",
     *,
     save_claim_receipted: bool | None = None,
+    allow_ticket_claim: bool = False,
 ) -> GroundedReply:
     """Render approved facts exactly; otherwise preserve safe model conversation."""
 
@@ -280,7 +281,10 @@ def render_reply(
                     )
         return GroundedReply(_fallback(language), "invalid_selector")
     safe, suppressed = safe_spoken_text(
-        stripped, language, save_claim_receipted=save_claim_receipted
+        stripped,
+        language,
+        save_claim_receipted=save_claim_receipted,
+        allow_ticket_claim=allow_ticket_claim,
     )
     if not safe:
         return GroundedReply(_fallback(language), "empty_after_sanitization")
@@ -300,6 +304,7 @@ class VoiceEvidenceGate(FrameProcessor):
         language: str | Callable[[], str],
         load_records: Callable[[], Awaitable[list[dict[str, Any]]]],
         save_claim_receipted: Callable[[], bool] | None = None,
+        allow_ticket_claim: Callable[[], bool] | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -307,6 +312,7 @@ class VoiceEvidenceGate(FrameProcessor):
         self._language = language
         self._load_records = load_records
         self._save_claim_receipted = save_claim_receipted
+        self._allow_ticket_claim = allow_ticket_claim
         self._generation = 0
 
     def observe_caller_text(self, _text: str) -> None:
@@ -350,6 +356,9 @@ class VoiceEvidenceGate(FrameProcessor):
                 language,
                 save_claim_receipted=(
                     self._save_claim_receipted() if self._save_claim_receipted is not None else None
+                ),
+                allow_ticket_claim=(
+                    self._allow_ticket_claim() if self._allow_ticket_claim is not None else False
                 ),
             )
             frame.text = reply.text

@@ -39,6 +39,8 @@ import {
   confirmWhatsAppServiceIntake,
   findOpenWhatsAppServiceIntake,
   getFieldServiceFeatureState,
+  getServiceWorkflowPolicy,
+  parseServiceWorkflowPolicy,
   handoffWhatsAppServiceIntake,
   missingIntakeFields,
   commitPrivateObject,
@@ -298,6 +300,10 @@ async function processInbound(
               AND entitlement.available AND configuration.enabled
               AND configuration.whatsapp_intake_enabled
               AND ${fieldServiceAiAvailable}
+              AND EXISTS(SELECT 1 FROM messaging.conversations c JOIN agents.agent_profile_versions a ON a.tenant_id=c.tenant_id AND a.id=c.ai_agent_profile_version_id
+                WHERE c.id=${result.conversationId}::uuid AND c.tenant_id=entitlement.tenant_id AND c.ownership_mode='ai'
+                  AND a.published_at IS NOT NULL AND a.validation_status='valid' AND a.tool_permissions ? 'service.intake'
+                  AND platform.messaging_ai_actor_authorized(c.ai_enabled_by_user_id))
             ON CONFLICT DO NOTHING
           `;
           // A wrap-up reply is answered before the ordinary AI turn is even
@@ -357,6 +363,11 @@ async function processInbound(
 }
 
 interface FieldServiceIntakeWork {
+  readonly agentVersionId: string;
+  readonly ownershipEpoch: string;
+  readonly knownFields: ReturnType<typeof sanitizeIntakeProposal>;
+  readonly storeOptions: readonly unknown[];
+  readonly workflowPolicy: Awaited<ReturnType<typeof getServiceWorkflowPolicy>>;
   readonly conversationId: string;
   readonly contactId: string;
   readonly triggerMessageId: string;
@@ -425,11 +436,18 @@ async function loadFieldServiceIntakeWork(
       return undefined;
     }
     const context = await transaction<
-      { locale: string; occurred_at: Date; contact_id: string }[]
+      {
+        locale: string;
+        occurred_at: Date;
+        contact_id: string;
+        agent_version_id: string;
+        ownership_epoch: string;
+        known_context: { knownFields: unknown; storeOptions: unknown[] };
+      }[]
     >`
       SELECT coalesce(settings.locale, 'en') AS locale,
              message.created_at AS occurred_at,
-             conversation.contact_id
+             conversation.contact_id,conversation.ai_agent_profile_version_id AS agent_version_id,conversation.ownership_epoch,service.contact_intake_context(conversation.contact_id) AS known_context
       FROM messaging.messages message
       JOIN messaging.conversations conversation
         ON conversation.id=message.conversation_id
@@ -440,6 +458,10 @@ async function loadFieldServiceIntakeWork(
         AND message.conversation_id=${conversationId}::uuid
         AND conversation.contact_id=${contactId}::uuid
         AND message.direction='inbound'
+        AND conversation.ownership_mode='ai' AND conversation.removed_from_inbox_at IS NULL
+        AND platform.messaging_ai_actor_authorized(conversation.ai_enabled_by_user_id)
+        AND EXISTS(SELECT 1 FROM agents.agent_profile_versions a WHERE a.tenant_id=conversation.tenant_id AND a.id=conversation.ai_agent_profile_version_id
+          AND a.published_at IS NOT NULL AND a.validation_status='valid' AND a.tool_permissions ? 'service.intake')
     `;
     const bound = context[0];
     if (bound === undefined)
@@ -465,6 +487,11 @@ async function loadFieldServiceIntakeWork(
       triggerMessageId,
       occurredAt: bound.occurred_at.toISOString(),
       locale: bound.locale,
+      workflowPolicy: await getServiceWorkflowPolicy(transaction),
+      agentVersionId: bound.agent_version_id,
+      ownershipEpoch: bound.ownership_epoch,
+      knownFields: sanitizeIntakeProposal(bound.known_context.knownFields),
+      storeOptions: bound.known_context.storeOptions,
       existing: await findOpenWhatsAppServiceIntake(
         transaction,
         conversationId,
@@ -494,7 +521,9 @@ async function processFieldServiceIntake(
       throw new TypeError("field_service_ai_unavailable");
     const extraction = await provider.extractIntake({
       locale: work.locale,
-      existingFields: work.existing?.fields ?? {},
+      workflowPolicy: work.existing?.workflowPolicy ?? work.workflowPolicy,
+      existingFields: { ...work.knownFields, ...work.existing?.fields },
+      storeOptions: work.storeOptions,
       intakeAlreadyOpen: work.existing !== undefined,
       messages: work.messages,
     });
@@ -505,6 +534,18 @@ async function processFieldServiceIntake(
       const feature = await getFieldServiceFeatureState(transaction);
       if (!feature.effective || !feature.whatsAppIntakeEnabled) {
         await cancelJobForDisabledFeature(transaction, job.id, workerId);
+        return;
+      }
+      const ownership = await transaction<
+        { id: string }[]
+      >`SELECT c.id FROM messaging.conversations c
+        JOIN agents.agent_profile_versions a ON a.tenant_id=c.tenant_id AND a.id=c.ai_agent_profile_version_id
+        WHERE c.id=${work.conversationId}::uuid AND c.ai_agent_profile_version_id=${work.agentVersionId}::uuid
+          AND c.ownership_epoch=${work.ownershipEpoch}::bigint AND c.ownership_mode='ai' AND c.removed_from_inbox_at IS NULL
+          AND a.published_at IS NOT NULL AND a.validation_status='valid' AND a.tool_permissions ? 'service.intake'
+          AND platform.messaging_ai_actor_authorized(c.ai_enabled_by_user_id) FOR UPDATE OF c`;
+      if (ownership.length === 0) {
+        await finishJob(transaction, job.id, workerId);
         return;
       }
       const current = await findOpenWhatsAppServiceIntake(
@@ -551,9 +592,9 @@ async function processFieldServiceIntake(
           : undefined;
       await transaction`
         INSERT INTO audit.records(
-          tenant_id, action, target_type, target_id, metadata
+          tenant_id, actor_service, action, target_type, target_id, metadata
         ) VALUES (
-          platform.current_tenant_id(), 'field_service.intake.extracted',
+          platform.current_tenant_id(), 'messaging-worker', 'field_service.intake.extracted',
           'intake_draft', ${updated.id}::uuid,
           ${transaction.json({
             jobId: job.id,
@@ -2068,6 +2109,85 @@ async function processJob(
     | undefined,
   automation: MessagingAutomationOptions,
 ): Promise<void> {
+  if (
+    job.job_type === "field_service.photo_request" &&
+    job.reference_id !== null
+  ) {
+    try {
+      await sql.begin(async (transaction) => {
+        await setTenantContext(transaction, job.tenant_id);
+        await requireOwnedJob(transaction, workerId, job.id);
+        await requireTenantFeatures(transaction, ["field_service", "whatsapp"]);
+        const requestedText = record(job.payload).text;
+        if (
+          typeof requestedText !== "string" ||
+          requestedText.trim().length === 0 ||
+          requestedText.length > 2000
+        )
+          throw new TypeError("Invalid photo request text");
+        const candidates = await transaction<
+          {
+            conversation_id: string;
+            actor_id: string;
+            provider: "meta" | "simulator";
+            configuration: Record<string, unknown>;
+            text: string;
+          }[]
+        >`
+        SELECT c.id AS conversation_id,c.ai_enabled_by_user_id AS actor_id,ch.provider,ch.configuration,${requestedText} AS text
+        FROM service.intake_drafts d JOIN messaging.conversations c ON c.tenant_id=d.tenant_id AND c.id=d.conversation_id
+        JOIN messaging.channels ch ON ch.tenant_id=c.tenant_id AND ch.id=c.channel_id
+        WHERE d.id=${job.reference_id}::uuid AND c.ownership_mode='ai' AND c.removed_from_inbox_at IS NULL
+          AND ch.status='active' AND ch.provider IN ('meta','simulator')
+          AND platform.messaging_ai_actor_authorized(c.ai_enabled_by_user_id)`;
+        const candidate = candidates[0];
+        if (
+          candidate === undefined ||
+          (candidate.provider === "meta" &&
+            automation.realWhatsAppEnabled !== true)
+        ) {
+          await transaction`UPDATE ops.jobs SET status='cancelled',last_error_safe='photo_request_channel_unavailable',locked_by=NULL,locked_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=${job.id}::uuid`;
+          return;
+        }
+        await transaction`SELECT set_config('app.current_user',${candidate.actor_id},true)`;
+        const config = candidate.configuration;
+        const channelConfig =
+          typeof config.graphApiVersion === "string" &&
+          typeof config.phoneNumberId === "string" &&
+          typeof config.wabaId === "string"
+            ? {
+                graphApiVersion: config.graphApiVersion,
+                phoneNumberId: config.phoneNumberId,
+                wabaId: config.wabaId,
+              }
+            : undefined;
+        await queueWhatsAppOutbound(
+          transaction,
+          {
+            conversationId: candidate.conversation_id,
+            explicitlyConfirmed: true,
+            idempotencyKey: `service-photo:${job.id}`,
+            kind: "text",
+            provider: candidate.provider,
+            realProviderEnabled: automation.realWhatsAppEnabled === true,
+            senderUserId: candidate.actor_id,
+            senderType: "agent",
+            text: candidate.text,
+          },
+          channelConfig,
+        );
+        await finishJob(transaction, job.id, workerId);
+      });
+    } catch (error) {
+      await sql.begin(async (transaction) => {
+        await setTenantContext(transaction, job.tenant_id);
+        if (error instanceof TypeError)
+          await transaction`UPDATE ops.jobs SET max_attempts=attempts WHERE id=${job.id}::uuid AND status='running' AND locked_by=${workerId}`;
+        await transaction`SELECT ops.fail_job(${job.id}::uuid,${workerId},'photo_request_admission_failed',10)`;
+      });
+    }
+    return;
+  }
   if (job.job_type === "support.postcall.process") {
     await processPostCall(sql, workerId, job, automation);
     return;
@@ -2651,6 +2771,8 @@ async function loadAiWork(
         collected_fields: unknown;
         national_id_hint: string | null;
         required_field_overrides: unknown;
+        workflow_policy: unknown;
+        has_photo: boolean;
         case_reference: string | null;
         customer_resolution_status: NonNullable<
           AiWork["serviceIntake"]
@@ -2659,7 +2781,7 @@ async function loadAiWork(
     >`
       SELECT intake.status, intake.collected_fields, intake.national_id_hint,
              intake.customer_resolution_status,
-             intake.required_field_overrides, service_case.reference AS case_reference
+             intake.required_field_overrides, intake.workflow_policy, service.intake_has_photo(intake.id) AS has_photo, service_case.reference AS case_reference
       FROM service.intake_drafts intake
       LEFT JOIN service.cases service_case
         ON service_case.intake_draft_id=intake.id
@@ -2677,20 +2799,29 @@ async function loadAiWork(
         ? undefined
         : {
             status: intake.status,
+            workflowPolicy: parseServiceWorkflowPolicy(intake.workflow_policy),
             fields: intakeFields,
             nationalIdMasked:
               intake.national_id_hint === null
                 ? null
                 : `••••${intake.national_id_hint}`,
-            missingFields: missingIntakeFields(
-              {
-                ...intakeFields,
-                ...(intake.national_id_hint === null
-                  ? {}
-                  : { nationalId: "provided" }),
-              },
-              overridden as Parameters<typeof missingIntakeFields>[1],
-            ),
+            missingFields: [
+              ...missingIntakeFields(
+                {
+                  ...intakeFields,
+                  ...(intake.national_id_hint === null
+                    ? {}
+                    : { nationalId: "provided" }),
+                },
+                overridden as Parameters<typeof missingIntakeFields>[1],
+                parseServiceWorkflowPolicy(intake.workflow_policy)
+                  .requiredIntakeFields,
+              ),
+              ...(parseServiceWorkflowPolicy(intake.workflow_policy)
+                .photoPolicy === "required" && !intake.has_photo
+                ? ["photos"]
+                : []),
+            ],
             caseReference: intake.case_reference,
             customerResolutionStatus: intake.customer_resolution_status,
           };
@@ -3720,6 +3851,7 @@ async function loadAutomaticCallWork(
         AND canonical.agent_profile_version_id=conversation.ai_agent_profile_version_id
         AND canonical.published_at IS NOT NULL
         AND canonical.validation_status='valid'
+        AND platform.approved_flow_for_channel(canonical.id,agent.id,'voice')
         AND EXISTS (SELECT 1 FROM jsonb_array_elements(canonical.definition->'nodes') node
           WHERE node->>'type'='voice.call'
             AND node#>>'{configuration,flowId}'=${payload.flowId}

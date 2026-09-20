@@ -493,6 +493,113 @@ class PostgresVoiceRuntime:
             ).scalar_one()
             return dict(receipt)
 
+    async def pin_voice_agent(self, context: CallContext, agent_version_id: UUID) -> None:
+        """Retain the server-resolved agent binding before exposing executable tools."""
+        async with self._sessionmaker() as database, database.begin():
+            await set_tenant(database, str(context.tenant_id))
+            row = await database.get(Session, context.session_id, with_for_update=True)
+            if row is None:
+                raise ValueError("voice session is unavailable")
+            pinned = (
+                await database.execute(
+                    text("""
+                    SELECT payload->>'agent_version_id' FROM session_events
+                    WHERE tenant_id=:tenant AND session_id=:session
+                      AND event_type='voice.agent.binding.v1'
+                    LIMIT 1
+                    """),
+                    {"tenant": str(context.tenant_id), "session": str(context.session_id)},
+                )
+            ).scalar_one_or_none()
+            if pinned is not None:
+                if str(pinned) != str(agent_version_id):
+                    raise ValueError("voice session agent binding cannot change")
+                return
+            transport_phone = (
+                context.from_number if context.direction is Direction.INBOUND else context.to_number
+            )
+            try:
+                caller_phone = validate_e164(transport_phone) if transport_phone else None
+            except ValueError:
+                caller_phone = None
+            caller_identity = None
+            if caller_phone is not None:
+                caller_identity = (
+                    await database.execute(
+                        text("SELECT service.voice_caller_identity(:session_id,:phone)"),
+                        {"session_id": str(context.session_id), "phone": caller_phone},
+                    )
+                ).scalar_one_or_none()
+            sequence = (
+                await database.execute(
+                    text("""
+                    SELECT coalesce(max(sequence),-1)+1 FROM session_events
+                    WHERE tenant_id=:tenant AND session_id=:session
+                    """),
+                    {"tenant": str(context.tenant_id), "session": str(context.session_id)},
+                )
+            ).scalar_one()
+            database.add(
+                SessionEvent(
+                    tenant_id=context.tenant_id,
+                    session_id=context.session_id,
+                    sequence=sequence,
+                    event_type="voice.agent.binding.v1",
+                    payload={
+                        "agent_version_id": str(agent_version_id),
+                        "caller_identity_id": str(caller_identity) if caller_identity else None,
+                    },
+                )
+            )
+
+    async def get_service_intake_context(self, context: CallContext) -> dict:
+        async with self._sessionmaker() as database, database.begin():
+            await set_tenant(database, str(context.tenant_id))
+            result = (
+                await database.execute(
+                    text("SELECT service.voice_intake_context(:session_id)"),
+                    {"session_id": str(context.session_id)},
+                )
+            ).scalar_one()
+        if not isinstance(result, dict):
+            raise ValueError("service intake context is unavailable")
+        return result
+
+    async def capture_service_intake(
+        self, context: CallContext, *, fields: dict, confirmed: bool
+    ) -> dict:
+        async with self._sessionmaker() as database, database.begin():
+            await set_tenant(database, str(context.tenant_id))
+            result = (
+                await database.execute(
+                    text(
+                        "SELECT service.capture_service_intake"
+                        "(:session_id,CAST(:fields AS jsonb),:confirmed)"
+                    ),
+                    {
+                        "session_id": str(context.session_id),
+                        "fields": json.dumps(fields, ensure_ascii=False),
+                        "confirmed": confirmed,
+                    },
+                )
+            ).scalar_one()
+        if not isinstance(result, dict):
+            raise ValueError("service intake receipt is unavailable")
+        return result
+
+    async def request_service_photos(self, context: CallContext, *, message: str) -> dict:
+        async with self._sessionmaker() as database, database.begin():
+            await set_tenant(database, str(context.tenant_id))
+            result = (
+                await database.execute(
+                    text("SELECT service.request_voice_intake_photos(:session_id,:message)"),
+                    {"session_id": str(context.session_id), "message": message},
+                )
+            ).scalar_one()
+        if not isinstance(result, dict):
+            raise ValueError("service photo request receipt is unavailable")
+        return result
+
     async def get_flow(
         self,
         flow_id: UUID,
@@ -600,14 +707,16 @@ class PostgresVoiceRuntime:
                 AND (process.channel='voice' OR process.channel IS NULL)
               ORDER BY process.priority,process.id LIMIT 1
             ), candidates AS (
-              SELECT flow.*, row_number() OVER (PARTITION BY flow.flow_definition_id
-                ORDER BY flow.version DESC) AS latest
+              SELECT flow.*
               FROM automation.flow_versions flow
               WHERE flow.tenant_id = :tenant_id AND flow.published_at IS NOT NULL
-            )
-            SELECT DISTINCT agent.id, agent.system_prompt, agent.channel_configuration,
+            ), eligible AS (
+            SELECT agent.id, agent.system_prompt, agent.channel_configuration,
               agent.tool_permissions,
-              node #>> '{configuration,flowVersion}' AS voice_version
+              node #>> '{configuration,flowVersion}' AS voice_version,
+              binding.id AS binding_id,
+              dense_rank() OVER (PARTITION BY flow.flow_definition_id
+                ORDER BY flow.version DESC) AS latest
             FROM candidates flow
             LEFT JOIN process_binding binding ON true
             CROSS JOIN LATERAL jsonb_array_elements(flow.definition->'nodes') node
@@ -623,12 +732,16 @@ class PostgresVoiceRuntime:
               AND platform.current_tenant_feature_enabled('voice')
               AND agent.published_at IS NOT NULL AND agent.validation_status = 'valid'
               AND 'voice' = ANY(agent.channel_capabilities)
+              AND platform.approved_flow_for_channel(flow.id,agent.id,'voice')
               AND NOT EXISTS (
                 SELECT 1 FROM jsonb_array_elements_text(agent.tool_permissions) capability(value)
                 WHERE (capability.value LIKE 'lead.%'
                        AND NOT platform.current_tenant_feature_enabled('leads'))
                    OR (capability.value = 'ticket.open'
                        AND NOT platform.current_tenant_feature_enabled('tickets'))
+                   OR (capability.value = 'service.intake' AND (
+                       NOT platform.current_tenant_feature_enabled('field_service')
+                       OR NOT platform.current_tenant_feature_enabled('tickets')))
               )
               AND node->>'type' = 'voice.call'
               AND node #>> '{configuration,flowId}' = :flow_id
@@ -636,10 +749,13 @@ class PostgresVoiceRuntime:
                 flow.id=binding.flow_version_id
                 AND agent.id=binding.agent_profile_version_id
               ))
-              AND (binding.id IS NOT NULL OR CAST(:agent_id AS uuid) IS NOT NULL OR flow.latest = 1)
               AND (CAST(:agent_id AS uuid) IS NULL OR agent.id = CAST(:agent_id AS uuid))
               AND (CAST(:voice_version AS text) IS NULL OR
                    node #>> '{configuration,flowVersion}' = CAST(:voice_version AS text))
+            )
+            SELECT DISTINCT id,system_prompt,channel_configuration,tool_permissions,voice_version
+            FROM eligible
+            WHERE binding_id IS NOT NULL OR CAST(:agent_id AS uuid) IS NOT NULL OR latest=1
         """)
         async with self._sessionmaker() as database, database.begin():
             await set_tenant(database, str(tenant_id))
@@ -658,10 +774,31 @@ class PostgresVoiceRuntime:
                 .mappings()
                 .all()
             )
+            requires_approved_routing = False
+            if not rows:
+                requires_approved_routing = (
+                    await database.execute(
+                        text("""
+                            SELECT platform.current_tenant_requires_approved_routing()
+                              OR NOT platform.current_tenant_active()
+                              OR NOT platform.current_tenant_feature_enabled('voice')
+                              OR EXISTS (
+                                SELECT 1 FROM automation.flow_versions flow
+                                CROSS JOIN LATERAL
+                                  jsonb_array_elements(flow.definition->'nodes') node
+                                WHERE flow.tenant_id=:tenant_id
+                                  AND flow.published_at IS NOT NULL
+                                  AND node->>'type'='voice.call'
+                                  AND node#>>'{configuration,flowId}'=:flow_id
+                              )
+                        """),
+                        {"tenant_id": str(tenant_id), "flow_id": str(flow_id)},
+                    )
+                ).scalar_one()
         if len(rows) > 1:
             raise ValueError("voice flow has ambiguous published agent bindings")
         if not rows:
-            if agent_version_id is not None:
+            if agent_version_id is not None or requires_approved_routing:
                 raise ValueError("requested published voice agent binding is unavailable")
             return {}
         row = rows[0]
@@ -1238,6 +1375,17 @@ class AgentPostgresSessions:
     async def open_support_ticket(self, ctx: CallContext, *, subject: str, summary: str) -> dict:
         return await self._backend.open_support_ticket(ctx, subject=subject, summary=summary)
 
+    async def get_service_intake_context(self, ctx: CallContext) -> dict:
+        return await self._backend.get_service_intake_context(ctx)
+
+    async def capture_service_intake(
+        self, ctx: CallContext, *, fields: dict, confirmed: bool
+    ) -> dict:
+        return await self._backend.capture_service_intake(ctx, fields=fields, confirmed=confirmed)
+
+    async def request_service_photos(self, ctx: CallContext, *, message: str) -> dict:
+        return await self._backend.request_service_photos(ctx, message=message)
+
     async def get_flow(self, flow_id: UUID, *, tenant_id: UUID) -> FlowSpec | None:
         return await self._backend.get_flow(flow_id, tenant_id=tenant_id)
 
@@ -1248,6 +1396,8 @@ class AgentPostgresSessions:
             agent_version_id=context.agent_version_id,
             flow_version=context.flow_version,
         )
+        if configuration.get("agentVersionId"):
+            await self._backend.pin_voice_agent(context, UUID(configuration["agentVersionId"]))
         quality = configuration.get("quality", {})
         persona = {"feminine": "female", "masculine": "male", "neutral": "neutral"}.get(
             str(quality.get("agentGrammar", ""))

@@ -253,6 +253,8 @@ export function AppShell({
   const currentGroup = currentNavigation?.group ?? "Workspace";
   const featureEnabled = useCallback(
     (href: string) => {
+      // Email has no approved tenant module yet and is not part of a package.
+      if (href === "/email" && enabledFeatures !== undefined) return false;
       const required = requiredFeatureForHref(href);
       if (required === undefined) return true;
       if (enabledFeatures !== undefined)
@@ -369,10 +371,12 @@ export function AppShell({
             },
           ]
         : []),
-    ].filter((item) =>
-      item.label
-        .toLocaleLowerCase(locale)
-        .includes(query.trim().toLocaleLowerCase(locale)),
+    ].filter(
+      (item) =>
+        featureEnabled(item.href.split("?")[0] ?? item.href) &&
+        item.label
+          .toLocaleLowerCase(locale)
+          .includes(query.trim().toLocaleLowerCase(locale)),
     );
 
     const term = query.trim();
@@ -394,7 +398,9 @@ export function AppShell({
               label: t("shell.searchConversations", { query: term }),
               section: t("shell.searchResults"),
             },
-          ];
+          ].filter((item) =>
+            featureEnabled(item.href.split("?")[0] ?? item.href),
+          );
 
     return [
       ...supportedActions,
@@ -674,52 +680,70 @@ export function AppShell({
         ) : null}
 
         <nav aria-label={t("shell.modules")} className="nav">
-          {groups.map((group) => (
-            <div className="nav__group" key={group}>
-              <p className="nav__group-label">{groupLabel(group)}</p>
-              {navigation
-                .filter(
-                  (item) =>
-                    item.group === group &&
-                    featureEnabled(item.href) &&
-                    (item.href !== "/tenants" || session.user.isSuperuser) &&
-                    session.permissions.includes(
-                      destinationPermission(item.href),
-                    ),
-                )
-                .map(({ href, icon }) => {
-                  const Icon = icons[icon];
-                  const label = t(`shell.${navKey(icon)}`);
-                  return (
-                    <Link
-                      aria-current={active === href ? "page" : undefined}
-                      aria-label={label}
-                      className={`nav__item ${active === href ? "nav__item--active" : ""}`}
-                      href={href}
-                      key={href}
-                      onFocus={() => router.prefetch(href)}
-                      onMouseEnter={() => router.prefetch(href)}
-                      onPointerDown={() => router.prefetch(href)}
-                      onClick={() => {
-                        closeMobileNavigation(pathname === href && menuOpen);
-                      }}
-                      prefetch={
-                        href === "/tickets" || href === "/calendar"
-                          ? true
-                          : false
-                      }
-                      title={!expanded ? label : undefined}
-                    >
-                      <span className="nav__icon">
-                        <Icon aria-hidden="true" size={18} strokeWidth={1.7} />
-                      </span>
-                      <span className="nav__label">{label}</span>
-                      <NavigationPendingIndicator label={t("common.loading")} />
-                    </Link>
-                  );
-                })}
-            </div>
-          ))}
+          {groups
+            .filter((group) =>
+              navigation.some(
+                (item) =>
+                  item.group === group &&
+                  featureEnabled(item.href) &&
+                  (item.href !== "/tenants" || session.user.isSuperuser) &&
+                  session.permissions.includes(
+                    destinationPermission(item.href),
+                  ),
+              ),
+            )
+            .map((group) => (
+              <div className="nav__group" key={group}>
+                <p className="nav__group-label">{groupLabel(group)}</p>
+                {navigation
+                  .filter(
+                    (item) =>
+                      item.group === group &&
+                      featureEnabled(item.href) &&
+                      (item.href !== "/tenants" || session.user.isSuperuser) &&
+                      session.permissions.includes(
+                        destinationPermission(item.href),
+                      ),
+                  )
+                  .map(({ href, icon }) => {
+                    const Icon = icons[icon];
+                    const label = t(`shell.${navKey(icon)}`);
+                    return (
+                      <Link
+                        aria-current={active === href ? "page" : undefined}
+                        aria-label={label}
+                        className={`nav__item ${active === href ? "nav__item--active" : ""}`}
+                        href={href}
+                        key={href}
+                        onFocus={() => router.prefetch(href)}
+                        onMouseEnter={() => router.prefetch(href)}
+                        onPointerDown={() => router.prefetch(href)}
+                        onClick={() => {
+                          closeMobileNavigation(pathname === href && menuOpen);
+                        }}
+                        prefetch={
+                          href === "/tickets" || href === "/calendar"
+                            ? true
+                            : false
+                        }
+                        title={!expanded ? label : undefined}
+                      >
+                        <span className="nav__icon">
+                          <Icon
+                            aria-hidden="true"
+                            size={18}
+                            strokeWidth={1.7}
+                          />
+                        </span>
+                        <span className="nav__label">{label}</span>
+                        <NavigationPendingIndicator
+                          label={t("common.loading")}
+                        />
+                      </Link>
+                    );
+                  })}
+              </div>
+            ))}
         </nav>
 
         <div className="shell__rail-footer">

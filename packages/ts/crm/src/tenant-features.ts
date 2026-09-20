@@ -1,5 +1,6 @@
 import type postgres from "postgres";
 import type { JsonValue } from "./types.js";
+import { parseServiceWorkflowPolicy } from "./service-workflow.js";
 
 export const tenantFeatureKeys = [
   "contacts",
@@ -134,13 +135,14 @@ export const tenantFeatureRegistry: Readonly<
 
 export const tenantTemplateRegistry = {
   field_service: {
-    version: 1,
+    version: 2,
     label: "Field Service",
     features: [
       "contacts",
       "whatsapp",
       "voice",
       "agents",
+      "tickets",
       "field_service",
       "technicians",
       "ocr",
@@ -158,6 +160,16 @@ export const tenantTemplateRegistry = {
     version: 1,
     label: "Customer Support",
     features: ["contacts", "whatsapp", "voice", "agents", "tickets"],
+  },
+  leads_support: {
+    version: 1,
+    label: "Leads + Support",
+    features: ["contacts", "agents", "whatsapp", "voice", "leads", "tickets"],
+  },
+  leads_only: {
+    version: 1,
+    label: "Leads only",
+    features: ["contacts", "leads"],
   },
   blank: { version: 1, label: "Blank / Custom", features: ["contacts"] },
 } as const satisfies Record<
@@ -225,7 +237,8 @@ function isFeatureKey(value: unknown): value is TenantFeatureKey {
   );
 }
 
-function featureConfiguration(
+export function validateTenantFeatureConfiguration(
+  key: TenantFeatureKey,
   value: unknown,
 ): Readonly<Record<string, JsonValue>> {
   if (value === null || typeof value !== "object" || Array.isArray(value))
@@ -233,6 +246,11 @@ function featureConfiguration(
   const serialized = JSON.stringify(value);
   if (new TextEncoder().encode(serialized).byteLength > 16_384)
     throw new TypeError("feature configuration is too large");
+  if (key === "field_service" && "workflow" in value) {
+    if (Object.keys(value).some((name) => name !== "workflow"))
+      throw new TypeError("unknown field service configuration option");
+    return { workflow: { ...parseServiceWorkflowPolicy(value.workflow) } };
+  }
   if (Object.keys(value).length > 0)
     throw new TypeError(
       "this feature has no configurable fields in schema version 1",
@@ -277,7 +295,9 @@ export async function getTenantFeatureSnapshot(
           enabled: row?.enabled === true,
           effective: row?.effective === true,
           configuration:
-            row === undefined ? {} : featureConfiguration(row.configuration),
+            row === undefined
+              ? {}
+              : validateTenantFeatureConfiguration(key, row.configuration),
           configurationSchemaVersion: row?.configuration_schema_version ?? 1,
           source: row?.source ?? "migration",
           revision: row?.revision ?? 0,
@@ -313,7 +333,10 @@ export async function setTenantFeature(
   if (!isFeatureKey(input.key)) throw new TypeError("unknown tenant feature");
   if (!Number.isInteger(input.expectedRevision) || input.expectedRevision < 1)
     throw new TypeError("expectedRevision must be a positive integer");
-  const configuration = featureConfiguration(input.configuration ?? {});
+  const configuration = validateTenantFeatureConfiguration(
+    input.key,
+    input.configuration ?? {},
+  );
   await sql`
     SELECT platform.set_current_tenant_feature(
       ${input.key}, ${input.enabled}, ${sql.json(configuration)}, 1,

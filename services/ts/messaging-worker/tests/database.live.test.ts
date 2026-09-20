@@ -10,6 +10,7 @@ import {
   createSimulatorBroadcast,
   enqueueSimulatorBroadcast,
   acceptWhatsAppWebhook,
+  retailServiceWorkflowPolicy,
 } from "@or-on/crm";
 
 import { createMessagingStore } from "../src/database.js";
@@ -83,6 +84,116 @@ async function createWhatsAppContactFixture(
 }
 
 describe.skipIf(databaseUrl === undefined)("durable messaging worker", () => {
+  it("commits configured service intake and delivers its durable photo request through the existing sender", async () => {
+    if (databaseUrl === undefined)
+      throw new Error("Explicit test database required");
+    const admin = postgres(databaseUrl, { max: 1, prepare: false });
+    const tenant = randomUUID(),
+      actor = randomUUID(),
+      contact = randomUUID(),
+      channel = randomUUID(),
+      conversation = randomUUID(),
+      agent = randomUUID(),
+      version = randomUUID(),
+      message = randomUUID(),
+      job = randomUUID();
+    await admin.begin(async (sql) => {
+      await sql`INSERT INTO tenants(id,name,slug) VALUES(${tenant}::uuid,'Fictional retail intake',${`retail-${tenant}`})`;
+      await sql`INSERT INTO users(id,email,status) VALUES(${actor}::uuid,${`${actor}@example.invalid`},'active')`;
+      await sql`INSERT INTO memberships(tenant_id,user_id,role) VALUES(${tenant}::uuid,${actor}::uuid,'owner')`;
+      await sql`SELECT set_config('app.current_tenant',${tenant},true),set_config('app.current_user',${actor},true),set_config('app.current_role','owner',true)`;
+      await sql`INSERT INTO crm.tenant_settings(tenant_id,locale,timezone) VALUES(${tenant}::uuid,'en','UTC')`;
+      await sql`INSERT INTO crm.contacts(id,tenant_id,name,whatsapp_consent) VALUES(${contact}::uuid,${tenant}::uuid,'Fictional store contact','granted')`;
+      await sql`INSERT INTO crm.contact_channel_identities(tenant_id,contact_id,channel,normalized_value,validation_status,is_primary) VALUES(${tenant}::uuid,${contact}::uuid,'whatsapp',${`+1202${Date.now().toString().slice(-7)}`},'valid',true)`;
+      await sql`INSERT INTO platform.tenant_feature_entitlements(tenant_id,feature_key,available,enabled,granted_at,configuration) VALUES(${tenant}::uuid,'field_service',true,true,CURRENT_TIMESTAMP,${sql.json({ workflow: { ...retailServiceWorkflowPolicy, requiredIntakeFields: [...retailServiceWorkflowPolicy.requiredIntakeFields], requiredReportFields: [...retailServiceWorkflowPolicy.requiredReportFields] } })})`;
+      await sql`INSERT INTO service.tenant_configuration(tenant_id,enabled,whatsapp_intake_enabled) VALUES(${tenant}::uuid,true,true)`;
+      await sql`INSERT INTO messaging.channels(id,tenant_id,kind,provider,provider_account_id,status) VALUES(${channel}::uuid,${tenant}::uuid,'whatsapp','simulator',${randomUUID()},'active')`;
+      await sql`INSERT INTO agents.agent_profiles(id,tenant_id,name) VALUES(${agent}::uuid,${tenant}::uuid,'Fictional service agent')`;
+      await sql`INSERT INTO agents.agent_profile_versions(id,tenant_id,agent_profile_id,version,system_prompt,locale,channel_capabilities,tool_permissions,validation_status,published_at) VALUES(${version}::uuid,${tenant}::uuid,${agent}::uuid,1,'Help customers with field service','en',ARRAY['whatsapp'],'["service.intake"]','valid',CURRENT_TIMESTAMP)`;
+      await sql`INSERT INTO messaging.conversations(id,tenant_id,channel_id,contact_id,ownership_mode,ai_agent_profile_version_id,ai_enabled_by_user_id,ai_enabled_at) VALUES(${conversation}::uuid,${tenant}::uuid,${channel}::uuid,${contact}::uuid,'ai',${version}::uuid,${actor}::uuid,CURRENT_TIMESTAMP)`;
+      await sql`INSERT INTO messaging.messages(id,tenant_id,conversation_id,direction,sender_type,content_type,content_text,provider,status) VALUES(${message}::uuid,${tenant}::uuid,${conversation}::uuid,'inbound','contact','text','Yes, open the confirmed printer incident','simulator','received')`;
+      await sql`INSERT INTO ops.jobs(id,tenant_id,queue,job_type,reference_type,reference_id,payload,idempotency_key) VALUES(${job}::uuid,${tenant}::uuid,'messaging','field_service.intake.extract','message',${message}::uuid,${sql.json({ conversationId: conversation, contactId: contact, triggerMessageId: message })},${`retail-intake:${message}`})`;
+    });
+    const extractIntake = vi.fn(() =>
+      Promise.resolve({
+        serviceIntent: true,
+        confirmed: true,
+        confidence: 1,
+        fields: {
+          chainName: "Fictional chain",
+          storeName: "North branch",
+          faultDescription: "Receipt printer fault",
+          exactFailure: "Blank output",
+        },
+      }),
+    );
+    const store = createMessagingStore(
+      databaseUrl,
+      `retail-worker-${job}`,
+      {
+        simulator: new SimulatorWhatsAppProvider(),
+        meta: new MetaWhatsAppProvider({
+          enabled: false,
+          accessToken: undefined,
+          graphApiVersion: undefined,
+          phoneNumberId: undefined,
+        }),
+      },
+      undefined,
+      {
+        simulatorEnabled: true,
+        fieldServiceProvider: {
+          providerName: "fictional",
+          modelName: "fixture",
+          extractIntake,
+          extractProductLabel: () =>
+            Promise.resolve({
+              fields: {},
+              confidence: 0,
+              fieldConfidence: {},
+            }),
+          summarizeEvidence: () =>
+            Promise.resolve("Customer reported blank printer output."),
+        },
+      },
+    );
+    try {
+      for (let i = 0; i < 30; i++) {
+        await store.processAvailable();
+        const result = await admin<
+          { status: string }[]
+        >`SELECT status FROM ops.jobs WHERE id=${job}::uuid`;
+        if (result[0]?.status === "succeeded") break;
+      }
+      expect(extractIntake).toHaveBeenCalledOnce();
+      const cases = await admin<
+        { id: string; intake_draft_id: string }[]
+      >`SELECT id,intake_draft_id FROM service.cases WHERE tenant_id=${tenant}::uuid`;
+      expect(cases).toHaveLength(1);
+      const incident = cases[0];
+      if (incident === undefined) throw new Error("Case not committed");
+      const tickets = await admin<
+        { count: number }[]
+      >`SELECT count(*)::int AS count FROM support.tickets WHERE service_case_id=${incident.id}::uuid`;
+      expect(tickets[0]?.count).toBe(1);
+      const photoJob = randomUUID();
+      await admin`INSERT INTO ops.jobs(id,tenant_id,queue,job_type,reference_type,reference_id,payload,idempotency_key) VALUES(${photoJob}::uuid,${tenant}::uuid,'messaging','field_service.photo_request','intake_draft',${incident.intake_draft_id}::uuid,${admin.json({ conversationId: conversation, text: "Please send a photo of the printer here." })},${`photo-${photoJob}`})`;
+      for (let i = 0; i < 30; i++) {
+        await store.processAvailable();
+        const result = await admin<
+          { status: string }[]
+        >`SELECT status FROM ops.jobs WHERE id=${photoJob}::uuid`;
+        if (result[0]?.status === "succeeded") break;
+      }
+      const requests = await admin<
+        { count: number }[]
+      >`SELECT count(*)::int AS count FROM messaging.outbound_requests WHERE tenant_id=${tenant}::uuid AND idempotency_key=${`service-photo:${photoJob}`}`;
+      expect(requests[0]?.count).toBe(1);
+    } finally {
+      await store.close();
+      await admin.end({ timeout: 2 });
+    }
+  }, 60_000);
   it("claims and completes simulator broadcast recipients idempotently", async () => {
     if (databaseUrl === undefined)
       throw new Error("MESSAGING_WORKER_TEST_DATABASE_URL is required");

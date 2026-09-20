@@ -22,7 +22,11 @@ import {
   saveReportDraft,
   scheduleServiceAppointment,
   suggestNextServiceAppointment,
+  captureWhatsAppServiceIntakeMessage,
+  updateWhatsAppServiceIntake,
+  confirmWhatsAppServiceIntake,
 } from "./field-service.js";
+import { retailServiceWorkflowPolicy } from "./service-workflow.js";
 import { createServiceReportWorkbook } from "./field-service-export.js";
 
 const databaseUrl = process.env.CRM_TEST_DATABASE_URL;
@@ -147,6 +151,62 @@ async function isolated(
 describe.skipIf(databaseUrl === undefined)(
   "field-service scheduling against PostgreSQL RLS",
   () => {
+    it("completes retail WhatsApp intake with transport identity and one linked support ticket", async () =>
+      isolated(async (sql, fixture) => {
+        await sql`RESET ROLE`;
+        await sql`UPDATE service.tenant_configuration SET whatsapp_intake_enabled=true WHERE tenant_id=${fixture.tenantId}::uuid`;
+        await sql`UPDATE platform.tenant_feature_entitlements SET configuration=${sql.json({ workflow: { ...retailServiceWorkflowPolicy, requiredIntakeFields: [...retailServiceWorkflowPolicy.requiredIntakeFields], requiredReportFields: [...retailServiceWorkflowPolicy.requiredReportFields] } })} WHERE tenant_id=${fixture.tenantId}::uuid AND feature_key='field_service'`;
+        await sql`INSERT INTO crm.contact_channel_identities(tenant_id,contact_id,channel,normalized_value,validation_status,is_primary) VALUES(${fixture.tenantId}::uuid,${fixture.contactId}::uuid,'whatsapp','+972500000071','valid',true)`;
+        const channels = await sql<
+          { id: string }[]
+        >`INSERT INTO messaging.channels(tenant_id,kind,provider,provider_account_id,status) VALUES(${fixture.tenantId}::uuid,'whatsapp','simulator',${randomUUID()},'active') RETURNING id`;
+        const channelId = channels[0]?.id;
+        if (channelId === undefined) throw new Error("Channel fixture missing");
+        const conversations = await sql<
+          { id: string }[]
+        >`INSERT INTO messaging.conversations(tenant_id,channel_id,contact_id) VALUES(${fixture.tenantId}::uuid,${channelId}::uuid,${fixture.contactId}::uuid) RETURNING id`;
+        const conversationId = conversations[0]?.id;
+        if (conversationId === undefined)
+          throw new Error("Conversation fixture missing");
+        const messages = await sql<
+          { id: string }[]
+        >`INSERT INTO messaging.messages(tenant_id,conversation_id,direction,sender_type,content_type,content_text,provider,status) VALUES(${fixture.tenantId}::uuid,${conversationId}::uuid,'inbound','contact','text','The till printer is blank','simulator','received') RETURNING id`;
+        const messageId = messages[0]?.id;
+        if (messageId === undefined) throw new Error("Message fixture missing");
+        await sql`SET LOCAL ROLE platform_web`;
+        const intake = await captureWhatsAppServiceIntakeMessage(sql, {
+          conversationId,
+          reportingContactId: fixture.contactId,
+          messageId,
+          occurredAt: new Date().toISOString(),
+        });
+        expect(intake.fields.customerPhone).toBe("+972500000071");
+        expect(intake.missingFields).not.toContain("customerName");
+        expect(intake.missingFields).not.toContain("nationalId");
+        const ready = await updateWhatsAppServiceIntake(sql, intake.id, {
+          chainName: "Fictional chain",
+          storeName: "Fictional branch",
+          faultDescription: "Receipt printer fault",
+          exactFailure: "Blank paper",
+        });
+        expect(ready.missingFields).toEqual([]);
+        const incident = await confirmWhatsAppServiceIntake(sql, intake.id);
+        expect((await confirmWhatsAppServiceIntake(sql, intake.id)).id).toBe(
+          incident.id,
+        );
+        expect(incident.faultDescription).toContain("Blank paper");
+        const tickets = await sql<
+          { count: number }[]
+        >`SELECT count(*)::int AS count FROM support.tickets WHERE service_case_id=${incident.id}::uuid`;
+        expect(tickets[0]?.count).toBe(1);
+        const chains = await sql<{ name: string }[]>`
+          SELECT chain.name FROM crm.service_chains chain
+          JOIN crm.service_locations location ON location.chain_id=chain.id
+          WHERE location.id=${incident.serviceLocationId}::uuid
+        `;
+        expect(chains[0]?.name).toBe("Fictional chain");
+        expect(incident.workflowPolicy).toEqual(retailServiceWorkflowPolicy);
+      }));
     it("lists only tenant-visible report revisions with stable report metadata", async () =>
       isolated(async (sql, fixture) => {
         const appointment = await scheduleServiceAppointment(

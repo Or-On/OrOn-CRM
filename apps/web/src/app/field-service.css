@@ -6,6 +6,79 @@
   margin-inline: auto;
 }
 
+.technician-queue {
+  display: grid;
+  gap: 1rem;
+  min-inline-size: 0;
+}
+
+.technician-queue h2,
+.technician-queue h3,
+.technician-queue p {
+  margin: 0;
+}
+
+.technician-queue .field-service-toolbar p,
+.technician-queue__notice {
+  margin-block-start: 0.4rem;
+  color: var(--or-text-muted);
+  font-size: 0.875rem;
+}
+
+.technician-queue__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 21rem), 1fr));
+  gap: 1rem;
+}
+
+.technician-queue__card {
+  display: grid;
+  align-content: start;
+  gap: 1rem;
+  min-inline-size: 0;
+  padding: clamp(1rem, 2vw, 1.5rem);
+  overflow-wrap: anywhere;
+}
+
+.technician-queue__card > header,
+.technician-queue__card > footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.technician-queue__card > p {
+  color: var(--or-text-secondary);
+  line-height: 1.6;
+}
+
+.technician-queue__card dl {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding-block: 1rem;
+  border-block: 1px solid var(--or-divider);
+}
+
+.technician-queue__card dt {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--or-text-muted);
+  font-size: 0.75rem;
+}
+
+.technician-queue__card dd {
+  margin: 0.25rem 0 0;
+}
+
+.technician-queue__card .or-button,
+.technician-queue .field-service-tabs button {
+  min-block-size: 2.75rem;
+}
+
 .field-service-loading {
   display: grid;
   gap: 1rem;
@@ -160,8 +233,61 @@
 
 .field-service-tabs {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.25rem;
+}
+
+.service-directory {
+  display: grid;
+  gap: 1rem;
+  min-inline-size: 0;
+}
+.service-directory :is(h2, h3, p) {
+  margin: 0;
+}
+.service-directory .field-service-toolbar p {
+  color: var(--or-text-muted);
+  font-size: 0.85rem;
+  margin-block-start: 0.4rem;
+  line-height: 1.6;
+}
+.service-directory__layout {
+  display: grid;
+  grid-template-columns: minmax(15rem, 0.8fr) minmax(0, 1.5fr);
+  gap: 1rem;
+  align-items: start;
+}
+.service-directory__form {
+  padding: 1.25rem;
+}
+.service-directory__stores {
+  display: grid;
+  gap: 0.75rem;
+}
+.service-directory__store {
+  display: flex;
+  align-items: start;
+  gap: 0.85rem;
+  padding: 1.25rem;
+  overflow-wrap: anywhere;
+}
+.service-directory__store > svg {
+  color: var(--or-accent);
+  flex-shrink: 0;
+}
+.service-directory__store h3 {
+  margin-block: 0.35rem;
+}
+.service-directory__store p {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-block-end: 0.5rem;
+}
+.service-directory__store :is(small, p) {
+  color: var(--or-text-muted);
+  font-size: 0.8rem;
 }
 
 .field-service-tabs button {
@@ -776,6 +902,9 @@
 }
 
 @media (max-width: 48rem) {
+  .service-directory__layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .field-service-directory {
     overflow: visible;
     background: transparent;

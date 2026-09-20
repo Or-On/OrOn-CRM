@@ -7,6 +7,7 @@ import {
   type AgentCapability,
   type AgentContextSurfaces,
   type LeadFieldSchema,
+  type ServiceWorkflowPolicy,
 } from "@or-on/crm";
 
 import {
@@ -50,6 +51,7 @@ export interface WhatsAppAiRequest {
   readonly tenantDisplayName?: string;
   readonly knowledge?: readonly EligibleKnowledgeFact[];
   readonly serviceIntake?: {
+    readonly workflowPolicy?: ServiceWorkflowPolicy;
     readonly status:
       | "collecting"
       | "awaiting_confirmation"

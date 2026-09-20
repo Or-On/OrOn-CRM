@@ -881,6 +881,7 @@ export async function assignDefaultWhatsAppAi(
       AND (process.channel='whatsapp' OR process.channel IS NULL)
       AND process.agent_profile_version_id IS NOT NULL
       AND process.updated_by_user_id IS NOT NULL
+      AND platform.approved_agent_for_channel(version.id,'whatsapp')
       AND platform.messaging_ai_actor_authorized(process.updated_by_user_id)
     ORDER BY process.priority,process.id
     LIMIT 1
@@ -942,6 +943,7 @@ export async function assignDefaultWhatsAppAi(
         AND version.published_at IS NOT NULL
         AND version.validation_status='valid'
         AND version.channel_capabilities @> ARRAY['whatsapp']::text[]
+        AND platform.approved_agent_for_channel(version.id,'whatsapp')
       ORDER BY version.version DESC, version.id DESC
       LIMIT 1
     ) candidate ON true

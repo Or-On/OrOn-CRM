@@ -11,6 +11,14 @@
     "./field-service-domain": {
       "types": "./src/field-service-domain.ts",
       "default": "./dist/field-service-domain.js"
+    },
+    "./service-workflow": {
+      "types": "./src/service-workflow.ts",
+      "default": "./dist/service-workflow.js"
+    },
+    "./tenant-configuration-client": {
+      "types": "./src/tenant-configuration-client.ts",
+      "default": "./dist/tenant-configuration-client.js"
     }
   },
   "scripts": {

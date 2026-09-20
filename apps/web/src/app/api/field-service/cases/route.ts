@@ -102,6 +102,9 @@ export async function POST(request: Request) {
                 }),
             title: text(body.title, "Case title"),
             faultDescription: text(body.faultDescription, "Fault description"),
+            ...(typeof body.exactFailure === "string"
+              ? { exactFailure: text(body.exactFailure, "What is not working") }
+              : {}),
             warrantyStatus: warranty(body.warrantyStatus),
             ...(productType === undefined ? {} : { productType }),
             ...(productModel === undefined ? {} : { productModel }),

@@ -18,6 +18,7 @@ import type {
   ServiceReportDocument,
   ServiceVisit,
 } from "@or-on/crm";
+import type * as CrmModule from "@or-on/crm";
 
 import {
   FieldServiceSettings,
@@ -52,7 +53,8 @@ vi.mock("next/image", () => ({
     <span aria-label={alt || "report image"} data-src={src} role="img" />
   ),
 }));
-vi.mock("@or-on/crm", () => ({
+vi.mock("@or-on/crm", async (importOriginal) => ({
+  ...(await importOriginal<typeof CrmModule>()),
   getServiceReportDocument: () => Promise.resolve(state.report),
   nextServiceCaseStatuses: () => ["scheduled", "cancelled"],
 }));
@@ -534,6 +536,98 @@ describe("field-service UI contracts", () => {
       within(reportDialog).getByLabelText<HTMLTextAreaElement>("Diagnosis")
         .value,
     ).toBe("Selected visit diagnosis");
+  });
+
+  it("saves current report fields before finalization and follows the case-pinned report requirements", async () => {
+    const visit: ServiceVisit = {
+      id: "50000000-0000-4000-8000-000000000001",
+      caseId: serviceCase.id,
+      appointmentId: null,
+      technicianId: "60000000-0000-4000-8000-000000000001",
+      visitNumber: 1,
+      status: "assigned",
+      arrivalAt: null,
+      departureAt: null,
+      durationSeconds: null,
+      arrivalSignatureObjectId: null,
+      departureSignatureObjectId: null,
+      arrivalIdentity: null,
+      departureIdentity: null,
+    };
+    const report: ReportRevision = {
+      id: "30000000-0000-4000-8000-000000000001",
+      reportId: "40000000-0000-4000-8000-000000000001",
+      version: 1,
+      status: "draft",
+      diagnosis: null,
+      workPerformed: null,
+      partReplaced: null,
+      replacementPartDetails: null,
+      technicianNotes: null,
+      finalizedAt: null,
+    };
+    state.crmMutation.mockResolvedValue({ report });
+    render(
+      localized(
+        <ServiceCaseWorkspace
+          canManage
+          canOperate
+          canReadVoice
+          dossier={{
+            ...dossier,
+            visits: [visit],
+            serviceCase: {
+              ...serviceCase,
+              workflowPolicy: {
+                version: 1,
+                requiredIntakeFields: ["faultDescription"],
+                requiredReportFields: ["diagnosis", "workPerformed"],
+                photoPolicy: "requested",
+                selfAssignmentEnabled: true,
+              },
+            },
+          }}
+          feature={feature}
+          linkCandidates={{ calls: [], conversations: [] }}
+          technicians={[]}
+          timezone="Asia/Jerusalem"
+        />,
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Report" }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "Technician report",
+    });
+    expect(
+      within(dialog).getByLabelText<HTMLSelectElement>("Part replaced?")
+        .required,
+    ).toBe(false);
+    expect(
+      within(dialog).getByText(
+        "Required to complete: diagnosis, work performed.",
+      ),
+    ).toBeTruthy();
+    fireEvent.change(within(dialog).getByLabelText("Diagnosis"), {
+      target: { value: "Printer head misaligned" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Work performed"), {
+      target: { value: "Realigned the head and verified a receipt" },
+    });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Finalize report" }),
+    );
+    await waitFor(() => expect(state.crmMutation).toHaveBeenCalledTimes(3));
+    expect(state.crmMutation.mock.calls[1]).toEqual([
+      `/api/field-service/reports/${report.id}`,
+      expect.objectContaining({
+        diagnosis: "Printer head misaligned",
+        workPerformed: "Realigned the head and verified a receipt",
+      }),
+      { method: "PATCH" },
+    ]);
+    expect(state.crmMutation.mock.calls[2]?.[0]).toBe(
+      `/api/field-service/reports/${report.id}/finalize`,
+    );
   });
 
   it("keeps mutation failures in the active dialog and clears them before switching", async () => {

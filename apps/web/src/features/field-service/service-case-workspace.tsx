@@ -7,8 +7,10 @@ import type {
   ServiceCaseLinkCandidates,
   ServiceCaseStatus,
   ServiceVisit,
+  ServiceWorkflowPolicy,
   TechnicianSummary,
 } from "@or-on/crm";
+import { serviceWorkflowDefaults } from "@or-on/crm/service-workflow";
 import { nextServiceCaseStatuses } from "@or-on/crm/field-service-domain";
 import {
   Badge,
@@ -179,6 +181,7 @@ export function ServiceCaseWorkspace({
   linkCandidates,
   technicians,
   timezone,
+  workflowPolicy,
 }: {
   readonly canManage: boolean;
   readonly canOperate: boolean;
@@ -188,11 +191,23 @@ export function ServiceCaseWorkspace({
   readonly linkCandidates: ServiceCaseLinkCandidates | undefined;
   readonly technicians: readonly TechnicianSummary[];
   readonly timezone: string;
+  readonly workflowPolicy?: ServiceWorkflowPolicy;
 }) {
   const locale = useLocale();
   const he = locale.startsWith("he");
   const router = useRouter();
   const serviceCase = dossier.serviceCase;
+  const reportPolicy =
+    serviceCase.workflowPolicy ?? workflowPolicy ?? serviceWorkflowDefaults;
+  const reportRequirementLabels = {
+    diagnosis: he ? "אבחון" : "diagnosis",
+    workPerformed: he ? "העבודה שבוצעה" : "work performed",
+    partReplaced: he ? "חלקים שהוחלפו" : "replaced parts",
+    arrivalSignature: he ? "חתימת הגעה" : "arrival signature",
+    departureSignature: he ? "חתימת סיום" : "completion signature",
+    faultPhoto: he ? "צילום תקלה" : "fault photo",
+    modulePhoto: he ? "צילום ציוד" : "equipment photo",
+  };
   const [pendingAction, setPendingAction] = useState<string>();
   const [error, setError] = useState<string>();
   const [visitOpen, setVisitOpen] = useState(false);
@@ -352,35 +367,34 @@ export function ServiceCaseWorkspace({
     });
   }
 
-  async function saveReport(event: SyntheticEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function persistReport(form: FormData) {
     if (latestReport === undefined) return;
-    const form = new FormData(event.currentTarget);
     const partReplaced = form.get("partReplaced");
-    await run("save-report", async () => {
-      const payload = await crmMutation<{ report: ReportRevision }>(
-        `/api/field-service/reports/${latestReport.id}`,
-        {
-          diagnosis: form.get("diagnosis"),
-          workPerformed: form.get("workPerformed"),
-          partReplaced:
-            partReplaced === "yes"
-              ? true
-              : partReplaced === "no"
-                ? false
-                : null,
-          replacementPartDetails: form.get("replacementPartDetails"),
-          technicianNotes: form.get("technicianNotes"),
-        },
-        { method: "PATCH" },
-      );
-      setLatestReport(payload.report);
-    });
+    const payload = await crmMutation<{ report: ReportRevision }>(
+      `/api/field-service/reports/${latestReport.id}`,
+      {
+        diagnosis: form.get("diagnosis"),
+        workPerformed: form.get("workPerformed"),
+        partReplaced:
+          partReplaced === "yes" ? true : partReplaced === "no" ? false : null,
+        replacementPartDetails: form.get("replacementPartDetails"),
+        technicianNotes: form.get("technicianNotes"),
+      },
+      { method: "PATCH" },
+    );
+    setLatestReport(payload.report);
   }
 
-  async function finalizeReport() {
+  async function saveReport(event: SyntheticEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    await run("save-report", () => persistReport(form));
+  }
+
+  async function finalizeReport(form: FormData) {
     if (latestReport === undefined) return;
     await run("finalize-report", async () => {
+      await persistReport(form);
       const payload = await crmMutation<{ report: ReportRevision }>(
         `/api/field-service/reports/${latestReport.id}/finalize`,
         {},
@@ -1450,7 +1464,7 @@ export function ServiceCaseWorkspace({
               id="report-diagnosis"
               label={he ? "אבחון" : "Diagnosis"}
               name="diagnosis"
-              required
+              required={reportPolicy.requiredReportFields.includes("diagnosis")}
               rows={3}
             />
             <Textarea
@@ -1459,7 +1473,9 @@ export function ServiceCaseWorkspace({
               id="report-work"
               label={he ? "עבודה שבוצעה" : "Work performed"}
               name="workPerformed"
-              required
+              required={reportPolicy.requiredReportFields.includes(
+                "workPerformed",
+              )}
               rows={3}
             />
             <Select
@@ -1474,7 +1490,9 @@ export function ServiceCaseWorkspace({
               id="report-part-replaced"
               label={he ? "הוחלף חלק?" : "Part replaced?"}
               name="partReplaced"
-              required
+              required={reportPolicy.requiredReportFields.includes(
+                "partReplaced",
+              )}
             >
               <option value="">{he ? "בחירה" : "Select"}</option>
               <option value="yes">{he ? "כן" : "Yes"}</option>
@@ -1497,9 +1515,11 @@ export function ServiceCaseWorkspace({
             />
             <InlineFeedback
               description={
-                he
-                  ? "להשלמה נדרשות חתימות הגעה ויציאה, צילום תקלה וצילום מודול."
-                  : "Finalization requires arrival and departure signatures, a fault photo, and a module photo."
+                reportPolicy.requiredReportFields.length
+                  ? `${he ? "נדרש להשלמה" : "Required to complete"}: ${reportPolicy.requiredReportFields.map((field) => reportRequirementLabels[field]).join(", ")}.`
+                  : he
+                    ? "ניתן להשלים לאחר בדיקת פרטי הדוח."
+                    : "Review the report before completing it."
               }
             />
             <div className="field-service-form__actions">
@@ -1535,7 +1555,11 @@ export function ServiceCaseWorkspace({
                   <Button
                     busy={pendingAction === "finalize-report"}
                     disabled={pending}
-                    onClick={() => void finalizeReport()}
+                    onClick={(event) => {
+                      const form = event.currentTarget.form;
+                      if (form?.reportValidity())
+                        void finalizeReport(new FormData(form));
+                    }}
                     type="button"
                   >
                     {he ? "סיום וחתימה" : "Finalize report"}

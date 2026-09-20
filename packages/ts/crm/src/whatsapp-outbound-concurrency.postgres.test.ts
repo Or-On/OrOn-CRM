@@ -152,6 +152,7 @@ async function cleanupFixture(database: postgres.Sql, fixture: Fixture) {
     // The synthetic case intentionally retains its conversation. Remove the
     // retaining evidence first so tenant cleanup does not rely on PostgreSQL's
     // unspecified cascade ordering across the contact/conversation graph.
+    await sql`DELETE FROM support.tickets WHERE tenant_id=${fixture.tenantId}::uuid`;
     await sql`DELETE FROM service.cases WHERE tenant_id=${fixture.tenantId}::uuid`;
     await sql`DELETE FROM messaging.conversations WHERE tenant_id=${fixture.tenantId}::uuid`;
     await sql`DELETE FROM tenants WHERE id=${fixture.tenantId}::uuid`;

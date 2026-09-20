@@ -16,8 +16,8 @@ Four independent checks apply:
 
 1. **Platform entitlement** — a platform super administrator grants the
    `field_service` capability to a tenant.
-2. **Tenant activation** — an owner or administrator enables the module in
-   Settings for that tenant.
+2. **Reviewed activation** — an owner or administrator submits the module and
+   workflow in Business configuration; a platform super administrator approves it.
 3. **User permission** — the request must carry the appropriate
    `field-service:read`, `field-service:operate`, or `field-service:manage`
    permission. The built-in technician role is deliberately restricted.
@@ -39,16 +39,31 @@ permissions when field service is off.
 2. Create a tenant with **Field service & technicians** selected, or open the
    capability control for an existing tenant and grant it there. This makes the
    feature available; it does not activate it.
-3. Switch to the tenant, open **Settings**, and find **Field service &
-   technicians**.
-4. Enable the module. Leave optional integrations off until their readiness
-   indicators are satisfied.
+3. Switch to the tenant and open **Business configuration** in Settings. Select
+   the Field Service template and review its modules, intake fields, photo policy,
+   self-assignment and report requirements.
+4. Save and submit the draft, then approve as a platform super administrator.
+   Publish the required agent and flow versions, grant `service.intake`, and
+   submit/approve their exact WhatsApp and voice process bindings. Leave optional
+   integrations off until their readiness indicators are satisfied.
 5. Assign users one of the existing roles. Tenant owners and administrators can
    manage cases and configuration; agents can operate cases; technicians only
    see permitted assignments and reports; viewers are read-only.
 
 The settings panel records who changed tenant activation and when. Entitlement
 and configuration changes also write audit records.
+
+For a retail support operation, maintain chains and stores in the service
+directory. Known caller numbers are taken from the validated channel, not asked
+again merely for lookup. Review the reusable retail policy before activation;
+legacy appliance policies can require different fields. See
+[tenant configuration](../architecture/tenant-operations-configuration.md) for
+the approval lifecycle and non-destructive module changes.
+
+Technicians claim work from the available queue when self-assignment is allowed.
+A successful claim grants access to that case and reserves it against competing
+claims. Managers can reassign. Reports use the policy captured by the case, so
+later tenant configuration changes do not silently change an ongoing job.
 
 The readiness block reports private evidence storage, protected-field keys,
 WhatsApp AI extraction, OCR, calendar access, and shared-login configuration

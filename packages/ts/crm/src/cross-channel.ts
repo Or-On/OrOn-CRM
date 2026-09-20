@@ -742,6 +742,8 @@ async function reviewAgentConfiguration(
   const capabilities = requireAgentCapabilities(input.toolPermissions ?? []);
   for (const feature of new Set(capabilities.map(capabilityRequiredFeature)))
     await requireTenantFeature(sql, feature);
+  if (capabilities.includes("service.intake"))
+    await requireTenantFeature(sql, "tickets");
   const conflicts = capabilityChannelConflicts(capabilities, channels);
   if (conflicts.length > 0)
     throw new TypeError(
@@ -960,6 +962,8 @@ export async function publishAgentProfile(
     ),
   ))
     await requireTenantFeature(sql, feature);
+  if (parseAgentCapabilities(draft.tool_permissions).includes("service.intake"))
+    await requireTenantFeature(sql, "tickets");
   await assertAgentKnowledgePublishable(
     sql,
     parseKnowledgeSourceIds(draft.knowledge_configuration.sourceIds ?? []),
@@ -1393,6 +1397,7 @@ export async function queueWhatsAppAutomaticCall(
       AND contact.lifecycle_status = 'active'
       AND contact.voice_consent <> 'revoked'
       AND node ->> 'type' = 'voice.call'
+      AND platform.approved_flow_for_channel(flow.id,voice_agent.id,'voice')
       AND platform.messaging_ai_actor_authorized(${actorUserId}::uuid)
       AND trigger.id=(SELECT latest.id FROM messaging.messages latest
         WHERE latest.conversation_id=conversation.id AND latest.direction='inbound'

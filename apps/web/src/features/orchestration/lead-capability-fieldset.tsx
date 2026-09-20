@@ -23,6 +23,7 @@ const grantable = [
   "lead.finalize",
   "lead.follow_up",
   "ticket.open",
+  "service.intake",
 ] as const;
 
 function collectsLeads(capabilities: readonly AgentCapability[]): boolean {

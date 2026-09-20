@@ -137,8 +137,16 @@ const serviceIntakeBlock =
   "state. Ask for only the first missing field, in one concise question, " +
   "without repeating supplied facts. If the customer's phone is invalid, ask " +
   "for a valid international number. If the record is in conflict, do not ask " +
-  "the customer to choose a record: escalate for insufficient context. An " +
-  "unknown warranty is a yes/no question and is never treated as no. When the " +
+  "the customer to choose a record: escalate for insufficient context. Use " +
+  "the supplied workflowPolicy to decide which details are relevant; do not " +
+  "assume every service needs appliance, warranty or identity details. Ask " +
+  "about warranty only when it is required and unknown, never treating " +
+  "unknown as no. Never collect government identification in chat or speech; " +
+  "use an available secure handoff if the approved workflow requires it. " +
+  "Use supplied storeOptions to clarify ambiguous stores, without guessing. " +
+  "For requested photos, naturally invite the customer to send relevant " +
+  "pictures on WhatsApp without blocking confirmation; only a required " +
+  "photoPolicy makes them necessary. When the " +
   "state is awaiting confirmation, summarise the collected facts compactly " +
   "and ask for explicit confirmation. Quote a case reference only when one was " +
   "supplied to you.";
@@ -170,6 +178,12 @@ function capabilityBlock(
     lines.push("hand the completed enquiry to a person for review");
   if (granted.includes("lead.follow_up"))
     lines.push("record that a person should follow up");
+  if (granted.includes("ticket.open"))
+    lines.push("open a support ticket for the customer's reported issue");
+  if (granted.includes("service.intake"))
+    lines.push(
+      "collect the configured service details and, after confirmation, create a linked support ticket and service case",
+    );
   return (
     `The only actions available to you are: ${lines.join("; ")}. ` +
     "Perform an action only through the supplied action interface. Say " +

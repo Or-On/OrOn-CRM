@@ -151,6 +151,21 @@ describe("capabilities decide what may be claimed", () => {
     expect(text).toContain("read what has already been recorded");
     expect(text).not.toContain("hand the completed enquiry");
   });
+
+  it("describes service receipts and policy without imposing appliance questions", () => {
+    const text = render({
+      agentPrompt: itSupport,
+      locale: "he",
+      channel: "voice",
+      capabilities: ["service.intake", "ticket.open"],
+      surfaces: { serviceIntake: true },
+    });
+    expect(text).toContain("create a linked support ticket and service case");
+    expect(text).toContain("supplied workflowPolicy");
+    expect(text).toContain("only a required photoPolicy");
+    expect(text).toContain("after that action returns a receipt");
+    expect(text).not.toContain("actions available to you are: .");
+  });
 });
 
 describe("the same agent means the same thing on both channels", () => {

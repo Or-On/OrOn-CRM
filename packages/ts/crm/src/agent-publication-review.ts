@@ -89,6 +89,14 @@ export function reviewAgentPublication(input: {
       }));
   if (hasCapability(granted, "ticket.open") || input.implicitTicketing === true)
     enabledActions.push(ticketOnEscalation);
+  if (hasCapability(granted, "service.intake"))
+    enabledActions.push({
+      name: "service_intake",
+      capability: "service.intake",
+      description:
+        "Collect the configured service details, save a confirmed ticket and service incident, and request linked photos.",
+      mutating: true,
+    });
   const blocking: AgentPublicationReview["blocking"][number][] = [];
   if (collectsLeads && input.leadFields === null)
     blocking.push("lead_schema_missing");

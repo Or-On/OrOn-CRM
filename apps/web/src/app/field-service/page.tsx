@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import {
   getFieldServiceFeatureState,
+  getServiceDirectory,
   getTenantSettings,
   listContacts,
   listServiceAppointments,
@@ -38,6 +39,7 @@ export default async function FieldServicePage() {
           contacts,
           settings,
           teamMembers,
+          directory,
         ] = await Promise.all([
           listServiceCasePage(sql, { limit: 50 }),
           listServiceAppointments(sql),
@@ -45,12 +47,16 @@ export default async function FieldServicePage() {
           listContacts(sql, { limit: 100 }),
           getTenantSettings(sql),
           canManage ? listTeamMembers(sql) : Promise.resolve([]),
+          canManage
+            ? getServiceDirectory(sql)
+            : Promise.resolve({ stores: [] }),
         ]);
         return {
           appointments,
           cases: casePage.cases,
           nextCaseCursor: casePage.nextCursor,
           contacts,
+          serviceStores: directory.stores,
           feature,
           technicians,
           technicianAccounts: teamMembers.filter(
@@ -58,6 +64,7 @@ export default async function FieldServicePage() {
           ),
           timezone: settings.timezone,
           canManage,
+          isTechnician: session.tenant.role === "technician",
           canOperate: isAuthorized(principal, "field-service:operate"),
         };
       },

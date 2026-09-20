@@ -22,14 +22,26 @@ def support_ticket_function_factory(
 
     def factory(node_name: str, configs: dict[str, NodeConfig]) -> FlowsFunctionSchema:
         async def open_ticket(args: dict, flow_manager) -> tuple[dict, NodeConfig]:
-            receipt = await sessions.open_support_ticket(
-                context,
-                subject=str(args.get("subject", "")),
-                summary=str(args.get("summary", "")),
-            )
+            session = flow_manager.state.setdefault("session", {})
+            try:
+                receipt = await sessions.open_support_ticket(
+                    context,
+                    subject=str(args.get("subject", "")),
+                    summary=str(args.get("summary", "")),
+                )
+            except Exception:
+                receipt = None
+            if not isinstance(receipt, dict) or not receipt.get("ticketId"):
+                return (
+                    {
+                        "success": False,
+                        "instruction": "The ticket save could not be confirmed. Do not say it "
+                        "was opened. Explain briefly and retry if appropriate.",
+                    },
+                    render_node(configs[node_name], session),
+                )
             receipt_state.clear()
             receipt_state.update(receipt)
-            session = flow_manager.state.setdefault("session", {})
             return (
                 {
                     "success": True,
