@@ -36,7 +36,7 @@ export default async function LeadDetailPage({
     });
     if (data === undefined) notFound();
     return (
-      <main className="page page--wide">
+      <main className="page page--wide page--workspace-premium">
         <LeadDetailView
           detail={data.detail}
           team={data.team.map((member) => ({

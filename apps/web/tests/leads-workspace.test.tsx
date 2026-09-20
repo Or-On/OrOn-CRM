@@ -6,6 +6,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import type {
   LeadCounts,
@@ -281,9 +282,9 @@ describe("leads register", () => {
     expect(query.get("status")).toBe("qualified");
     expect(query.get("sort")).toBe("due");
     expect(query.get("q")).toBe("roni");
-    expect(inputValue("Search reference, objective, contact or phone…")).toBe(
-      "roni",
-    );
+    expect(
+      inputValue("Search leads by reference, objective, contact or phone…"),
+    ).toBe("roni");
   });
 
   it("shows capture completeness and agent provenance, not an invented score", () => {
@@ -333,6 +334,160 @@ describe("leads register", () => {
     expect(screen.getByLabelText("מקור")).toBeTruthy();
     expect(screen.getByText("1 מתוך 3 שדות חובה")).toBeTruthy();
   });
+
+  it("uses the shared page header and a compact labeled table without losing lead facts", () => {
+    render(
+      localized(
+        <main className="page page--wide page--workspace-premium">
+          <LeadsWorkspace
+            agents={[]}
+            initialCounts={counts}
+            initialPage={page}
+            team={[]}
+            tenantTimeZone="Asia/Jerusalem"
+          />
+        </main>,
+      ),
+    );
+    const header = screen
+      .getByRole("heading", { name: "Leads", level: 1 })
+      .closest("header");
+    expect(header?.classList.contains("or-page-header")).toBe(true);
+    expect(header?.classList.contains("page-heading--premium")).toBe(true);
+    expect(header?.parentElement?.tagName).toBe("MAIN");
+    const table = screen.getByRole("table", { name: "Lead register" });
+    expect(within(table).getAllByRole("columnheader")).toHaveLength(6);
+    const row = within(table).getAllByRole("row")[1];
+    if (!row) throw new Error("Expected a populated lead row");
+    expect(within(row).getAllByRole("cell")).toHaveLength(6);
+    for (const label of [
+      "Interest",
+      "Status",
+      "Ownership",
+      "Fields collected",
+      "Updated",
+    ]) {
+      expect(within(row).getByText(label)).toBeTruthy();
+    }
+    expect(
+      within(row)
+        .getByRole("link", { name: "Open lead LD-ABCD1234" })
+        .getAttribute("href"),
+    ).toBe(`/leads/${leadId}`);
+    expect(
+      within(row)
+        .getByRole("link", { name: "רוני בדיוני" })
+        .getAttribute("href"),
+    ).toBe(`/contacts/${contactId}`);
+    expect(within(row).getByText("LD-ABCD1234").tagName).toBe("BDI");
+    expect(
+      within(row).getByText("Collecting").classList.contains("or-badge"),
+    ).toBe(true);
+    expect(within(row).getByText("WhatsApp")).toBeTruthy();
+    expect(within(row).getByText("Fictional lead coordinator v2")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Open", pressed: true }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("tablist")).toBeNull();
+  });
+
+  it("resets all deep-linked filters together and re-queries the default open view", async () => {
+    navigation.search = new URLSearchParams(
+      "status=qualified&channel=voice&owner=none&since=2026-09-01&sort=due&q=pilot",
+    );
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(() => respond({ ...page, counts }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      localized(
+        <LeadsWorkspace
+          agents={[]}
+          initialCounts={counts}
+          initialPage={page}
+          team={[]}
+          tenantTimeZone="Asia/Jerusalem"
+        />,
+      ),
+    );
+    expect(screen.getByText("More filters (2)").closest("details")?.open).toBe(
+      true,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Reset filters" }));
+    await vi.advanceTimersByTimeAsync(300);
+    expect(navigation.replace).toHaveBeenLastCalledWith("/leads", {
+      scroll: false,
+    });
+    expect(String(fetchMock.mock.calls.at(-1)?.[0])).toBe(
+      "/api/leads?status=open&sort=updated&limit=25",
+    );
+    expect(
+      inputValue("Search leads by reference, objective, contact or phone…"),
+    ).toBe("");
+  });
+
+  it("distinguishes an empty open register from a filtered search with no matches", () => {
+    const emptyPage: LeadPage = { leads: [], nextCursor: null };
+    const emptyCounts = {
+      ...counts,
+      total: 0,
+      byStatus: { ...counts.byStatus, collecting: 0 },
+    };
+    const result = render(
+      localized(
+        <LeadsWorkspace
+          agents={[]}
+          initialCounts={emptyCounts}
+          initialPage={emptyPage}
+          team={[]}
+          tenantTimeZone="Asia/Jerusalem"
+        />,
+      ),
+    );
+    expect(screen.getByRole("heading", { name: "No open leads" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Reset filters" })).toBeNull();
+    result.unmount();
+    navigation.search = new URLSearchParams("q=unmatched");
+    render(
+      localized(
+        <LeadsWorkspace
+          agents={[]}
+          initialCounts={emptyCounts}
+          initialPage={emptyPage}
+          team={[]}
+          tenantTimeZone="Asia/Jerusalem"
+        />,
+      ),
+    );
+    expect(
+      screen.getByRole("heading", { name: "No leads match these filters" }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "No open leads" })).toBeNull();
+  });
+
+  it("announces pending requests and replaces stale empty guidance while loading", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(() => new Promise<Response>(() => undefined)),
+    );
+    render(
+      localized(
+        <LeadsWorkspace
+          agents={[]}
+          initialCounts={{ ...counts, total: 0 }}
+          initialPage={{ leads: [], nextCursor: null }}
+          team={[]}
+          tenantTimeZone="Asia/Jerusalem"
+        />,
+      ),
+    );
+    await vi.advanceTimersByTimeAsync(300);
+    await waitFor(() => {
+      expect(screen.getByRole("status").textContent).toBe("Loading…");
+    });
+    expect(screen.queryByRole("heading", { name: "No open leads" })).toBeNull();
+    expect(screen.queryByRole("table")).toBeNull();
+  });
 });
 
 describe("lead detail", () => {
@@ -340,6 +495,65 @@ describe("lead detail", () => {
     vi.clearAllMocks();
     vi.unstubAllGlobals();
     cleanup();
+  });
+
+  it("uses the shared detail header and panels with labeled mobile field values", () => {
+    render(
+      localized(
+        <main className="page page--wide page--workspace-premium">
+          <LeadDetailView
+            detail={detail}
+            team={[]}
+            tenantTimeZone="Asia/Jerusalem"
+          />
+        </main>,
+        "he",
+      ),
+    );
+    const header = screen
+      .getByRole("heading", { name: lead.reference, level: 1 })
+      .closest("header");
+    expect(header?.classList.contains("page-heading--premium")).toBe(true);
+    expect(header?.parentElement?.tagName).toBe("MAIN");
+    expect(
+      screen.getByRole("link", { name: "כל הלידים" }).getAttribute("href"),
+    ).toBe("/leads");
+    expect(
+      screen
+        .getByRole("region", { name: "פרטי הליד" })
+        .classList.contains("or-surface"),
+    ).toBe(true);
+    expect(
+      screen
+        .getByRole("region", { name: "ניהול הליד" })
+        .classList.contains("or-surface"),
+    ).toBe(true);
+    const row = screen.getByRole("row", { name: /Company/u });
+    for (const label of ["ערך", "מצב", "אישור", "מקור", "נרשם"]) {
+      expect(within(row).getByText(label)).toBeTruthy();
+    }
+    expect(screen.getByLabelText("אחראי")).toBeTruthy();
+  });
+
+  it("does not offer field corrections when no field schema exists", () => {
+    render(
+      localized(
+        <LeadDetailView
+          detail={{ ...detail, fields: [], schema: null }}
+          team={[]}
+          tenantTimeZone="Asia/Jerusalem"
+        />,
+      ),
+    );
+    expect(
+      screen.queryByRole("heading", { name: "Correct collected fields" }),
+    ).toBeNull();
+    expect(
+      screen.getAllByRole("button", { name: "Save changes" }),
+    ).toHaveLength(1);
+    expect(
+      screen.getByRole("heading", { name: "Manage this lead" }),
+    ).toBeTruthy();
   });
 
   it("states a missing recording as missing rather than offering playback", () => {

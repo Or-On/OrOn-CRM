@@ -6,7 +6,16 @@ import type {
   LeadListEntry,
   LeadStatus,
 } from "@or-on/crm";
-import { Button, Input, Select, Textarea } from "@or-on/ui";
+import {
+  Badge,
+  Button,
+  DataTable,
+  Input,
+  PageHeader,
+  Select,
+  Surface,
+  Textarea,
+} from "@or-on/ui";
 import { useLocale } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -18,6 +27,8 @@ import styles from "./leads-workspace.module.css";
 
 const COPY = {
   en: {
+    title: "Lead record",
+    overview: "Lead overview",
     back: "All leads",
     contact: "Contact",
     phone: "Phone",
@@ -115,6 +126,8 @@ const COPY = {
     },
   },
   he: {
+    title: "רשומת ליד",
+    overview: "פרטי הליד",
     back: "כל הלידים",
     contact: "איש קשר",
     phone: "טלפון",
@@ -373,381 +386,423 @@ export function LeadDetailView({
   }
 
   return (
-    <section className={styles.workspace ?? ""}>
-      <header className={styles.header ?? ""}>
-        <div>
-          <h1>
-            <bdi>{lead.reference}</bdi>
-          </h1>
-          <p>{lead.businessObjective ?? lead.interestKey ?? t.objective}</p>
-        </div>
-        <Link className={styles.legacy ?? ""} href="/leads">
-          {t.back}
-        </Link>
-      </header>
-
-      <dl className={styles.facts ?? ""}>
-        <div>
-          <dt>{t.contact}</dt>
-          <dd>
-            <Link href={`/contacts/${detail.contact.id}`}>
-              {detail.contact.name ?? detail.contact.id}
-            </Link>
-          </dd>
-        </div>
-        <div>
-          <dt>{t.phone}</dt>
-          <dd>
-            <bdi>{detail.contact.primaryPhone ?? "—"}</bdi>
-          </dd>
-        </div>
-        <div>
-          <dt>{t.email}</dt>
-          <dd>
-            <bdi>{detail.contact.email ?? "—"}</bdi>
-          </dd>
-        </div>
-        <div>
-          <dt>{t.status}</dt>
-          <dd>{t.statuses[lead.status]}</dd>
-        </div>
-        <div>
-          <dt>{t.source}</dt>
-          <dd>{channelLabel(t, lead.sourceChannel)}</dd>
-        </div>
-        <div>
-          <dt>{t.owner}</dt>
-          <dd>{lead.ownerName ?? t.unassigned}</dd>
-        </div>
-        <div>
-          {/* Provenance the operator can act on: which agent, at which frozen
-              version, under which reviewed schema. Not a success score. */}
-          <dt>{t.capturedBy}</dt>
-          <dd>
-            {lead.agentName === null
-              ? t.manualEntry
-              : `${lead.agentName} v${String(lead.agentVersion ?? 0)}`}
-          </dd>
-        </div>
-        <div>
-          <dt>{t.schema}</dt>
-          <dd>
-            {lead.fieldSchemaName === null
-              ? t.noSchema
-              : `${lead.fieldSchemaName} v${String(lead.fieldSchemaVersion ?? 0)}`}
-          </dd>
-        </div>
-        <div>
-          <dt>{t.capture}</dt>
-          <dd>
-            {completeness === null || done === null
-              ? t.noCapture
-              : `${String(done)}/${String(completeness.required.length)}`}
-          </dd>
-        </div>
-        <div>
-          <dt>{t.revision}</dt>
-          <dd>{lead.revision}</dd>
-        </div>
-        <div>
-          <dt>{t.created}</dt>
-          <dd>{formatter.format(new Date(lead.createdAt))}</dd>
-        </div>
-        <div>
-          <dt>{t.updated}</dt>
-          <dd>{formatter.format(new Date(lead.updatedAt))}</dd>
-        </div>
-        <div>
-          <dt>{t.conversation}</dt>
-          <dd>
-            {/* The Inbox selects a conversation by query parameter; there is no
-                per-conversation route to link to. */}
-            {detail.interaction.conversationId === null ? (
-              t.noConversation
-            ) : (
-              <Link
-                href={`/inbox?conversation=${detail.interaction.conversationId}`}
-              >
-                {t.openConversation}
-              </Link>
-            )}
-          </dd>
-        </div>
-      </dl>
-      <p className={styles.hint ?? ""}>{t.captureHint}</p>
-
-      <section aria-label={t.fields}>
-        <h2>{t.fields}</h2>
-        <table className={styles.table ?? ""}>
-          <thead>
-            <tr>
-              <th scope="col">{t.field}</th>
-              <th scope="col">{t.value}</th>
-              <th scope="col">{t.state}</th>
-              <th scope="col">{t.confirmation}</th>
-              <th scope="col">{t.fieldSource}</th>
-              <th scope="col">{t.observed}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {detail.fields.map((field) => (
-              <tr key={field.key}>
-                <td>
-                  {field.label}{" "}
-                  <span className={styles.sources ?? ""}>
-                    {field.required ? t.required : t.optional}
-                  </span>
-                </td>
-                <td>
-                  <FieldValue field={field} />
-                </td>
-                <td>{field.state === null ? "—" : t.states[field.state]}</td>
-                <td>
-                  {field.confirmation === null
-                    ? "—"
-                    : t.confirmations[field.confirmation]}
-                </td>
-                <td>
-                  {field.recordedBy === null
-                    ? "—"
-                    : `${t.recordedBy[field.recordedBy]} · ${channelLabel(t, field.sourceChannel)}`}
-                </td>
-                <td>
-                  {field.observedAt === null
-                    ? "—"
-                    : formatter.format(new Date(field.observedAt))}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <p className={styles.hint ?? ""}>{t.provenanceHint}</p>
-      </section>
-
-      <section aria-label={t.editFields}>
-        <h2>{t.editFields}</h2>
-        <p className={styles.hint ?? ""}>{t.editHint}</p>
-        <div className={styles.editGrid ?? ""}>
-          {detail.fields.map((field) =>
-            field.type === "choice" && field.choices !== null ? (
-              <Select
-                id={`lead-field-${field.key}`}
-                key={field.key}
-                label={field.label}
-                onChange={(event) => {
-                  setEdits((current) => ({
-                    ...current,
-                    [field.key]: event.target.value,
-                  }));
-                }}
-                value={edits[field.key] ?? field.normalizedValue ?? ""}
-              >
-                <option value="">—</option>
-                {field.choices.map((choice) => (
-                  <option key={choice} value={choice}>
-                    {choice}
-                  </option>
-                ))}
-              </Select>
-            ) : (
-              <Input
-                id={`lead-field-${field.key}`}
-                key={field.key}
-                label={field.label}
-                onChange={(event) => {
-                  setEdits((current) => ({
-                    ...current,
-                    [field.key]: event.target.value,
-                  }));
-                }}
-                value={edits[field.key] ?? field.normalizedValue ?? ""}
-              />
-            ),
-          )}
-        </div>
-        <Button
-          disabled={pending}
-          onClick={() => {
-            void saveFields();
-          }}
-          type="button"
-        >
-          {pending ? t.saving : t.save}
-        </Button>
-      </section>
-
-      <section aria-label={t.manage}>
-        <h2>{t.manage}</h2>
-        <div className={styles.editGrid ?? ""}>
-          <Select
-            id="lead-status-edit"
-            label={t.status}
-            onChange={(event) => {
-              setStatus(event.target.value as LeadStatus);
-            }}
-            value={status}
+    <>
+      <PageHeader
+        className="page-heading page-heading--premium"
+        eyebrow={t.title}
+        title={<bdi>{lead.reference}</bdi>}
+        description={
+          <bdi>{lead.businessObjective ?? lead.interestKey ?? t.objective}</bdi>
+        }
+        actions={
+          <Link
+            className="or-button or-button--secondary or-button--medium"
+            href="/leads"
           >
-            {OPERATOR_STATUSES.map((value) => (
-              <option key={value} value={value}>
-                {t.statuses[value]}
-              </option>
-            ))}
-          </Select>
-          <Select
-            id="lead-owner-edit"
-            label={t.owner}
-            onChange={(event) => {
-              setOwner(event.target.value);
-            }}
-            value={owner}
-          >
-            <option value="">{t.unassigned}</option>
-            {team.map((member) => (
-              <option key={member.userId} value={member.userId}>
-                {member.name}
-              </option>
-            ))}
-          </Select>
-          <Input
-            id="lead-next-action"
-            label={t.nextAction}
-            onChange={(event) => {
-              setNextAction(event.target.value);
-            }}
-            value={nextAction}
-          />
-          <Input
-            id="lead-due"
-            label={t.due}
-            onChange={(event) => {
-              setDueAt(event.target.value);
-            }}
-            type="date"
-            value={dueAt}
-          />
-        </div>
-        <Textarea
-          id="lead-summary"
-          label={t.summary}
-          onChange={(event) => {
-            setSummary(event.target.value);
-          }}
-          rows={4}
-          value={summary}
-        />
-        <Button
-          disabled={pending}
-          onClick={() => {
-            void saveManagement();
-          }}
-          type="button"
-        >
-          {pending ? t.saving : t.save}
-        </Button>
-        {notice === null ? null : <p role="status">{notice}</p>}
-        {problem === null ? null : <p role="alert">{problem}</p>}
-      </section>
-
-      <section aria-label={t.qualification}>
-        <h2>{t.qualification}</h2>
-        {Object.keys(detail.qualification).length === 0 ? (
-          <p className={styles.hint ?? ""}>{t.noQualification}</p>
-        ) : (
+            {t.back}
+          </Link>
+        }
+      />
+      <section className={styles.workspace ?? ""}>
+        <Surface className={styles.detailPanel ?? ""} aria-label={t.overview}>
+          <h2>{t.overview}</h2>
           <dl className={styles.facts ?? ""}>
-            {Object.entries(detail.qualification).map(([key, value]) => (
-              <div key={key}>
-                <dt>{key}</dt>
-                <dd>
-                  <bdi>{JSON.stringify(value)}</bdi>
-                </dd>
-              </div>
-            ))}
-          </dl>
-        )}
-      </section>
-
-      <section aria-label={t.calls}>
-        <h2>{t.calls}</h2>
-        {detail.calls.length === 0 ? (
-          <p className={styles.hint ?? ""}>{t.noCalls}</p>
-        ) : (
-          <ul className={styles.timeline ?? ""}>
-            {detail.calls.map((call) => (
-              <li key={call.sessionId}>
-                <span className={styles.timelineWhen ?? ""}>
-                  {call.startedAt === null
-                    ? "—"
-                    : formatter.format(new Date(call.startedAt))}
-                </span>
-                <span className={styles.timelineKind ?? ""}>
-                  {call.direction ?? "—"} · {call.status ?? "—"}
-                </span>
-                <span>
-                  {/* Stated from what is actually stored: a recording is listed
-                      as available only when one exists to play. */}
-                  {t.recording}:{" "}
-                  {call.recording === "available" ? t.available : t.missing} ·{" "}
-                  {t.transcript}:{" "}
-                  {call.transcript === "available" ? t.available : t.missing}
-                </span>
-                <Link href={`/voice/calls/${call.sessionId}`}>
-                  {t.openCall}
+            <div>
+              <dt>{t.contact}</dt>
+              <dd>
+                <Link href={`/contacts/${detail.contact.id}`}>
+                  <bdi>{detail.contact.name ?? detail.contact.id}</bdi>
                 </Link>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+              </dd>
+            </div>
+            <div>
+              <dt>{t.phone}</dt>
+              <dd>
+                <bdi>{detail.contact.primaryPhone ?? "—"}</bdi>
+              </dd>
+            </div>
+            <div>
+              <dt>{t.email}</dt>
+              <dd>
+                <bdi>{detail.contact.email ?? "—"}</bdi>
+              </dd>
+            </div>
+            <div>
+              <dt>{t.status}</dt>
+              <dd>
+                <Badge label={t.statuses[lead.status]} />
+              </dd>
+            </div>
+            <div>
+              <dt>{t.source}</dt>
+              <dd>{channelLabel(t, lead.sourceChannel)}</dd>
+            </div>
+            <div>
+              <dt>{t.owner}</dt>
+              <dd>{lead.ownerName ?? t.unassigned}</dd>
+            </div>
+            <div>
+              {/* Provenance the operator can act on: which agent, at which frozen
+              version, under which reviewed schema. Not a success score. */}
+              <dt>{t.capturedBy}</dt>
+              <dd>
+                {lead.agentName === null
+                  ? t.manualEntry
+                  : `${lead.agentName} v${String(lead.agentVersion ?? 0)}`}
+              </dd>
+            </div>
+            <div>
+              <dt>{t.schema}</dt>
+              <dd>
+                {lead.fieldSchemaName === null
+                  ? t.noSchema
+                  : `${lead.fieldSchemaName} v${String(lead.fieldSchemaVersion ?? 0)}`}
+              </dd>
+            </div>
+            <div>
+              <dt>{t.capture}</dt>
+              <dd>
+                {completeness === null || done === null
+                  ? t.noCapture
+                  : `${String(done)}/${String(completeness.required.length)}`}
+              </dd>
+            </div>
+            <div>
+              <dt>{t.revision}</dt>
+              <dd>{lead.revision}</dd>
+            </div>
+            <div>
+              <dt>{t.created}</dt>
+              <dd>{formatter.format(new Date(lead.createdAt))}</dd>
+            </div>
+            <div>
+              <dt>{t.updated}</dt>
+              <dd>{formatter.format(new Date(lead.updatedAt))}</dd>
+            </div>
+            <div>
+              <dt>{t.conversation}</dt>
+              <dd>
+                {/* The Inbox selects a conversation by query parameter; there is no
+                per-conversation route to link to. */}
+                {detail.interaction.conversationId === null ? (
+                  t.noConversation
+                ) : (
+                  <Link
+                    href={`/inbox?conversation=${detail.interaction.conversationId}`}
+                  >
+                    {t.openConversation}
+                  </Link>
+                )}
+              </dd>
+            </div>
+          </dl>
+          <p className={styles.hint ?? ""}>{t.captureHint}</p>
+        </Surface>
 
-      <section aria-label={t.history}>
-        <h2>{t.history}</h2>
-        {detail.history.length === 0 ? (
-          <p className={styles.hint ?? ""}>{t.noHistory}</p>
-        ) : (
-          <ul className={styles.timeline ?? ""}>
-            {detail.history.map((entry) => (
-              <li key={`${entry.key}-${entry.observedAt}`}>
-                <span className={styles.timelineWhen ?? ""}>
-                  {formatter.format(new Date(entry.observedAt))}
-                </span>
-                <span className={styles.timelineKind ?? ""}>{entry.key}</span>
-                <span>
-                  <bdi>{entry.normalizedValue ?? t.states[entry.state]}</bdi>
-                </span>
-                <span className={styles.timelineVisibility ?? ""}>
-                  {t.recordedBy[entry.recordedBy]}
-                  {entry.supersededAt === null
-                    ? ""
-                    : ` · ${t.supersededAt} ${formatter.format(new Date(entry.supersededAt))}`}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+        <Surface className={styles.detailPanel ?? ""} aria-label={t.fields}>
+          <h2>{t.fields}</h2>
+          {detail.fields.length === 0 ? (
+            <p className={styles.hint ?? ""}>{t.noSchema}</p>
+          ) : (
+            <div className={styles.directory ?? ""}>
+              <DataTable label={t.fields}>
+                <thead>
+                  <tr>
+                    <th scope="col">{t.field}</th>
+                    <th scope="col">{t.value}</th>
+                    <th scope="col">{t.state}</th>
+                    <th scope="col">{t.confirmation}</th>
+                    <th scope="col">{t.fieldSource}</th>
+                    <th scope="col">{t.observed}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {detail.fields.map((field) => (
+                    <tr key={field.key}>
+                      <td className={styles.identityCell ?? ""}>
+                        {field.label}{" "}
+                        <span className={styles.sources ?? ""}>
+                          {field.required ? t.required : t.optional}
+                        </span>
+                      </td>
+                      <td>
+                        <span className={styles.cellLabel ?? ""}>
+                          {t.value}
+                        </span>
+                        <FieldValue field={field} />
+                      </td>
+                      <td>
+                        <span className={styles.cellLabel ?? ""}>
+                          {t.state}
+                        </span>
+                        {field.state === null ? "—" : t.states[field.state]}
+                      </td>
+                      <td>
+                        <span className={styles.cellLabel ?? ""}>
+                          {t.confirmation}
+                        </span>
+                        {field.confirmation === null
+                          ? "—"
+                          : t.confirmations[field.confirmation]}
+                      </td>
+                      <td>
+                        <span className={styles.cellLabel ?? ""}>
+                          {t.fieldSource}
+                        </span>
+                        {field.recordedBy === null
+                          ? "—"
+                          : `${t.recordedBy[field.recordedBy]} · ${channelLabel(t, field.sourceChannel)}`}
+                      </td>
+                      <td>
+                        <span className={styles.cellLabel ?? ""}>
+                          {t.observed}
+                        </span>
+                        {field.observedAt === null
+                          ? "—"
+                          : formatter.format(new Date(field.observedAt))}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </DataTable>
+            </div>
+          )}
+          <p className={styles.hint ?? ""}>{t.provenanceHint}</p>
+        </Surface>
 
-      <section aria-label={t.audit}>
-        <h2>{t.audit}</h2>
-        {detail.audit.length === 0 ? (
-          <p className={styles.hint ?? ""}>{t.noAudit}</p>
-        ) : (
-          <ul className={styles.timeline ?? ""}>
-            {detail.audit.map((entry) => (
-              <li key={`${entry.action}-${entry.occurredAt}`}>
-                <span className={styles.timelineWhen ?? ""}>
-                  {formatter.format(new Date(entry.occurredAt))}
-                </span>
-                <span className={styles.timelineKind ?? ""}>
-                  {entry.action}
-                </span>
-                <span>
-                  {t.actor}: {entry.actorName ?? t.system}
-                </span>
-              </li>
-            ))}
-          </ul>
+        {detail.fields.length === 0 ? null : (
+          <Surface
+            className={styles.detailPanel ?? ""}
+            aria-label={t.editFields}
+          >
+            <h2>{t.editFields}</h2>
+            <p className={styles.hint ?? ""}>{t.editHint}</p>
+            <div className={styles.editGrid ?? ""}>
+              {detail.fields.map((field) =>
+                field.type === "choice" && field.choices !== null ? (
+                  <Select
+                    id={`lead-field-${field.key}`}
+                    key={field.key}
+                    label={field.label}
+                    onChange={(event) => {
+                      setEdits((current) => ({
+                        ...current,
+                        [field.key]: event.target.value,
+                      }));
+                    }}
+                    value={edits[field.key] ?? field.normalizedValue ?? ""}
+                  >
+                    <option value="">—</option>
+                    {field.choices.map((choice) => (
+                      <option key={choice} value={choice}>
+                        {choice}
+                      </option>
+                    ))}
+                  </Select>
+                ) : (
+                  <Input
+                    id={`lead-field-${field.key}`}
+                    key={field.key}
+                    label={field.label}
+                    onChange={(event) => {
+                      setEdits((current) => ({
+                        ...current,
+                        [field.key]: event.target.value,
+                      }));
+                    }}
+                    value={edits[field.key] ?? field.normalizedValue ?? ""}
+                  />
+                ),
+              )}
+            </div>
+            <Button
+              disabled={pending}
+              onClick={() => {
+                void saveFields();
+              }}
+              type="button"
+            >
+              {pending ? t.saving : t.save}
+            </Button>
+          </Surface>
         )}
+
+        <Surface className={styles.detailPanel ?? ""} aria-label={t.manage}>
+          <h2>{t.manage}</h2>
+          <div className={styles.editGrid ?? ""}>
+            <Select
+              id="lead-status-edit"
+              label={t.status}
+              onChange={(event) => {
+                setStatus(event.target.value as LeadStatus);
+              }}
+              value={status}
+            >
+              {OPERATOR_STATUSES.map((value) => (
+                <option key={value} value={value}>
+                  {t.statuses[value]}
+                </option>
+              ))}
+            </Select>
+            <Select
+              id="lead-owner-edit"
+              label={t.owner}
+              onChange={(event) => {
+                setOwner(event.target.value);
+              }}
+              value={owner}
+            >
+              <option value="">{t.unassigned}</option>
+              {team.map((member) => (
+                <option key={member.userId} value={member.userId}>
+                  {member.name}
+                </option>
+              ))}
+            </Select>
+            <Input
+              id="lead-next-action"
+              label={t.nextAction}
+              onChange={(event) => {
+                setNextAction(event.target.value);
+              }}
+              value={nextAction}
+            />
+            <Input
+              id="lead-due"
+              label={t.due}
+              onChange={(event) => {
+                setDueAt(event.target.value);
+              }}
+              type="date"
+              value={dueAt}
+            />
+          </div>
+          <Textarea
+            id="lead-summary"
+            label={t.summary}
+            onChange={(event) => {
+              setSummary(event.target.value);
+            }}
+            rows={4}
+            value={summary}
+          />
+          <Button
+            disabled={pending}
+            onClick={() => {
+              void saveManagement();
+            }}
+            type="button"
+          >
+            {pending ? t.saving : t.save}
+          </Button>
+          {notice === null ? null : <p role="status">{notice}</p>}
+          {problem === null ? null : <p role="alert">{problem}</p>}
+        </Surface>
+
+        <Surface
+          className={styles.detailPanel ?? ""}
+          aria-label={t.qualification}
+        >
+          <h2>{t.qualification}</h2>
+          {Object.keys(detail.qualification).length === 0 ? (
+            <p className={styles.hint ?? ""}>{t.noQualification}</p>
+          ) : (
+            <dl className={styles.facts ?? ""}>
+              {Object.entries(detail.qualification).map(([key, value]) => (
+                <div key={key}>
+                  <dt>{key}</dt>
+                  <dd>
+                    <bdi>{JSON.stringify(value)}</bdi>
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          )}
+        </Surface>
+
+        <Surface className={styles.detailPanel ?? ""} aria-label={t.calls}>
+          <h2>{t.calls}</h2>
+          {detail.calls.length === 0 ? (
+            <p className={styles.hint ?? ""}>{t.noCalls}</p>
+          ) : (
+            <ul className={styles.timeline ?? ""}>
+              {detail.calls.map((call) => (
+                <li key={call.sessionId}>
+                  <span className={styles.timelineWhen ?? ""}>
+                    {call.startedAt === null
+                      ? "—"
+                      : formatter.format(new Date(call.startedAt))}
+                  </span>
+                  <span className={styles.timelineKind ?? ""}>
+                    {call.direction ?? "—"} · {call.status ?? "—"}
+                  </span>
+                  <span>
+                    {/* Stated from what is actually stored: a recording is listed
+                      as available only when one exists to play. */}
+                    {t.recording}:{" "}
+                    {call.recording === "available" ? t.available : t.missing} ·{" "}
+                    {t.transcript}:{" "}
+                    {call.transcript === "available" ? t.available : t.missing}
+                  </span>
+                  <Link href={`/voice/calls/${call.sessionId}`}>
+                    {t.openCall}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Surface>
+
+        <Surface className={styles.detailPanel ?? ""} aria-label={t.history}>
+          <h2>{t.history}</h2>
+          {detail.history.length === 0 ? (
+            <p className={styles.hint ?? ""}>{t.noHistory}</p>
+          ) : (
+            <ul className={styles.timeline ?? ""}>
+              {detail.history.map((entry) => (
+                <li key={`${entry.key}-${entry.observedAt}`}>
+                  <span className={styles.timelineWhen ?? ""}>
+                    {formatter.format(new Date(entry.observedAt))}
+                  </span>
+                  <span className={styles.timelineKind ?? ""}>{entry.key}</span>
+                  <span>
+                    <bdi>{entry.normalizedValue ?? t.states[entry.state]}</bdi>
+                  </span>
+                  <span className={styles.timelineVisibility ?? ""}>
+                    {t.recordedBy[entry.recordedBy]}
+                    {entry.supersededAt === null
+                      ? ""
+                      : ` · ${t.supersededAt} ${formatter.format(new Date(entry.supersededAt))}`}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Surface>
+
+        <Surface className={styles.detailPanel ?? ""} aria-label={t.audit}>
+          <h2>{t.audit}</h2>
+          {detail.audit.length === 0 ? (
+            <p className={styles.hint ?? ""}>{t.noAudit}</p>
+          ) : (
+            <ul className={styles.timeline ?? ""}>
+              {detail.audit.map((entry) => (
+                <li key={`${entry.action}-${entry.occurredAt}`}>
+                  <span className={styles.timelineWhen ?? ""}>
+                    {formatter.format(new Date(entry.occurredAt))}
+                  </span>
+                  <span className={styles.timelineKind ?? ""}>
+                    {entry.action}
+                  </span>
+                  <span>
+                    {t.actor}: {entry.actorName ?? t.system}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Surface>
       </section>
-    </section>
+    </>
   );
 }

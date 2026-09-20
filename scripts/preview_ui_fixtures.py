@@ -530,6 +530,51 @@ async def seed_preview_fixtures(url: str, database: str) -> dict[str, str]:
                     published_at=now if index == 0 else None,
                     created_by_user_id=USER_ID,
                 )
+            # Populated Leads UI acceptance uses only these owned fictional
+            # records; this is never a live-tenant seed or a provider action.
+            lead_records = (
+                ("new", "whatsapp", "Fictional customer onboarding", None),
+                (
+                    "collecting",
+                    "voice",
+                    "Fictional support workflow evaluation",
+                    "Review the pilot brief",
+                ),
+                (
+                    "ready_for_review",
+                    "whatsapp",
+                    "בדיקת מערכת הדגמה לצוות שירות רב־ערוצי",
+                    "תיאום שיחת הדגמה",
+                ),
+                (
+                    "qualified",
+                    "manual",
+                    "Fictional multi-location rollout with a deliberately long "
+                    "description to check narrow layouts",
+                    "Prepare a fictional follow-up",
+                ),
+                ("disqualified", "api", "Fictional archived opportunity", None),
+                ("converted", "manual", "Fictional completed evaluation", None),
+            )
+            for index, (status, source, objective, next_action) in enumerate(lead_records):
+                await insert(
+                    "crm.leads",
+                    id=fixture_id(f"lead-{index}"),
+                    tenant_id=TENANT_ID,
+                    reference=f"LD-PREVIEW{index + 1:02d}",
+                    contact_id=fixture_id(f"contact-{index}"),
+                    source_channel=source,
+                    agent_profile_version_id=(
+                        fixture_id("agent-version-0") if source in {"voice", "whatsapp"} else None
+                    ),
+                    status=status,
+                    business_objective=objective,
+                    next_action=next_action,
+                    owner_user_id=USER_ID if index % 2 else None,
+                    created_by_user_id=USER_ID,
+                    created_at=now - timedelta(days=index + 1),
+                    updated_at=now - timedelta(minutes=index * 17),
+                )
             for index in range(3):
                 flow_id = fixture_id(f"flow-{index}")
                 await insert(

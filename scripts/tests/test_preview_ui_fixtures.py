@@ -73,6 +73,41 @@ def test_owned_fixture_destination_is_accepted() -> None:
 
 
 @pytest.mark.asyncio
+async def test_lead_fixtures_cover_scoped_mixed_language_directory_states() -> None:
+    connection = MagicMock()
+    connection.fetchval = AsyncMock(return_value="oron_ui_preview_abc")
+    connection.execute = AsyncMock()
+    connection.close = AsyncMock()
+    connection.transaction.return_value.__aenter__ = AsyncMock()
+    connection.transaction.return_value.__aexit__ = AsyncMock()
+    with patch(
+        "scripts.preview_ui_fixtures.asyncpg.connect", new=AsyncMock(return_value=connection)
+    ):
+        await seed_preview_fixtures(
+            "postgresql://fixture@127.0.0.1/oron_ui_preview_abc", "oron_ui_preview_abc"
+        )
+    leads = []
+    for call in connection.execute.call_args_list:
+        query, *values = call.args
+        match = re.match(r"INSERT INTO crm\.leads \(([^)]+)\)", query)
+        if match:
+            leads.append(dict(zip(match[1].split(", "), values, strict=True)))
+    assert len(leads) == 6
+    assert {row["source_channel"] for row in leads} == {"voice", "whatsapp", "manual", "api"}
+    assert {row["status"] for row in leads} >= {
+        "new",
+        "collecting",
+        "ready_for_review",
+        "qualified",
+    }
+    assert any("הדגמה" in row["business_objective"] for row in leads)
+    for index, row in enumerate(leads):
+        assert str(row["tenant_id"]) == "10000000-0000-4000-8000-000000000001"
+        assert row["contact_id"] == fixture_id(f"contact-{index}")
+        assert row["reference"].startswith("LD-PREVIEW")
+
+
+@pytest.mark.asyncio
 async def test_settings_fixture_metadata_is_scoped_and_has_no_usable_credentials() -> None:
     connection = MagicMock()
     connection.fetchval = AsyncMock(return_value="oron_ui_preview_abc")

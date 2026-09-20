@@ -9,7 +9,16 @@ import type {
   LeadSourceChannel,
   LeadStatus,
 } from "@or-on/crm";
-import { Button, Input, Select } from "@or-on/ui";
+import {
+  Badge,
+  Button,
+  DataTable,
+  Input,
+  PageHeader,
+  Select,
+  Surface,
+} from "@or-on/ui";
+import { ChevronRight, SearchX } from "lucide-react";
 import { useLocale } from "next-intl";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -26,11 +35,19 @@ export interface LeadTeamMember {
 const COPY = {
   en: {
     title: "Leads",
+    eyebrow: "Customer relationships",
+    register: "Lead register",
     subtitle:
       "Commercial interest captured by agents, with the fields collected for each one.",
     open: "Open",
     all: "All",
-    search: "Search reference, objective, contact or phone…",
+    search: "Search leads by reference, objective, contact or phone…",
+    searchLabel: "Search leads",
+    moreFilters: "More filters",
+    resetFilters: "Reset filters",
+    ownership: "Ownership",
+    lead: "Lead & contact",
+    openLead: "Open lead {reference}",
     reference: "Reference",
     contact: "Contact",
     objective: "Interest",
@@ -55,8 +72,12 @@ const COPY = {
     since: "Updated since",
     loadMore: "Load more",
     loading: "Loading…",
-    empty: "No leads match this view",
-    emptyHint: "Change the filters or clear the search.",
+    empty: "No open leads",
+    emptyHint:
+      "New leads captured from conversations appear here for review and follow-up.",
+    noMatches: "No leads match these filters",
+    noMatchesHint: "Try another search or reset the filters to see open leads.",
+    allEmpty: "No leads yet",
     failed: "Leads could not be loaded.",
     retry: "Retry",
     matching: "{count} matching",
@@ -82,10 +103,18 @@ const COPY = {
   },
   he: {
     title: "לידים",
+    eyebrow: "קשרי לקוחות",
+    register: "רשימת לידים",
     subtitle: "התעניינות עסקית שנאספה על ידי הסוכנים, עם השדות שנאספו לכל אחת.",
     open: "פתוחים",
     all: "הכול",
-    search: "חיפוש לפי מספר ליד, תחום עניין, איש קשר או טלפון…",
+    search: "חיפוש לידים לפי מספר ליד, תחום עניין, איש קשר או טלפון…",
+    searchLabel: "חיפוש לידים",
+    moreFilters: "מסננים נוספים",
+    resetFilters: "איפוס מסננים",
+    ownership: "טיפול ואחריות",
+    lead: "ליד ואיש קשר",
+    openLead: "פתיחת ליד {reference}",
     reference: "מספר ליד",
     contact: "איש קשר",
     objective: "תחום עניין",
@@ -110,8 +139,11 @@ const COPY = {
     since: "עודכן מאז",
     loadMore: "טעינת עוד",
     loading: "טוען…",
-    empty: "אין לידים שמתאימים לתצוגה הזאת",
-    emptyHint: "שנו את המסננים או נקו את החיפוש.",
+    empty: "אין לידים פתוחים",
+    emptyHint: "לידים חדשים שייאספו מהשיחות יופיעו כאן לבדיקה ולהמשך טיפול.",
+    noMatches: "אין לידים שמתאימים למסננים",
+    noMatchesHint: "נסו חיפוש אחר או אפסו את המסננים כדי לראות לידים פתוחים.",
+    allEmpty: "עדיין אין לידים",
     failed: "לא הצלחנו לטעון את הלידים.",
     retry: "נסו שוב",
     matching: "{count} תואמים",
@@ -153,6 +185,15 @@ const CHANNELS: readonly LeadSourceChannel[] = [
   "api",
 ];
 const SORTS: readonly LeadSortKey[] = ["updated", "created", "due"];
+const STATUS_TONES = {
+  new: "info",
+  collecting: "neutral",
+  ready_for_review: "warning",
+  qualified: "positive",
+  disqualified: "neutral",
+  converted: "positive",
+  archived: "neutral",
+} as const;
 
 interface Cursor {
   readonly sortAt: string;
@@ -335,224 +376,359 @@ export function LeadsWorkspace({
   const update = (change: Partial<Filters>) => {
     setFilters((current) => ({ ...current, ...change }));
   };
+  const hasFilters =
+    (filters.status !== "open" && filters.status !== "all") ||
+    filters.channel !== "" ||
+    filters.owner !== "" ||
+    filters.agent !== "" ||
+    filters.since !== "" ||
+    filters.query.trim() !== "";
+  const canReset =
+    hasFilters || filters.status !== "open" || filters.sort !== "updated";
+  const secondaryFilterCount = [
+    filters.owner,
+    filters.agent,
+    filters.since,
+  ].filter(Boolean).length;
+  const resetFilters = () => {
+    setFilters(filtersFromSearch(new URLSearchParams()));
+  };
 
   return (
-    <section className={styles.workspace ?? ""}>
-      <header className={styles.header ?? ""}>
-        <div>
-          <h1>{t.title}</h1>
-          <p>{t.subtitle}</p>
-        </div>
-        <p className={styles.count ?? ""}>
-          {t.matching.replace("{count}", String(counts.total))}
-        </p>
-      </header>
-
-      <div className={styles.filters ?? ""} role="group" aria-label={t.title}>
-        <div className={styles.statusTabs ?? ""} role="tablist">
-          {(["open", "all"] as const).map((value) => (
-            <button
-              aria-selected={filters.status === value}
-              className={styles.statusTab ?? ""}
-              key={value}
-              onClick={() => {
-                update({ status: value });
-              }}
-              role="tab"
-              type="button"
+    <>
+      <PageHeader
+        className="page-heading page-heading--premium"
+        description={t.subtitle}
+        eyebrow={t.eyebrow}
+        title={t.title}
+      />
+      <section className={styles.workspace ?? ""} aria-label={t.register}>
+        <Surface className={styles.resource ?? ""}>
+          <header className={styles.resourceHeader ?? ""}>
+            <div
+              className={styles.statusTabs ?? ""}
+              role="group"
+              aria-label={t.status}
             >
-              {t[value]}
-            </button>
-          ))}
-        </div>
-        <Select
-          id="lead-status"
-          label={t.status}
-          onChange={(event) => {
-            update({
-              status: event.target.value as LeadStatus | "all" | "open",
-            });
-          }}
-          value={filters.status}
-        >
-          <option value="open">{t.open}</option>
-          <option value="all">{t.anyStatus}</option>
-          {STATUSES.map((value) => (
-            <option key={value} value={value}>
-              {/* Each badge counts the same set the tab would show, because the
-                  server applies one predicate to the rows and the counts. */}
-              {t.statuses[value]} ({counts.byStatus[value]})
-            </option>
-          ))}
-        </Select>
-        <Select
-          id="lead-channel"
-          label={t.source}
-          onChange={(event) => {
-            update({ channel: event.target.value as LeadSourceChannel | "" });
-          }}
-          value={filters.channel}
-        >
-          <option value="">{t.anyChannel}</option>
-          {CHANNELS.map((value) => (
-            <option key={value} value={value}>
-              {t.channels[value]}
-            </option>
-          ))}
-        </Select>
-        <Select
-          id="lead-owner"
-          label={t.owner}
-          onChange={(event) => {
-            update({ owner: event.target.value });
-          }}
-          value={filters.owner}
-        >
-          <option value="">{t.anyOwner}</option>
-          <option value="none">{t.unassigned}</option>
-          {team.map((member) => (
-            <option key={member.userId} value={member.userId}>
-              {member.name}
-            </option>
-          ))}
-        </Select>
-        <Select
-          id="lead-agent"
-          label={t.agent}
-          onChange={(event) => {
-            update({ agent: event.target.value });
-          }}
-          value={filters.agent}
-        >
-          <option value="">{t.anyAgent}</option>
-          {agents.map((agent) => (
-            <option
-              key={agent.agentProfileVersionId}
-              value={agent.agentProfileVersionId}
-            >
-              {agent.name} v{agent.version}
-            </option>
-          ))}
-        </Select>
-        <Select
-          id="lead-sort"
-          label={t.sort}
-          onChange={(event) => {
-            update({ sort: event.target.value as LeadSortKey });
-          }}
-          value={filters.sort}
-        >
-          {SORTS.map((value) => (
-            <option key={value} value={value}>
-              {t[value]}
-            </option>
-          ))}
-        </Select>
-        <Input
-          id="lead-since"
-          label={t.since}
-          onChange={(event) => {
-            update({ since: event.target.value });
-          }}
-          type="date"
-          value={filters.since}
-        />
-        <Input
-          id="lead-search"
-          label={t.search}
-          onChange={(event) => {
-            update({ query: event.target.value });
-          }}
-          placeholder={t.search}
-          type="search"
-          value={filters.query}
-        />
-      </div>
+              {(["open", "all"] as const).map((value) => (
+                <button
+                  aria-pressed={filters.status === value}
+                  className={styles.statusTab ?? ""}
+                  key={value}
+                  onClick={() => {
+                    update({ status: value });
+                  }}
+                  type="button"
+                >
+                  {t[value]}
+                </button>
+              ))}
+            </div>
+            <p className={styles.count ?? ""} role="status" aria-live="polite">
+              {busy
+                ? t.loading
+                : t.matching.replace(
+                    "{count}",
+                    new Intl.NumberFormat(locale).format(counts.total),
+                  )}
+            </p>
+          </header>
 
-      {failed ? (
-        <div className={styles.empty ?? ""} role="alert">
-          <p>{t.failed}</p>
-          <Button
-            onClick={() => {
-              void load(null);
-            }}
-            type="button"
+          <div
+            className={styles.filters ?? ""}
+            role="group"
+            aria-label={t.title}
           >
-            {t.retry}
-          </Button>
-        </div>
-      ) : leads.length === 0 && !busy ? (
-        <div className={styles.empty ?? ""}>
-          <p>{t.empty}</p>
-          <p>{t.emptyHint}</p>
-        </div>
-      ) : (
-        <table className={styles.table ?? ""}>
-          <thead>
-            <tr>
-              <th scope="col">{t.reference}</th>
-              <th scope="col">{t.contact}</th>
-              <th scope="col">{t.objective}</th>
-              <th scope="col">{t.status}</th>
-              <th scope="col">{t.source}</th>
-              <th scope="col">{t.owner}</th>
-              <th scope="col">{t.agent}</th>
-              <th scope="col">{t.capture}</th>
-              <th scope="col">{t.nextAction}</th>
-              <th scope="col">{t.updated}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {leads.map((lead) => (
-              <tr key={lead.id}>
-                <td>
-                  {/* A reference is a Latin identifier inside a Hebrew page;
-                      isolating it keeps the surrounding text ordered. */}
-                  <Link href={`/leads/${lead.id}`}>
-                    <bdi>{lead.reference}</bdi>
-                  </Link>
-                </td>
-                <td>
-                  <Link href={`/contacts/${lead.contactId}`}>
-                    {lead.contactName ?? lead.contactId}
-                  </Link>
-                </td>
-                <td>{lead.businessObjective ?? lead.interestKey ?? "—"}</td>
-                <td>{t.statuses[lead.status]}</td>
-                <td>{t.channels[lead.sourceChannel]}</td>
-                <td>{lead.ownerName ?? t.noOwner}</td>
-                <td>
-                  {lead.agentName === null
-                    ? t.noAgent
-                    : `${lead.agentName} v${String(lead.agentVersion ?? 0)}`}
-                </td>
-                <td>
-                  <Completeness
-                    lead={lead}
-                    noSchema={t.noSchema}
-                    template={t.completeness}
-                  />
-                </td>
-                <td>{lead.nextAction ?? t.noNextAction}</td>
-                <td>{formatter.format(new Date(lead.updatedAt))}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+            <Input
+              id="lead-search"
+              label={t.searchLabel}
+              aria-label={t.search}
+              onChange={(event) => {
+                update({ query: event.target.value });
+              }}
+              placeholder={t.search}
+              type="search"
+              value={filters.query}
+            />
+            <Select
+              id="lead-status"
+              label={t.status}
+              onChange={(event) => {
+                update({
+                  status: event.target.value as LeadStatus | "all" | "open",
+                });
+              }}
+              value={filters.status}
+            >
+              <option value="open">{t.open}</option>
+              <option value="all">{t.anyStatus}</option>
+              {STATUSES.map((value) => (
+                <option key={value} value={value}>
+                  {/* Each badge counts the same set the tab would show, because the
+                  server applies one predicate to the rows and the counts. */}
+                  {t.statuses[value]} ({counts.byStatus[value]})
+                </option>
+              ))}
+            </Select>
+            <Select
+              id="lead-channel"
+              label={t.source}
+              onChange={(event) => {
+                update({
+                  channel: event.target.value as LeadSourceChannel | "",
+                });
+              }}
+              value={filters.channel}
+            >
+              <option value="">{t.anyChannel}</option>
+              {CHANNELS.map((value) => (
+                <option key={value} value={value}>
+                  {t.channels[value]}
+                </option>
+              ))}
+            </Select>
+            <Select
+              id="lead-sort"
+              label={t.sort}
+              onChange={(event) => {
+                update({ sort: event.target.value as LeadSortKey });
+              }}
+              value={filters.sort}
+            >
+              {SORTS.map((value) => (
+                <option key={value} value={value}>
+                  {t[value]}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div className={styles.filterTools ?? ""}>
+            <details
+              className={styles.moreFilters ?? ""}
+              open={secondaryFilterCount > 0 ? true : undefined}
+            >
+              <summary>
+                {t.moreFilters}
+                {secondaryFilterCount > 0
+                  ? ` (${String(secondaryFilterCount)})`
+                  : ""}
+              </summary>
+              <div className={styles.secondaryFilters ?? ""}>
+                <Select
+                  id="lead-owner"
+                  label={t.owner}
+                  onChange={(event) => {
+                    update({ owner: event.target.value });
+                  }}
+                  value={filters.owner}
+                >
+                  <option value="">{t.anyOwner}</option>
+                  <option value="none">{t.unassigned}</option>
+                  {team.map((member) => (
+                    <option key={member.userId} value={member.userId}>
+                      {member.name}
+                    </option>
+                  ))}
+                </Select>
+                <Select
+                  id="lead-agent"
+                  label={t.agent}
+                  onChange={(event) => {
+                    update({ agent: event.target.value });
+                  }}
+                  value={filters.agent}
+                >
+                  <option value="">{t.anyAgent}</option>
+                  {agents.map((agent) => (
+                    <option
+                      key={agent.agentProfileVersionId}
+                      value={agent.agentProfileVersionId}
+                    >
+                      {agent.name} v{agent.version}
+                    </option>
+                  ))}
+                </Select>
+                <Input
+                  id="lead-since"
+                  label={t.since}
+                  onChange={(event) => {
+                    update({ since: event.target.value });
+                  }}
+                  type="date"
+                  value={filters.since}
+                />
+              </div>
+            </details>
+            {canReset ? (
+              <Button onClick={resetFilters} type="button" variant="quiet">
+                {t.resetFilters}
+              </Button>
+            ) : null}
+          </div>
 
-      {cursor !== null && !failed ? (
-        <Button
-          disabled={busy}
-          onClick={() => {
-            void load(cursor);
-          }}
-          type="button"
-        >
-          {busy ? t.loading : t.loadMore}
-        </Button>
-      ) : null}
-      <p className={styles.hint ?? ""}>{t.captureHint}</p>
-    </section>
+          <div aria-busy={busy} className={styles.results ?? ""}>
+            {failed ? (
+              <div className={styles.empty ?? ""} role="alert">
+                <p>{t.failed}</p>
+                <Button
+                  onClick={() => {
+                    void load(null);
+                  }}
+                  type="button"
+                >
+                  {t.retry}
+                </Button>
+              </div>
+            ) : leads.length === 0 ? (
+              <div className={styles.empty ?? ""}>
+                {busy ? (
+                  <p>{t.loading}</p>
+                ) : (
+                  <>
+                    <SearchX aria-hidden="true" size={26} />
+                    <h2>
+                      {hasFilters
+                        ? t.noMatches
+                        : filters.status === "all"
+                          ? t.allEmpty
+                          : t.empty}
+                    </h2>
+                    <p>{hasFilters ? t.noMatchesHint : t.emptyHint}</p>
+                    {hasFilters ? (
+                      <Button
+                        onClick={resetFilters}
+                        type="button"
+                        variant="secondary"
+                      >
+                        {t.resetFilters}
+                      </Button>
+                    ) : null}
+                  </>
+                )}
+              </div>
+            ) : (
+              <div className={styles.directory ?? ""}>
+                <DataTable label={t.register} minWidth="64rem">
+                  <thead>
+                    <tr>
+                      <th scope="col">{t.lead}</th>
+                      <th scope="col">{t.objective}</th>
+                      <th scope="col">{t.status}</th>
+                      <th scope="col">{t.ownership}</th>
+                      <th scope="col">{t.capture}</th>
+                      <th scope="col">{t.updated}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {leads.map((lead) => (
+                      <tr key={lead.id}>
+                        <td className={styles.identityCell ?? ""}>
+                          {/* A reference is a Latin identifier inside a Hebrew page;
+                      isolating it keeps the surrounding text ordered. */}
+                          <Link
+                            className={styles.leadLink ?? ""}
+                            href={`/leads/${lead.id}`}
+                            aria-label={t.openLead.replace(
+                              "{reference}",
+                              lead.reference,
+                            )}
+                          >
+                            <bdi>{lead.reference}</bdi>
+                            <ChevronRight aria-hidden="true" size={16} />
+                          </Link>
+                          <Link
+                            className={styles.secondary ?? ""}
+                            href={`/contacts/${lead.contactId}`}
+                          >
+                            <bdi>{lead.contactName ?? lead.contactId}</bdi>
+                          </Link>
+                        </td>
+                        <td>
+                          <span className={styles.cellLabel ?? ""}>
+                            {t.objective}
+                          </span>
+                          <span className={styles.primary ?? ""}>
+                            <bdi>
+                              {lead.businessObjective ??
+                                lead.interestKey ??
+                                "—"}
+                            </bdi>
+                          </span>
+                          <span className={styles.secondary ?? ""}>
+                            {t.nextAction}:{" "}
+                            <bdi>{lead.nextAction ?? t.noNextAction}</bdi>
+                          </span>
+                        </td>
+                        <td>
+                          <span className={styles.cellLabel ?? ""}>
+                            {t.status}
+                          </span>
+                          <Badge
+                            label={t.statuses[lead.status]}
+                            tone={STATUS_TONES[lead.status]}
+                          />
+                          <span className={styles.secondary ?? ""}>
+                            {t.channels[lead.sourceChannel]}
+                          </span>
+                        </td>
+                        <td>
+                          <span className={styles.cellLabel ?? ""}>
+                            {t.ownership}
+                          </span>
+                          <span className={styles.primary ?? ""}>
+                            <bdi>{lead.ownerName ?? t.noOwner}</bdi>
+                          </span>
+                          <span className={styles.secondary ?? ""}>
+                            {t.agent}:{" "}
+                            <bdi>
+                              {lead.agentName === null
+                                ? t.noAgent
+                                : `${lead.agentName} v${String(lead.agentVersion ?? 0)}`}
+                            </bdi>
+                          </span>
+                        </td>
+                        <td>
+                          <span className={styles.cellLabel ?? ""}>
+                            {t.capture}
+                          </span>
+                          <Completeness
+                            lead={lead}
+                            noSchema={t.noSchema}
+                            template={t.completeness}
+                          />
+                        </td>
+                        <td>
+                          <span className={styles.cellLabel ?? ""}>
+                            {t.updated}
+                          </span>
+                          <time dateTime={lead.updatedAt}>
+                            {formatter.format(new Date(lead.updatedAt))}
+                          </time>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </DataTable>
+              </div>
+            )}
+          </div>
+
+          {cursor !== null && !failed ? (
+            <div className={styles.pagination ?? ""}>
+              <Button
+                disabled={busy}
+                onClick={() => {
+                  void load(cursor);
+                }}
+                type="button"
+              >
+                {busy ? t.loading : t.loadMore}
+              </Button>
+            </div>
+          ) : null}
+        </Surface>
+        <p className={styles.hint ?? ""}>{t.captureHint}</p>
+      </section>
+    </>
   );
 }

@@ -4,51 +4,80 @@
   min-inline-size: 0;
 }
 
-.header {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-}
-
-.header h1 {
-  margin: 0;
-  font-size: clamp(1.65rem, 2.5vw, 2rem);
-  font-weight: 620;
-  line-height: 1.15;
-  letter-spacing: -0.045em;
-}
-
-.header p {
-  margin: 0.25rem 0 0;
-  color: var(--text-muted);
-}
-
 .count {
   margin: 0;
-  color: var(--text-muted);
+  color: var(--or-text-muted);
+  font-size: var(--or-text-meta);
   font-variant-numeric: tabular-nums;
 }
 
-.legacy {
-  font-size: 0.9rem;
-  color: var(--text-muted);
-  text-decoration: underline;
+.resource {
+  overflow: hidden;
+  padding: 0;
+  min-inline-size: 0;
+}
+
+.resourceHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 1rem;
+  border-block-end: 1px solid var(--or-border);
 }
 
 .filters {
+  display: grid;
+  grid-template-columns: minmax(16rem, 2fr) repeat(3, minmax(9rem, 1fr));
+  align-items: end;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+.filters > *,
+.secondaryFilters > * {
+  min-inline-size: 0;
+}
+
+.filterTools {
   display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
+  align-items: start;
+  gap: 1rem;
+  padding: 0 1rem 1rem;
+}
+
+.filterTools > button {
+  flex-shrink: 0;
+}
+
+.moreFilters {
+  flex: 1;
+  min-inline-size: 0;
+}
+
+.moreFilters summary {
+  inline-size: fit-content;
+  min-block-size: 2.75rem;
+  padding-block: 0.65rem;
+  color: var(--or-text-muted);
+  cursor: pointer;
+  font-size: var(--or-text-meta);
+  font-weight: 600;
+}
+
+.secondaryFilters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  padding-block-start: 0.75rem;
 }
 
 .statusTabs {
   display: inline-flex;
   gap: 0.25rem;
   padding: 0.2rem;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--or-border);
   border-radius: 0.6rem;
 }
 
@@ -60,64 +89,148 @@
   border-radius: 0.45rem;
   cursor: pointer;
   font: inherit;
+  min-block-size: 2.5rem;
 }
 
-.statusTab[aria-selected="true"] {
-  background: var(--surface-raised);
+.statusTab[aria-pressed="true"] {
+  background: var(--or-surface-selected);
   font-weight: 600;
 }
 
-.table {
-  inline-size: 100%;
-  border-collapse: collapse;
-  /* Logical properties throughout: the same rules lay out correctly in the
-     Hebrew right-to-left workspace without a mirrored stylesheet. */
-  text-align: start;
+.statusTab:focus-visible,
+.moreFilters summary:focus-visible,
+.directory a:focus-visible {
+  outline: 2px solid var(--or-focus);
+  outline-offset: 2px;
 }
 
-.table th,
-.table td {
-  text-align: start;
-  padding: 0.6rem 0.75rem;
-  border-block-end: 1px solid var(--border-subtle);
-  white-space: nowrap;
+.results {
+  border-block-start: 1px solid var(--or-border);
 }
 
-.table td:nth-child(3) {
+.directory {
+  min-inline-size: 0;
+}
+
+.directory :global(.or-data-table) {
+  border: 0;
+  border-radius: 0;
+}
+
+.directory th,
+.directory td {
+  text-align: start;
   white-space: normal;
-  min-inline-size: 12rem;
+  overflow-wrap: anywhere;
+  vertical-align: top;
+}
+
+.directory th:first-child {
+  inline-size: 18%;
+}
+
+.directory th:nth-child(2) {
+  inline-size: 24%;
+}
+
+.directory th:nth-child(3) {
+  inline-size: 14%;
+}
+
+.directory th:nth-child(4) {
+  inline-size: 20%;
+}
+
+.primary,
+.secondary {
+  display: block;
+}
+
+.primary {
+  font-weight: 550;
+}
+
+.secondary {
+  margin-block-start: 0.35rem;
+  color: var(--or-text-muted);
+  font-size: var(--or-text-meta);
+  line-height: 1.5;
+}
+
+.leadLink {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-block-size: 1.5rem;
+  font-weight: 650;
+}
+
+.leadLink svg {
+  flex-shrink: 0;
+  color: var(--or-text-muted);
+}
+
+:global([dir="rtl"]) .leadLink svg {
+  transform: rotate(180deg);
+}
+
+.cellLabel {
+  display: none;
+}
+
+.pagination {
+  display: flex;
+  justify-content: center;
+  border-block-start: 1px solid var(--or-border);
+  padding: 1rem;
 }
 
 .empty {
   display: grid;
   gap: 0.5rem;
   justify-items: center;
-  padding: 2.5rem 1rem;
-  color: var(--text-muted);
+  padding: 3rem 1.25rem;
+  color: var(--or-text-muted);
   text-align: center;
+}
+
+.empty h2 {
+  margin: 0.5rem 0 0;
+  color: var(--or-text-primary);
+  font-size: var(--or-text-section);
+}
+
+.empty p {
+  max-inline-size: 32rem;
+  margin: 0 0 0.5rem;
 }
 
 .hint {
   margin: 0;
   font-size: 0.85rem;
-  color: var(--text-muted);
+  color: var(--or-text-muted);
+  line-height: 1.6;
 }
 
 .facts {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
   gap: 0.75rem 1.5rem;
   margin: 0;
 }
 
 .facts div {
   display: grid;
+  align-content: start;
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
   gap: 0.15rem;
 }
 
 .facts dt {
   font-size: 0.8rem;
-  color: var(--text-muted);
+  color: var(--or-text-muted);
 }
 
 .facts dd {
@@ -129,14 +242,41 @@
    heading: a recorded answer and where it came from belong in the same line. */
 .sources {
   font-size: 0.8rem;
-  color: var(--text-muted);
+  color: var(--or-text-muted);
 }
 
 .editGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
   gap: 0.75rem 1rem;
   margin-block-end: 0.75rem;
+}
+
+.detailPanel {
+  display: grid;
+  gap: 1rem;
+  min-inline-size: 0;
+  padding: clamp(1rem, 2vw, 1.5rem);
+}
+
+.detailPanel h2 {
+  margin: 0;
+  font-size: var(--or-text-section);
+  font-weight: 650;
+}
+
+.detailPanel > button {
+  justify-self: start;
+}
+
+.detailPanel .directory {
+  border: 1px solid var(--or-border);
+  border-radius: var(--or-radius-md);
+  overflow: hidden;
+}
+
+.detailPanel :global(.or-field) {
+  min-inline-size: 0;
 }
 
 .timeline {
@@ -149,43 +289,111 @@
 
 .timeline li {
   display: grid;
-  grid-template-columns: auto auto 1fr auto;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
   gap: 0.75rem;
   align-items: baseline;
   padding-block: 0.4rem;
-  border-block-end: 1px solid var(--border-subtle);
+  border-block-end: 1px solid var(--or-border);
+}
+
+.timeline li > * {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
 }
 
 .timelineWhen,
 .timelineKind,
 .timelineVisibility {
   font-size: 0.82rem;
-  color: var(--text-muted);
-  white-space: nowrap;
+  color: var(--or-text-muted);
 }
 
-@media (max-width: 60rem) {
-  .table thead {
-    display: none;
+/* The persistent desktop sidebar also consumes width: compact the register
+   before its four filter columns or desktop table can clip at tablet sizes. */
+@media (max-width: 80rem) {
+  .filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .table tr {
+  .filterTools {
+    flex-wrap: wrap;
+  }
+
+  .directory {
+    padding: 0.75rem;
+  }
+
+  .directory :global(.or-data-table) {
+    overflow: visible;
+  }
+
+  .directory table,
+  .directory tbody {
     display: grid;
-    gap: 0.2rem;
-    padding-block: 0.6rem;
-    border-block-end: 1px solid var(--border-subtle);
+    min-width: 0 !important;
+    inline-size: 100%;
+    gap: 0.75rem;
   }
 
-  .table td {
+  /* Keep column headings available to assistive technology even when rows
+     become labeled cards. */
+  .directory thead {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .directory tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+    padding: 1rem;
+    border: 1px solid var(--or-border);
+    border-radius: var(--or-radius-md);
+    background: var(--or-surface);
+  }
+
+  .directory td {
+    min-inline-size: 0;
+    padding: 0;
     border: 0;
-    padding: 0.1rem 0;
-    white-space: normal;
+  }
+
+  .identityCell {
+    grid-column: 1 / -1;
+    padding-block-end: 0.75rem !important;
+    border-block-end: 1px solid var(--or-border) !important;
+  }
+
+  .cellLabel {
+    display: block;
+    margin-block-end: 0.35rem;
+    color: var(--or-text-muted);
+    font-size: var(--or-text-meta);
+    font-weight: 500;
+  }
+
+  .timeline li {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.35rem;
   }
 }
 
-@media (max-width: 45rem) {
-  .timeline li {
-    grid-template-columns: 1fr;
-    gap: 0.15rem;
+@media (max-width: 35rem) {
+  .filters,
+  .secondaryFilters,
+  .directory tr {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .moreFilters {
+    flex-basis: 100%;
+  }
+
+  .directory .leadLink,
+  .directory .identityCell > a {
+    min-block-size: 2rem;
   }
 }

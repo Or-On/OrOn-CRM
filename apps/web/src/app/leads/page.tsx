@@ -108,7 +108,7 @@ export default async function LeadsPage({
       return { page, counts, team, agents, settings };
     });
     return (
-      <main className="page page--wide">
+      <main className="page page--wide page--workspace-premium">
         <LeadsWorkspace
           agents={data.agents}
           initialCounts={data.counts}
