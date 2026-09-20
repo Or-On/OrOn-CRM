@@ -11,6 +11,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ManagementPanel } from "../src/features/management";
+import { IdentityImage } from "../src/features/identity";
 import en from "../src/i18n/messages/en.json";
 import he from "../src/i18n/messages/he.json";
 import { localized } from "./localized";
@@ -42,6 +43,7 @@ const props = {
     isSuperuser: false,
   },
   currentUserId: "fictional-owner",
+  tenantId: "fictional-tenant",
   tenantName: "Fictional workspace",
   canManageMembers: true,
   canManageTenant: true,
@@ -136,10 +138,95 @@ describe("tenant settings controls", () => {
       workspace.getByRole("button", { name: en.management.removeLogo }),
     );
     await waitFor(() =>
-      expect(state.image).toHaveBeenCalledWith("/api/settings/logo", {
-        method: "DELETE",
-      }),
+      expect(state.image).toHaveBeenCalledWith(
+        "/api/settings/logo?context=fictional-tenant",
+        { method: "DELETE" },
+      ),
     );
+  });
+
+  it("broadcasts a successful upload only to the rendered tenant's logo copies", async () => {
+    const { container } = render(
+      localized(
+        <>
+          <IdentityImage
+            contextKey="other-tenant"
+            fallback="O"
+            source="/api/settings/logo"
+          />
+          <ManagementPanel {...props} />
+        </>,
+      ),
+    );
+    const other = container.querySelector('img[src*="context=other-tenant"]');
+    if (!other) throw new Error("Other tenant logo missing");
+    fireEvent.load(other);
+    const workspace = tab(en.management.workspaceTab);
+    const file = new File(["fictional-image"], "logo.png", {
+      type: "image/png",
+    });
+    fireEvent.change(workspace.getByLabelText(en.management.uploadLogo), {
+      target: { files: [file] },
+    });
+    await waitFor(() =>
+      expect(state.image).toHaveBeenCalledWith(
+        "/api/settings/logo?context=fictional-tenant",
+        { file, method: "PATCH" },
+      ),
+    );
+    await waitFor(() =>
+      expect(workspace.getByRole("status").textContent).toBe(
+        en.management.logoUpdated,
+      ),
+    );
+    for (const mark of container.querySelectorAll(
+      'img[src*="context=fictional-tenant"]',
+    ))
+      expect(mark.getAttribute("src")).toContain(
+        "?v=1&context=fictional-tenant",
+      );
+    expect(other.getAttribute("src")).toContain("?v=0&context=other-tenant");
+    expect(other.getAttribute("data-loaded")).toBe("true");
+  });
+
+  it("explains stale workspace logo edits in Hebrew without announcing a successful update", async () => {
+    state.image.mockRejectedValue(
+      new Error("Workspace changed. Refresh before changing its logo."),
+    );
+    const { container } = render(
+      localized(<ManagementPanel {...props} />, "he"),
+    );
+    const workspace = tab(he.management.workspaceTab);
+    fireEvent.click(
+      workspace.getByRole("button", { name: he.management.removeLogo }),
+    );
+    await waitFor(() =>
+      expect(workspace.getByRole("alert").textContent).toBe(
+        he.management.logoContextChanged,
+      ),
+    );
+    expect(workspace.queryByRole("status")).toBeNull();
+    for (const mark of container.querySelectorAll(
+      'img[src*="context=fictional-tenant"]',
+    ))
+      expect(mark.getAttribute("src")).toContain(
+        "?v=0&context=fictional-tenant",
+      );
+  });
+
+  it("keeps unknown logo failures localized without exposing backend details", async () => {
+    state.image.mockRejectedValue(new Error("Private backend diagnostic"));
+    render(localized(<ManagementPanel {...props} />, "he"));
+    const workspace = tab(he.management.workspaceTab);
+    fireEvent.click(
+      workspace.getByRole("button", { name: he.management.removeLogo }),
+    );
+    await waitFor(() =>
+      expect(workspace.getByRole("alert").textContent).toBe(
+        he.management.imageFailed,
+      ),
+    );
+    expect(screen.queryByText("Private backend diagnostic")).toBeNull();
   });
 
   it("uses real personal preference controls and preserves account drafts across categories", async () => {

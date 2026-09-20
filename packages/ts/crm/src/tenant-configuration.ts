@@ -19,6 +19,7 @@ import {
 } from "./tenant-processes.js";
 import type { JsonValue } from "./types.js";
 import { parseServiceWorkflowPolicy } from "./service-workflow.js";
+import { parseLeadFieldSchema } from "./lead-schema.js";
 export { configurationFromTemplate } from "./tenant-configuration-client.js";
 
 /** A reviewed package is data, never executable tenant-supplied code. */
@@ -249,15 +250,21 @@ export async function validateTenantConfiguration(
         flow_channels: readonly string[];
         tool_permissions: unknown;
         flow_agent: string | null;
+        lead_schema_definition: unknown;
       }[]
     >`
       SELECT agent.channel_capabilities AS channels,definition.channel_capabilities AS flow_channels,
-        agent.tool_permissions,flow.agent_profile_version_id AS flow_agent
+        agent.tool_permissions,flow.agent_profile_version_id AS flow_agent,
+        lead_schema.definition AS lead_schema_definition
       FROM agents.agent_profile_versions agent
       JOIN agents.agent_profiles profile ON profile.id=agent.agent_profile_id
       JOIN automation.flow_versions flow ON flow.id=${process.flowVersionId}::uuid
         AND flow.tenant_id=agent.tenant_id
       JOIN automation.flow_definitions definition ON definition.id=flow.flow_definition_id
+      LEFT JOIN crm.lead_field_schemas lead_schema
+        ON lead_schema.tenant_id=agent.tenant_id
+        AND lead_schema.id::text=lower(agent.channel_configuration->>'leadFieldSchemaId')
+        AND lead_schema.published_at IS NOT NULL
       WHERE agent.id=${process.agentProfileVersionId}::uuid
         AND agent.tenant_id=platform.current_tenant_id()
         AND agent.published_at IS NOT NULL AND agent.validation_status='valid'
@@ -283,6 +290,20 @@ export async function validateTenantConfiguration(
         `${process.name}: selected versions do not support ${channel}`,
       );
     const capabilities = parseAgentCapabilities(binding.tool_permissions);
+    // A process's business-object label is a promise of an executable workflow,
+    // not just a request to show that module in the sidebar. Read/finalize-only
+    // agents cannot create a lead, and an unpinned schema cannot collect fields.
+    if (process.businessObject === "lead") {
+      if (!capabilities.includes("lead.write"))
+        throw new TypeError(
+          `${process.name}: lead workflows require an agent with lead.write`,
+        );
+      if (binding.lead_schema_definition == null)
+        throw new TypeError(
+          `${process.name}: lead workflows require a pinned published lead field schema in this workspace`,
+        );
+      parseLeadFieldSchema(binding.lead_schema_definition);
+    }
     const required = new Set<TenantFeatureKey>([
       "contacts",
       "agents",

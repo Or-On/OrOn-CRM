@@ -31,6 +31,8 @@ export interface WhatsAppAiRequest {
   readonly lead?: {
     readonly schema: LeadFieldSchema;
     readonly missingRequired: readonly string[];
+    /** Durable lifecycle state; absence means no state was supplied, not completion. */
+    readonly status?: string;
     /**
      * What is already stored. Supplying it is what stops the agent re-asking a
      * question the customer has answered, on this channel or another one.
@@ -89,6 +91,8 @@ export interface WhatsAppAiRequest {
       readonly knownBeforeConversation: boolean;
       readonly firstConversation: boolean;
       readonly missingProfileFields: readonly ("name" | "email" | "company")[];
+      /** Validated sender of this interaction, not an inferred contact primary phone. */
+      readonly channelPhone?: string;
     };
     readonly notes: readonly {
       readonly text: string;
@@ -292,6 +296,7 @@ function decisionSchemaFor(
 function envelopeInstruction(
   actions: readonly string[],
   replyOnly: boolean,
+  leadRouting: boolean,
 ): string {
   const lines = [
     "Return only the requested JSON object, with every field present and " +
@@ -302,7 +307,9 @@ function envelopeInstruction(
       "null; use a replyCode only for a generic greeting, thanks, safe " +
       "fallback, the callback_confirmation described above, or " +
       "clarify_rephrase when the latest message is incoherent.",
-    "Choose handoff for an explicit request for a person, an emergency, a " +
+    (leadRouting
+      ? "Choose handoff for an immediate request to speak to a person, an emergency, a "
+      : "Choose handoff for an explicit request for a person, an emergency, a ") +
       "safety issue, a regulated decision, or an issue you cannot resolve " +
       "with the supplied data. Choose request_call only for a standalone " +
       "explicit immediate callback request.",
@@ -312,17 +319,48 @@ function envelopeInstruction(
       "Choose lead_save to record what the customer told you, putting each " +
         "value in leadObservations and leaving text null. You will be told " +
         "the outcome before you reply, and only that outcome lets you say it " +
-        "is saved.",
+        "is saved. For a genuine enquiry, save new relevant answers before " +
+        "another discovery question; do not wait until all fields are complete. " +
+        "Read leadCollection.fields for the reviewed field meanings and " +
+        "constraints. Save multiple supplied facts together, and do not " +
+        "repeat observations already recorded unless the customer corrects them.",
     );
   if (actions.includes("lead_finalize"))
     lines.push(
-      "Choose lead_finalize with leadSummary once the customer has given " +
-        "what they are willing to give, to pass the enquiry to a person.",
+      "Choose lead_finalize with leadSummary for an actual enquiry once " +
+        "the required details have been answered, declined or marked not " +
+        "applicable. Missing optional fields are not a reason to keep asking " +
+        "questions. Read leadCollection.status and actionReceipts: a lead " +
+        "in ready_for_review, qualified, disqualified, converted or archived " +
+        "state must not be finalized again " +
+        "merely because another customer message arrived. Respect the outcome; " +
+        "do not repeat a successful action " +
+        "or present a failed action as completed.",
     );
   if (actions.includes("lead_follow_up"))
     lines.push(
       "Choose lead_follow_up with leadNote when the customer asks to be " +
-        "contacted again by a person.",
+        "contacted later by a person. A deferred follow-up request is not " +
+        "an immediate handoff or permission to dial now. If they ask you to " +
+        "collect details first, keep collecting only genuinely missing " +
+        "required details, then record the requested follow-up. If they " +
+        "want to stop now, record the follow-up with available facts without " +
+        "demanding more answers. When both finalization and follow-up are " +
+        "needed and available for a complete enquiry, finalize first, then " +
+        "record follow-up so its next-action note is preserved. Do not repeat " +
+        "a follow-up already acknowledged by a successful receipt. A follow-up " +
+        "receipt records a request, not " +
+        "a guaranteed response time or completed human contact.",
+    );
+  if (actions.includes("lead_save"))
+    lines.push(
+      "Do not choose handoff merely because a commercial enquiry mentions " +
+        "a future human follow-up. Distinguish that from an explicit immediate " +
+        "transfer or a request to stop AI handling, which you must respect " +
+        "without another collection question. Never ask for details to delay " +
+        "that transfer. If the required action is unavailable, explain that " +
+        "honestly and offer the available human route; do not claim a save " +
+        "or arrange follow-up through prose alone.",
     );
   if (replyOnly)
     lines.push(
@@ -529,10 +567,33 @@ export class OpenAiCompatibleChatProvider implements WhatsAppAiProvider {
                 "a verified action receipt under the existing rules.",
             },
           ]),
+      ...(request.contactContext?.identity.channelPhone === undefined
+        ? []
+        : [
+            {
+              id: "context.channel_contactability",
+              authority: "platform" as const,
+              text:
+                "contactContext.identity.channelPhone is the validated WhatsApp sender " +
+                "for this interaction. The current correspondent is already reachable " +
+                "on that channel; do not ask them to repeat this number for contactability. " +
+                "It is not proof of personal identity or consent to a call, marketing " +
+                "or data sharing. Do not infer an alternate callback number or another " +
+                "person's number from it. A reviewed phone field can use it only when " +
+                "that field explicitly means this correspondent's current channel number; " +
+                "a field asking for another number still needs the customer's answer.",
+            },
+          ]),
       {
         id: "channel.envelope",
         authority: "channel" as const,
-        text: envelopeInstruction(actions, request.replyOnly === true),
+        text: envelopeInstruction(
+          actions,
+          request.replyOnly === true,
+          request.lead !== undefined &&
+            (capabilities.includes("lead.write") ||
+              capabilities.includes("lead.follow_up")),
+        ),
       },
     ]);
     try {
@@ -565,8 +626,32 @@ export class OpenAiCompatibleChatProvider implements WhatsAppAiProvider {
                     request.lead === undefined
                       ? undefined
                       : {
+                          fields: request.lead.schema.fields.map((field) => ({
+                            key: field.key,
+                            label: field.label,
+                            type: field.type,
+                            required: field.required,
+                            ...(field.description === undefined
+                              ? {}
+                              : { description: field.description }),
+                            ...(field.choices === undefined
+                              ? {}
+                              : { choices: field.choices }),
+                            ...(field.maxLength === undefined
+                              ? {}
+                              : { maxLength: field.maxLength }),
+                            ...(field.minimum === undefined
+                              ? {}
+                              : { minimum: field.minimum }),
+                            ...(field.maximum === undefined
+                              ? {}
+                              : { maximum: field.maximum }),
+                          })),
                           collected: request.lead.collected ?? [],
                           missingRequired: request.lead.missingRequired,
+                          ...(request.lead.status === undefined
+                            ? {}
+                            : { status: request.lead.status }),
                         },
                   knowledge: boundedKnowledge(request.knowledge ?? []),
                   messages: boundedHistory(request.messages).map((message) => ({

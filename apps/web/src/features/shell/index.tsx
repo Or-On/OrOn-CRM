@@ -64,8 +64,6 @@ import {
 
 import { LanguageControl } from "../../i18n/language-control";
 import { applyThemeTransition } from "../../i18n/theme-transition";
-import { product } from "../../branding";
-import { BrandMark } from "../brand";
 import { crmMutation } from "../crm";
 import { IdentityImage } from "../identity";
 import { NotificationCenter } from "./notification-center";
@@ -536,9 +534,16 @@ export function AppShell({
   if (session === undefined || isPublicAccessRoute)
     return <div className="auth-layout">{children}</div>;
 
-  const workspaceBrandName = session.user.isSuperuser
-    ? product.name
-    : (tenantBranding?.businessName ?? session.tenant.tenantName);
+  const workspaceBrandName =
+    tenantBranding?.businessName ?? session.tenant.tenantName;
+  const workspaceBrandMark = (
+    <IdentityImage
+      className="workspace-brand-mark"
+      contextKey={session.tenant.tenantId}
+      fallback={workspaceBrandName.slice(0, 1).toLocaleUpperCase(locale)}
+      source="/api/settings/logo"
+    />
+  );
 
   return (
     <div
@@ -559,8 +564,10 @@ export function AppShell({
           className="mobile-brand"
           href="/"
         >
-          <BrandMark size={20} />
-          <span>{workspaceBrandName}</span>
+          {workspaceBrandMark}
+          <span className="workspace-brand-name" dir="auto">
+            {workspaceBrandName}
+          </span>
         </Link>
         <strong className="mobile-context" dir="auto">
           {currentLabel}
@@ -599,8 +606,10 @@ export function AppShell({
       >
         <div className="rail-brand-row">
           <Link aria-label={t("shell.brandHome")} className="brand" href="/">
-            <BrandMark size={20} />
-            <span className="brand__name">{workspaceBrandName}</span>
+            {workspaceBrandMark}
+            <span className="brand__name" dir="auto">
+              {workspaceBrandName}
+            </span>
           </Link>
           <IconButton
             className="rail-mobile-close"
@@ -801,6 +810,7 @@ export function AppShell({
                 >
                   <IdentityImage
                     className="tenant-switcher__monogram"
+                    contextKey={session.tenant.tenantId}
                     fallback={session.tenant.tenantName
                       .slice(0, 1)
                       .toLocaleUpperCase(locale)}
@@ -887,9 +897,15 @@ export function AppShell({
           >
             {isInbox ? (
               <>
-                <Link className="inbox-topbar-brand" href="/">
-                  <BrandMark size={17} />
-                  <span>{workspaceBrandName}</span>
+                <Link
+                  aria-label={t("shell.brandHome")}
+                  className="inbox-topbar-brand"
+                  href="/"
+                >
+                  {workspaceBrandMark}
+                  <span className="workspace-brand-name" dir="auto">
+                    {workspaceBrandName}
+                  </span>
                 </Link>
                 <Suspense>
                   <InboxSearch />

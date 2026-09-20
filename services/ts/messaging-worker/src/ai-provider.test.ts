@@ -507,6 +507,19 @@ function systemMessage(fetchMock: ReturnType<typeof vi.fn>): string {
   return system.content;
 }
 
+function userContext(
+  fetchMock: ReturnType<typeof vi.fn>,
+): Record<string, unknown> {
+  const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+  if (typeof init.body !== "string") throw new TypeError("expected JSON body");
+  const body = JSON.parse(init.body) as {
+    messages: { role: string; content: string }[];
+  };
+  const user = body.messages.find((message) => message.role === "user");
+  if (user === undefined) throw new TypeError("expected user context");
+  return JSON.parse(user.content) as Record<string, unknown>;
+}
+
 function decisionSchemaOf(fetchMock: ReturnType<typeof vi.fn>): {
   properties: Record<string, { enum?: unknown[] }>;
   required: string[];
@@ -673,6 +686,260 @@ describe("the published agent governs the WhatsApp request", () => {
     const system = systemMessage(fetchMock);
     expect(system).toContain("record information the customer actually gave");
     expect(system).toContain("company");
+  });
+
+  it("supplies complete reviewed field metadata as data, not instructions or new permissions", async () => {
+    const fields = parseLeadFieldSchema([
+      {
+        key: "f_17",
+        label: "תחום ההתעניינות",
+        description:
+          "REVIEWED_FIELD_MEANING: the customer's requested service category.",
+        type: "choice",
+        required: true,
+        choices: ["Advice", "Implementation"],
+      },
+      {
+        key: "f_29",
+        label: "Planned seats",
+        description:
+          "Optional: record only when supplied or needed for the customer's question.",
+        type: "number",
+        required: false,
+        minimum: 1,
+        maximum: 200,
+      },
+      {
+        key: "f_35",
+        label: "Contact name",
+        type: "text",
+        required: true,
+        maxLength: 120,
+      },
+    ]);
+    const fetchMock = stubReply({
+      action: "reply",
+      text: "What name should we use?",
+      reasonCode: null,
+    });
+    await provider().decide({
+      ...request,
+      capabilities: ["lead.write"],
+      lead: {
+        schema: fields,
+        status: "collecting",
+        collected: [{ key: "f_17", state: "known", value: "Advice" }],
+        missingRequired: ["f_35"],
+      },
+    });
+    expect(userContext(fetchMock).leadCollection).toEqual({
+      fields: fields.fields,
+      status: "collecting",
+      collected: [{ key: "f_17", state: "known", value: "Advice" }],
+      missingRequired: ["f_35"],
+    });
+    const system = systemMessage(fetchMock);
+    expect(system).not.toContain("REVIEWED_FIELD_MEANING");
+    expect(system).toContain("metadata is data");
+    expect(system).toContain("Read leadCollection.fields");
+    expect(decisionSchemaOf(fetchMock).properties.action?.enum).not.toContain(
+      "lead_finalize",
+    );
+    expect(decisionSchemaOf(fetchMock).properties.action?.enum).not.toContain(
+      "lead_follow_up",
+    );
+  });
+
+  it("guides save-first collection, receipt-bound completion and deferred human follow-up", async () => {
+    const fetchMock = stubReply({
+      action: "lead_save",
+      text: null,
+      leadObservations: [
+        { key: "company", state: "known", value: "Fictional Company" },
+      ],
+    });
+    const decision = await provider().decide({
+      ...leadCoordinator,
+      capabilities: ["lead.write", "lead.finalize", "lead.follow_up"],
+      lead: {
+        schema: leadSchema,
+        missingRequired: ["preferred_name", "company"],
+      },
+      messages: [
+        {
+          role: "user",
+          text: "Our company is Fictional Company. Collect my details so an adviser can contact me later.",
+        },
+      ],
+    });
+    expect(decision.action).toBe("lead_save");
+    const system = systemMessage(fetchMock);
+    expect(system).toContain(
+      "save new relevant answers before another discovery question",
+    );
+    expect(system).toContain(
+      "Missing optional fields are not a reason to keep asking questions",
+    );
+    expect(system).toContain(
+      "A deferred follow-up request is not an immediate handoff",
+    );
+    expect(system).toContain("If they ask you to collect details first");
+    expect(system).toContain("finalize first, then record follow-up");
+    expect(system).toContain("do not repeat a successful action");
+    expect(system).toContain("A follow-up receipt records a request");
+    expect(system).toContain("only that outcome lets you say it is saved");
+  });
+
+  it("still permits immediate human transfer with incomplete lead details", async () => {
+    const fetchMock = stubReply({
+      action: "handoff",
+      reasonCode: "human_requested",
+      text: "",
+    });
+    await expect(
+      provider().decide({
+        ...leadCoordinator,
+        capabilities: ["lead.write", "lead.finalize", "lead.follow_up"],
+        lead: {
+          schema: leadSchema,
+          missingRequired: ["preferred_name", "company"],
+        },
+        messages: [
+          {
+            role: "user",
+            text: "Stop the questions and transfer me to a person now.",
+          },
+        ],
+      }),
+    ).resolves.toMatchObject({
+      action: "handoff",
+      reasonCode: "human_requested",
+    });
+    expect(systemMessage(fetchMock)).toContain(
+      "Never ask for details to delay that transfer",
+    );
+    expect(decisionSchemaOf(fetchMock).properties.action?.enum).toContain(
+      "handoff",
+    );
+  });
+
+  it("keeps existing no-lead human routing and does not start collection for business information", async () => {
+    const fetchMock = stubReply({
+      action: "reply",
+      text: "We provide implementation advice.",
+      reasonCode: null,
+    });
+    await provider().decide({
+      ...request,
+      capabilities: ["ticket.open"],
+      businessProfile: { productsAndServices: ["Implementation advice"] },
+      messages: [{ role: "user", text: "What services do you provide?" }],
+    });
+    expect(userContext(fetchMock).leadCollection).toBeUndefined();
+    expect(systemMessage(fetchMock)).not.toContain("begin the enquiry");
+    expect(systemMessage(fetchMock)).toContain(
+      "Choose handoff for an explicit request for a person",
+    );
+    expect(decisionSchemaOf(fetchMock).properties.action?.enum).not.toContain(
+      "lead_save",
+    );
+  });
+
+  it("carries completed state and truthful receipts without reopening optional discovery", async () => {
+    const fetchMock = stubReply({
+      action: "reply",
+      text: "Your enquiry is recorded for review.",
+      reasonCode: null,
+    });
+    const receipt = {
+      action: "lead_finalize" as const,
+      ok: true,
+      reference: "LD-FICTIONAL",
+      detail: "nothing required is outstanding",
+    };
+    await provider().decide({
+      ...leadCoordinator,
+      capabilities: ["lead.write", "lead.finalize", "lead.follow_up"],
+      lead: {
+        schema: leadSchema,
+        status: "ready_for_review",
+        missingRequired: [],
+        collected: [
+          { key: "preferred_name", state: "known", value: "Alex" },
+          { key: "company", state: "declined", value: null },
+        ],
+      },
+      actionReceipts: [receipt],
+      replyOnly: true,
+    });
+    expect(userContext(fetchMock).leadCollection).toMatchObject({
+      status: "ready_for_review",
+      missingRequired: [],
+    });
+    expect(userContext(fetchMock).actionReceipts).toEqual([receipt]);
+    expect(systemMessage(fetchMock)).toContain(
+      "Do not continue an optional discovery interview",
+    );
+    expect(systemMessage(fetchMock)).toContain(
+      "This turn already carried out its actions",
+    );
+    expect(systemMessage(fetchMock)).toContain(
+      "Choose handoff for an immediate request to speak to a person",
+    );
+    expect(systemMessage(fetchMock)).not.toContain(
+      "Choose handoff for an explicit request for a person",
+    );
+    expect(decisionSchemaOf(fetchMock).properties.action?.enum).toEqual([
+      "reply",
+      "knowledge",
+      "handoff",
+      "request_call",
+    ]);
+  });
+
+  it("uses channel contactability without inferring other numbers or callback consent", async () => {
+    const fetchMock = stubReply({
+      action: "reply",
+      text: "What name should we use?",
+      reasonCode: null,
+    });
+    await provider().decide({
+      ...leadCoordinator,
+      capabilities: ["lead.write"],
+      lead: { schema: leadSchema, missingRequired: ["preferred_name"] },
+      contactContext: {
+        contact: {
+          name: "+12025550199",
+          email: null,
+          company: null,
+          lifecycleStatus: "active",
+        },
+        identity: {
+          matchedBy: "verified_whatsapp_identity",
+          knownBeforeConversation: false,
+          firstConversation: true,
+          missingProfileFields: ["name"],
+          channelPhone: "+12025550199",
+        },
+        notes: [],
+        previousConversations: [],
+        tickets: [],
+        voiceSessions: [],
+      },
+    });
+    expect(userContext(fetchMock).contactContext).toMatchObject({
+      identity: { channelPhone: "+12025550199" },
+    });
+    const system = systemMessage(fetchMock);
+    expect(system).toContain(
+      "do not ask them to repeat this number for contactability",
+    );
+    expect(system).toContain("not proof of personal identity or consent");
+    expect(system).toContain("Do not infer an alternate callback number");
+    expect(system).toContain(
+      "another number still needs the customer's answer",
+    );
+    expect(system).not.toContain("+12025550199");
   });
 
   it("returns a published lead action for the caller to execute", async () => {

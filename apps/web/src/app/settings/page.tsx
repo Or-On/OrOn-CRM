@@ -71,6 +71,7 @@ export default async function SettingsPage({
             : undefined,
           canManageMembers,
           canManageTenant,
+          tenantId: session.tenant.tenantId,
           canManageOwners:
             session.isSuperuser || session.tenant.role === "owner",
           tenantName: canManageTenant ? session.tenant.tenantName : undefined,

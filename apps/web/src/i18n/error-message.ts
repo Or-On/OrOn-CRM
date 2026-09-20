@@ -4,6 +4,8 @@ import hebrew from "./messages/he.json";
 type Translate = (key: string) => string;
 const knownErrors: Readonly<Record<string, string>> = {
   "invalid custom field value": "validation.format",
+  "Workspace changed. Refresh before changing its logo.":
+    "management.logoContextChanged",
   "tenant business description exceeds text limits":
     "tenantSupportSettings.descriptionLimit",
   "tenant products and services exceed text limits":

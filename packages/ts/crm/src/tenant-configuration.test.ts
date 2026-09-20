@@ -139,4 +139,115 @@ describe("reviewed tenant packages", () => {
       ),
     ).rejects.toThrow("same routing priority");
   });
+
+  describe("executable lead process validation", () => {
+    const process = {
+      name: "Customer enquiries",
+      trigger: "whatsapp.new_conversation",
+      channel: "whatsapp",
+      enabled: true,
+      businessObject: "lead",
+      agentProfileVersionId: "10000000-0000-4000-8000-000000000001",
+      flowVersionId: "20000000-0000-4000-8000-000000000001",
+    };
+    const configuration = parseTenantConfiguration({
+      ...configurationFromTemplate("leads_support"),
+      processes: [process],
+    });
+    const binding = {
+      channels: ["whatsapp", "voice"],
+      flow_channels: ["whatsapp", "voice"],
+      flow_agent: process.agentProfileVersionId,
+      tool_permissions: ["lead.write"],
+      lead_schema_definition: [
+        {
+          key: "interest",
+          label: "Customer interest",
+          type: "text",
+          required: true,
+        },
+      ],
+    };
+
+    it.each([
+      [],
+      ["ticket.open"],
+      ["lead.read"],
+      ["lead.finalize"],
+      ["lead.follow_up"],
+    ])(
+      "rejects a lead workflow when the agent cannot create/save leads: %j",
+      async (...permissions: string[]) => {
+        const sql = vi
+          .fn()
+          .mockResolvedValue([
+            { ...binding, tool_permissions: permissions },
+          ]) as unknown as postgres.TransactionSql;
+        await expect(
+          validateTenantConfiguration(sql, configuration),
+        ).rejects.toThrow("lead workflows require an agent with lead.write");
+      },
+    );
+
+    it("requires the exact pinned schema to resolve as published in the agent tenant", async () => {
+      const queryMock = vi
+        .fn()
+        .mockResolvedValue([{ ...binding, lead_schema_definition: null }]);
+      const sql = queryMock as unknown as postgres.TransactionSql;
+      await expect(
+        validateTenantConfiguration(sql, configuration),
+      ).rejects.toThrow("pinned published lead field schema in this workspace");
+      const query = (queryMock.mock.calls[0]?.[0] as TemplateStringsArray).join(
+        "",
+      );
+      expect(query).toContain("lead_schema.tenant_id=agent.tenant_id");
+      expect(query).toContain(
+        "agent.channel_configuration->>'leadFieldSchemaId'",
+      );
+      expect(query).toContain("lead_schema.published_at IS NOT NULL");
+    });
+
+    it.each([[], [{ key: "invalid", label: "Missing type and required" }]])(
+      "rejects a malformed historical published schema: %j",
+      async (...fields: unknown[]) => {
+        const sql = vi
+          .fn()
+          .mockResolvedValue([
+            { ...binding, lead_schema_definition: fields },
+          ]) as unknown as postgres.TransactionSql;
+        await expect(
+          validateTenantConfiguration(sql, configuration),
+        ).rejects.toThrow("lead field schema");
+      },
+    );
+
+    it("accepts a write-capable lead workflow without imposing finalize, follow-up or tenant-specific fields", async () => {
+      const sql = vi
+        .fn()
+        .mockResolvedValue([binding]) as unknown as postgres.TransactionSql;
+      await expect(
+        validateTenantConfiguration(sql, configuration),
+      ).resolves.toBeUndefined();
+    });
+
+    it("preserves module-only packages and incomplete disabled processes", async () => {
+      const sql = vi.fn() as unknown as postgres.TransactionSql;
+      await expect(
+        validateTenantConfiguration(
+          sql,
+          parseTenantConfiguration(configurationFromTemplate("leads_only")),
+        ),
+      ).resolves.toBeUndefined();
+      await expect(
+        validateTenantConfiguration(
+          sql,
+          parseTenantConfiguration({
+            ...configurationFromTemplate("leads_support"),
+            processes: [{ ...process, enabled: false }],
+          }),
+        ),
+      ).resolves.toBeUndefined();
+      expect(sql).not.toHaveBeenCalled();
+    });
+  });
 });

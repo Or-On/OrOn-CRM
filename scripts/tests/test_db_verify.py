@@ -21,9 +21,21 @@ def test_graph_has_preserved_oron_root_and_one_target_head() -> None:
     assert report.heads == (manifest["alembic_head"],)
     assert report.branch_points == ("8eda5976c920",)
     # Bumped by exactly one per deliberate migration; 89 adds configurable service
-    # workflows (a6d30b9f4c12), 90 reviewed tenant packages (c7e29a1b5d40). An unexplained
+    # workflows (a6d30b9f4c12), 90 reviewed tenant packages (c7e29a1b5d40), and 91
+    # executable lead-workflow validation (d2f6b8a13c90). An unexplained
     # change here means a migration arrived that nobody reviewed.
-    assert report.revision_count == 90
+    assert report.revision_count == 91
+
+
+def test_lead_workflow_guard_is_present_in_the_final_configuration_validator() -> None:
+    sql = render_offline_sql()
+    validator = sql.rsplit(
+        "CREATE OR REPLACE FUNCTION platform.validate_tenant_configuration(", maxsplit=1
+    )[1].split("END $$;", maxsplit=1)[0]
+    assert "v_process->>'businessObject'='lead'" in validator
+    assert "v_agent.tool_permissions @> '[\"lead.write\"]'::jsonb" in validator
+    assert "schema.tenant_id=platform.current_tenant_id()" in validator
+    assert "schema.published_at IS NOT NULL" in validator
 
 
 def test_rendered_postgresql_contract_passes_static_security_checks() -> None:

@@ -373,6 +373,35 @@ body {
   opacity: 1;
 }
 
+.workspace-brand-mark {
+  display: inline-grid;
+  flex: 0 0 1.25rem;
+  inline-size: 1.25rem;
+  block-size: 1.25rem;
+  place-items: center;
+  border-radius: 0.25rem;
+  color: var(--or-text);
+  background: var(--or-surface-hover);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.workspace-brand-mark[data-image-loaded="true"] {
+  background: transparent;
+}
+
+.workspace-brand-mark .identity-image__media {
+  object-fit: contain;
+}
+
+.workspace-brand-name {
+  min-inline-size: 0;
+  max-inline-size: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .identity-image-editor {
   display: flex;
   align-items: center;
@@ -1927,6 +1956,8 @@ textarea,
 
   .mobile-brand {
     display: flex;
+    min-inline-size: 0;
+    max-inline-size: 45vw;
     align-items: center;
     gap: 0.5rem;
     color: var(--or-text);
@@ -4120,7 +4151,7 @@ textarea,
     border: 0;
   }
 
-  .inbox-topbar-brand span {
+  .inbox-topbar-brand > .workspace-brand-name {
     display: none;
   }
 

@@ -11,7 +11,7 @@ from db.tests.postgres.test_tenant_configuration_approval import package, review
 pytestmark = [pytest.mark.postgres, pytest.mark.integration, pytest.mark.rls]
 
 
-async def versions(pg, tenant, *, permissions=None):
+async def versions(pg, tenant, *, permissions=None, lead_schema_id=None):
     await pg.execute("RESET ROLE")
     profile, flow = uuid4(), uuid4()
     await pg.execute(
@@ -30,14 +30,16 @@ async def versions(pg, tenant, *, permissions=None):
         agent, flow_version = uuid4(), uuid4()
         await pg.execute(
             "INSERT INTO agents.agent_profile_versions(id,tenant_id,agent_profile_id,version,"
-            "system_prompt,channel_capabilities,tool_permissions,validation_status,published_at) "
+            "system_prompt,channel_capabilities,tool_permissions,channel_configuration,"
+            "validation_status,published_at) "
             "VALUES($1,$2,$3,$4,'Fictional support agent',ARRAY['whatsapp','voice'],$5::jsonb,"
-            "'valid',CURRENT_TIMESTAMP)",
+            "$6::jsonb,'valid',CURRENT_TIMESTAMP)",
             agent,
             tenant,
             profile,
             version,
-            json.dumps(permissions or ["ticket.open"]),
+            json.dumps(["ticket.open"] if permissions is None else permissions),
+            json.dumps({"leadFieldSchemaId": str(lead_schema_id)} if lead_schema_id else {}),
         )
         await pg.execute(
             "INSERT INTO automation.flow_versions(id,tenant_id,flow_definition_id,version,"

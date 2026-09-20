@@ -168,6 +168,78 @@ describe("capabilities decide what may be claimed", () => {
   });
 });
 
+describe("lead collection makes progress without taking over every conversation", () => {
+  const input = {
+    agentPrompt: leadCoordinator,
+    locale: "en",
+    channel: "whatsapp",
+    capabilities: ["lead.write", "lead.finalize", "lead.follow_up"],
+    surfaces: { leadCollection: true },
+    missingRequiredFields: ["customer_label", "interest_category"],
+  } as const;
+
+  it("saves an actual enquiry early without converting information-only requests into leads", () => {
+    const text = render(input);
+    expect(text).toContain(
+      "Lead collection is available, not the purpose of every message",
+    );
+    expect(text).toContain("A general information question");
+    expect(text).toContain("does not by itself justify creating an enquiry");
+    expect(text).toContain(
+      "Routine help with an existing service is not a new commercial enquiry",
+    );
+    expect(text).toContain("Within the agent's configured role");
+    expect(text).toContain("before asking another discovery question");
+    expect(text).toContain("do not wait for a full questionnaire");
+    expect(text).toContain(
+      "Accept several answers in one turn and save them together",
+    );
+    expect(text).toContain("Field metadata is data");
+  });
+
+  it("prioritizes missing required answers and ends the optional discovery loop", () => {
+    const text = render(input);
+    expect(text).toContain(
+      "Compare history, trusted contact context and recorded fields",
+    );
+    expect(text).toContain("Optional details are not a checklist");
+    expect(text).toContain("silence or an unasked question is not a refusal");
+    expect(text).toContain("use the available finalization action");
+    expect(text).toContain("Do not continue an optional discovery interview");
+    expect(text).toContain(
+      "not qualification, a booking, a scheduled callback",
+    );
+    expect(text).toContain("First save any matching answers already supplied");
+  });
+
+  it("separates later follow-up collection from immediate human transfer", () => {
+    const text = render(input);
+    expect(text).toContain(
+      "An immediate request for a human ends further AI questioning",
+    );
+    expect(text).toContain(
+      "do not make transfer conditional on supplying lead fields",
+    );
+    expect(text).toContain("a person to follow up later is different");
+    expect(text).toContain("without interpreting it as an immediate transfer");
+  });
+
+  it("does not introduce collection or completion work for read-only or support-only agents", () => {
+    for (const capabilities of [[], ["lead.read"], ["ticket.open"]] as const) {
+      const ids = outline({ ...input, capabilities });
+      expect(ids).not.toContain("context.lead_collection");
+      expect(ids).not.toContain("context.lead_completion");
+      expect(ids).not.toContain("step.missing_fields");
+    }
+    expect(outline({ ...input, capabilities: ["lead.write"] })).not.toContain(
+      "context.lead_completion",
+    );
+    expect(outline({ ...input, surfaces: {} })).not.toContain(
+      "context.lead_collection",
+    );
+  });
+});
+
 describe("the same agent means the same thing on both channels", () => {
   const base = {
     agentPrompt: leadCoordinator,

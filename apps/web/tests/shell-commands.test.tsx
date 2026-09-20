@@ -11,6 +11,7 @@ import type { PublicSession } from "@or-on/auth";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AppShell } from "../src/features/shell";
+import en from "../src/i18n/messages/en.json";
 import { localized } from "./localized";
 
 const navigation = vi.hoisted(() => ({
@@ -173,6 +174,49 @@ describe("route-backed workspace commands", () => {
     expect(
       container.querySelector(".shell")?.getAttribute("data-tenant-accent"),
     ).toBe("emerald");
+    const marks = container.querySelectorAll(".workspace-brand-mark img");
+    expect(marks).toHaveLength(2);
+    for (const mark of marks) {
+      expect(mark.getAttribute("src")).toBe(
+        `/api/settings/logo?v=0&context=${membership.tenantId}`,
+      );
+      expect(mark.getAttribute("alt")).toBe("");
+    }
+    expect(container.querySelector(".brand .product-logo")).toBeNull();
+  });
+
+  it("uses the active tenant logo in all Inbox brand surfaces and resets it on switching", () => {
+    navigation.pathname = "/inbox";
+    const view = render(
+      localized(<AppShell session={session}>Inbox</AppShell>),
+    );
+    const marks = view.container.querySelectorAll(".workspace-brand-mark img");
+    expect(marks).toHaveLength(3);
+    for (const mark of marks) fireEvent.load(mark);
+    const changed = {
+      ...session,
+      tenant: {
+        ...membership,
+        tenantId: "tenant-b",
+        tenantName: "Second workspace",
+      },
+    };
+    view.rerender(localized(<AppShell session={changed}>Inbox</AppShell>));
+    for (const mark of view.container.querySelectorAll(
+      ".workspace-brand-mark img",
+    )) {
+      expect(mark.getAttribute("src")).toContain("context=tenant-b");
+      expect(mark.hasAttribute("data-loaded")).toBe(false);
+    }
+    expect(
+      view.container.querySelector(".inbox-topbar-brand .workspace-brand-name")
+        ?.textContent,
+    ).toBe("Second workspace");
+    expect(
+      view.container
+        .querySelector(".inbox-topbar-brand")
+        ?.getAttribute("aria-label"),
+    ).toBe(en.shell.brandHome);
   });
 
   it("keeps Inbox search synchronized with same-route navigation and reset without remounting drafts", () => {
@@ -418,6 +462,9 @@ describe("route-backed workspace commands", () => {
       localized(<AppShell session={elevated}>Workspace</AppShell>),
     );
     const switcher = container.querySelector(".tenant-switcher");
+    expect(container.querySelector(".brand__name")?.textContent).toBe(
+      membership.tenantName,
+    );
     expect(
       switcher?.classList.contains("tenant-switcher--platform-admin"),
     ).toBe(true);

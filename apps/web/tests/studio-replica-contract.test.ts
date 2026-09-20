@@ -18,7 +18,18 @@ describe("Studio Admin replica contract", () => {
     expect(css).toContain("--or-radius-md: 0.625rem");
     expect(layout).toContain("Geist_Mono");
     expect(layout).toContain('import "./studio-replica.css"');
-    expect(shell).toContain("<BrandMark");
+  });
+
+  it("uses tenant-scoped workspace identity while retaining the platform shell geometry", () => {
+    expect(shell).toContain(
+      '<IdentityImage\n      className="workspace-brand-mark"',
+    );
+    expect(shell).toContain("contextKey={session.tenant.tenantId}");
+    expect(shell).toContain('source="/api/settings/logo"');
+    expect(shell.match(/\{workspaceBrandMark\}/gu)).toHaveLength(3);
+    expect(shell).not.toContain("<BrandMark");
+    expect(css).toContain(".inbox-topbar-brand > .workspace-brand-name");
+    expect(css).not.toContain(".inbox-topbar-brand span {");
   });
 
   it("uses Studio neutral light and dark surfaces", () => {

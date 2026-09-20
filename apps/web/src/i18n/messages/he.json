@@ -987,6 +987,7 @@
     "uploadLogo": "העלאת לוגו",
     "removeLogo": "הסרה",
     "logoUpdated": "לוגו הארגון עודכן.",
+    "logoContextChanged": "סביבת העבודה הפעילה השתנתה. רעננו את הדף לפני שינוי הלוגו שלה.",
     "logoRemoved": "לוגו הארגון הוסר.",
     "imageFailed": "יש לבחור תמונת PNG, JPEG או WebP תקינה בגודל של עד 2 MB.",
     "branding": "זהות שמוצגת ללקוחות",

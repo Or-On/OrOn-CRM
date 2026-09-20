@@ -987,6 +987,7 @@
     "uploadLogo": "Upload logo",
     "removeLogo": "Remove",
     "logoUpdated": "Organization logo updated.",
+    "logoContextChanged": "The active workspace changed. Refresh this page before changing its logo.",
     "logoRemoved": "Organization logo removed.",
     "imageFailed": "Choose a valid PNG, JPEG or WebP image up to 2 MB.",
     "branding": "Customer-facing identity",

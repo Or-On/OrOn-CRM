@@ -1,8 +1,10 @@
 "use client";
 
 import { ImagePlus, Trash2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { useRef, useState, type ChangeEvent } from "react";
 
+import { errorMessage } from "../../i18n/error-message";
 import { imageMutation } from "../crm";
 import { announceIdentityImageUpdate, IdentityImage } from "./identity-image";
 import { identityImageAccept } from "./image-upload";
@@ -11,6 +13,7 @@ const MAX_BYTES = 2 * 1024 * 1024;
 
 export function IdentityImageEditor({
   chooseLabel,
+  contextKey,
   fallback,
   failedLabel,
   hint,
@@ -22,6 +25,7 @@ export function IdentityImageEditor({
   variant = "avatar",
 }: {
   readonly chooseLabel: string;
+  readonly contextKey?: string | undefined;
   readonly fallback: string;
   readonly failedLabel: string;
   readonly hint: string;
@@ -32,12 +36,24 @@ export function IdentityImageEditor({
   readonly updatedLabel: string;
   readonly variant?: "avatar" | "organization";
 }) {
+  const t = useTranslations();
+  const mutationSource = contextKey
+    ? `${source}${source.includes("?") ? "&" : "?"}context=${encodeURIComponent(contextKey)}`
+    : source;
   const input = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState(false);
   const [feedback, setFeedback] = useState<{
     readonly tone: "error" | "success";
     readonly text: string;
   }>();
+
+  function imageFailure(error: unknown): string {
+    return errorMessage(
+      error,
+      (key) => (key === "identity-image-failure" ? failedLabel : t(key)),
+      "identity-image-failure",
+    );
+  }
 
   async function upload(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -53,13 +69,13 @@ export function IdentityImageEditor({
     setPending(true);
     setFeedback(undefined);
     try {
-      await imageMutation(source, { file, method: "PATCH" });
-      announceIdentityImageUpdate(source);
+      await imageMutation(mutationSource, { file, method: "PATCH" });
+      announceIdentityImageUpdate(source, contextKey);
       setFeedback({ tone: "success", text: updatedLabel });
     } catch (error) {
       setFeedback({
         tone: "error",
-        text: error instanceof Error ? error.message : failedLabel,
+        text: imageFailure(error),
       });
     } finally {
       setPending(false);
@@ -71,13 +87,13 @@ export function IdentityImageEditor({
     setPending(true);
     setFeedback(undefined);
     try {
-      await imageMutation(source, { method: "DELETE" });
-      announceIdentityImageUpdate(source);
+      await imageMutation(mutationSource, { method: "DELETE" });
+      announceIdentityImageUpdate(source, contextKey);
       setFeedback({ tone: "success", text: removedLabel });
     } catch (error) {
       setFeedback({
         tone: "error",
-        text: error instanceof Error ? error.message : failedLabel,
+        text: imageFailure(error),
       });
     } finally {
       setPending(false);
@@ -88,6 +104,7 @@ export function IdentityImageEditor({
     <div className="identity-image-editor" data-variant={variant}>
       <IdentityImage
         className="identity-image-editor__preview"
+        contextKey={contextKey}
         fallback={fallback}
         source={source}
       />

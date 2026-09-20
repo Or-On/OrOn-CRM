@@ -4,32 +4,56 @@ import { useEffect, useRef, useState } from "react";
 
 const imageUpdatedEvent = "or-on:identity-image-updated";
 
-export function announceIdentityImageUpdate(source: string): void {
-  window.dispatchEvent(new CustomEvent(imageUpdatedEvent, { detail: source }));
+export function announceIdentityImageUpdate(
+  source: string,
+  contextKey?: string,
+): void {
+  window.dispatchEvent(
+    new CustomEvent(imageUpdatedEvent, { detail: { source, contextKey } }),
+  );
 }
 
-export function IdentityImage({
-  className = "",
-  fallback,
-  source,
-}: {
+interface IdentityImageProps {
   readonly className?: string;
+  readonly contextKey?: string | undefined;
   readonly fallback: string;
   readonly source: string;
-}) {
+}
+
+export function IdentityImage(props: IdentityImageProps) {
+  // The private endpoint resolves the authenticated tenant, not this key. A new
+  // context remounts the image and changes its URL so a tenant switch cannot keep
+  // displaying the previous workspace's loaded image.
+  return (
+    <IdentityImageContent
+      {...props}
+      key={`${props.source}:${props.contextKey ?? ""}`}
+    />
+  );
+}
+
+function IdentityImageContent({
+  className = "",
+  contextKey,
+  fallback,
+  source,
+}: IdentityImageProps) {
   const [revision, setRevision] = useState(0);
   const [loaded, setLoaded] = useState(false);
   const media = useRef<HTMLImageElement>(null);
 
   useEffect(() => {
     const refresh = (event: Event) => {
-      if ((event as CustomEvent<string>).detail !== source) return;
+      const detail = (
+        event as CustomEvent<{ source: string; contextKey?: string }>
+      ).detail;
+      if (detail.source !== source || detail.contextKey !== contextKey) return;
       setLoaded(false);
-      setRevision(Date.now());
+      setRevision((previous) => previous + 1);
     };
     window.addEventListener(imageUpdatedEvent, refresh);
     return () => window.removeEventListener(imageUpdatedEvent, refresh);
-  }, [source]);
+  }, [source, contextKey]);
 
   useEffect(() => {
     const image = media.current;
@@ -57,7 +81,7 @@ export function IdentityImage({
         onError={() => setLoaded(false)}
         onLoad={() => setLoaded(true)}
         ref={media}
-        src={`${source}?v=${String(revision)}`}
+        src={`${source}${source.includes("?") ? "&" : "?"}v=${String(revision)}${contextKey ? `&context=${encodeURIComponent(contextKey)}` : ""}`}
       />
     </span>
   );

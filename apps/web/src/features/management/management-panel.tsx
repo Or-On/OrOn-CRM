@@ -76,6 +76,7 @@ export function ManagementPanel({
   members,
   notifications,
   settings,
+  tenantId,
   tenantName,
   invitations,
   apiKeys,
@@ -91,6 +92,7 @@ export function ManagementPanel({
   readonly members: readonly TeamMember[];
   readonly notifications: readonly NotificationSummary[];
   readonly settings?: TenantSettings | undefined;
+  readonly tenantId?: string | undefined;
   readonly tenantName?: string | undefined;
   readonly invitations: readonly TenantInvitationSummary[];
   readonly apiKeys: readonly ApiKeySummary[];
@@ -504,6 +506,7 @@ export function ManagementPanel({
         <div className="settings-workspace-identity">
           <IdentityImage
             className="settings-list-icon settings-workspace-identity__logo"
+            contextKey={tenantId}
             fallback={workspaceName.slice(0, 2).toLocaleUpperCase(locale)}
             source="/api/settings/logo"
           />
@@ -766,6 +769,7 @@ export function ManagementPanel({
                     </h3>
                     <IdentityImageEditor
                       chooseLabel={t("management.uploadLogo")}
+                      contextKey={tenantId}
                       failedLabel={t("management.imageFailed")}
                       fallback={tenantName
                         .slice(0, 2)

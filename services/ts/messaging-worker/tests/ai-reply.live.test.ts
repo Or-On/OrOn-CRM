@@ -702,6 +702,7 @@ describe.skipIf(sourceUrl === undefined)(
               tickets?: { id: string; title: string }[];
               identity?: {
                 matchedBy: string;
+                channelPhone?: string;
                 knownBeforeConversation: boolean;
               };
             };
@@ -719,8 +720,21 @@ describe.skipIf(sourceUrl === undefined)(
       ]);
       expect(firstAiRequest?.contactContext?.identity).toMatchObject({
         matchedBy: "verified_whatsapp_identity",
+        channelPhone: "+12025550198",
         knownBeforeConversation: true,
       });
+      // Mutable sender metadata and another contact identity cannot replace
+      // the verified inbound phone supplied as model contact context.
+      expect(
+        aiDecide.mock.calls.every(([request]) => {
+          const context = request as {
+            contactContext?: { identity?: { channelPhone?: string } };
+          };
+          return (
+            context.contactContext?.identity?.channelPhone === "+12025550198"
+          );
+        }),
+      ).toBe(true);
       expect(metaSend).toHaveBeenCalledTimes(6);
       expect(
         metaSend.mock.calls.every(

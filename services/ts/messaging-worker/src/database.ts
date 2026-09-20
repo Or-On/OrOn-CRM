@@ -2386,6 +2386,7 @@ interface AiWork {
   readonly lead: {
     readonly id: string;
     readonly revision: number;
+    readonly status: string;
     readonly collected: readonly {
       readonly key: string;
       readonly state: string;
@@ -2859,6 +2860,7 @@ async function loadAiWork(
           : {
               id: lead.id,
               revision: lead.revision,
+              status: lead.status,
               collected: lead.fields
                 .filter((field) => field.supersededAt === null)
                 .map((field) => ({
@@ -2887,6 +2889,13 @@ async function loadAiWork(
         },
         identity: {
           matchedBy: "verified_whatsapp_identity",
+          // This is the immutable inbound sender, not an arbitrary primary
+          // contact phone or model-authored message metadata. It establishes
+          // channel contactability, not consent or a different callback number.
+          ...(recipientIdentityId === undefined ||
+          recipientAddress === undefined
+            ? {}
+            : { channelPhone: recipientAddress }),
           knownBeforeConversation,
           firstConversation,
           missingProfileFields,
@@ -2972,13 +2981,14 @@ function aiRequestFor(
       : {
           lead: {
             schema: pinned.schema,
+            status: lead?.status ?? "new",
             collected: lead?.collected ?? [],
             missingRequired:
               lead?.missingRequired ??
               leadCompleteness(pinned.schema, []).missing,
           },
         }),
-    ...(receipts.length === 0 ? {} : { actionReceipts: receipts }),
+    ...(receipts.length === 0 ? {} : { actionReceipts: [...receipts] }),
     ...(options.replyOnly === true ? { replyOnly: true } : {}),
     ...(work.serviceIntake === undefined
       ? {}
@@ -3165,6 +3175,7 @@ async function runWhatsAppLeadAction(
         lead: {
           id: leadId,
           revision: result.receipt?.revision ?? lead?.revision ?? 0,
+          status: result.status,
           collected: result.collected,
           missingRequired: result.missingRequired,
         },

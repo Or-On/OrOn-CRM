@@ -1,8 +1,17 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { IdentityImage } from "../src/features/identity";
+import {
+  announceIdentityImageUpdate,
+  IdentityImage,
+} from "../src/features/identity";
 
 afterEach(() => {
   cleanup();
@@ -10,6 +19,96 @@ afterEach(() => {
 });
 
 describe("IdentityImage", () => {
+  it("resets an already loaded logo and changes the private URL when switching tenants", () => {
+    const view = render(
+      <IdentityImage
+        contextKey="tenant-a"
+        fallback="A"
+        source="/api/settings/logo"
+      />,
+    );
+    const first = view.container.querySelector("img");
+    if (!first) throw new Error("Tenant A logo missing");
+    fireEvent.load(first);
+    expect(first.getAttribute("src")).toContain("context=tenant-a");
+
+    view.rerender(
+      <IdentityImage
+        contextKey="tenant-b"
+        fallback="B"
+        source="/api/settings/logo"
+      />,
+    );
+    const second = view.container.querySelector("img");
+    if (!second) throw new Error("Tenant B logo missing");
+    expect(second).not.toBe(first);
+    expect(second.getAttribute("src")).toContain("context=tenant-b");
+    expect(second.hasAttribute("data-loaded")).toBe(false);
+    fireEvent.error(second);
+    expect(
+      view.container.querySelector(".identity-image__fallback")?.textContent,
+    ).toBe("B");
+
+    view.rerender(
+      <IdentityImage
+        contextKey="tenant-a"
+        fallback="A"
+        source="/api/settings/logo"
+      />,
+    );
+    const returned = view.container.querySelector("img");
+    expect(returned).not.toBe(first);
+    expect(returned?.getAttribute("src")).toContain("context=tenant-a");
+    expect(
+      view.container.querySelector(".identity-image__fallback")?.textContent,
+    ).toBe("A");
+  });
+
+  it("refreshes all copies of the updated tenant logo without changing another tenant", () => {
+    const view = render(
+      <>
+        <IdentityImage
+          contextKey="tenant-a"
+          fallback="A"
+          source="/api/settings/logo"
+        />
+        <IdentityImage
+          contextKey="tenant-a"
+          fallback="A"
+          source="/api/settings/logo"
+        />
+        <IdentityImage
+          contextKey="tenant-b"
+          fallback="B"
+          source="/api/settings/logo"
+        />
+      </>,
+    );
+    for (const image of view.container.querySelectorAll("img"))
+      fireEvent.load(image);
+    const other = view.container.querySelector('img[src*="context=tenant-b"]');
+    act(() => announceIdentityImageUpdate("/api/settings/logo", "tenant-a"));
+    const updated = view.container.querySelectorAll(
+      'img[src*="context=tenant-a"]',
+    );
+    expect(updated).toHaveLength(2);
+    for (const image of updated) {
+      expect(image.getAttribute("src")).toContain("?v=1&context=tenant-a");
+      expect(image.hasAttribute("data-loaded")).toBe(false);
+    }
+    expect(view.container.querySelector('img[src*="context=tenant-b"]')).toBe(
+      other,
+    );
+    expect(other?.getAttribute("data-loaded")).toBe("true");
+    expect(other?.getAttribute("src")).toContain("?v=0&context=tenant-b");
+    act(() => announceIdentityImageUpdate("/api/settings/logo", "tenant-a"));
+    expect(
+      view.container
+        .querySelector('img[src*="context=tenant-a"]')
+        ?.getAttribute("src"),
+    ).toContain("?v=2&context=tenant-a");
+  });
+
   it("recognizes an avatar that loaded before client hydration", async () => {
     const complete = vi
       .spyOn(HTMLImageElement.prototype, "complete", "get")

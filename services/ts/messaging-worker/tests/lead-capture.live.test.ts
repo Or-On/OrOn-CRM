@@ -239,7 +239,7 @@ describe.skipIf(sourceUrl === undefined)(
       return id;
     }
 
-    it("executes the save, persists it and only then lets the agent say it saved", async () => {
+    it("saves, finalizes and records requested follow-up before replying, then reloads the completed state", async () => {
       const schema = await web.begin(async (transaction) => {
         await transaction`SELECT set_config('app.current_tenant', ${tenantId}, true)`;
         await transaction`SELECT set_config('app.current_user', ${userId}, true)`;
@@ -250,7 +250,7 @@ describe.skipIf(sourceUrl === undefined)(
       });
       const agentVersionId = await publishAgent(
         "Fictional lead coordinator",
-        ["lead.write", "lead.finalize"],
+        ["lead.write", "lead.finalize", "lead.follow_up"],
         schema.id,
       );
 
@@ -309,9 +309,23 @@ describe.skipIf(sourceUrl === undefined)(
                 },
               ],
             });
+          if (requests.length === 2)
+            return Promise.resolve({
+              action: "lead_finalize",
+              summary:
+                "Customer supplied their name and company and requested follow-up.",
+            });
+          if (requests.length === 3)
+            return Promise.resolve({
+              action: "lead_follow_up",
+              note: "Customer requested a representative to contact them about their enquiry.",
+            });
           return Promise.resolve({
             action: "reply",
-            text: "רשמתי את הפרטים. כמה משתמשים מתוכננים?",
+            text:
+              requests.length === 4
+                ? "רשמתי את הפרטים לבדיקת הצוות."
+                : "תודה רבה.",
           });
         });
       const store = createMessagingStore(
@@ -325,7 +339,9 @@ describe.skipIf(sourceUrl === undefined)(
               .fn<
                 (request: WhatsAppSendRequest) => Promise<WhatsAppSendResult>
               >()
-              .mockResolvedValue({ messageId: `wamid.${randomUUID()}` }),
+              .mockImplementation(() =>
+                Promise.resolve({ messageId: `wamid.${randomUUID()}` }),
+              ),
           },
         },
         undefined,
@@ -334,9 +350,11 @@ describe.skipIf(sourceUrl === undefined)(
       try {
         await acceptInbound(
           `wamid.lead-${randomUUID()}`,
-          "קוראים לי דנה ואני מאבסל",
+          "קוראים לי דנה ואני מאבסל, אשמח שנציג יחזור אליי",
           from,
         );
+        expect(await processUntilIdle(store)).toBeGreaterThan(0);
+        await acceptInbound(`wamid.lead-thanks-${randomUUID()}`, "תודה", from);
         expect(await processUntilIdle(store)).toBeGreaterThan(0);
       } finally {
         await store.close();
@@ -357,19 +375,22 @@ describe.skipIf(sourceUrl === undefined)(
           id: string;
           reference: string;
           status: string;
+          next_action: string | null;
           field_schema_id: string | null;
           field_schema_version: number | null;
           source_conversation_id: string | null;
           agent_profile_version_id: string | null;
         }[]
       >`
-        SELECT id, reference, status, field_schema_id, field_schema_version,
+        SELECT id, reference, status, next_action, field_schema_id, field_schema_version,
                source_conversation_id, agent_profile_version_id
         FROM crm.leads WHERE tenant_id=${tenantId}::uuid
       `;
       expect(leads).toHaveLength(1);
       expect(leads[0]).toMatchObject({
-        status: "collecting",
+        status: "ready_for_review",
+        next_action:
+          "Customer requested a representative to contact them about their enquiry.",
         field_schema_id: schema.id,
         field_schema_version: schema.version,
         source_conversation_id: conversationId,
@@ -402,7 +423,7 @@ describe.skipIf(sourceUrl === undefined)(
       const trigger = await admin<{ id: string }[]>`
         SELECT id FROM messaging.messages
         WHERE conversation_id=${conversationId}::uuid AND direction='inbound'
-          AND content_text=${"קוראים לי דנה ואני מאבסל"}
+          AND content_text=${"קוראים לי דנה ואני מאבסל, אשמח שנציג יחזור אליי"}
       `;
       expect(trigger).toHaveLength(1);
       expect(fields[1]).toMatchObject({
@@ -413,9 +434,9 @@ describe.skipIf(sourceUrl === undefined)(
         recorded_by: "agent",
       });
 
-      // The second pass is what produces the customer's message, and it is the
-      // receipt — not the model's memory — that entitles it to claim a save.
-      expect(requests).toHaveLength(2);
+      // Each next pass sees only actions already committed. The fourth pass
+      // produces the reply; its receipts, not model memory, license save claims.
+      expect(requests).toHaveLength(5);
       const receipts = requests[1]?.actionReceipts ?? [];
       expect(receipts).toHaveLength(1);
       expect(receipts[0]?.action).toBe("lead_save");
@@ -431,12 +452,40 @@ describe.skipIf(sourceUrl === undefined)(
           expect.objectContaining({ key: "preferred_name", value: "דנה" }),
         ]),
       );
+      expect(requests[0]?.lead?.status).toBe("new");
+      expect(requests[1]?.lead?.status).toBe("collecting");
+      expect(requests[2]?.lead?.status).toBe("ready_for_review");
+      expect(requests[3]?.lead?.status).toBe("ready_for_review");
+      expect(requests[3]?.replyOnly).toBe(true);
+      expect(
+        requests[3]?.actionReceipts?.map(({ action, ok }) => ({ action, ok })),
+      ).toEqual([
+        { action: "lead_save", ok: true },
+        { action: "lead_finalize", ok: true },
+        { action: "lead_follow_up", ok: true },
+      ]);
+      // A later customer turn carries durable completion, not stale model
+      // memory or the previous turn's receipts. Optional fields remain empty.
+      expect(requests[4]?.lead?.status).toBe("ready_for_review");
+      expect(requests[4]?.lead?.missingRequired).toEqual([]);
+      expect(requests[4]?.actionReceipts).toBeUndefined();
+      expect(requests[4]?.contactContext?.identity.channelPhone).toBe(
+        `+${from}`,
+      );
+      const followUps = await admin<{ count: number }[]>`
+        SELECT count(*)::integer AS count FROM crm.lead_operations
+        WHERE lead_id=${leads[0]?.id ?? null}::uuid
+          AND operation='lead.request_follow_up'
+      `;
+      expect(followUps[0]?.count).toBe(1);
       const delivered = await admin<{ content_text: string }[]>`
         SELECT content_text FROM messaging.messages
         WHERE conversation_id=${conversationId}::uuid AND direction='outbound'
-        ORDER BY created_at DESC LIMIT 1
+        ORDER BY created_at ASC
       `;
-      expect(delivered[0]?.content_text).toContain("רשמתי");
+      expect(
+        delivered.some(({ content_text }) => content_text.includes("רשמתי")),
+      ).toBe(true);
     }, 120_000);
 
     it("spends a bounded action budget and still answers the customer", async () => {
