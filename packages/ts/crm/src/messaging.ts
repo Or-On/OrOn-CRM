@@ -665,6 +665,10 @@ export async function ingestSimulatedInbound(
         handoff_reason_safe = CASE
           WHEN removed_from_inbox_at IS NULL THEN handoff_reason_safe
         END,
+        inbox_reopened_at = CASE
+          WHEN removed_from_inbox_at IS NULL THEN inbox_reopened_at
+          ELSE CURRENT_TIMESTAMP
+        END,
         removed_from_inbox_at = NULL,
         removed_from_inbox_by_user_id = NULL,
         updated_at = CURRENT_TIMESTAMP
@@ -857,6 +861,10 @@ export async function ingestWhatsAppInbound(
         END,
         handoff_reason_safe = CASE
           WHEN removed_from_inbox_at IS NULL THEN handoff_reason_safe
+        END,
+        inbox_reopened_at = CASE
+          WHEN removed_from_inbox_at IS NULL THEN inbox_reopened_at
+          ELSE CURRENT_TIMESTAMP
         END,
         removed_from_inbox_at = NULL,
         removed_from_inbox_by_user_id = NULL,

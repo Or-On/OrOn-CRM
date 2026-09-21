@@ -4203,6 +4203,12 @@ export async function findOpenWhatsAppServiceIntake(
     FROM service.intake_drafts
     WHERE conversation_id = ${conversationId}::uuid
       AND status IN ('collecting','awaiting_confirmation')
+      -- A conversation reopened after Inbox removal starts a new intake.
+      AND created_at >= COALESCE((
+        SELECT conversation.inbox_reopened_at
+        FROM messaging.conversations conversation
+        WHERE conversation.id = ${conversationId}::uuid
+      ), '-infinity'::timestamptz)
     ORDER BY updated_at DESC, id DESC LIMIT 1
   `;
   return rows[0] === undefined ? undefined : intakeDraft(rows[0]);

@@ -2798,6 +2798,14 @@ async function loadAiWork(
         ON service_case.intake_draft_id=intake.id
        AND service_case.tenant_id=intake.tenant_id
       WHERE intake.conversation_id=${row.conversation_id}::uuid
+        -- An intake from before Inbox removal belongs to the removed thread.
+        -- A handed-off one otherwise escalated every reopened message to a
+        -- person before the model was consulted.
+        AND intake.created_at >= COALESCE((
+          SELECT conversation.inbox_reopened_at
+          FROM messaging.conversations conversation
+          WHERE conversation.id=${row.conversation_id}::uuid
+        ), '-infinity'::timestamptz)
       ORDER BY intake.updated_at DESC, intake.id DESC LIMIT 1
     `;
     const intake = intakes[0];
