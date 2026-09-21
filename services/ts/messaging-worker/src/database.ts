@@ -2678,6 +2678,15 @@ async function loadAiWork(
         AND ((message.direction='inbound' AND message.status='received') OR
              (message.direction='outbound' AND
               message.status IN ('sent','delivered','read')))
+        -- A conversation reopened after Inbox removal is a new thread. The
+        -- removed thread's messages (a request for a person, a takeover) made
+        -- the model hand every new question straight back to a human.
+        AND (message.id = ${triggerMessageId}::uuid
+          OR message.created_at >= COALESCE((
+            SELECT conversation.inbox_reopened_at
+            FROM messaging.conversations conversation
+            WHERE conversation.id = ${row.conversation_id}::uuid
+          ), '-infinity'::timestamptz))
       ORDER BY message.created_at DESC, message.updated_at DESC, message.id DESC LIMIT 50
     `;
     const config = row.configuration as Record<string, unknown> | null;

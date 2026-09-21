@@ -665,9 +665,13 @@ export async function ingestSimulatedInbound(
         handoff_reason_safe = CASE
           WHEN removed_from_inbox_at IS NULL THEN handoff_reason_safe
         END,
+        -- The reopened thread is everything after the removal. Earlier
+        -- messages, intake and handoffs belong to the removed thread. The
+        -- removal time is used rather than this message's time: provider
+        -- timestamps have one-second precision and can precede the clock.
         inbox_reopened_at = CASE
           WHEN removed_from_inbox_at IS NULL THEN inbox_reopened_at
-          ELSE CURRENT_TIMESTAMP
+          ELSE removed_from_inbox_at
         END,
         removed_from_inbox_at = NULL,
         removed_from_inbox_by_user_id = NULL,
@@ -862,9 +866,13 @@ export async function ingestWhatsAppInbound(
         handoff_reason_safe = CASE
           WHEN removed_from_inbox_at IS NULL THEN handoff_reason_safe
         END,
+        -- The reopened thread is everything after the removal. Earlier
+        -- messages, intake and handoffs belong to the removed thread. The
+        -- removal time is used rather than this message's time: provider
+        -- timestamps have one-second precision and can precede the clock.
         inbox_reopened_at = CASE
           WHEN removed_from_inbox_at IS NULL THEN inbox_reopened_at
-          ELSE CURRENT_TIMESTAMP
+          ELSE removed_from_inbox_at
         END,
         removed_from_inbox_at = NULL,
         removed_from_inbox_by_user_id = NULL,

@@ -335,6 +335,47 @@ describe.skipIf(sourceUrl === undefined)(
       expect(escalations).toEqual([{ count: 0 }]);
     });
 
+    it("gives the AI only the new thread after a human-handled conversation is removed", async () => {
+      // Real Gemini, before this rule: the removed thread's "I want a person"
+      // made the model hand the new question straight back (3 of 3 runs).
+      const from = "12025550407";
+      await customerWrites(from, "שלום, יש לי בעיה עם החיוב");
+      await customerWrites(from, "אני רוצה לדבר עם נציג אנושי");
+      const first = await conversationOf(from);
+      await asOperator((transaction) =>
+        setConversationOwnership(transaction, first.id, userId, "human"),
+      );
+      const contact = await admin<{ contact_id: string }[]>`
+        SELECT contact_id FROM messaging.conversations WHERE id=${first.id}::uuid
+      `;
+      await admin`
+        INSERT INTO crm.leads
+          (tenant_id, reference, contact_id, source_channel, source_conversation_id)
+        VALUES (${tenantId}::uuid, ${`LEAD-${randomUUID()}`},
+                ${contact[0]?.contact_id ?? ""}::uuid, 'whatsapp', ${first.id}::uuid)
+      `;
+      expect(
+        await asOperator((transaction) =>
+          deleteConversation(transaction, first.id, userId),
+        ),
+      ).toEqual({ status: "removed_retained_evidence" });
+      // WhatsApp timestamps have one-second precision; real removals and the
+      // customer's next message are seconds to days apart.
+      await new Promise((resolve) => setTimeout(resolve, 1_100));
+
+      decide.mockClear();
+      await customerWrites(from, "היי, כמה עולה המנוי החודשי?");
+      const request = decide.mock.calls.at(-1)?.[0];
+      expect(request?.messages.map((message) => message.text)).toEqual([
+        "היי, כמה עולה המנוי החודשי?",
+      ]);
+      expect(await conversationOf(from)).toMatchObject({
+        id: first.id,
+        ownership_mode: "ai",
+        handoff_reason_safe: null,
+      });
+    });
+
     it("lets an operator reassign a conversation the AI escalated to a person", async () => {
       const from = "12025550406";
       await customerWrites(from, "שלום");
