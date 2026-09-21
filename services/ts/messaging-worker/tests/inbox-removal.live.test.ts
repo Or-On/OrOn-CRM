@@ -480,9 +480,15 @@ describe.skipIf(sourceUrl === undefined)(
         })),
       ).toEqual([{ live: editedVersionId, whatsapp: agentVersionId }]);
 
+      // Live report 2026-09-21: an Inbox page opened before a release sent the
+      // newest published version; the database refused it with a bare 409.
+      // Handing over to the agent now binds its approved WhatsApp version.
       const conversation = await conversationOf(from);
-      await expect(
-        asOperator((transaction) =>
+      await asOperator((transaction) =>
+        setConversationOwnership(transaction, conversation.id, userId, "human"),
+      );
+      expect(
+        await asOperator((transaction) =>
           setConversationOwnership(
             transaction,
             conversation.id,
@@ -491,21 +497,44 @@ describe.skipIf(sourceUrl === undefined)(
             editedVersionId,
           ),
         ),
-      ).rejects.toMatchObject({
-        message:
-          "Approve this agent version in the workspace workflow before assignment",
+      ).toBe(true);
+      const handedOver = await admin<
+        { mode: string; version: string | null }[]
+      >`
+        SELECT ownership_mode AS mode, ai_agent_profile_version_id AS version
+        FROM messaging.conversations WHERE id=${conversation.id}::uuid
+      `;
+      expect(handedOver).toEqual([{ mode: "ai", version: agentVersionId }]);
+
+      // An agent created after the baseline, with no approved binding at all,
+      // is refused with the message the Inbox explains to the operator.
+      const unapprovedVersionId = await asOperator(async (transaction) => {
+        const profileId = await createAgentProfileDraft(transaction, userId, {
+          name: "Fictional unapproved agent",
+          systemPrompt: "Answer briefly.",
+          locale: "he",
+          channels: ["whatsapp"],
+        });
+        await publishAgentProfile(transaction, userId, profileId);
+        const rows = await transaction<{ id: string }[]>`
+          SELECT id FROM agents.agent_profile_versions
+          WHERE agent_profile_id=${profileId}::uuid AND published_at IS NOT NULL
+        `;
+        return rows[0]?.id ?? "";
       });
-      expect(
-        await asOperator((transaction) =>
+      await expect(
+        asOperator((transaction) =>
           setConversationOwnership(
             transaction,
             conversation.id,
             userId,
             "ai",
-            agentVersionId,
+            unapprovedVersionId,
           ),
         ),
-      ).toBe(true);
+      ).rejects.toThrow(
+        "Approve this agent version in the workspace workflow before assignment",
+      );
     });
 
     it("lets the operator change the responder and the assignee after reopening", async () => {

@@ -1612,26 +1612,40 @@ export async function setConversationOwnership(
         platform.current_tenant_id()::text || ':agent-profile:' || ${profileId}, 11
       ))
     `;
-    const agents = await sql<{ id: string }[]>`
-      SELECT version.id
+    // The operator hands the conversation to an agent ("AI · name"). WhatsApp
+    // runs the version the tenant's reviewed configuration approves, exactly
+    // as the default assignment does. A client offering a newer published but
+    // unapproved version (an Inbox page opened before a release) was refused
+    // by trg_approved_conversation_agent with a bare 409.
+    const agents = await sql<{ id: string; approved: boolean }[]>`
+      SELECT version.id,
+             platform.approved_agent_for_channel(version.id, 'whatsapp') AS approved
       FROM agents.agent_profile_versions version
       JOIN agents.agent_profiles profile
         ON profile.id=version.agent_profile_id
        AND profile.tenant_id=version.tenant_id
-      WHERE version.id = ${agentProfileVersionId}::uuid
+      WHERE version.agent_profile_id = ${profileId}::uuid
         AND version.tenant_id = platform.current_tenant_id()
         AND version.published_at IS NOT NULL
         AND version.validation_status = 'valid'
         AND version.channel_capabilities @> ARRAY['whatsapp']::text[]
         AND profile.archived_at IS NULL
-      LIMIT 1
+      ORDER BY version.version DESC
     `;
     if (agents[0] === undefined)
       throw new TypeError("a published WhatsApp agent is required");
+    const approved = agents.filter((agent) => agent.approved);
+    const bound =
+      approved.find((agent) => agent.id === agentProfileVersionId) ??
+      approved[0];
+    if (bound === undefined)
+      throw new TypeError(
+        "Approve this agent version in the workspace workflow before assignment",
+      );
     const rows = await sql<{ id: string }[]>`
       UPDATE messaging.conversations
       SET ownership_mode = 'ai',
-          ai_agent_profile_version_id = ${agentProfileVersionId}::uuid,
+          ai_agent_profile_version_id = ${bound.id}::uuid,
           ai_enabled_by_user_id = ${actorUserId}::uuid,
           ai_enabled_at = CURRENT_TIMESTAMP,
           assigned_user_id = NULL,
