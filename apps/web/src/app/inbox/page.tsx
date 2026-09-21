@@ -91,10 +91,10 @@ export default async function InboxPage({
         selectedId: first?.id,
         quickReplies,
         teamMembers,
-        // An operator may hand a conversation only to the agent version the
-        // platform would actually run: the live one. The newest version is
-        // routinely an unpublished draft, and offering that would bind the
-        // conversation to something the ownership gate refuses.
+        // Published WhatsApp agents. The thread offers each one's
+        // `whatsAppAssignableVersionId`, the version the ownership gate
+        // accepts; a published agent still awaiting workflow approval stays
+        // listed only so the operator is told why it cannot be selected.
         agentProfiles: agentProfiles.filter(
           (profile) =>
             profile.publishedVersionId !== null &&

@@ -31,6 +31,10 @@ const knownErrors: Readonly<Record<string, string>> = {
   "real WhatsApp channel is not configured": "errors.configuration",
   "WhatsApp AI is disabled by the platform operator": "inbox.aiDisabled",
   "a published WhatsApp agent is required": "inbox.noAiAgent",
+  // trg_approved_conversation_agent (TF409): the version is published but its
+  // WhatsApp workflow binding is not approved in the reviewed configuration.
+  "Approve this agent version in the workspace workflow before assignment":
+    "inbox.aiNotApproved",
   "Move active conversations to human ownership before deleting this agent.":
     "orchestration.agentHasActiveConversations",
   "conversation has no valid WhatsApp recipient": "errors.phone",

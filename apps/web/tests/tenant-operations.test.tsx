@@ -44,6 +44,7 @@ const agents: readonly AgentProfileSummary[] = [
     publishedVersion: 1,
     publishedVersionId: "v1",
     publishedChannels: ["voice"],
+    whatsAppAssignableVersionId: null,
     leadFieldSchema: null,
     implicitTicketing: false,
     review: {
@@ -77,6 +78,7 @@ const agents: readonly AgentProfileSummary[] = [
     publishedVersion: null,
     publishedVersionId: null,
     publishedChannels: [],
+    whatsAppAssignableVersionId: null,
     leadFieldSchema: null,
     implicitTicketing: false,
     review: {

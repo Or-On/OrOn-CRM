@@ -10,6 +10,7 @@ import {
   listConversations,
   listMessagePage,
   listMessages,
+  setConversationOwnership,
 } from "./messaging.js";
 import {
   createAgentProfileDraft,
@@ -639,6 +640,141 @@ describe.skipIf(databaseUrl === undefined)(
         expect(
           (await listConversations(transaction)).map((item) => item.id),
         ).toEqual([first.conversationId]);
+      });
+    });
+
+    it("reopens a removed human-handled conversation eligible for default AI assignment", async () => {
+      await isolated(async (transaction) => {
+        const suffix = randomUUID().replaceAll("-", "");
+        const input = {
+          from: `+1204${suffix.replace(/\D/gu, "").padEnd(7, "0").slice(0, 7)}`,
+          profileName: "Fictional handed-over customer",
+          text: "Fictional request before removal",
+          providerEventId: `fixture-handover-event-${suffix}`,
+          providerMessageId: `fixture-handover-${suffix}`,
+        };
+        const first = await ingestSimulatedInbound(transaction, userId, input);
+        const contact = await transaction<{ contact_id: string }[]>`
+          SELECT contact_id FROM messaging.conversations
+          WHERE id=${first.conversationId}::uuid
+        `;
+        await transaction`
+          INSERT INTO service.cases(
+            tenant_id,reference,customer_contact_id,conversation_id,title,
+            fault_description,created_by_user_id
+          ) VALUES(
+            platform.current_tenant_id(),${`FS-HO-${suffix}`},
+            ${contact[0]?.contact_id ?? ""}::uuid,${first.conversationId}::uuid,
+            'Fictional handed-over case','Synthetic retained evidence',
+            ${userId}::uuid
+          )
+        `;
+        // The operator took the thread over: assignee, reason and an accepted
+        // handoff exactly as the Inbox "Human operator" responder writes them.
+        expect(
+          await setConversationOwnership(
+            transaction,
+            first.conversationId,
+            userId,
+            "human",
+          ),
+        ).toBe(true);
+        expect(
+          await deleteConversation(transaction, first.conversationId, userId),
+        ).toEqual({ status: "removed_retained_evidence" });
+        const removed = await transaction<
+          { assigned: string | null; reason: string | null; open: number }[]
+        >`
+          SELECT conversation.assigned_user_id AS assigned,
+                 conversation.handoff_reason_safe AS reason,
+                 (SELECT count(*)::int FROM automation.handoffs handoff
+                  WHERE handoff.conversation_id=conversation.id
+                    AND handoff.status IN ('pending','accepted')) AS open
+          FROM messaging.conversations conversation
+          WHERE conversation.id=${first.conversationId}::uuid
+        `;
+        expect(removed).toEqual([{ assigned: null, reason: null, open: 0 }]);
+
+        await ingestSimulatedInbound(transaction, userId, {
+          ...input,
+          text: "Fictional request after removal",
+          providerEventId: `fixture-handover-event-new-${suffix}`,
+          providerMessageId: `fixture-handover-new-${suffix}`,
+        });
+        // Exactly the preconditions assignDefaultWhatsAppAi requires.
+        const reopened = await transaction<
+          {
+            ownership: string;
+            assigned: string | null;
+            reason: string | null;
+            removed: Date | null;
+          }[]
+        >`
+          SELECT ownership_mode AS ownership, assigned_user_id AS assigned,
+                 handoff_reason_safe AS reason, removed_from_inbox_at AS removed
+          FROM messaging.conversations WHERE id=${first.conversationId}::uuid
+        `;
+        expect(reopened).toEqual([
+          { ownership: "human", assigned: null, reason: null, removed: null },
+        ]);
+      });
+    });
+
+    it("clears stale handling state left on rows removed before the fix", async () => {
+      await isolated(async (transaction) => {
+        const suffix = randomUUID().replaceAll("-", "");
+        const input = {
+          from: `+1205${suffix.replace(/\D/gu, "").padEnd(7, "0").slice(0, 7)}`,
+          profileName: "Fictional legacy removal customer",
+          text: "Fictional legacy request",
+          providerEventId: `fixture-legacy-event-${suffix}`,
+          providerMessageId: `fixture-legacy-${suffix}`,
+        };
+        const first = await ingestSimulatedInbound(transaction, userId, input);
+        // What the previous soft removal left behind for DEV data.
+        await transaction`
+          UPDATE messaging.conversations
+          SET removed_from_inbox_at=CURRENT_TIMESTAMP,
+              removed_from_inbox_by_user_id=${userId}::uuid,
+              assigned_user_id=${userId}::uuid,
+              handoff_reason_safe='Fictional stale handoff reason'
+          WHERE id=${first.conversationId}::uuid
+        `;
+        await ingestSimulatedInbound(transaction, userId, {
+          ...input,
+          providerEventId: `fixture-legacy-event-new-${suffix}`,
+          providerMessageId: `fixture-legacy-new-${suffix}`,
+        });
+        const reopened = await transaction<
+          { assigned: string | null; reason: string | null }[]
+        >`
+          SELECT assigned_user_id AS assigned, handoff_reason_safe AS reason
+          FROM messaging.conversations WHERE id=${first.conversationId}::uuid
+        `;
+        expect(reopened).toEqual([{ assigned: null, reason: null }]);
+
+        // A message to a conversation that was never removed keeps its
+        // operator and reason: human ownership stays sticky.
+        await transaction`
+          UPDATE messaging.conversations
+          SET assigned_user_id=${userId}::uuid,
+              handoff_reason_safe='Fictional live handoff reason'
+          WHERE id=${first.conversationId}::uuid
+        `;
+        await ingestSimulatedInbound(transaction, userId, {
+          ...input,
+          providerEventId: `fixture-legacy-event-live-${suffix}`,
+          providerMessageId: `fixture-legacy-live-${suffix}`,
+        });
+        const live = await transaction<
+          { assigned: string | null; reason: string | null }[]
+        >`
+          SELECT assigned_user_id AS assigned, handoff_reason_safe AS reason
+          FROM messaging.conversations WHERE id=${first.conversationId}::uuid
+        `;
+        expect(live).toEqual([
+          { assigned: userId, reason: "Fictional live handoff reason" },
+        ]);
       });
     });
   },

@@ -628,6 +628,7 @@ describe("Inbox interaction safety (no provider network)", () => {
     publishedVersion: 1,
     publishedVersionId: "00000000-0000-4000-8000-000000000091",
     publishedChannels: ["whatsapp"] as const,
+    whatsAppAssignableVersionId: "00000000-0000-4000-8000-000000000091",
     leadFieldSchema: null,
     implicitTicketing: false,
     review: {
@@ -723,6 +724,123 @@ describe("Inbox interaction safety (no provider network)", () => {
     );
     expect((await screen.findByRole("alert")).textContent).toContain(
       "WhatsApp AI is disabled by the platform operator",
+    );
+  });
+
+  it("hands over only the version WhatsApp approval accepts, not a newer published one", async () => {
+    // v3 is published after the configuration baseline without an approved
+    // workflow binding; v1 is the approved version the database accepts.
+    const awaitingApproval = {
+      ...draftAheadAgent,
+      publishedVersion: 3,
+      publishedVersionId: "00000000-0000-4000-8000-000000000093",
+      whatsAppAssignableVersionId: "00000000-0000-4000-8000-000000000091",
+    };
+    render(
+      localized(
+        <InboxWorkspace
+          agentProfiles={[awaitingApproval]}
+          aiRepliesEnabled
+          conversations={conversations}
+          initialMessages={messagesA}
+          quickReplies={[]}
+          teamMembers={[]}
+          realWhatsAppEnabled={false}
+          canOperate
+        />,
+      ),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Conversation controls" }),
+    );
+    const responder = screen.getByRole("combobox", {
+      name: "Conversation responder",
+    });
+    const offered = within(responder)
+      .getAllByRole("option")
+      .map((option) => option.getAttribute("value"));
+    expect(offered).toEqual(["human", "00000000-0000-4000-8000-000000000091"]);
+    fireEvent.change(responder, {
+      target: { value: "00000000-0000-4000-8000-000000000091" },
+    });
+    await waitFor(() =>
+      expect(transport.mutate).toHaveBeenCalledWith(
+        "/api/messaging/conversations/alpha",
+        {
+          ownershipMode: "ai",
+          agentProfileVersionId: "00000000-0000-4000-8000-000000000091",
+        },
+        { method: "PATCH" },
+      ),
+    );
+  });
+
+  it("explains that a published agent still needs workflow approval", () => {
+    render(
+      localized(
+        <InboxWorkspace
+          agentProfiles={[
+            { ...draftAheadAgent, whatsAppAssignableVersionId: null },
+          ]}
+          aiRepliesEnabled
+          conversations={conversations}
+          initialMessages={messagesA}
+          quickReplies={[]}
+          teamMembers={[]}
+          realWhatsAppEnabled={false}
+          canOperate
+        />,
+      ),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Conversation controls" }),
+    );
+    const responder = screen.getByRole("combobox", {
+      name: "Conversation responder",
+    });
+    expect(
+      within(responder)
+        .getAllByRole("option")
+        .map((option) => option.getAttribute("value")),
+    ).toEqual(["human"]);
+    expect(
+      screen.getByText(/not approved for new conversations yet/u),
+    ).toBeTruthy();
+  });
+
+  it("translates the database approval refusal instead of a generic failure", async () => {
+    transport.mutate.mockRejectedValueOnce(
+      new Error(
+        "Approve this agent version in the workspace workflow before assignment",
+      ),
+    );
+    render(
+      localized(
+        <InboxWorkspace
+          agentProfiles={[draftAheadAgent]}
+          aiRepliesEnabled
+          conversations={conversations}
+          initialMessages={messagesA}
+          quickReplies={[]}
+          teamMembers={[]}
+          realWhatsAppEnabled={false}
+          canOperate
+        />,
+      ),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Conversation controls" }),
+    );
+    fireEvent.change(
+      screen.getByRole("combobox", { name: "Conversation responder" }),
+      { target: { value: "00000000-0000-4000-8000-000000000091" } },
+    );
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain(
+      "not approved for new conversations yet",
+    );
+    expect(alert.textContent).not.toContain(
+      "Could not update this conversation",
     );
   });
 

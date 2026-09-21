@@ -654,6 +654,17 @@ export async function ingestSimulatedInbound(
     SET unread_count = unread_count + 1,
         last_message_at = ${occurredAt},
         last_message_preview = ${input.text.trim()},
+        -- Reopened from Inbox removal: start with a new conversation's
+        -- handling state. Removal ended the thread and cancelled its
+        -- handoffs; a stale operator or handoff reason would block the default
+        -- WhatsApp AI assignment that runs next. CASE reads the pre-update
+        -- row, so a message to a live conversation keeps both unchanged.
+        assigned_user_id = CASE
+          WHEN removed_from_inbox_at IS NULL THEN assigned_user_id
+        END,
+        handoff_reason_safe = CASE
+          WHEN removed_from_inbox_at IS NULL THEN handoff_reason_safe
+        END,
         removed_from_inbox_at = NULL,
         removed_from_inbox_by_user_id = NULL,
         updated_at = CURRENT_TIMESTAMP
@@ -836,6 +847,17 @@ export async function ingestWhatsAppInbound(
             THEN ${preview}
           ELSE last_message_preview END,
         last_message_at = GREATEST(last_message_at, ${message.created_at}),
+        -- Reopened from Inbox removal: start with a new conversation's
+        -- handling state. Removal ended the thread and cancelled its
+        -- handoffs; a stale operator or handoff reason would block the default
+        -- WhatsApp AI assignment that runs next. CASE reads the pre-update
+        -- row, so a message to a live conversation keeps both unchanged.
+        assigned_user_id = CASE
+          WHEN removed_from_inbox_at IS NULL THEN assigned_user_id
+        END,
+        handoff_reason_safe = CASE
+          WHEN removed_from_inbox_at IS NULL THEN handoff_reason_safe
+        END,
         removed_from_inbox_at = NULL,
         removed_from_inbox_by_user_id = NULL,
         updated_at = CURRENT_TIMESTAMP
@@ -1404,6 +1426,10 @@ export async function deleteConversation(
             WHEN ownership_mode = 'ai' THEN NULL
             ELSE ai_enabled_at
           END,
+          -- Its handoffs were cancelled above; keeping the operator or the
+          -- handoff reason would pin the next customer message to a person.
+          assigned_user_id = NULL,
+          handoff_reason_safe = NULL,
           updated_at = CURRENT_TIMESTAMP
       WHERE id = ${conversationId}::uuid
     `;

@@ -539,14 +539,18 @@ export function ConversationThread({
                 }
               >
                 <option value="human">{t("inbox.humanResponder")}</option>
+                {/* Only the version WhatsApp assignment accepts: published,
+                    valid and approved by the tenant's reviewed configuration.
+                    A newer published version awaiting approval is refused by
+                    the database, so it is not offered. */}
                 {agentProfiles.flatMap((profile) =>
-                  profile.publishedVersionId === null
+                  profile.whatsAppAssignableVersionId === null
                     ? []
                     : [
                         <option
                           disabled={!aiRepliesEnabled}
-                          key={profile.publishedVersionId}
-                          value={profile.publishedVersionId}
+                          key={profile.whatsAppAssignableVersionId}
+                          value={profile.whatsAppAssignableVersionId}
                         >
                           {t("inbox.aiResponder", { name: profile.name })}
                         </option>,
@@ -558,7 +562,12 @@ export function ConversationThread({
                   ? t("inbox.aiDisabled")
                   : agentProfiles.length === 0
                     ? t("inbox.noAiAgent")
-                    : t("inbox.responderHint")}
+                    : agentProfiles.every(
+                          (profile) =>
+                            profile.whatsAppAssignableVersionId === null,
+                        )
+                      ? t("inbox.aiNotApproved")
+                      : t("inbox.responderHint")}
               </small>
               <Select
                 disabled={!canOperate || pending}

@@ -1390,6 +1390,7 @@
     "aiResponder": "AI · {name}",
     "noAiAgent": "Publish a valid WhatsApp agent in Agents & Flows before enabling AI replies.",
     "aiDisabled": "WhatsApp AI is disabled by the platform operator. Set the deployment flag and API key, then restart the messaging worker.",
+    "aiNotApproved": "The published WhatsApp agent version is not approved for new conversations yet. Submit its workflow binding in Business settings and have it approved; until then conversations stay with a person.",
     "responderHint": "Switching to Human assigns the conversation to you immediately. AI requires both deployment enablement and a published WhatsApp agent.",
     "unassigned": "Unassigned",
     "historyMode": "Viewing history · live updates paused",

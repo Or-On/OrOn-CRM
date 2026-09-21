@@ -49,6 +49,7 @@ function coordinator(
     publishedVersion: 2,
     publishedVersionId: v2,
     publishedChannels: ["voice", "whatsapp"],
+    whatsAppAssignableVersionId: v2,
     leadFieldSchema: {
       id: "schema-1",
       name: "Business software enquiry",

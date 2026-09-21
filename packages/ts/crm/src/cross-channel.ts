@@ -313,6 +313,16 @@ export interface AgentProfileSummary {
    * agent reads these, not `channels`.
    */
   readonly publishedChannels: readonly SupportedChannel[];
+  /**
+   * The version a WhatsApp conversation can be handed to right now: the newest
+   * published, valid, WhatsApp-capable version that the tenant's reviewed
+   * configuration approves for WhatsApp. It is exactly what the default
+   * assignment and the conversation ownership trigger accept, so a screen that
+   * offers it cannot offer a hand-over the database refuses. Null when no
+   * version is approved yet (for example a version published after the
+   * configuration baseline without an approved workflow binding).
+   */
+  readonly whatsAppAssignableVersionId: string | null;
   /** The reviewed field list the newest version is pinned to, by name. */
   readonly leadFieldSchema: {
     readonly id: string;
@@ -360,6 +370,7 @@ interface AgentProfileRow {
   published_version: number | null;
   published_version_id: string | null;
   published_channel_capabilities: SupportedChannel[] | null;
+  whatsapp_assignable_version_id: string | null;
   implicit_ticketing: boolean | null;
   schema_id: string | null;
   schema_name: string | null;
@@ -394,6 +405,7 @@ export async function listAgentProfiles(
            version.implicit_ticketing,
            live.version AS published_version, live.id AS published_version_id,
            live.channel_capabilities AS published_channel_capabilities,
+           whatsapp.id AS whatsapp_assignable_version_id,
            COALESCE(settings.whatsapp_ai_agent_profile_id = profile.id, false)
              AS is_default_whatsapp,
            schema.id AS schema_id, schema.name AS schema_name,
@@ -424,6 +436,18 @@ export async function listAgentProfiles(
         AND candidate.validation_status = 'valid'
       ORDER BY candidate.version DESC LIMIT 1
     ) live ON true
+    LEFT JOIN LATERAL (
+      -- The version WhatsApp assignment accepts: the same rule as the worker's
+      -- default assignment and trg_approved_conversation_agent.
+      SELECT candidate.id
+      FROM agents.agent_profile_versions candidate
+      WHERE candidate.agent_profile_id = profile.id
+        AND candidate.published_at IS NOT NULL
+        AND candidate.validation_status = 'valid'
+        AND candidate.channel_capabilities @> ARRAY['whatsapp']::text[]
+        AND platform.approved_agent_for_channel(candidate.id, 'whatsapp')
+      ORDER BY candidate.version DESC LIMIT 1
+    ) whatsapp ON true
     LEFT JOIN crm.lead_field_schemas schema
       ON schema.tenant_id = profile.tenant_id
      AND schema.id::text = version.channel_configuration->>'leadFieldSchemaId'
@@ -497,6 +521,7 @@ export async function listAgentProfiles(
       publishedVersion: row.published_version,
       publishedVersionId: row.published_version_id,
       publishedChannels: row.published_channel_capabilities ?? [],
+      whatsAppAssignableVersionId: row.whatsapp_assignable_version_id,
       leadFieldSchema:
         schema === null
           ? null

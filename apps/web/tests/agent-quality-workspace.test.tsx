@@ -219,6 +219,7 @@ describe("persisted agent quality workspace", () => {
               publishedVersion: 1,
               publishedVersionId: version.id,
               publishedChannels: ["voice"],
+              whatsAppAssignableVersionId: null,
               leadFieldSchema: null,
               implicitTicketing: false,
               review: {
