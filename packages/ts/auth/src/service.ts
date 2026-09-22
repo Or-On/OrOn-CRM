@@ -1,6 +1,10 @@
 import { Buffer } from "node:buffer";
 
-import { isAuthorized, permissions } from "./authorization.js";
+import {
+  applicationScope,
+  isAuthorizedInApplication,
+  permissions,
+} from "./authorization.js";
 import {
   generateOpaqueToken,
   hashPassword,
@@ -223,6 +227,10 @@ export class AuthService {
   }
 
   public toPublicSession(session: AuthSession): PublicSession {
+    const principal = {
+      role: session.tenant.role,
+      isSuperuser: session.isSuperuser,
+    };
     return {
       user: {
         id: session.userId,
@@ -236,11 +244,9 @@ export class AuthService {
       memberships: session.memberships,
       expiresAt: session.absoluteExpiresAt.toISOString(),
       permissions: permissions.filter((permission) =>
-        isAuthorized(
-          { role: session.tenant.role, isSuperuser: session.isSuperuser },
-          permission,
-        ),
+        isAuthorizedInApplication(principal, permission),
       ),
+      applicationScope: applicationScope(principal),
     };
   }
 }

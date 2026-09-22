@@ -38,6 +38,7 @@ export * from "./tenant-configuration.js";
 export * from "./field-service-domain.js";
 export * from "./field-service-export.js";
 export * from "./field-service.js";
+export * from "./field-service-session.js";
 export * from "./service-workflow.js";
 export * from "./tenants.js";
 export * from "./tools.js";

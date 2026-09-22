@@ -107,7 +107,7 @@ describe("platform tenant deletion", () => {
     );
     fireEvent.click(
       screen.getByRole("checkbox", {
-        name: /Field service & technicians/u,
+        name: /Field Service & technicians/u,
       }),
     );
     state.mutate.mockResolvedValueOnce({
@@ -122,7 +122,7 @@ describe("platform tenant deletion", () => {
         { method: "PATCH" },
       ),
     );
-    expect(await screen.findByText("Field service available")).toBeTruthy();
-    expect(screen.queryByText("Field service active")).toBeNull();
+    expect(await screen.findByText("Field Service available")).toBeTruthy();
+    expect(screen.queryByText("Field Service active")).toBeNull();
   });
 });

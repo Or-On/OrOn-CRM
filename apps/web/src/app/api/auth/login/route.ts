@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 
 import {
   InvalidCredentialsError,
+  applicationHome,
+  applicationScope,
   assertTrustedUnsafeRequest,
   clientAddress,
 } from "@or-on/auth";
@@ -33,7 +35,13 @@ export async function POST(request: Request) {
       }),
     );
     await setSessionCookies(issued.sessionToken, issued.csrfToken);
-    return NextResponse.json({ ok: true });
+    // Each login is its own session; sibling sessions of the account stay
+    // valid. The landing page follows the session's application.
+    const scope = applicationScope({
+      role: issued.session.tenant.role,
+      isSuperuser: issued.session.isSuperuser,
+    });
+    return NextResponse.json({ ok: true, home: applicationHome[scope] });
   } catch (error) {
     if (error instanceof InvalidCredentialsError) {
       return NextResponse.json({ error: error.message }, { status: 401 });

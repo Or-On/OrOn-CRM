@@ -30,6 +30,18 @@ vi.mock("../src/features/auth", () => ({
       { tenant: { tenantId: state.tenantId } },
     );
   },
+  withCurrentShellTenant: (
+    action: (
+      sql: { tenantId: string },
+      session: { tenant: { tenantId: string } },
+    ) => unknown,
+  ) => {
+    state.permission("shell");
+    return action(
+      { tenantId: state.tenantId },
+      { tenant: { tenantId: state.tenantId } },
+    );
+  },
 }));
 vi.mock("../src/features/crm-route", () => ({
   assertCrmMutation: state.guard,
@@ -95,6 +107,8 @@ describe("tenant logo endpoint isolation", () => {
     expect(state.permission).toHaveBeenCalledWith("tenant:manage");
     expect(state.guard).toHaveBeenCalledOnce();
     const first = await GET(request());
+    // Reading brands every application shell, including technicians'.
+    expect(state.permission).toHaveBeenLastCalledWith("shell");
     expect(new Uint8Array(await first.arrayBuffer())).toEqual(logoA);
     expect(first.headers.get("cache-control")).toBe("private, no-store");
     state.tenantId = "tenant-b";

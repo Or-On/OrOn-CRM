@@ -12,6 +12,9 @@ export function proxy(request: NextRequest) {
   // Locale metadata is not an authentication boundary. Never trust caller headers.
   requestHeaders.set("x-or-on-locale", locale);
   requestHeaders.delete("x-or-on-public-route");
+  // The requested page lets the root layout keep a session inside its own
+  // application. It can only redirect away from a page; it never grants one.
+  requestHeaders.set("x-or-on-pathname", request.nextUrl.pathname);
   const response = NextResponse.next({ request: { headers: requestHeaders } });
   if (
     (pathLocale === "en" || pathLocale === "he") &&

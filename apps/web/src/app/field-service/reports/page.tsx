@@ -40,6 +40,6 @@ export default async function ServiceReportsPage() {
 }
 
 export const metadata: Metadata = {
-  title: "Service reports",
-  description: "Tenant-scoped field-service report history.",
+  title: "Field Service reports",
+  description: "Tenant-scoped Field Service report history.",
 };

@@ -106,7 +106,7 @@ export const navigation = [
   },
   {
     href: "/field-service",
-    label: "Field service",
+    label: "Field Service",
     group: "Operations",
     icon: "fieldService",
   },

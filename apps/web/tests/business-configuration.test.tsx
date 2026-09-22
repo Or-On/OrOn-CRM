@@ -84,7 +84,7 @@ describe("business configuration", () => {
     );
     expect(html).toContain("Business templates");
     expect(html).toContain("Field Service");
-    expect(html).toContain("Requires Field service");
+    expect(html).toContain("Requires Field Service");
     expect(html).toContain("Support intake");
     expect(html).toContain("Support agent v4");
     expect(html).toContain("Support flow v2");
@@ -219,9 +219,16 @@ describe("business configuration", () => {
 
   it("loads the reusable service template with retail intake and technician policy", () => {
     render(workspace());
+    // The Field Service template card, not the Field Service module card.
     const card = screen
-      .getByRole("heading", { name: "Field Service" })
-      .closest("article");
+      .getAllByRole("heading", { name: "Field Service" })
+      .map((heading) => heading.closest("article"))
+      .find(
+        (article) =>
+          article !== null &&
+          within(article).queryByRole("button", { name: "Use template" }) !==
+            null,
+      );
     if (!card) throw new Error("Missing service template card");
     fireEvent.click(within(card).getByRole("button", { name: "Use template" }));
     expect(

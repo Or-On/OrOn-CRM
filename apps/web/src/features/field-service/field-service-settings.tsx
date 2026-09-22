@@ -102,7 +102,7 @@ export function FieldServiceSettings({
         payload.feature.effective
           ? he
             ? "שירות השטח פעיל וזמין כעת בתפריט התפעול."
-            : "Field service is active and now available in Operations."
+            : "Field Service is active and now available in Operations."
           : he
             ? "הגדרות שירות השטח נשמרו."
             : "Field-service settings saved.",
@@ -131,7 +131,7 @@ export function FieldServiceSettings({
           <span className="eyebrow">
             {he ? "יכולת אופציונלית" : "Optional capability"}
           </span>
-          <h3>{he ? "שירות שטח וטכנאים" : "Field service & technicians"}</h3>
+          <h3>{he ? "שירות שטח וטכנאים" : "Field Service & technicians"}</h3>
           <p>
             {he
               ? "תיקים, תזמון, נוכחות, ראיות ודוחות—מבודדים לסביבת העבודה הזו."
@@ -344,7 +344,7 @@ export function FieldServiceSettings({
                 className="or-button or-button--secondary or-button--medium"
                 href="/field-service"
               >
-                {he ? "פתיחת שירות השטח" : "Open field service"}
+                {he ? "פתיחת שירות השטח" : "Open Field Service"}
               </Link>
             ) : null}
             <Button disabled={pending} type="submit">

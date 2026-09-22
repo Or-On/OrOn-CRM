@@ -8,6 +8,7 @@ import type {
   ServiceCaseStatus,
   ServiceVisit,
   ServiceWorkflowPolicy,
+  SessionTechnician,
   TechnicianSummary,
 } from "@or-on/crm";
 import { serviceWorkflowDefaults } from "@or-on/crm/service-workflow";
@@ -178,7 +179,9 @@ export function ServiceCaseWorkspace({
   canReadVoice,
   dossier,
   feature,
+  isTechnician = false,
   linkCandidates,
+  sessionTechnician = null,
   technicians,
   timezone,
   workflowPolicy,
@@ -188,7 +191,10 @@ export function ServiceCaseWorkspace({
   readonly canReadVoice: boolean;
   readonly dossier: ServiceCaseDossier;
   readonly feature: FieldServiceFeatureState;
+  readonly isTechnician?: boolean;
   readonly linkCandidates: ServiceCaseLinkCandidates | undefined;
+  /** The physical technician of this browser session (technician roles). */
+  readonly sessionTechnician?: SessionTechnician | null;
   readonly technicians: readonly TechnicianSummary[];
   readonly timezone: string;
   readonly workflowPolicy?: ServiceWorkflowPolicy;
@@ -233,6 +239,13 @@ export function ServiceCaseWorkspace({
       dossier.conversations.flatMap((conversation) => conversation.messages),
     [dossier.conversations],
   );
+  // A technician works only visits assigned to their own physical technician;
+  // earlier visits by others on the same case stay readable history.
+  const canWorkVisit = (visit: ServiceVisit) =>
+    !isTechnician || visit.technicianId === sessionTechnician?.id;
+  const evidenceDefaultVisit = isTechnician
+    ? dossier.visits.filter(canWorkVisit).at(-1)
+    : dossier.visits.at(-1);
 
   const pending = pendingAction !== undefined;
   const dialogOpen =
@@ -529,7 +542,7 @@ export function ServiceCaseWorkspace({
     <div className="service-case-workspace">
       <Link className="service-case-back" href="/field-service">
         <ArrowLeft aria-hidden="true" size={15} />
-        {he ? "חזרה לשירות שטח" : "Back to field service"}
+        {he ? "חזרה לשירות שטח" : "Back to Field Service"}
       </Link>
       <header className="service-case-hero">
         <div>
@@ -740,9 +753,11 @@ export function ServiceCaseWorkspace({
                 </span>
                 <h2 dir="auto">{serviceCase.customerName}</h2>
               </div>
-              <Link href={`/contacts/${serviceCase.customerContactId}`}>
-                {he ? "פתיחת לקוח" : "Open contact"}
-              </Link>
+              {isTechnician ? null : (
+                <Link href={`/contacts/${serviceCase.customerContactId}`}>
+                  {he ? "פתיחת לקוח" : "Open contact"}
+                </Link>
+              )}
             </header>
             <dl className="service-case-details">
               <div>
@@ -861,7 +876,7 @@ export function ServiceCaseWorkspace({
                           ) : null}
                         </div>
                       </div>
-                      {canOperate ? (
+                      {canOperate && canWorkVisit(visit) ? (
                         <div className="service-visit-actions">
                           <Button
                             onClick={() => openIdentityDialog(visit)}
@@ -907,7 +922,7 @@ export function ServiceCaseWorkspace({
               {canOperate ? (
                 <Button
                   onClick={() =>
-                    openUploadDialog(dossier.visits.at(-1), undefined)
+                    openUploadDialog(evidenceDefaultVisit, undefined)
                   }
                   size="small"
                   variant="secondary"
@@ -1398,6 +1413,11 @@ export function ServiceCaseWorkspace({
             </option>
           </Select>
           <Input
+            defaultValue={
+              identityVisit?.technicianId === sessionTechnician?.id
+                ? sessionTechnician?.fullName
+                : undefined
+            }
             id="identity-name"
             label={he ? "שם מלא" : "Full name"}
             name="fullName"

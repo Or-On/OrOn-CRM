@@ -36,7 +36,13 @@ export function LoginForm() {
         );
         return;
       }
-      router.replace("/");
+      const payload = (await response.json().catch(() => ({}))) as {
+        readonly home?: unknown;
+      };
+      // Technicians land directly in their Field Service application.
+      router.replace(
+        payload.home === "/field-service" ? "/field-service" : "/",
+      );
       router.refresh();
     } catch {
       setError(t("auth.failed"));

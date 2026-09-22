@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { applicationHome } from "@or-on/auth";
 import { getTranslations } from "next-intl/server";
 import { ArrowUpRight, Workflow } from "lucide-react";
 
@@ -17,6 +18,9 @@ export async function generateMetadata() {
 export default async function StartPage() {
   const session = await currentPublicSession();
   if (!session) redirect("/login");
+  // Workspace onboarding is not part of the technician application.
+  if (session.applicationScope === "field-service")
+    redirect(applicationHome["field-service"]);
   const t = await getTranslations("start");
   const tCommon = await getTranslations("common");
   const tInbox = await getTranslations("inbox");

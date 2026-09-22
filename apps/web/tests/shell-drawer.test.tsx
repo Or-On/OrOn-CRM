@@ -31,6 +31,7 @@ const session: PublicSession = {
   memberships: [membership],
   expiresAt: "2030-01-01T00:00:00.000Z",
   permissions: [],
+  applicationScope: "workspace",
 };
 
 describe("responsive workspace drawer", () => {

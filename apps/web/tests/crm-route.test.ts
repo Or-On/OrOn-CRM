@@ -34,4 +34,24 @@ describe("CRM PostgreSQL error responses", () => {
       expect(await response.json()).toEqual({ error: message });
     },
   );
+
+  it.each([
+    ["FS428", 428, "TECHNICIAN_IDENTIFICATION_REQUIRED"],
+    ["FS401", 403, "TECHNICIAN_IDENTITY_MISMATCH"],
+    ["FS409", 409, "TECHNICIAN_SESSION_ALREADY_BOUND"],
+  ])(
+    "explains shared technician session state %s with a stable code",
+    async (sqlstate, status, code) => {
+      const response = crmErrorResponse({
+        code: sqlstate,
+        message: "identify the technician using this session",
+        detail: "sensitive row content",
+      });
+
+      expect(response.status).toBe(status);
+      const body = (await response.json()) as { error: string; code: string };
+      expect(body.code).toBe(code);
+      expect(body.error).not.toContain("sensitive");
+    },
+  );
 });

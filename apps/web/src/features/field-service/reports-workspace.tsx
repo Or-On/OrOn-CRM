@@ -186,7 +186,7 @@ export function ReportsWorkspace({
     <div className="field-service-workspace field-service-reports-workspace">
       <Link className="service-case-back" href="/field-service">
         <ArrowLeft aria-hidden="true" size={16} />
-        {he ? "חזרה לשירות השטח" : "Back to field service"}
+        {he ? "חזרה לשירות השטח" : "Back to Field Service"}
       </Link>
 
       <header className="platform-admin-hero field-service-hero">

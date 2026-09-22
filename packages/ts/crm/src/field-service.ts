@@ -1477,12 +1477,7 @@ export async function createServiceCase(
   },
 ): Promise<ServiceCaseSummary> {
   await requireFieldService(sql);
-  const configured = await sql<{ configured: boolean }[]>`
-    SELECT coalesce(bool_or(configuration ? 'workflow'),false) AS configured
-    FROM platform.tenant_feature_entitlements WHERE feature_key='field_service'
-  `;
-  if (input.source === "whatsapp" || configured[0]?.configured === true)
-    await requireTenantFeature(sql, "tickets");
+  await requireCaseTicketing(sql, input.source === "whatsapp");
   if ((actor.userId === undefined) === (actor.service === undefined))
     throw new TypeError("Exactly one case actor is required");
   if (
@@ -1545,6 +1540,79 @@ export async function createServiceCase(
   const created = await getServiceCase(sql, id);
   if (created === undefined) throw new Error("Created case could not be read");
   return created;
+}
+
+/** Configured service workflows open a linked support ticket for every case. */
+async function requireCaseTicketing(
+  sql: postgres.TransactionSql,
+  whatsAppIntake: boolean,
+): Promise<void> {
+  const configured = await sql<{ configured: boolean }[]>`
+    SELECT coalesce(bool_or(configuration ? 'workflow'),false) AS configured
+    FROM platform.tenant_feature_entitlements WHERE feature_key='field_service'
+  `;
+  if (whatsAppIntake || configured[0]?.configured === true)
+    await requireTenantFeature(sql, "tickets");
+}
+
+export interface TechnicianCaseReceipt {
+  readonly serviceCase: ServiceCaseSummary;
+  /** The physical technician of the creating session, never the shared user. */
+  readonly technicianId: string;
+  readonly visitId: string;
+}
+
+/**
+ * Creates a manual case from a technician session and assigns its field work
+ * to that session's physical technician in the same database transaction.
+ * PostgreSQL resolves the technician from the authenticated session context;
+ * this function deliberately accepts no technician identifier.
+ */
+export async function createTechnicianServiceCase(
+  sql: postgres.TransactionSql,
+  input: {
+    readonly customerContactId: string;
+    readonly serviceLocationId?: string | null;
+    readonly title: string;
+    readonly faultDescription: string;
+    readonly exactFailure?: string;
+    readonly warrantyStatus?: WarrantyStatus;
+    readonly productType?: string | null;
+    readonly productModel?: string | null;
+    readonly serialNumber?: string | null;
+    readonly priority?: ServiceCaseSummary["priority"];
+    readonly requestId?: string;
+  },
+): Promise<TechnicianCaseReceipt> {
+  await requireFieldService(sql);
+  await requireCaseTicketing(sql, false);
+  const rows = await sql<
+    { receipt: { caseId: string; technicianId: string; visitId: string } }[]
+  >`
+    SELECT service.create_technician_case(
+      ${input.customerContactId}::uuid, ${input.serviceLocationId ?? null}::uuid,
+      ${requiredText(input.title, "Case title", 200)},
+      ${requiredText(
+        [input.faultDescription, input.exactFailure].filter(Boolean).join("\n"),
+        "Fault description",
+        10_000,
+      )},
+      ${input.warrantyStatus ?? "unknown"}, ${nullableText(input.productType, 160)},
+      ${nullableText(input.productModel, 160)}, ${nullableText(input.serialNumber, 160)},
+      ${input.priority ?? "normal"}, ${input.requestId ?? randomUUID()}
+    ) AS receipt
+  `;
+  const receipt = rows[0]?.receipt;
+  if (receipt === undefined)
+    throw new Error("Technician case creation returned no receipt");
+  const serviceCase = await getServiceCase(sql, receipt.caseId);
+  if (serviceCase === undefined)
+    throw new Error("Created case could not be read");
+  return {
+    serviceCase,
+    technicianId: receipt.technicianId,
+    visitId: receipt.visitId,
+  };
 }
 
 export async function transitionServiceCase(
@@ -2642,6 +2710,9 @@ export async function identifyTechnicianSession(
         OR (
           ${feature.sharedTechnicianLoginEnabled}
           AND coalesce(current_setting('app.current_role', true), '') = 'technician'
+          -- A shared login identifies only as the physical technician this
+          -- exact browser session already named, never another visit's one.
+          AND technician.id = service.current_session_technician_id()
         )
       )
     RETURNING id

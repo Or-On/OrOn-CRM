@@ -21,7 +21,7 @@ export default function FieldServiceError({
 
   return (
     <main
-      aria-label={he ? "שגיאה בשירות השטח" : "Field service error"}
+      aria-label={he ? "שגיאה בשירות השטח" : "Field Service error"}
       className="page page--wide page--field-service page--workspace-premium route-state field-service-route-state"
     >
       <span className="route-state__symbol" aria-hidden="true">

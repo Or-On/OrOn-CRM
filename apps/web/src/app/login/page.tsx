@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { LockKeyhole } from "lucide-react";
+import { applicationHome } from "@or-on/auth";
 
 import { Surface } from "@or-on/ui";
 
@@ -19,7 +20,14 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function LoginPage() {
-  if ((await currentPublicSession()) !== undefined) redirect("/");
+  const session = await currentPublicSession();
+  // A signed-in technician belongs in the Field Service app, not the workspace.
+  if (session !== undefined)
+    redirect(
+      session.applicationScope === "field-service"
+        ? applicationHome["field-service"]
+        : applicationHome.workspace,
+    );
   const t = await getTranslations("auth");
   return (
     <main className="login-page">

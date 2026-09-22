@@ -2,7 +2,11 @@ import { NextResponse } from "next/server";
 
 import { getCurrentTenantLogo, setCurrentTenantLogo } from "@or-on/crm";
 
-import { requestId, withCurrentTenant } from "../../../../features/auth";
+import {
+  requestId,
+  withCurrentShellTenant,
+  withCurrentTenant,
+} from "../../../../features/auth";
 import {
   assertCrmMutation,
   crmErrorResponse,
@@ -35,7 +39,9 @@ function logoErrorResponse(error: unknown) {
 
 export async function GET(request: Request) {
   try {
-    const image = await withCurrentTenant("platform:read", (sql, session) => {
+    // The workspace logo brands every application shell, including the
+    // technician Field Service app; changing it stays a tenant setting.
+    const image = await withCurrentShellTenant((sql, session) => {
       assertLogoContext(request, session.tenant.tenantId);
       return getCurrentTenantLogo(sql);
     });

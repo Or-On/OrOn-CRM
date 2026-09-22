@@ -6,8 +6,10 @@ import {
   assertTrustedUnsafeRequest,
   createAuthRepository,
   isAuthorized,
+  isAuthorizedInApplication,
   issueServiceAssertion,
   withTenantTransaction,
+  type ApplicationScope,
   type AuthSession,
   type Permission,
   type PublicSession,
@@ -89,9 +91,16 @@ export async function currentPublicSession(): Promise<
   return resolved.publicSession;
 }
 
-export async function requirePublicSession(): Promise<PublicSession> {
+export async function requirePublicSession(
+  options: { readonly application?: ApplicationScope } = {},
+): Promise<PublicSession> {
   const session = await currentPublicSession();
   if (session === undefined) throw new UnauthenticatedError("Unauthenticated");
+  if (
+    options.application !== undefined &&
+    session.applicationScope !== options.application
+  )
+    throw new ForbiddenError("Forbidden");
   return session;
 }
 
@@ -124,7 +133,7 @@ export async function issueLiveAgentGrant(
   session: AuthSession,
 ): Promise<string> {
   if (
-    !isAuthorized(
+    !isAuthorizedInApplication(
       { role: session.tenant.role, isSuperuser: session.isSuperuser },
       "voice:operate",
     )
@@ -171,7 +180,11 @@ export async function issueControlApiGrant(
     role: session.tenant.role,
     isSuperuser: session.isSuperuser,
   };
-  if (!required.every((permission) => isAuthorized(principal, permission))) {
+  if (
+    !required.every((permission) =>
+      isAuthorizedInApplication(principal, permission),
+    )
+  ) {
     throw new ForbiddenError("Forbidden");
   }
   const { serviceSecret } = authConfig();
@@ -192,7 +205,7 @@ export async function issueDispatcherGrant(
   session: AuthSession,
 ): Promise<string> {
   if (
-    !isAuthorized(
+    !isAuthorizedInApplication(
       { role: session.tenant.role, isSuperuser: session.isSuperuser },
       "voice:operate",
     )
@@ -241,6 +254,26 @@ export async function withCurrentTenant<T>(
   return withResolvedTenant(await currentRawSession(), permission, operation);
 }
 
+/**
+ * Shell presentation only: tenant branding and enabled modules for the
+ * application frame of every session, including the technician Field Service
+ * app. It returns no module data and never widens what pages or APIs accept.
+ */
+export async function withCurrentShellTenant<T>(
+  operation: (
+    transaction: TenantTransaction,
+    session: AuthSession,
+  ) => Promise<T>,
+): Promise<T> {
+  return withResolvedTenant(
+    await currentRawSession(),
+    "platform:read",
+    operation,
+    false,
+    "shell",
+  );
+}
+
 /** Recheck after an external round trip; render-scoped cached identity may be revoked. */
 export async function withFreshCurrentTenant<T>(
   permission: Permission,
@@ -265,16 +298,19 @@ async function withResolvedTenant<T>(
     session: AuthSession,
   ) => Promise<T>,
   lockAuthorization = false,
+  access: "application" | "shell" = "application",
 ): Promise<T> {
   if (resolved === undefined) throw new UnauthenticatedError("Unauthenticated");
+  const principal = {
+    role: resolved.session.tenant.role,
+    isSuperuser: resolved.session.isSuperuser,
+  };
+  // Every page and API is bound to the session's application: a technician
+  // keeps platform:read for the shell but cannot use it for workspace data.
   if (
-    !isAuthorized(
-      {
-        role: resolved.session.tenant.role,
-        isSuperuser: resolved.session.isSuperuser,
-      },
-      permission,
-    )
+    !(access === "shell"
+      ? isAuthorized(principal, permission)
+      : isAuthorizedInApplication(principal, permission))
   )
     throw new ForbiddenError("Forbidden");
   const { databaseUrl } = authConfig();

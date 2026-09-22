@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
+import { applicationHome } from "@or-on/auth";
 
 import { currentPublicSession } from "../features/auth";
 
@@ -9,5 +10,12 @@ export const localizedEntryMetadata: Metadata = {
 
 export async function LocalizedEntryPage() {
   // The locale proxy persists the selected language before this redirect.
-  redirect((await currentPublicSession()) === undefined ? "/login" : "/");
+  const session = await currentPublicSession();
+  redirect(
+    session === undefined
+      ? "/login"
+      : session.applicationScope === "field-service"
+        ? applicationHome["field-service"]
+        : applicationHome.workspace,
+  );
 }

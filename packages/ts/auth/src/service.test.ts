@@ -134,6 +134,106 @@ describe("AuthService", () => {
     );
   });
 
+  it("publishes the Field Service application scope for technician sessions", () => {
+    const repo = repository();
+    const service = new AuthService(repo.value, {
+      dummyPasswordHash: encodedPassword,
+      tokenPepper: pepper,
+    });
+    const technician: AuthSession = {
+      ...repo.session,
+      tenant: { ...repo.session.tenant, role: "technician" },
+    };
+    const published = service.toPublicSession(technician);
+    expect(published.applicationScope).toBe("field-service");
+    expect(published.permissions).toEqual([
+      "field-service:read",
+      "field-service:operate",
+    ]);
+    expect(service.toPublicSession(repo.session).applicationScope).toBe(
+      "workspace",
+    );
+  });
+
+  it("keeps sibling sessions of one account valid across login and logout", async () => {
+    const technician = {
+      ...membership,
+      role: "technician" as const,
+    };
+    const sessions = new Map<string, AuthSession>();
+    const revoked: string[] = [];
+    const key = (hash: Uint8Array) => Buffer.from(hash).toString("hex");
+    const shared: AuthRepository = {
+      acceptInvitation: () => Promise.resolve(true),
+      close: () => Promise.resolve(),
+      createSession: (input) => {
+        const sessionId = `30000000-0000-4000-8000-${String(sessions.size + 1).padStart(12, "0")}`;
+        sessions.set(key(input.tokenHash), {
+          absoluteExpiresAt: input.absoluteExpiresAt,
+          csrfTokenHash: input.csrfTokenHash,
+          displayName: "Shared technicians",
+          email: "technicians@example.test",
+          isSuperuser: false,
+          memberships: [technician],
+          rotationCount: 0,
+          sessionId,
+          tenant: technician,
+          userId: "20000000-0000-4000-8000-000000000001",
+        });
+        return Promise.resolve(sessionId);
+      },
+      lookupLogin: () =>
+        Promise.resolve({
+          email: "technicians@example.test",
+          displayName: "Shared technicians",
+          failedAttempts: 0,
+          isSuperuser: false,
+          lockedUntil: undefined,
+          passwordHash: encodedPassword,
+          status: "active",
+          userId: "20000000-0000-4000-8000-000000000001",
+        }),
+      invitationRecord: () => Promise.resolve(undefined),
+      membershipsForUser: () => Promise.resolve([technician]),
+      recordLoginFailure: () => Promise.resolve(),
+      recordLoginSuccess: () => Promise.resolve(),
+      resolveSession: (hash) => Promise.resolve(sessions.get(key(hash))),
+      revokeSession: (hash) => {
+        revoked.push(key(hash));
+        return Promise.resolve(sessions.delete(key(hash)));
+      },
+      switchTenant: () => Promise.resolve(true),
+    };
+    const service = new AuthService(shared, {
+      dummyPasswordHash: encodedPassword,
+      tokenPepper: pepper,
+    });
+    const credentials = {
+      email: "technicians@example.test",
+      password: "correct horse battery staple",
+    };
+    const tabletA = await service.login({ ...credentials, requestId: "a" });
+    const tabletB = await service.login({ ...credentials, requestId: "b" });
+
+    expect(tabletA.session.userId).toBe(tabletB.session.userId);
+    expect(tabletA.session.sessionId).not.toBe(tabletB.session.sessionId);
+    expect(tabletA.sessionToken).not.toBe(tabletB.sessionToken);
+    expect(revoked).toEqual([]);
+    expect((await service.resolve(tabletA.sessionToken))?.sessionId).toBe(
+      tabletA.session.sessionId,
+    );
+    expect((await service.resolve(tabletB.sessionToken))?.sessionId).toBe(
+      tabletB.session.sessionId,
+    );
+
+    await service.logout(tabletA.sessionToken, "logout-a");
+    expect(revoked).toHaveLength(1);
+    expect(await service.resolve(tabletA.sessionToken)).toBeUndefined();
+    expect((await service.resolve(tabletB.sessionToken))?.sessionId).toBe(
+      tabletB.session.sessionId,
+    );
+  });
+
   it("requires the CSRF cookie, header, and session digest to agree", () => {
     const repo = repository();
     const service = new AuthService(repo.value, {

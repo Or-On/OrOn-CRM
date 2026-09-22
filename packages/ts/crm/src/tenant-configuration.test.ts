@@ -46,7 +46,7 @@ describe("reviewed tenant packages", () => {
         ...base,
         features: ["contacts", "technicians"],
       }),
-    ).toThrow("requires Field service");
+    ).toThrow("requires Field Service");
     expect(() =>
       parseTenantConfiguration({
         ...base,

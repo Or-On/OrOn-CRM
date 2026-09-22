@@ -38,7 +38,7 @@ export function FieldServiceNavigation({
 
   return (
     <nav
-      aria-label={he ? "ניווט שירות שטח" : "Field service sections"}
+      aria-label={he ? "ניווט שירות שטח" : "Field Service sections"}
       className={styles.navigation}
     >
       <ul className={styles.list}>

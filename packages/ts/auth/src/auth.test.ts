@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  applicationHome,
+  applicationScope,
   canonicalRoles,
   canAssignRole,
   hashOpaqueToken,
   hashPassword,
   hasPermission,
   isAuthorized,
+  isAuthorizedInApplication,
+  isPathInApplicationScope,
   issueServiceAssertion,
   permissions,
   tokenDigestMatches,
@@ -81,6 +85,63 @@ describe("authorization", () => {
         );
       }
     }
+  });
+
+  it("confines technicians to the Field Service application without shrinking their role", () => {
+    const technician = { role: "technician", isSuperuser: false } as const;
+    expect(applicationScope(technician)).toBe("field-service");
+    expect(applicationHome[applicationScope(technician)]).toBe(
+      "/field-service",
+    );
+    // The role still carries platform:read for the application shell...
+    expect(isAuthorized(technician, "platform:read")).toBe(true);
+    // ...but no workspace page or API accepts it from the technician app.
+    expect(isAuthorizedInApplication(technician, "platform:read")).toBe(false);
+    expect(isAuthorizedInApplication(technician, "crm:read")).toBe(false);
+    expect(isAuthorizedInApplication(technician, "field-service:operate")).toBe(
+      true,
+    );
+    expect(isAuthorizedInApplication(technician, "field-service:manage")).toBe(
+      false,
+    );
+    for (const role of canonicalRoles.filter((item) => item !== "technician")) {
+      const principal = { role, isSuperuser: false };
+      expect(applicationScope(principal)).toBe("workspace");
+      for (const permission of permissions)
+        expect(isAuthorizedInApplication(principal, permission)).toBe(
+          isAuthorized(principal, permission),
+        );
+    }
+    expect(applicationScope({ role: "technician", isSuperuser: true })).toBe(
+      "workspace",
+    );
+  });
+
+  it("maps only Field Service and sign-in routes into the technician application", () => {
+    for (const path of [
+      "/field-service",
+      "/field-service/cases/10000000-0000-4000-8000-000000000001",
+      "/field-service/reports?status=finalized",
+      "/login",
+      "/invite/token",
+    ])
+      expect(isPathInApplicationScope("field-service", path), path).toBe(true);
+    for (const path of [
+      "/",
+      "/inbox",
+      "/contacts/1",
+      "/profile",
+      "/settings",
+      "/settings/business",
+      "/system/health",
+      "/users",
+      "/roles",
+      "/tenants",
+      "/start",
+      "/field-services",
+    ])
+      expect(isPathInApplicationScope("field-service", path), path).toBe(false);
+    expect(isPathInApplicationScope("workspace", "/profile")).toBe(true);
   });
 
   it("grants platform super-administrators every capability without widening tenant roles", () => {

@@ -1,6 +1,7 @@
 import { ControlApiClient } from "@or-on/api-client";
 import { loadConfig } from "@or-on/config";
 import {
+  ForbiddenError,
   requirePublicSession,
   UnauthenticatedError,
 } from "../../../../features/auth";
@@ -18,8 +19,11 @@ async function timeProbe<T>(probe: () => Promise<T>) {
 
 export async function GET() {
   try {
-    await requirePublicSession();
+    // Platform health belongs to the workspace, not the technician app.
+    await requirePublicSession({ application: "workspace" });
   } catch (error) {
+    if (error instanceof ForbiddenError)
+      return Response.json({ error: "Forbidden" }, { status: 403 });
     return Response.json(
       {
         error:

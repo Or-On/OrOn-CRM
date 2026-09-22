@@ -90,6 +90,19 @@ export async function responsePayload(response: Response): Promise<unknown> {
   }
 }
 
+/** A failed read keeps a generic message and exposes the server's code. */
+export class CrmReadError extends Error {
+  readonly status: number;
+  readonly code: string | undefined;
+
+  constructor(message: string, status: number, code: string | undefined) {
+    super(message);
+    this.name = "CrmReadError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
 export async function crmRead<T>(
   url: string,
   signal?: AbortSignal,
@@ -102,10 +115,17 @@ export async function crmRead<T>(
   );
   const payload = await responsePayload(response);
   if (!response.ok)
-    throw new Error(
+    throw new CrmReadError(
       response.status === 401
         ? "Your session expired. Sign in again."
         : "Could not refresh this view. Please try again.",
+      response.status,
+      payload !== null &&
+        typeof payload === "object" &&
+        "code" in payload &&
+        typeof payload.code === "string"
+        ? payload.code
+        : undefined,
     );
   return payload as T;
 }

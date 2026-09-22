@@ -52,4 +52,15 @@ describe("localized application entry", () => {
       await expect(page()).rejects.toThrow("REDIRECT:/");
     },
   );
+
+  it.each([
+    ["en", EnglishEntryPage],
+    ["he", HebrewEntryPage],
+  ])("keeps a technician %s entry inside Field Service", async (_, page) => {
+    runtime.session.mockResolvedValue({
+      applicationScope: "field-service",
+      user: { email: "technicians@example.invalid" },
+    });
+    await expect(page()).rejects.toThrow("REDIRECT:/field-service");
+  });
 });

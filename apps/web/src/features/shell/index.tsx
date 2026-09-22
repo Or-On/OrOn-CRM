@@ -125,6 +125,18 @@ function initials(email: string): string {
   return email.slice(0, 2).toLocaleUpperCase("en");
 }
 
+/** Account initials without a profile-image request. */
+function InitialsAvatar({ label }: { readonly label: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="identity-image identity-summary__avatar"
+    >
+      <span className="identity-image__fallback">{initials(label)}</span>
+    </span>
+  );
+}
+
 function NavigationPendingIndicator({ label }: { readonly label: string }) {
   const { pending } = useLinkStatus();
   return (
@@ -220,6 +232,14 @@ export function AppShell({
   const [commandIndex, setCommandIndex] = useState(0);
   const [sessionPending, setSessionPending] = useState(false);
   const [sessionError, setSessionError] = useState<string>();
+  // Technicians work in a dedicated Field Service application: the shell keeps
+  // only that module plus sign-out, language and theme. Server guards deny the
+  // rest; this projection only avoids showing controls that cannot be used.
+  const fieldServiceApp = session?.applicationScope === "field-service";
+  const homeHref = fieldServiceApp ? "/field-service" : "/";
+  const brandLabel = fieldServiceApp
+    ? t("shell.fieldService")
+    : t("shell.brandHome");
   const updateExpandedPreference = useCallback((next: boolean) => {
     setExpanded(next);
     try {
@@ -559,11 +579,7 @@ export function AppShell({
         inert={menuOpen || isInbox || undefined}
         aria-hidden={menuOpen || isInbox || undefined}
       >
-        <Link
-          aria-label={t("shell.brandHome")}
-          className="mobile-brand"
-          href="/"
-        >
+        <Link aria-label={brandLabel} className="mobile-brand" href={homeHref}>
           {workspaceBrandMark}
           <span className="workspace-brand-name" dir="auto">
             {workspaceBrandName}
@@ -605,7 +621,7 @@ export function AppShell({
         role={menuOpen ? "dialog" : undefined}
       >
         <div className="rail-brand-row">
-          <Link aria-label={t("shell.brandHome")} className="brand" href="/">
+          <Link aria-label={brandLabel} className="brand" href={homeHref}>
             {workspaceBrandMark}
             <span className="brand__name" dir="auto">
               {workspaceBrandName}
@@ -756,17 +772,19 @@ export function AppShell({
         </nav>
 
         <div className="shell__rail-footer">
-          <Link
-            aria-label={t("common.help")}
-            className="nav__item"
-            href="/start"
-            title={t("common.help")}
-          >
-            <span className="nav__icon">
-              <CircleHelp aria-hidden="true" size={19} />
-            </span>
-            <span className="nav__label">{t("common.help")}</span>
-          </Link>
+          {fieldServiceApp ? null : (
+            <Link
+              aria-label={t("common.help")}
+              className="nav__item"
+              href="/start"
+              title={t("common.help")}
+            >
+              <span className="nav__icon">
+                <CircleHelp aria-hidden="true" size={19} />
+              </span>
+              <span className="nav__label">{t("common.help")}</span>
+            </Link>
+          )}
           <Popover
             label={t("shell.account")}
             open={accountOpen}
@@ -775,13 +793,19 @@ export function AppShell({
             contentClassName="account-menu__panel"
             trigger={
               <>
-                <IdentityImage
-                  className="identity-summary__avatar"
-                  fallback={initials(
-                    session.user.displayName ?? session.user.email,
-                  )}
-                  source="/api/account/avatar"
-                />
+                {fieldServiceApp ? (
+                  <InitialsAvatar
+                    label={session.user.displayName ?? session.user.email}
+                  />
+                ) : (
+                  <IdentityImage
+                    className="identity-summary__avatar"
+                    fallback={initials(
+                      session.user.displayName ?? session.user.email,
+                    )}
+                    source="/api/account/avatar"
+                  />
+                )}
                 <span className="rail-account__copy" dir="auto">
                   <strong>
                     {session.user.displayName ?? session.user.email}
@@ -846,17 +870,19 @@ export function AppShell({
                   </span>
                   <ChevronDown aria-hidden="true" size={14} />
                 </label>
-                <Link
-                  className="text-link"
-                  href="/profile"
-                  onClick={() => {
-                    setAccountOpen(false);
-                    closeMobileNavigation(false);
-                  }}
-                >
-                  <UserCircle aria-hidden="true" size={16} />
-                  {t("shell.profile")}
-                </Link>
+                {fieldServiceApp ? null : (
+                  <Link
+                    className="text-link"
+                    href="/profile"
+                    onClick={() => {
+                      setAccountOpen(false);
+                      closeMobileNavigation(false);
+                    }}
+                  >
+                    <UserCircle aria-hidden="true" size={16} />
+                    {t("shell.profile")}
+                  </Link>
+                )}
                 <Button
                   disabled={sessionPending}
                   onClick={() => void postSession("/api/auth/logout")}
@@ -898,9 +924,9 @@ export function AppShell({
             {isInbox ? (
               <>
                 <Link
-                  aria-label={t("shell.brandHome")}
+                  aria-label={brandLabel}
                   className="inbox-topbar-brand"
-                  href="/"
+                  href={homeHref}
                 >
                   {workspaceBrandMark}
                   <span className="workspace-brand-name" dir="auto">
@@ -941,7 +967,7 @@ export function AppShell({
             )}
           </div>
           <div className="topbar-actions">
-            <NotificationCenter />
+            {fieldServiceApp ? null : <NotificationCenter />}
             <LanguageControl />
             <IconButton
               className="topbar-square-action theme-cycle-button"
@@ -966,14 +992,16 @@ export function AppShell({
                 <MoonStar aria-hidden="true" size={17} />
               )}
             </IconButton>
-            <Link
-              aria-label={t("shell.health")}
-              className="topbar-icon-link"
-              href="/system/health"
-              title={t("shell.health")}
-            >
-              <Activity aria-hidden="true" size={17} />
-            </Link>
+            {fieldServiceApp ? null : (
+              <Link
+                aria-label={t("shell.health")}
+                className="topbar-icon-link"
+                href="/system/health"
+                title={t("shell.health")}
+              >
+                <Activity aria-hidden="true" size={17} />
+              </Link>
+            )}
           </div>
         </header>
         {hasContextNavigation ? (

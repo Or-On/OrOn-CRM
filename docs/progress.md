@@ -4,6 +4,32 @@ Last updated: 2026-09-12 (Asia/Jerusalem)
 
 ## Active readiness checkpoint — supersedes historical checkpoint below
 
+### Shared technician accounts and the technician application — 2026-09-22
+
+- `technician` sessions now run a dedicated Field Service application. One
+  application-scope rule in `@or-on/auth` filters the published session
+  permissions, gates every tenant transaction (`withCurrentTenant`), and keeps
+  shell branding on the explicit `withCurrentShellTenant` boundary. Workspace
+  pages deny technicians and the root layout returns them to `/field-service`.
+- One technician account can be signed in on many devices at once. Migration
+  `7b3d9e5a1c48` adds `service.technician_session_bindings`, so each
+  authenticated session names its own physical technician;
+  `service.current_session_technician_id()` resolves it for case access,
+  technician visibility, the dispatch queue, self-claim, visit identity,
+  reports and evidence. The previous shared-login branch, which exposed every
+  technician's dispatched work to every shared session, is gone.
+- Technicians can open service cases again: `service.create_technician_case`
+  creates the case and takes its field work through the one
+  `service.apply_case_assignment` transaction that queue claims and manager
+  assignment also use, so concurrency, conflict detection, visit numbering and
+  audit history stay identical. Reports remain tenant-owned
+  `service.reports`/`service.report_revisions` rows and keep appearing under
+  Field Service → Reports with the visit's technician name.
+- Verified locally against PostgreSQL 18.6: `db/tests/postgres` (including the
+  new `test_technician_sessions.py`, which migrates a disposable database for
+  its concurrency cases), `@or-on/auth` (with a live multi-session test),
+  `@or-on/crm` field-service suites, and the complete `@or-on/web` suite.
+
 ### Engineering audit follow-up — 2026-09-17 (uncommitted)
 
 - Voice configuration (flow publish, DID registration, campaign create/run)

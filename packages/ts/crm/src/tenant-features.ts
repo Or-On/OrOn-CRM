@@ -84,7 +84,7 @@ export const tenantFeatureRegistry: Readonly<
   },
   field_service: {
     key: "field_service",
-    label: "Field service",
+    label: "Field Service",
     purpose: "Service cases and dispatch",
     dependencies: ["contacts"],
     configurationSchemaVersion: 1,

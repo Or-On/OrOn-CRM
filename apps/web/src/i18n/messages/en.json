@@ -562,7 +562,7 @@
     "tasks": "Tasks",
     "leads": "Leads",
     "finance": "Finance",
-    "fieldService": "Field service",
+    "fieldService": "Field Service",
     "profile": "Profile",
     "users": "Users",
     "roles": "Roles",
@@ -867,7 +867,7 @@
     "archiveLocation": "Archive service location",
     "noLocations": "No store or service location is recorded.",
     "documents": "Customer documents",
-    "documentsHint": "Private files remain part of the CRM customer record even when field service is disabled.",
+    "documentsHint": "Private files remain part of the CRM customer record even when Field Service is disabled.",
     "addDocument": "Add document",
     "noDocuments": "No customer documents are stored.",
     "documentCategory": "Document category",
@@ -893,7 +893,7 @@
     "longitude": "Longitude",
     "serviceHistory": "Field-service history",
     "serviceHistoryHint": "Cases, visits, evidence and reports linked through trusted CRM identifiers.",
-    "serviceModuleDisabled": "Field service is disabled; the customer file and classifications remain available.",
+    "serviceModuleDisabled": "Field Service is disabled; the customer file and classifications remain available.",
     "noServiceCases": "No linked service cases are available."
   },
   "pipelines": {

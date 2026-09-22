@@ -1,8 +1,10 @@
+/* Field Service fills the workspace on large monitors; the cap only keeps
+   ultra-wide displays from stretching cards and tables beyond readability. */
 .field-service-workspace {
   display: grid;
   gap: 1rem;
   inline-size: 100%;
-  max-inline-size: 96rem;
+  max-inline-size: 150rem;
   margin-inline: auto;
 }
 
@@ -79,11 +81,199 @@
   min-block-size: 2.75rem;
 }
 
+/* A shared technician account names the physical technician per device
+   before any field work is shown. Large touch targets for phones/tablets. */
+.technician-identity {
+  display: grid;
+  gap: 1.25rem;
+  inline-size: min(100%, 48rem);
+  margin-inline: auto;
+  padding: clamp(1.1rem, 3vw, 2rem);
+}
+
+.technician-identity__header {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.technician-identity__header h2 {
+  margin: 0.25rem 0 0.4rem;
+  font-size: clamp(1.25rem, 2.4vw, 1.6rem);
+  letter-spacing: -0.03em;
+}
+
+.technician-identity__header p {
+  margin: 0;
+  color: var(--or-text-muted);
+  line-height: 1.6;
+}
+
+.technician-identity__icon {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  inline-size: 2.75rem;
+  block-size: 2.75rem;
+  color: var(--or-accent);
+  background: color-mix(in srgb, var(--or-accent) 10%, var(--or-surface));
+  border: 1px solid color-mix(in srgb, var(--or-accent) 24%, var(--or-border));
+  border-radius: var(--or-radius-md);
+}
+
+.technician-identity__form {
+  display: grid;
+  gap: 1rem;
+}
+
+.technician-identity__search {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+  color: var(--or-text-muted);
+}
+
+.technician-identity__search > svg {
+  flex: 0 0 auto;
+  margin-block-end: 0.8rem;
+}
+
+.technician-identity__search > .or-field {
+  flex: 1 1 auto;
+}
+
+.technician-identity__options {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr));
+  gap: 0.6rem;
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.technician-identity__option {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-block-size: 3.5rem;
+  padding: 0.75rem 0.9rem;
+  overflow-wrap: anywhere;
+  background: var(--or-surface);
+  border: 1px solid var(--or-border);
+  border-radius: var(--or-radius-md);
+  cursor: pointer;
+  transition:
+    background var(--or-duration-fast),
+    border-color var(--or-duration-fast);
+}
+
+.technician-identity__option:hover {
+  background: var(--or-surface-hover);
+}
+
+.technician-identity__option[data-selected] {
+  background: var(--or-accent-soft);
+  border-color: color-mix(in srgb, var(--or-accent) 45%, var(--or-border));
+}
+
+.technician-identity__option:has(input:focus-visible) {
+  outline: 2px solid var(--or-focus);
+  outline-offset: 2px;
+}
+
+.technician-identity__option input {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  opacity: 0;
+}
+
+.technician-identity__avatar,
+.technician-session-banner__avatar {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  inline-size: 2.4rem;
+  block-size: 2.4rem;
+  color: var(--or-accent-strong);
+  background: color-mix(in srgb, var(--or-accent) 14%, var(--or-surface));
+  border-radius: 50%;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.technician-identity__name,
+.technician-session-banner__copy {
+  display: grid;
+  gap: 0.15rem;
+  min-inline-size: 0;
+}
+
+.technician-identity__name small,
+.technician-session-banner__copy small {
+  color: var(--or-text-muted);
+  font-size: 0.75rem;
+}
+
+.technician-identity__empty {
+  margin: 0;
+  color: var(--or-text-muted);
+}
+
+.technician-identity__submit {
+  justify-self: start;
+  min-block-size: 2.75rem;
+}
+
+.technician-session-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1rem;
+  padding: 0.75rem 1rem;
+  background: var(--or-surface);
+  border: 1px solid var(--or-border);
+  border-radius: var(--or-radius-md);
+  box-shadow: var(--or-shadow-1);
+}
+
+.technician-session-banner__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.technician-session-banner__switch {
+  min-block-size: 2.5rem;
+  margin-inline-start: auto;
+}
+
+@media (max-width: 40rem) {
+  .technician-identity__header {
+    flex-direction: column;
+  }
+
+  .technician-identity__submit,
+  .technician-session-banner__switch {
+    justify-self: stretch;
+    inline-size: 100%;
+    margin-inline-start: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .technician-identity__option {
+    transition: none;
+  }
+}
+
 .field-service-loading {
   display: grid;
   gap: 1rem;
   inline-size: 100%;
-  max-inline-size: 96rem;
+  max-inline-size: 150rem;
   margin-inline: auto;
 }
 
@@ -979,7 +1169,7 @@
   display: grid;
   gap: 1rem;
   inline-size: 100%;
-  max-inline-size: 96rem;
+  max-inline-size: 150rem;
   margin-inline: auto;
 }
 

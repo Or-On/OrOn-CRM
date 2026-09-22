@@ -36,7 +36,7 @@ export default function ServiceReportsError({
               href="/field-service"
             >
               <ArrowLeft aria-hidden="true" size={16} />
-              {he ? "חזרה לשירות השטח" : "Back to field service"}
+              {he ? "חזרה לשירות השטח" : "Back to Field Service"}
             </Link>
           </div>
         }

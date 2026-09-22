@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import {
   getFieldServiceFeatureState,
+  getTechnicianSessionContext,
   getTenantSettings,
   getServiceCaseDossier,
   listServiceCaseLinkCandidates,
@@ -20,6 +21,8 @@ import {
   ServiceCaseWorkspace,
   uuidPattern,
 } from "../../../../features/field-service";
+
+export const metadata = { title: "Field Service case" };
 
 export default async function ServiceCasePage({
   params,
@@ -45,6 +48,11 @@ export default async function ServiceCasePage({
           { role: session.tenant.role, isSuperuser: session.isSuperuser },
           "voice:read",
         );
+        const isTechnician = session.tenant.role === "technician";
+        // Visit actions follow the physical technician of this session.
+        const technicianSession = isTechnician
+          ? await getTechnicianSessionContext(sql)
+          : undefined;
         const [dossier, technicians, linkCandidates, settings] =
           await Promise.all([
             getServiceCaseDossier(sql, id),
@@ -72,6 +80,8 @@ export default async function ServiceCasePage({
             "field-service:operate",
           ),
           canReadVoice,
+          isTechnician,
+          sessionTechnician: technicianSession?.technician ?? null,
         };
       },
     );
@@ -89,7 +99,9 @@ export default async function ServiceCasePage({
         canReadVoice={data.canReadVoice}
         dossier={data.dossier}
         feature={data.feature}
+        isTechnician={data.isTechnician}
         linkCandidates={data.linkCandidates}
+        sessionTechnician={data.sessionTechnician}
         technicians={data.technicians}
         timezone={data.timezone}
       />

@@ -350,4 +350,4 @@ export default async function ServiceReportPage({
   }
 }
 
-export const metadata = { title: "Service report" };
+export const metadata = { title: "Field Service report" };

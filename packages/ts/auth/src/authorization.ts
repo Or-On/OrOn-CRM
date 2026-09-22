@@ -96,6 +96,86 @@ export function isAuthorized(
   return principal.isSuperuser || hasPermission(principal.role, permission);
 }
 
+/**
+ * The product surface a session works in. A technician works inside the
+ * dedicated Field Service application; every other tenant role, and every
+ * platform super-administrator, works in the full workspace.
+ */
+export const applicationScopes = ["workspace", "field-service"] as const;
+export type ApplicationScope = (typeof applicationScopes)[number];
+
+const scopedPermissions: Readonly<
+  Record<ApplicationScope, ReadonlySet<Permission> | undefined>
+> = {
+  workspace: undefined,
+  "field-service": new Set([
+    "field-service:read",
+    "field-service:operate",
+    "field-service:manage",
+  ]),
+};
+
+/** Where a session lands after sign-in and when it leaves its application. */
+export const applicationHome: Readonly<Record<ApplicationScope, string>> = {
+  workspace: "/",
+  "field-service": "/field-service",
+};
+
+const scopedRoutes: Readonly<
+  Record<ApplicationScope, readonly string[] | undefined>
+> = {
+  workspace: undefined,
+  "field-service": ["/field-service"],
+};
+
+/** Sign-in, invitation and locale entry routes serve every application. */
+const entryRoutes = ["/login", "/invite", "/en", "/he"];
+
+export function applicationScope(principal: {
+  readonly role: Role;
+  readonly isSuperuser: boolean;
+}): ApplicationScope {
+  return !principal.isSuperuser && principal.role === "technician"
+    ? "field-service"
+    : "workspace";
+}
+
+export function isPermissionInApplicationScope(
+  scope: ApplicationScope,
+  permission: Permission,
+): boolean {
+  return scopedPermissions[scope]?.has(permission) ?? true;
+}
+
+/**
+ * Authorization for a product request: the role must grant the permission and
+ * the permission must belong to the session's application. A technician keeps
+ * `platform:read` for the application shell, but no workspace page or API
+ * (profile, settings, health, CRM modules) accepts it from a technician.
+ */
+export function isAuthorizedInApplication(
+  principal: { readonly role: Role; readonly isSuperuser: boolean },
+  permission: Permission,
+): boolean {
+  return (
+    isAuthorized(principal, permission) &&
+    isPermissionInApplicationScope(applicationScope(principal), permission)
+  );
+}
+
+/** Page-route projection of the same rule; API routes use permissions. */
+export function isPathInApplicationScope(
+  scope: ApplicationScope,
+  pathname: string,
+): boolean {
+  const routes = scopedRoutes[scope];
+  if (routes === undefined) return true;
+  const path = pathname.split(/[?#]/u)[0] ?? pathname;
+  return [...routes, ...entryRoutes].some(
+    (route) => path === route || path.startsWith(`${route}/`),
+  );
+}
+
 export function canAssignRole(actor: Role, target: Role): boolean {
   if (actor === "owner") return true;
   if (actor === "admin") return target !== "owner";

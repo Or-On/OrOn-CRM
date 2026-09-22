@@ -831,7 +831,7 @@ describe("field-service UI contracts", () => {
 
     expect(
       screen
-        .getByRole("main", { name: "Loading field service" })
+        .getByRole("main", { name: "Loading Field Service" })
         .getAttribute("aria-busy"),
     ).toBe("true");
     expect(

@@ -14,7 +14,7 @@ describe("field-service section navigation", () => {
   it("exposes real overview, report and OCR destinations with one current page", () => {
     render(localized(<FieldServiceNavigation active="reports" />));
     const navigation = screen.getByRole("navigation", {
-      name: "Field service sections",
+      name: "Field Service sections",
     });
     const overview = screen.getByRole("link", { name: "Overview" });
     const reports = screen.getByRole("link", { name: "Reports" });

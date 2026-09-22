@@ -46,6 +46,34 @@ export function crmErrorResponse(error: unknown): NextResponse {
       { error: "This technician already has a conflicting appointment" },
       { status: 409 },
     );
+  // A shared technician account works only after this browser session names
+  // its physical technician; the codes come from the session-binding SQL.
+  if (code === "FS428")
+    return NextResponse.json(
+      {
+        error:
+          "Choose which technician is using this device before continuing.",
+        code: "TECHNICIAN_IDENTIFICATION_REQUIRED",
+      },
+      { status: 428 },
+    );
+  if (code === "FS401")
+    return NextResponse.json(
+      {
+        error: "The employee ID does not match this technician profile.",
+        code: "TECHNICIAN_IDENTITY_MISMATCH",
+      },
+      { status: 403 },
+    );
+  if (code === "FS409")
+    return NextResponse.json(
+      {
+        error:
+          "This device is already identified as another technician. Switch technician first.",
+        code: "TECHNICIAN_SESSION_ALREADY_BOUND",
+      },
+      { status: 409 },
+    );
   if (code === "42501" || code === "TF403")
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   if (code === "40001")

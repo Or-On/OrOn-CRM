@@ -67,4 +67,11 @@ describe("application sign-in entry", () => {
     });
     await expect(LoginPage()).rejects.toThrow("REDIRECT:/");
   });
+  it("sends a technician session to the Field Service application", async () => {
+    runtime.session.mockResolvedValue({
+      applicationScope: "field-service",
+      user: { email: "technicians@example.invalid" },
+    });
+    await expect(LoginPage()).rejects.toThrow("REDIRECT:/field-service");
+  });
 });

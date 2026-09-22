@@ -2,11 +2,13 @@ import { redirect } from "next/navigation";
 import {
   getFieldServiceFeatureState,
   getServiceDirectory,
+  getTechnicianSessionContext,
   getTenantSettings,
   listContacts,
   listServiceAppointments,
   listServiceCasePage,
   listTeamMembers,
+  listTechnicianSessionCandidates,
   listTechnicians,
 } from "@or-on/crm";
 import { isAuthorized } from "@or-on/auth";
@@ -32,6 +34,18 @@ export default async function FieldServicePage() {
           isSuperuser: session.isSuperuser,
         };
         const canManage = isAuthorized(principal, "field-service:manage");
+        const canOperate = isAuthorized(principal, "field-service:operate");
+        const isTechnician = session.tenant.role === "technician";
+        // The physical technician belongs to this browser session, not to
+        // the (possibly shared) platform account.
+        const technicianSession = isTechnician
+          ? await getTechnicianSessionContext(sql)
+          : undefined;
+        const technicianCandidates =
+          technicianSession?.mode === "shared" &&
+          technicianSession.technician === null
+            ? await listTechnicianSessionCandidates(sql)
+            : [];
         const [
           casePage,
           appointments,
@@ -47,7 +61,7 @@ export default async function FieldServicePage() {
           listContacts(sql, { limit: 100 }),
           getTenantSettings(sql),
           canManage ? listTeamMembers(sql) : Promise.resolve([]),
-          canManage
+          canManage || (isTechnician && canOperate)
             ? getServiceDirectory(sql)
             : Promise.resolve({ stores: [] }),
         ]);
@@ -64,8 +78,10 @@ export default async function FieldServicePage() {
           ),
           timezone: settings.timezone,
           canManage,
-          isTechnician: session.tenant.role === "technician",
-          canOperate: isAuthorized(principal, "field-service:operate"),
+          isTechnician,
+          canOperate,
+          ...(technicianSession === undefined ? {} : { technicianSession }),
+          technicianCandidates,
         };
       },
     );
@@ -81,4 +97,4 @@ export default async function FieldServicePage() {
   }
 }
 
-export const metadata = { title: "Field service" };
+export const metadata = { title: "Field Service" };

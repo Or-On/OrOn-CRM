@@ -288,14 +288,14 @@ export function TenantWorkspace({
                       {tenant.fieldServiceEnabled
                         ? he
                           ? "שירות שטח פעיל"
-                          : "Field service active"
+                          : "Field Service active"
                         : tenant.fieldServiceAvailable
                           ? he
                             ? "שירות שטח זמין"
-                            : "Field service available"
+                            : "Field Service available"
                           : he
                             ? "שירות שטח לא הוקצה"
-                            : "Field service not assigned"}
+                            : "Field Service not assigned"}
                     </span>
                   </div>
                   <div className="tenant-admin-card__actions">
@@ -461,7 +461,7 @@ export function TenantWorkspace({
             <Checkbox name="fieldServiceAvailable" value="true">
               <span>
                 <strong>
-                  {he ? "שירות שטח וטכנאים" : "Field service & technicians"}
+                  {he ? "שירות שטח וטכנאים" : "Field Service & technicians"}
                 </strong>
                 <small>
                   {he
@@ -515,7 +515,7 @@ export function TenantWorkspace({
             >
               <span>
                 <strong>
-                  {he ? "שירות שטח וטכנאים" : "Field service & technicians"}
+                  {he ? "שירות שטח וטכנאים" : "Field Service & technicians"}
                 </strong>
                 <small>
                   {he

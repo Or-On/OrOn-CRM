@@ -49,6 +49,16 @@ describe("server-rendered locale selection", () => {
       ).toBeNull();
     }
   });
+  it("overwrites caller-supplied page paths with the requested path", () => {
+    const response = proxy(
+      new NextRequest("http://localhost/profile?tab=security", {
+        headers: { "x-or-on-pathname": "/field-service" },
+      }),
+    );
+    expect(response.headers.get("x-middleware-request-x-or-on-pathname")).toBe(
+      "/profile",
+    );
+  });
   it("falls back to English for unsupported cookie values", () => {
     const response = proxy(
       new NextRequest("http://localhost/login", {

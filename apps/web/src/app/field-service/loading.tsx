@@ -3,7 +3,7 @@ import { useLocale } from "next-intl";
 
 export default function FieldServiceLoading() {
   const he = useLocale().startsWith("he");
-  const label = he ? "טוען את סביבת שירות השטח" : "Loading field service";
+  const label = he ? "טוען את סביבת שירות השטח" : "Loading Field Service";
 
   return (
     <main

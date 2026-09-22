@@ -7,6 +7,7 @@ const access = vi.hoisted(() => ({
 }));
 vi.mock("../src/features/auth", () => ({
   requirePublicSession: access.require,
+  ForbiddenError: class ForbiddenError extends Error {},
   UnauthenticatedError: class UnauthenticatedError extends Error {},
 }));
 vi.mock("@or-on/config", () => ({
@@ -26,7 +27,7 @@ vi.mock("@or-on/api-client", () => ({
   },
 }));
 import { GET } from "../src/app/api/system/health/route";
-import { UnauthenticatedError } from "../src/features/auth";
+import { ForbiddenError, UnauthenticatedError } from "../src/features/auth";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -36,6 +37,12 @@ describe("tenant health projection", () => {
   it("requires a session before probing internal services", async () => {
     access.require.mockRejectedValue(new UnauthenticatedError());
     expect((await GET()).status).toBe(401);
+    expect(access.live).not.toHaveBeenCalled();
+  });
+  it("keeps platform health out of the technician application", async () => {
+    access.require.mockRejectedValue(new ForbiddenError());
+    expect((await GET()).status).toBe(403);
+    expect(access.require).toHaveBeenCalledWith({ application: "workspace" });
     expect(access.live).not.toHaveBeenCalled();
   });
   it("projects only observed status and excludes internal metadata", async () => {

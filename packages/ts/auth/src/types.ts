@@ -1,4 +1,4 @@
-import type { Role } from "./authorization.js";
+import type { ApplicationScope, Role } from "./authorization.js";
 
 export interface Membership {
   readonly tenantId: string;
@@ -30,7 +30,9 @@ export interface PublicSession {
   readonly tenant: Membership;
   readonly memberships: readonly Membership[];
   readonly expiresAt: string;
+  /** Permissions usable in this session's application, not the raw role set. */
   readonly permissions: readonly string[];
+  readonly applicationScope: ApplicationScope;
 }
 
 export interface IssuedSession {

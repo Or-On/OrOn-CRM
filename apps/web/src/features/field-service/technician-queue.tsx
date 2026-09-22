@@ -42,6 +42,7 @@ export function TechnicianQueue({ canClaim }: { readonly canClaim: boolean }) {
   const [feedback, setFeedback] = useState<{
     message: string;
     critical: boolean;
+    identify?: boolean;
   }>();
   const requestNumber = useRef(0);
 
@@ -55,16 +56,32 @@ export function TechnicianQueue({ canClaim }: { readonly canClaim: boolean }) {
         if (!cancelled && request === requestNumber.current) setPage(result);
       })
       .catch((error: unknown) => {
-        if (!cancelled)
+        if (cancelled) return;
+        // This device's technician was released elsewhere in the session;
+        // reloading shows the identification step again.
+        if (
+          error instanceof Error &&
+          "code" in error &&
+          error.code === "TECHNICIAN_IDENTIFICATION_REQUIRED"
+        ) {
           setFeedback({
             critical: true,
-            message:
-              error instanceof Error
-                ? error.message
-                : he
-                  ? "לא ניתן לטעון את האירועים."
-                  : "Could not load incidents.",
+            identify: true,
+            message: he
+              ? "יש לבחור מי הטכנאי שעובד במכשיר הזה."
+              : "Choose which technician is working on this device.",
           });
+          return;
+        }
+        setFeedback({
+          critical: true,
+          message:
+            error instanceof Error
+              ? error.message
+              : he
+                ? "לא ניתן לטעון את האירועים."
+                : "Could not load incidents.",
+        });
       })
       .finally(() => {
         if (!cancelled && request === requestNumber.current) setLoading(false);
@@ -166,6 +183,19 @@ export function TechnicianQueue({ canClaim }: { readonly canClaim: boolean }) {
       </div>
       {feedback ? (
         <InlineFeedback
+          {...(feedback.identify === true
+            ? {
+                action: (
+                  <Button
+                    onClick={() => router.refresh()}
+                    size="small"
+                    variant="secondary"
+                  >
+                    {he ? "בחירת טכנאי" : "Choose technician"}
+                  </Button>
+                ),
+              }
+            : {})}
           description={feedback.message}
           tone={feedback.critical ? "critical" : "positive"}
         />

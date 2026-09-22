@@ -1,13 +1,18 @@
 import { NextResponse } from "next/server";
 import {
   createServiceCase,
+  createTechnicianServiceCase,
   listServiceCasePage,
   serviceCaseStatuses,
   type ServiceCaseStatus,
   type WarrantyStatus,
 } from "@or-on/crm";
 
-import { jsonObject, withCurrentTenant } from "../../../../features/auth";
+import {
+  jsonObject,
+  requestId,
+  withCurrentTenant,
+} from "../../../../features/auth";
 import {
   assertCrmMutation,
   crmErrorResponse,
@@ -75,45 +80,69 @@ export async function POST(request: Request) {
     const productType = optionalText(body.productType, "Product type");
     const productModel = optionalText(body.productModel, "Product model");
     const serialNumber = optionalText(body.serialNumber, "Serial number");
-    const serviceCase = await withCurrentTenant(
+    const details = {
+      customerContactId: uuid(body.customerContactId, "Customer"),
+      ...(body.serviceLocationId === undefined ||
+      body.serviceLocationId === null
+        ? {}
+        : {
+            serviceLocationId: uuid(body.serviceLocationId, "Service location"),
+          }),
+      title: text(body.title, "Case title"),
+      faultDescription: text(body.faultDescription, "Fault description"),
+      ...(typeof body.exactFailure === "string"
+        ? { exactFailure: text(body.exactFailure, "What is not working") }
+        : {}),
+      warrantyStatus: warranty(body.warrantyStatus),
+      ...(productType === undefined ? {} : { productType }),
+      ...(productModel === undefined ? {} : { productModel }),
+      ...(serialNumber === undefined ? {} : { serialNumber }),
+      priority: priority as "low" | "normal" | "high" | "urgent",
+    };
+    const created = await withCurrentTenant(
       "field-service:operate",
-      (sql, session) =>
-        createServiceCase(
-          sql,
-          { userId: session.userId },
-          {
-            customerContactId: uuid(body.customerContactId, "Customer"),
-            ...(body.reportingContactId === undefined
-              ? {}
-              : {
-                  reportingContactId: uuid(
-                    body.reportingContactId,
-                    "Reporting contact",
-                  ),
-                }),
-            ...(body.serviceLocationId === undefined ||
-            body.serviceLocationId === null
-              ? {}
-              : {
-                  serviceLocationId: uuid(
-                    body.serviceLocationId,
-                    "Service location",
-                  ),
-                }),
-            title: text(body.title, "Case title"),
-            faultDescription: text(body.faultDescription, "Fault description"),
-            ...(typeof body.exactFailure === "string"
-              ? { exactFailure: text(body.exactFailure, "What is not working") }
-              : {}),
-            warrantyStatus: warranty(body.warrantyStatus),
-            ...(productType === undefined ? {} : { productType }),
-            ...(productModel === undefined ? {} : { productModel }),
-            ...(serialNumber === undefined ? {} : { serialNumber }),
-            priority: priority as "low" | "normal" | "high" | "urgent",
-          },
-        ),
+      async (sql, session) => {
+        if (session.tenant.role === "technician" && !session.isSuperuser) {
+          // Field work belongs to the physical technician of this browser
+          // session, resolved by PostgreSQL. The browser cannot name one.
+          if (
+            "technicianId" in body ||
+            "assignedTechnicianId" in body ||
+            "reportingContactId" in body
+          )
+            throw new TypeError(
+              "A technician case is assigned to the technician signed in on this device",
+            );
+          const receipt = await createTechnicianServiceCase(sql, {
+            ...details,
+            requestId: requestId(request),
+          });
+          return {
+            case: receipt.serviceCase,
+            technicianId: receipt.technicianId,
+            visitId: receipt.visitId,
+          };
+        }
+        return {
+          case: await createServiceCase(
+            sql,
+            { userId: session.userId },
+            {
+              ...details,
+              ...(body.reportingContactId === undefined
+                ? {}
+                : {
+                    reportingContactId: uuid(
+                      body.reportingContactId,
+                      "Reporting contact",
+                    ),
+                  }),
+            },
+          ),
+        };
+      },
     );
-    return NextResponse.json({ case: serviceCase }, { status: 201 });
+    return NextResponse.json(created, { status: 201 });
   } catch (error) {
     return crmErrorResponse(error);
   }

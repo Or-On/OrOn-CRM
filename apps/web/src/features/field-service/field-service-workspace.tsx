@@ -8,6 +8,8 @@ import type {
   ServiceCaseSummary,
   ServiceDirectory as Directory,
   TeamMember,
+  TechnicianSessionCandidate,
+  TechnicianSessionContext,
   TechnicianSummary,
 } from "@or-on/crm";
 import {
@@ -54,8 +56,14 @@ import {
 import { FieldServiceNavigation } from "./field-service-navigation";
 import { TechnicianQueue } from "./technician-queue";
 import { ServiceDirectory } from "./service-directory";
+import {
+  TechnicianIdentityGate,
+  TechnicianSessionBanner,
+} from "./technician-session";
 
 type View = "cases" | "schedule" | "technicians" | "my-work" | "directory";
+
+type CaseCustomer = Pick<ContactSummary, "id" | "name" | "company">;
 
 function caseTone(status: ServiceCaseSummary["status"]) {
   if (status === "completed" || status === "closed") return "positive" as const;
@@ -87,6 +95,8 @@ export function FieldServiceWorkspace({
   canOperate,
   isTechnician = false,
   serviceStores = [],
+  technicianSession,
+  technicianCandidates = [],
 }: {
   readonly appointments: readonly ServiceAppointment[];
   readonly cases: readonly ServiceCaseSummary[];
@@ -100,6 +110,9 @@ export function FieldServiceWorkspace({
   readonly canOperate: boolean;
   readonly isTechnician?: boolean;
   readonly serviceStores?: Directory["stores"];
+  /** The physical technician of this browser session, for technician roles. */
+  readonly technicianSession?: TechnicianSessionContext;
+  readonly technicianCandidates?: readonly TechnicianSessionCandidate[];
 }) {
   const locale = useLocale();
   const he = locale.startsWith("he");
@@ -116,7 +129,7 @@ export function FieldServiceWorkspace({
   const [createCustomerId, setCreateCustomerId] = useState("");
   const [contactQuery, setContactQuery] = useState("");
   const [contactOptions, setContactOptions] =
-    useState<readonly ContactSummary[]>(contacts);
+    useState<readonly CaseCustomer[]>(contacts);
   const [scheduleCase, setScheduleCase] = useState<ServiceCaseSummary>();
   const [manageAppointment, setManageAppointment] =
     useState<ServiceAppointment>();
@@ -150,6 +163,9 @@ export function FieldServiceWorkspace({
             .includes(term),
         );
   }, [cases, locale, query]);
+  const sessionTechnician = technicianSession?.technician ?? null;
+  // A technician works only once this device's physical technician is known.
+  const technicianReady = !isTechnician || sessionTechnician !== null;
   const dialogOpen =
     createOpen ||
     scheduleCase !== undefined ||
@@ -276,9 +292,13 @@ export function FieldServiceWorkspace({
         limit: "50",
         q: contactQuery.trim(),
       });
+      // Technicians have no CRM module; the Field Service lookup returns only
+      // the fields a case needs.
       const page = await crmRead<{
-        readonly contacts: readonly ContactSummary[];
-      }>(`/api/crm/contacts?${parameters.toString()}`);
+        readonly contacts: readonly CaseCustomer[];
+      }>(
+        `${isTechnician ? "/api/field-service/customers" : "/api/crm/contacts"}?${parameters.toString()}`,
+      );
       setContactOptions(page.contacts);
     } catch (reason) {
       setError(
@@ -294,11 +314,13 @@ export function FieldServiceWorkspace({
     const form = new FormData(event.currentTarget);
     if (form.get("serviceLocationId") === "") form.delete("serviceLocationId");
     await run("create-case", async () => {
-      await crmMutation(
+      const created = await crmMutation<{ case: ServiceCaseSummary }>(
         "/api/field-service/cases",
         Object.fromEntries(form.entries()),
       );
       closeCreateDialog();
+      // The new case is already this technician's work; open it directly.
+      if (isTechnician) router.push(`/field-service/cases/${created.case.id}`);
     });
   }
 
@@ -460,7 +482,7 @@ export function FieldServiceWorkspace({
           <span className="eyebrow">
             {he ? "תפעול שירות" : "Service operations"}
           </span>
-          <h1>{he ? "שירות שטח" : "Field service"}</h1>
+          <h1>{he ? "שירות שטח" : "Field Service"}</h1>
           <p>
             {isTechnician
               ? he
@@ -471,7 +493,7 @@ export function FieldServiceWorkspace({
                 : "Coordinate cases, visits, evidence, and signed reports in one workspace."}
           </p>
         </div>
-        {canOperate && !isTechnician ? (
+        {canOperate && technicianReady ? (
           <Button
             className="platform-admin-hero__action"
             onClick={openCreateDialog}
@@ -482,448 +504,487 @@ export function FieldServiceWorkspace({
         ) : null}
       </header>
 
-      <FieldServiceNavigation active="overview" />
-
-      {!isTechnician ? (
-        <section
-          className="field-service-metrics"
-          aria-label={he ? "סקירת שירות" : "Service overview"}
-        >
-          {[
-            {
-              icon: Wrench,
-              label: he ? "תיקים שנטענו" : "Loaded cases",
-              value: cases.length,
-            },
-            {
-              icon: Clock3,
-              label: he ? "ממתינים לתזמון" : "Awaiting schedule",
-              value: awaiting,
-            },
-            {
-              icon: CalendarClock,
-              label: he ? "פעילים" : "Active visits",
-              value: active,
-            },
-            {
-              icon: CircleCheckBig,
-              label: he ? "הושלמו" : "Completed",
-              value: completed,
-            },
-          ].map(({ icon: Icon, label, value }) => (
-            <Surface as="article" key={label} level="raised">
-              <span className="field-service-metric__icon">
-                <Icon aria-hidden="true" size={19} />
-              </span>
-              <span>
-                <small>{label}</small>
-                <strong>
-                  <AnimatedNumber
-                    animateOnMount
-                    locale={locale}
-                    value={value}
-                  />
-                </strong>
-              </span>
-            </Surface>
-          ))}
-        </section>
-      ) : null}
-
-      <div className="field-service-toolbar">
-        <div
-          className="field-service-tabs"
-          role="tablist"
-          aria-label={he ? "תצוגת שירות" : "Service view"}
-        >
-          {(
-            [
-              ...(isTechnician ? ["my-work" as const] : []),
-              "cases",
-              "schedule",
-              ...(canManage
-                ? ["technicians" as const, "directory" as const]
-                : []),
-            ] as readonly View[]
-          ).map((item) => (
-            <button
-              aria-selected={view === item}
-              aria-controls="field-service-panel"
-              id={`field-service-tab-${item}`}
-              tabIndex={view === item ? 0 : -1}
-              key={item}
-              onClick={() => setView(item)}
-              onKeyDown={(event) => {
-                const buttons = Array.from(
-                  event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>(
-                    '[role="tab"]',
-                  ) ?? [],
-                );
-                const position = buttons.indexOf(event.currentTarget);
-                const delta =
-                  event.key === "ArrowRight"
-                    ? he
-                      ? -1
-                      : 1
-                    : event.key === "ArrowLeft"
-                      ? he
-                        ? 1
-                        : -1
-                      : 0;
-                const next =
-                  event.key === "Home"
-                    ? buttons[0]
-                    : event.key === "End"
-                      ? buttons.at(-1)
-                      : delta
-                        ? buttons[
-                            (position + delta + buttons.length) % buttons.length
-                          ]
-                        : undefined;
-                if (next) {
-                  event.preventDefault();
-                  next.click();
-                  next.focus();
-                }
-              }}
-              role="tab"
-              type="button"
-            >
-              {item === "directory"
-                ? he
-                  ? "רשתות וסניפים"
-                  : "Chains & stores"
-                : item === "my-work"
-                  ? he
-                    ? "העבודה שלי"
-                    : "My work"
-                  : he
-                    ? item === "cases"
-                      ? "תיקים"
-                      : item === "schedule"
-                        ? "לוח זמנים"
-                        : "טכנאים"
-                    : item === "cases"
-                      ? "Cases"
-                      : item === "schedule"
-                        ? "Schedule"
-                        : "Technicians"}
-            </button>
-          ))}
-        </div>
-        {view === "cases" ? (
-          <form
-            className="field-service-search"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void fetchCasePage({ append: false, query });
-            }}
-            role="search"
-          >
-            <Search aria-hidden="true" size={15} />
-            <label
-              className="or-visually-hidden"
-              htmlFor="field-service-case-search"
-            >
-              {he ? "חיפוש תיקים" : "Search cases"}
-            </label>
-            <input
-              id="field-service-case-search"
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={
-                he ? "חיפוש לפי לקוח או מזהה…" : "Search customer or reference…"
-              }
-              type="search"
-              value={query}
-            />
-            <button className="or-visually-hidden" type="submit">
-              {he ? "חיפוש" : "Search"}
-            </button>
-          </form>
-        ) : null}
-      </div>
-
-      {error && !dialogOpen ? (
-        <p className="form-error" role="alert">
-          {error}
-        </p>
-      ) : null}
-
-      <div
-        role="tabpanel"
-        id="field-service-panel"
-        aria-labelledby={`field-service-tab-${view}`}
-        tabIndex={0}
-      >
-        {view === "directory" ? (
-          <ServiceDirectory contacts={contacts} />
-        ) : view === "my-work" ? (
-          <TechnicianQueue canClaim={isTechnician} />
-        ) : view === "cases" ? (
-          filtered.length === 0 ? (
-            <Surface level="raised">
-              <EmptyState
-                title={he ? "אין תיקי שירות" : "No service cases"}
-                description={
-                  query
-                    ? he
-                      ? "אין תוצאות לחיפוש הזה."
-                      : "No cases match this search."
-                    : he
-                      ? "תיק שאושר ב-WhatsApp או נפתח ידנית יופיע כאן."
-                      : "A confirmed WhatsApp intake or manually opened case will appear here."
-                }
-              />
-            </Surface>
-          ) : (
-            <Surface className="field-service-directory" level="raised">
-              <DataTable
-                label={he ? "תיקי שירות" : "Service cases"}
-                minWidth="58rem"
-              >
-                <thead>
-                  <tr>
-                    <th>{he ? "תיק" : "Case"}</th>
-                    <th>{he ? "לקוח ומיקום" : "Customer & location"}</th>
-                    <th>{he ? "תקלה" : "Issue"}</th>
-                    <th>{he ? "סטטוס" : "Status"}</th>
-                    <th>{he ? "עודכן" : "Updated"}</th>
-                    <th>
-                      <span className="or-visually-hidden">
-                        {he ? "פעולות" : "Actions"}
-                      </span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((item) => (
-                    <tr key={item.id}>
-                      <td>
-                        <Link
-                          className="field-service-case-link"
-                          href={`/field-service/cases/${item.id}`}
-                        >
-                          <strong dir="ltr">{item.reference}</strong>
-                          <small>{casePriorityLabel(item.priority, he)}</small>
-                        </Link>
-                      </td>
-                      <td>
-                        <strong dir="auto">{item.customerName}</strong>
-                        <small>
-                          <MapPin aria-hidden="true" size={12} />{" "}
-                          <bdi dir="auto">
-                            {item.serviceLocationName ??
-                              (he ? "ללא מיקום" : "No location")}
-                          </bdi>
-                        </small>
-                      </td>
-                      <td>
-                        <strong dir="auto">{item.title}</strong>
-                        <small>
-                          <bdi dir="auto">
-                            {item.productModel ??
-                              (he ? "דגם לא צוין" : "Model not supplied")}
-                          </bdi>
-                        </small>
-                      </td>
-                      <td>
-                        <Badge
-                          label={caseStatusLabel(item.status, he)}
-                          tone={caseTone(item.status)}
-                        />
-                      </td>
-                      <td data-label={he ? "עודכן" : "Updated"}>
-                        <time dateTime={item.updatedAt}>
-                          {new Intl.DateTimeFormat(locale, {
-                            dateStyle: "medium",
-                            timeZone: timezone,
-                          }).format(new Date(item.updatedAt))}
-                        </time>
-                      </td>
-                      <td>
-                        <div className="field-service-row-actions">
-                          {canOperate &&
-                          item.status === "awaiting_scheduling" ? (
-                            <Button
-                              onClick={() => openScheduleDialog(item)}
-                              size="small"
-                              variant="secondary"
-                            >
-                              {he ? "תזמון" : "Schedule"}
-                            </Button>
-                          ) : null}
-                          <Link
-                            aria-label={
-                              he
-                                ? `פתיחת ${item.reference}`
-                                : `Open ${item.reference}`
-                            }
-                            href={`/field-service/cases/${item.id}`}
-                          >
-                            <ChevronRight aria-hidden="true" size={17} />
-                          </Link>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </DataTable>
-            </Surface>
-          )
-        ) : view === "schedule" ? (
-          <div className="field-service-schedule-grid">
-            {appointments.length === 0 ? (
-              <Surface className="field-service-grid-empty" level="raised">
-                <EmptyState
-                  title={he ? "אין ביקורים מתוזמנים" : "No scheduled visits"}
-                  description={
-                    he
-                      ? "תזמון ידני עובד גם ללא חיבור ליומן חיצוני."
-                      : "Manual scheduling works without an external calendar connection."
-                  }
-                />
-              </Surface>
-            ) : (
-              appointments.map((item) => (
-                <Surface as="article" key={item.id} level="raised">
-                  <div>
-                    <Badge
-                      label={appointmentStatusLabel(item.status, he)}
-                      tone={
-                        item.status === "scheduled" ? "positive" : "neutral"
-                      }
-                    />
-                    <span dir="ltr">{item.source}</span>
-                  </div>
-                  <h3 dir="auto">{item.technicianName}</h3>
-                  <p>
-                    <CalendarClock aria-hidden="true" size={15} />{" "}
-                    {new Intl.DateTimeFormat(locale, {
-                      dateStyle: "medium",
-                      timeStyle: "short",
-                      timeZone: item.timezone,
-                    }).format(new Date(item.startsAt))}
-                  </p>
-                  <small dir="auto">
-                    {item.notes ?? (he ? "ללא הערות" : "No scheduling notes")}
-                  </small>
-                  {canOperate &&
-                  (item.status === "scheduled" ||
-                    item.status === "suggested") ? (
-                    <Button
-                      onClick={() => openManageAppointmentDialog(item)}
-                      size="small"
-                      variant="secondary"
-                    >
-                      {he ? "ניהול תזמון" : "Manage schedule"}
-                    </Button>
-                  ) : null}
-                </Surface>
-              ))
-            )}
-          </div>
+      {isTechnician && !technicianReady ? (
+        technicianSession?.mode === "shared" ? (
+          <TechnicianIdentityGate candidates={technicianCandidates} />
         ) : (
-          <section className="field-service-technicians">
-            <div className="field-service-section-heading">
-              <div>
-                <span className="eyebrow">
-                  {he ? "צוות שטח" : "Field team"}
-                </span>
-                <h2>{he ? "טכנאים" : "Technicians"}</h2>
-              </div>
-              {canManage ? (
-                <Button onClick={openTechnicianDialog} variant="secondary">
-                  <Plus aria-hidden="true" size={16} />
-                  {he ? "טכנאי חדש" : "New technician"}
-                </Button>
-              ) : null}
+          <EmptyState
+            title={
+              he
+                ? "החשבון אינו מקושר לפרופיל טכנאי"
+                : "This account is not linked to a technician"
+            }
+            description={
+              he
+                ? "בקשו ממנהל לקשר את החשבון לפרופיל טכנאי, או להפעיל כניסת טכנאים משותפת."
+                : "Ask a manager to link this account to a technician profile or to enable shared technician login."
+            }
+          />
+        )
+      ) : (
+        <>
+          {isTechnician && sessionTechnician !== null ? (
+            <TechnicianSessionBanner
+              shared={technicianSession?.mode === "shared"}
+              technician={sessionTechnician}
+            />
+          ) : null}
+
+          <FieldServiceNavigation active="overview" />
+
+          {!isTechnician ? (
+            <section
+              className="field-service-metrics"
+              aria-label={he ? "סקירת שירות" : "Service overview"}
+            >
+              {[
+                {
+                  icon: Wrench,
+                  label: he ? "תיקים שנטענו" : "Loaded cases",
+                  value: cases.length,
+                },
+                {
+                  icon: Clock3,
+                  label: he ? "ממתינים לתזמון" : "Awaiting schedule",
+                  value: awaiting,
+                },
+                {
+                  icon: CalendarClock,
+                  label: he ? "פעילים" : "Active visits",
+                  value: active,
+                },
+                {
+                  icon: CircleCheckBig,
+                  label: he ? "הושלמו" : "Completed",
+                  value: completed,
+                },
+              ].map(({ icon: Icon, label, value }) => (
+                <Surface as="article" key={label} level="raised">
+                  <span className="field-service-metric__icon">
+                    <Icon aria-hidden="true" size={19} />
+                  </span>
+                  <span>
+                    <small>{label}</small>
+                    <strong>
+                      <AnimatedNumber
+                        animateOnMount
+                        locale={locale}
+                        value={value}
+                      />
+                    </strong>
+                  </span>
+                </Surface>
+              ))}
+            </section>
+          ) : null}
+
+          <div className="field-service-toolbar">
+            <div
+              className="field-service-tabs"
+              role="tablist"
+              aria-label={he ? "תצוגת שירות" : "Service view"}
+            >
+              {(
+                [
+                  ...(isTechnician ? ["my-work" as const] : []),
+                  "cases",
+                  "schedule",
+                  ...(canManage
+                    ? ["technicians" as const, "directory" as const]
+                    : []),
+                ] as readonly View[]
+              ).map((item) => (
+                <button
+                  aria-selected={view === item}
+                  aria-controls="field-service-panel"
+                  id={`field-service-tab-${item}`}
+                  tabIndex={view === item ? 0 : -1}
+                  key={item}
+                  onClick={() => setView(item)}
+                  onKeyDown={(event) => {
+                    const buttons = Array.from(
+                      event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>(
+                        '[role="tab"]',
+                      ) ?? [],
+                    );
+                    const position = buttons.indexOf(event.currentTarget);
+                    const delta =
+                      event.key === "ArrowRight"
+                        ? he
+                          ? -1
+                          : 1
+                        : event.key === "ArrowLeft"
+                          ? he
+                            ? 1
+                            : -1
+                          : 0;
+                    const next =
+                      event.key === "Home"
+                        ? buttons[0]
+                        : event.key === "End"
+                          ? buttons.at(-1)
+                          : delta
+                            ? buttons[
+                                (position + delta + buttons.length) %
+                                  buttons.length
+                              ]
+                            : undefined;
+                    if (next) {
+                      event.preventDefault();
+                      next.click();
+                      next.focus();
+                    }
+                  }}
+                  role="tab"
+                  type="button"
+                >
+                  {item === "directory"
+                    ? he
+                      ? "רשתות וסניפים"
+                      : "Chains & stores"
+                    : item === "my-work"
+                      ? he
+                        ? "העבודה שלי"
+                        : "My work"
+                      : he
+                        ? item === "cases"
+                          ? "תיקים"
+                          : item === "schedule"
+                            ? "לוח זמנים"
+                            : "טכנאים"
+                        : item === "cases"
+                          ? "Cases"
+                          : item === "schedule"
+                            ? "Schedule"
+                            : "Technicians"}
+                </button>
+              ))}
             </div>
-            <div className="field-service-technician-grid">
-              {technicians.length === 0 ? (
-                <Surface className="field-service-grid-empty" level="raised">
+            {view === "cases" ? (
+              <form
+                className="field-service-search"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void fetchCasePage({ append: false, query });
+                }}
+                role="search"
+              >
+                <Search aria-hidden="true" size={15} />
+                <label
+                  className="or-visually-hidden"
+                  htmlFor="field-service-case-search"
+                >
+                  {he ? "חיפוש תיקים" : "Search cases"}
+                </label>
+                <input
+                  id="field-service-case-search"
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder={
+                    he
+                      ? "חיפוש לפי לקוח או מזהה…"
+                      : "Search customer or reference…"
+                  }
+                  type="search"
+                  value={query}
+                />
+                <button className="or-visually-hidden" type="submit">
+                  {he ? "חיפוש" : "Search"}
+                </button>
+              </form>
+            ) : null}
+          </div>
+
+          {error && !dialogOpen ? (
+            <p className="form-error" role="alert">
+              {error}
+            </p>
+          ) : null}
+
+          <div
+            role="tabpanel"
+            id="field-service-panel"
+            aria-labelledby={`field-service-tab-${view}`}
+            tabIndex={0}
+          >
+            {view === "directory" ? (
+              <ServiceDirectory contacts={contacts} />
+            ) : view === "my-work" ? (
+              <TechnicianQueue canClaim={isTechnician} />
+            ) : view === "cases" ? (
+              filtered.length === 0 ? (
+                <Surface level="raised">
                   <EmptyState
-                    title={he ? "אין טכנאים" : "No technicians"}
+                    title={he ? "אין תיקי שירות" : "No service cases"}
                     description={
-                      he
-                        ? "הוסיפו פרופיל טכנאי לפני תזמון הביקור הראשון."
-                        : "Add a technician profile before scheduling the first visit."
+                      query
+                        ? he
+                          ? "אין תוצאות לחיפוש הזה."
+                          : "No cases match this search."
+                        : he
+                          ? "תיק שאושר ב-WhatsApp או נפתח ידנית יופיע כאן."
+                          : "A confirmed WhatsApp intake or manually opened case will appear here."
                     }
                   />
                 </Surface>
               ) : (
-                technicians.map((item) => (
-                  <Surface as="article" key={item.id} level="raised">
-                    <span className="field-service-metric__icon">
-                      <UserRoundCog aria-hidden="true" size={19} />
-                    </span>
-                    <div>
-                      <h3 dir="auto">{item.fullName}</h3>
-                      <p dir="auto">
-                        {item.employeeIdentifier ??
-                          (he ? "ללא מזהה עובד" : "No employee ID")}
+                <Surface className="field-service-directory" level="raised">
+                  <DataTable
+                    label={he ? "תיקי שירות" : "Service cases"}
+                    minWidth="58rem"
+                  >
+                    <thead>
+                      <tr>
+                        <th>{he ? "תיק" : "Case"}</th>
+                        <th>{he ? "לקוח ומיקום" : "Customer & location"}</th>
+                        <th>{he ? "תקלה" : "Issue"}</th>
+                        <th>{he ? "סטטוס" : "Status"}</th>
+                        <th>{he ? "עודכן" : "Updated"}</th>
+                        <th>
+                          <span className="or-visually-hidden">
+                            {he ? "פעולות" : "Actions"}
+                          </span>
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filtered.map((item) => (
+                        <tr key={item.id}>
+                          <td>
+                            <Link
+                              className="field-service-case-link"
+                              href={`/field-service/cases/${item.id}`}
+                            >
+                              <strong dir="ltr">{item.reference}</strong>
+                              <small>
+                                {casePriorityLabel(item.priority, he)}
+                              </small>
+                            </Link>
+                          </td>
+                          <td>
+                            <strong dir="auto">{item.customerName}</strong>
+                            <small>
+                              <MapPin aria-hidden="true" size={12} />{" "}
+                              <bdi dir="auto">
+                                {item.serviceLocationName ??
+                                  (he ? "ללא מיקום" : "No location")}
+                              </bdi>
+                            </small>
+                          </td>
+                          <td>
+                            <strong dir="auto">{item.title}</strong>
+                            <small>
+                              <bdi dir="auto">
+                                {item.productModel ??
+                                  (he ? "דגם לא צוין" : "Model not supplied")}
+                              </bdi>
+                            </small>
+                          </td>
+                          <td>
+                            <Badge
+                              label={caseStatusLabel(item.status, he)}
+                              tone={caseTone(item.status)}
+                            />
+                          </td>
+                          <td data-label={he ? "עודכן" : "Updated"}>
+                            <time dateTime={item.updatedAt}>
+                              {new Intl.DateTimeFormat(locale, {
+                                dateStyle: "medium",
+                                timeZone: timezone,
+                              }).format(new Date(item.updatedAt))}
+                            </time>
+                          </td>
+                          <td>
+                            <div className="field-service-row-actions">
+                              {canOperate &&
+                              item.status === "awaiting_scheduling" ? (
+                                <Button
+                                  onClick={() => openScheduleDialog(item)}
+                                  size="small"
+                                  variant="secondary"
+                                >
+                                  {he ? "תזמון" : "Schedule"}
+                                </Button>
+                              ) : null}
+                              <Link
+                                aria-label={
+                                  he
+                                    ? `פתיחת ${item.reference}`
+                                    : `Open ${item.reference}`
+                                }
+                                href={`/field-service/cases/${item.id}`}
+                              >
+                                <ChevronRight aria-hidden="true" size={17} />
+                              </Link>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </DataTable>
+                </Surface>
+              )
+            ) : view === "schedule" ? (
+              <div className="field-service-schedule-grid">
+                {appointments.length === 0 ? (
+                  <Surface className="field-service-grid-empty" level="raised">
+                    <EmptyState
+                      title={
+                        he ? "אין ביקורים מתוזמנים" : "No scheduled visits"
+                      }
+                      description={
+                        he
+                          ? "תזמון ידני עובד גם ללא חיבור ליומן חיצוני."
+                          : "Manual scheduling works without an external calendar connection."
+                      }
+                    />
+                  </Surface>
+                ) : (
+                  appointments.map((item) => (
+                    <Surface as="article" key={item.id} level="raised">
+                      <div>
+                        <Badge
+                          label={appointmentStatusLabel(item.status, he)}
+                          tone={
+                            item.status === "scheduled" ? "positive" : "neutral"
+                          }
+                        />
+                        <span dir="ltr">{item.source}</span>
+                      </div>
+                      <h3 dir="auto">{item.technicianName}</h3>
+                      <p>
+                        <CalendarClock aria-hidden="true" size={15} />{" "}
+                        {new Intl.DateTimeFormat(locale, {
+                          dateStyle: "medium",
+                          timeStyle: "short",
+                          timeZone: item.timezone,
+                        }).format(new Date(item.startsAt))}
                       </p>
                       <small dir="auto">
-                        {item.phone ??
-                          item.email ??
-                          (he ? "ללא פרטי קשר" : "No contact details")}
+                        {item.notes ??
+                          (he ? "ללא הערות" : "No scheduling notes")}
                       </small>
-                    </div>
-                    <div className="field-service-technician-actions">
-                      <Badge
-                        label={
-                          item.active
-                            ? technicianIdentityLabel(
-                                item.identityVerification,
-                                he,
-                              )
-                            : he
-                              ? "לא פעיל"
-                              : "Inactive"
-                        }
-                        tone={
-                          item.active &&
-                          item.identityVerification === "verified"
-                            ? "positive"
-                            : "neutral"
-                        }
-                      />
-                      {canManage ? (
+                      {canOperate &&
+                      (item.status === "scheduled" ||
+                        item.status === "suggested") ? (
                         <Button
-                          onClick={() => openEditTechnicianDialog(item)}
+                          onClick={() => openManageAppointmentDialog(item)}
                           size="small"
-                          type="button"
-                          variant="quiet"
+                          variant="secondary"
                         >
-                          {he ? "עריכה" : "Edit"}
+                          {he ? "ניהול תזמון" : "Manage schedule"}
                         </Button>
                       ) : null}
-                    </div>
-                  </Surface>
-                ))
-              )}
-            </div>
-          </section>
-        )}
+                    </Surface>
+                  ))
+                )}
+              </div>
+            ) : (
+              <section className="field-service-technicians">
+                <div className="field-service-section-heading">
+                  <div>
+                    <span className="eyebrow">
+                      {he ? "צוות שטח" : "Field team"}
+                    </span>
+                    <h2>{he ? "טכנאים" : "Technicians"}</h2>
+                  </div>
+                  {canManage ? (
+                    <Button onClick={openTechnicianDialog} variant="secondary">
+                      <Plus aria-hidden="true" size={16} />
+                      {he ? "טכנאי חדש" : "New technician"}
+                    </Button>
+                  ) : null}
+                </div>
+                <div className="field-service-technician-grid">
+                  {technicians.length === 0 ? (
+                    <Surface
+                      className="field-service-grid-empty"
+                      level="raised"
+                    >
+                      <EmptyState
+                        title={he ? "אין טכנאים" : "No technicians"}
+                        description={
+                          he
+                            ? "הוסיפו פרופיל טכנאי לפני תזמון הביקור הראשון."
+                            : "Add a technician profile before scheduling the first visit."
+                        }
+                      />
+                    </Surface>
+                  ) : (
+                    technicians.map((item) => (
+                      <Surface as="article" key={item.id} level="raised">
+                        <span className="field-service-metric__icon">
+                          <UserRoundCog aria-hidden="true" size={19} />
+                        </span>
+                        <div>
+                          <h3 dir="auto">{item.fullName}</h3>
+                          <p dir="auto">
+                            {item.employeeIdentifier ??
+                              (he ? "ללא מזהה עובד" : "No employee ID")}
+                          </p>
+                          <small dir="auto">
+                            {item.phone ??
+                              item.email ??
+                              (he ? "ללא פרטי קשר" : "No contact details")}
+                          </small>
+                        </div>
+                        <div className="field-service-technician-actions">
+                          <Badge
+                            label={
+                              item.active
+                                ? technicianIdentityLabel(
+                                    item.identityVerification,
+                                    he,
+                                  )
+                                : he
+                                  ? "לא פעיל"
+                                  : "Inactive"
+                            }
+                            tone={
+                              item.active &&
+                              item.identityVerification === "verified"
+                                ? "positive"
+                                : "neutral"
+                            }
+                          />
+                          {canManage ? (
+                            <Button
+                              onClick={() => openEditTechnicianDialog(item)}
+                              size="small"
+                              type="button"
+                              variant="quiet"
+                            >
+                              {he ? "עריכה" : "Edit"}
+                            </Button>
+                          ) : null}
+                        </div>
+                      </Surface>
+                    ))
+                  )}
+                </div>
+              </section>
+            )}
 
-        {view === "cases" && nextCaseCursor !== null ? (
-          <div className="field-service-load-more">
-            <Button
-              busy={loadingCases}
-              disabled={loadingCases}
-              onClick={() =>
-                void fetchCasePage({
-                  append: true,
-                  query: appliedQuery,
-                  cursor: nextCaseCursor,
-                })
-              }
-              variant="secondary"
-            >
-              {he ? "טעינת תיקים נוספים" : "Load more cases"}
-            </Button>
+            {view === "cases" && nextCaseCursor !== null ? (
+              <div className="field-service-load-more">
+                <Button
+                  busy={loadingCases}
+                  disabled={loadingCases}
+                  onClick={() =>
+                    void fetchCasePage({
+                      append: true,
+                      query: appliedQuery,
+                      cursor: nextCaseCursor,
+                    })
+                  }
+                  variant="secondary"
+                >
+                  {he ? "טעינת תיקים נוספים" : "Load more cases"}
+                </Button>
+              </div>
+            ) : null}
           </div>
-        ) : null}
-      </div>
+        </>
+      )}
 
       <Dialog
         closeLabel={he ? "סגירה" : "Close"}
@@ -936,6 +997,15 @@ export function FieldServiceWorkspace({
           onSubmit={(event) => void createCase(event)}
         >
           <DialogError message={error} />
+          {sessionTechnician !== null ? (
+            <InlineFeedback
+              description={
+                he
+                  ? `התיק ישויך אליך (${sessionTechnician.fullName}) וייפתח לו ביקור ראשון.`
+                  : `The case is assigned to you (${sessionTechnician.fullName}) with a first visit ready.`
+              }
+            />
+          ) : null}
           <div className="field-service-contact-search">
             <Input
               id="field-case-contact-search"

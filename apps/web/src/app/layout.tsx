@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Heebo } from "next/font/google";
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
+import { applicationHome, isPathInApplicationScope } from "@or-on/auth";
 import { loadConfig } from "@or-on/config";
 import { cache, type ReactNode } from "react";
 import { NextIntlClientProvider } from "next-intl";
@@ -21,8 +24,7 @@ import "./field-service.css";
 
 import { AppShell } from "../features/shell";
 import { AccessProvider } from "../features/access";
-import { currentPublicSession } from "../features/auth";
-import { withCurrentTenant } from "../features/auth";
+import { currentPublicSession, withCurrentShellTenant } from "../features/auth";
 import {
   getFieldServiceFeatureState,
   getTenantFeatureSnapshot,
@@ -54,7 +56,7 @@ const applicationHebrew = Heebo({
 const currentShellContext = cache(async () => {
   const session = await currentPublicSession();
   if (session === undefined) return undefined;
-  const presentation = await withCurrentTenant("platform:read", async (sql) => {
+  const presentation = await withCurrentShellTenant(async (sql) => {
     const settings = await getTenantSettings(sql);
     const [fieldService, features] = await Promise.all([
       session.permissions.includes("field-service:read")
@@ -97,6 +99,16 @@ export default async function RootLayout({
 }) {
   const shellContext = await currentShellContext();
   const session = shellContext?.session;
+  if (session !== undefined && session.applicationScope !== "workspace") {
+    // A technician works inside the Field Service application. Page guards
+    // and APIs deny everything else; a direct visit lands on the app home.
+    const pathname = (await headers()).get("x-or-on-pathname");
+    if (
+      pathname !== null &&
+      !isPathInApplicationScope(session.applicationScope, pathname)
+    )
+      redirect(applicationHome[session.applicationScope]);
+  }
   const environment = loadConfig(process.env, { service: "web" }).environment;
   const locale = resolveLocale(await getLocale());
   return (

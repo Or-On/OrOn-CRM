@@ -55,6 +55,6 @@ export default async function FieldServiceOcrPage() {
 }
 
 export const metadata: Metadata = {
-  title: "OCR review",
-  description: "Tenant-scoped field-service OCR review queue.",
+  title: "Field Service OCR review",
+  description: "Tenant-scoped Field Service OCR review queue.",
 };
