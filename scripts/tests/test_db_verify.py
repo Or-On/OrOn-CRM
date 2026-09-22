@@ -24,9 +24,10 @@ def test_graph_has_preserved_oron_root_and_one_target_head() -> None:
     # workflows (a6d30b9f4c12), 90 reviewed tenant packages (c7e29a1b5d40), 91
     # executable lead-workflow validation (d2f6b8a13c90), 92 protected voice
     # retention inspection (e1c4b7a92d10), 93 the reopened-inbox marker
-    # (f3a8c61e4b27), and 94 session-scoped technician identity (7b3d9e5a1c48).
-    # An unexplained change here means a migration arrived that nobody reviewed.
-    assert report.revision_count == 94
+    # (f3a8c61e4b27), 94 session-scoped technician identity (7b3d9e5a1c48), and
+    # 95 typed shared-technician identification (3f5c8b1d7e42). An unexplained
+    # change here means a migration arrived that nobody reviewed.
+    assert report.revision_count == 95
 
 
 def test_lead_workflow_guard_is_present_in_the_final_configuration_validator() -> None:

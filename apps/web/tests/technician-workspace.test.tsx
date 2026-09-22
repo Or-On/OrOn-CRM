@@ -63,15 +63,6 @@ const david = {
   fullName: "David Fixture",
   identityVerification: "verified" as const,
 };
-const candidates = [
-  { ...david, requiresEmployeeIdentifier: true },
-  {
-    id: "60000000-0000-4000-8000-000000000002",
-    fullName: "Sarah Fixture",
-    identityVerification: "self_declared" as const,
-    requiresEmployeeIdentifier: false,
-  },
-];
 const contact = {
   id: "70000000-0000-4000-8000-000000000001",
   name: "Fictional customer",
@@ -100,7 +91,6 @@ function workspace(
       contacts={[contact]}
       feature={feature}
       isTechnician={options.isTechnician ?? true}
-      technicianCandidates={candidates}
       technicians={[]}
       timezone="Asia/Jerusalem"
       {...(technicianSession === undefined ? {} : { technicianSession })}
@@ -122,52 +112,69 @@ describe("technician Field Service application", () => {
   });
   afterEach(cleanup);
 
-  it("asks an unidentified shared device who is working before showing field work", async () => {
+  it("asks an unidentified shared device for the technician's own details", async () => {
     state.crmMutation.mockResolvedValue({ technician: david });
     render(workspace({ mode: "shared", technician: null }));
 
-    expect(
-      screen.getByRole("heading", { name: "Who is working on this device?" }),
-    ).toBeTruthy();
+    const gate = within(
+      screen.getByRole("region", { name: "Enter your details to start" }),
+    );
     expect(
       screen.queryByRole("button", { name: "New service case" }),
     ).toBeNull();
     expect(screen.queryByRole("tab", { name: "My work" })).toBeNull();
-    // The employee ID confirms the person; it is never displayed.
-    expect(screen.queryByText("FS-DAVID")).toBeNull();
+    // One generic form; no roster of other technicians is exposed.
+    expect(screen.queryByText("Moshe Fixture")).toBeNull();
+    const start = gate.getByRole("button", { name: "Start working" });
+    expect((start as HTMLButtonElement).disabled).toBe(true);
 
-    fireEvent.click(screen.getByRole("radio", { name: /David Fixture/u }));
-    const employeeId = screen.getByLabelText("Employee ID");
-    fireEvent.change(employeeId, { target: { value: "FS-DAVID" } });
-    fireEvent.click(
-      screen.getByRole("button", { name: "Start working as David Fixture" }),
-    );
+    fireEvent.change(gate.getByLabelText("Full name"), {
+      target: { value: "  David Fixture " },
+    });
+    fireEvent.change(gate.getByLabelText("Employee ID"), {
+      target: { value: " fs-david " },
+    });
+    fireEvent.change(gate.getByLabelText("Contact number (optional)"), {
+      target: { value: "+972500000000" },
+    });
+    fireEvent.click(start);
 
     await waitFor(() =>
       expect(state.crmMutation).toHaveBeenCalledWith(
         "/api/field-service/session-technician",
-        { technicianId: david.id, employeeIdentifier: "FS-DAVID" },
+        {
+          fullName: "David Fixture",
+          employeeIdentifier: "fs-david",
+          phone: "+972500000000",
+        },
       ),
     );
     expect(state.refresh).toHaveBeenCalled();
   });
 
-  it("confirms a profile without an employee ID as self-declared", async () => {
-    state.crmMutation.mockResolvedValue({ technician: candidates[1] });
+  it("keeps a refused employee identifier visible on the device", async () => {
+    state.crmMutation.mockRejectedValue(
+      new Error("This employee ID belongs to another technician."),
+    );
     render(workspace({ mode: "shared", technician: null }));
-
-    fireEvent.click(screen.getByRole("radio", { name: /Sarah Fixture/u }));
-    expect(screen.queryByLabelText("Employee ID")).toBeNull();
-    fireEvent.click(
-      screen.getByRole("button", { name: "Start working as Sarah Fixture" }),
+    const gate = within(
+      screen.getByRole("region", { name: "Enter your details to start" }),
     );
 
-    await waitFor(() =>
-      expect(state.crmMutation).toHaveBeenCalledWith(
-        "/api/field-service/session-technician",
-        { technicianId: candidates[1]?.id },
+    fireEvent.change(gate.getByLabelText("Full name"), {
+      target: { value: "Moshe Fixture" },
+    });
+    fireEvent.change(gate.getByLabelText("Employee ID"), {
+      target: { value: "FS-DAVID" },
+    });
+    fireEvent.click(gate.getByRole("button", { name: "Start working" }));
+
+    expect(
+      await screen.findByText(
+        "This employee ID belongs to another technician.",
       ),
-    );
+    ).toBeTruthy();
+    expect(state.refresh).not.toHaveBeenCalled();
   });
 
   it("creates a case for the identified technician and opens it", async () => {

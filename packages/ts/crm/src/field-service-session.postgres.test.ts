@@ -16,7 +16,6 @@ import {
 import {
   bindTechnicianSession,
   getTechnicianSessionContext,
-  listTechnicianSessionCandidates,
   releaseTechnicianSession,
 } from "./field-service-session.js";
 import { listServiceQueue } from "./service-workflow.js";
@@ -174,24 +173,22 @@ describe.skipIf(databaseUrl === undefined)(
         await expect(
           sql.savepoint((inner) => listServiceQueue(inner, "mine")),
         ).rejects.toMatchObject({ code: "FS428" });
-        expect(
-          (await listTechnicianSessionCandidates(sql)).map(
-            (item) => item.fullName,
-          ),
-        ).toEqual(["David Fixture", "Moshe Fixture"]);
+        // The device shows one generic form; typing another technician's
+        // employee identifier is refused.
         await expect(
           sql.savepoint((inner) =>
             bindTechnicianSession(inner, {
-              technicianId: fixture.david,
-              employeeIdentifier: "wrong",
+              fullName: "Moshe Fixture",
+              employeeIdentifier: "FS-DAVID",
             }),
           ),
         ).rejects.toMatchObject({ code: "FS401" });
         const david = await bindTechnicianSession(sql, {
-          technicianId: fixture.david,
+          fullName: "David Fixture",
           employeeIdentifier: "FS-DAVID",
         });
         expect(david.fullName).toBe("David Fixture");
+        expect(david.id).toBe(fixture.david);
 
         const davidCase = await createTechnicianServiceCase(sql, {
           customerContactId: fixture.contactId,
@@ -242,7 +239,7 @@ describe.skipIf(databaseUrl === undefined)(
         await as("tabletB");
         expect((await getTechnicianSessionContext(sql)).technician).toBeNull();
         await bindTechnicianSession(sql, {
-          technicianId: fixture.moshe,
+          fullName: "Moshe Fixture",
           employeeIdentifier: "FS-MOSHE",
         });
         expect(

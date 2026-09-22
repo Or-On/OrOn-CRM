@@ -155,12 +155,17 @@ async def _as(
     )
 
 
-async def _bind(pg: asyncpg.Connection, technician: UUID, identifier: str | None) -> dict:
+async def _bind(
+    pg: asyncpg.Connection, full_name: str, identifier: str, phone: str | None = None
+) -> dict:
+    """Identify exactly as the shared device does: typed details only."""
+
     return json.loads(
         await pg.fetchval(
-            "SELECT service.bind_current_technician_session($1,$2,$3)",
-            technician,
+            "SELECT service.bind_current_technician_session($1,$2,$3,$4)",
+            full_name,
             identifier,
+            phone,
             f"bind-{uuid4()}",
         )
     )
@@ -252,45 +257,60 @@ async def test_each_session_binds_its_own_physical_technician(pg: asyncpg.Connec
     await _as(pg, fixture, fixture.session_a)
     assert await pg.fetchval("SELECT service.current_technician_session_mode()") == "shared"
     assert await pg.fetchval("SELECT service.current_session_technician_id()") is None
-    candidates = await pg.fetch("SELECT * FROM service.list_session_technician_candidates()")
-    assert [row["full_name"] for row in candidates] == [
-        "David Fixture",
-        "Moshe Fixture",
-        "Sarah Fixture",
-    ]
-    # Candidates never disclose the employee identifier used as confirmation.
-    assert set(candidates[0].keys()) == {
-        "technician_id",
-        "full_name",
-        "identity_verification",
-        "requires_employee_identifier",
-    }
-    assert [row["requires_employee_identifier"] for row in candidates] == [True, True, False]
-
+    # An employee identifier already held by another technician is refused.
     await _raises(
         pg,
         "FS401",
-        "SELECT service.bind_current_technician_session($1,'FS-MOSHE','wrong')",
-        fixture.david,
+        "SELECT service.bind_current_technician_session($1,$2,NULL,'wrong-name')",
+        "Moshe Fixture",
+        "FS-DAVID",
     )
-    # A profile linked to an individual account cannot be taken by the shared login.
+    # A profile linked to an individual account keeps its own sign-in.
     await _raises(
         pg,
-        "P0002",
-        "SELECT service.bind_current_technician_session($1,'FS-LINKED','linked')",
-        fixture.linked,
+        "FS403",
+        "SELECT service.bind_current_technician_session($1,$2,NULL,'linked')",
+        "Linked Fixture",
+        "FS-LINKED",
     )
-    bound = await _bind(pg, fixture.david, "  fs-david ")
+    # A technician a manager deactivated cannot re-register the same identifier.
+    await pg.execute("RESET ROLE")
+    await pg.execute(
+        "UPDATE service.technicians SET active=false, identity_verification='revoked' WHERE id=$1",
+        fixture.sarah,
+    )
+    await pg.execute(
+        "UPDATE service.technicians SET employee_identifier='FS-SARAH' WHERE id=$1",
+        fixture.sarah,
+    )
+    await _as(pg, fixture, fixture.session_a)
+    await _raises(
+        pg,
+        "FS403",
+        "SELECT service.bind_current_technician_session($1,$2,NULL,'revoked')",
+        "Sarah Fixture",
+        "FS-SARAH",
+    )
+    # Details are validated before anything is recorded.
+    for name, identifier in (("D", "FS-DAVID"), ("David Fixture", "!!")):
+        await _raises(
+            pg,
+            "22023",
+            "SELECT service.bind_current_technician_session($1,$2,NULL,'invalid')",
+            name,
+            identifier,
+        )
+    bound = await _bind(pg, "  David Fixture ", "  fs-david ")
     assert bound["technicianId"] == str(fixture.david)
     assert bound["fullName"] == "David Fixture"
-    assert bound["confirmation"] == "employee_identifier"
+    assert bound["profileCreated"] is False
     assert await pg.fetchval("SELECT service.current_session_technician_id()") == fixture.david
     # Repeating the same identification is idempotent.
-    assert (await _bind(pg, fixture.david, "FS-DAVID"))["technicianId"] == str(fixture.david)
+    assert (await _bind(pg, "David Fixture", "FS-DAVID"))["technicianId"] == str(fixture.david)
 
     await _as(pg, fixture, fixture.session_b)
     assert await pg.fetchval("SELECT service.current_session_technician_id()") is None
-    await _bind(pg, fixture.moshe, "FS-MOSHE")
+    await _bind(pg, "Moshe Fixture", "FS-MOSHE")
     assert await pg.fetchval("SELECT service.current_session_technician_id()") == fixture.moshe
     # Session B only sees its own binding row.
     assert await pg.fetchval("SELECT count(*) FROM service.technician_session_bindings") == 1
@@ -305,8 +325,9 @@ async def test_each_session_binds_its_own_physical_technician(pg: asyncpg.Connec
     await _raises(
         pg,
         "FS409",
-        "SELECT service.bind_current_technician_session($1,'FS-MOSHE','switch')",
-        fixture.moshe,
+        "SELECT service.bind_current_technician_session($1,$2,NULL,'switch')",
+        "Moshe Fixture",
+        "FS-MOSHE",
     )
     # Runtime roles cannot write bindings directly; only the definer functions can.
     await _raises(
@@ -317,8 +338,13 @@ async def test_each_session_binds_its_own_physical_technician(pg: asyncpg.Connec
     )
     assert await pg.fetchval("SELECT service.release_current_technician_session('handover')")
     assert await pg.fetchval("SELECT service.current_session_technician_id()") is None
-    handover = await _bind(pg, fixture.sarah, None)
-    assert handover["confirmation"] == "profile_selection"
+    # A technician with no profile yet self-registers from the same form.
+    handover = await _bind(pg, "Yossi Fixture", "FS-YOSSI", "+972500000000")
+    assert handover["profileCreated"] is True
+    assert handover["identityVerification"] == "self_declared"
+    assert await pg.fetchval("SELECT service.current_session_technician_id()") == UUID(
+        handover["technicianId"]
+    )
 
     await _as(pg, fixture, fixture.session_b)
     assert await pg.fetchval("SELECT service.current_session_technician_id()") == fixture.moshe
@@ -328,8 +354,9 @@ async def test_each_session_binds_its_own_physical_technician(pg: asyncpg.Connec
     await _raises(
         pg,
         "42501",
-        "SELECT service.bind_current_technician_session($1,'FS-DAVID','owner')",
-        fixture.david,
+        "SELECT service.bind_current_technician_session($1,$2,NULL,'owner')",
+        "David Fixture",
+        "FS-DAVID",
     )
     linked_session, _ = await _session_as_superuser(pg, fixture.linked_user, fixture)
     await _as(pg, fixture, linked_session, user=fixture.linked_user)
@@ -338,8 +365,9 @@ async def test_each_session_binds_its_own_physical_technician(pg: asyncpg.Connec
     await _raises(
         pg,
         "42501",
-        "SELECT service.bind_current_technician_session($1,'FS-DAVID','linked-account')",
-        fixture.david,
+        "SELECT service.bind_current_technician_session($1,$2,NULL,'linked-account')",
+        "David Fixture",
+        "FS-DAVID",
     )
 
     await pg.execute("RESET ROLE")
@@ -361,9 +389,31 @@ async def test_each_session_binds_its_own_physical_technician(pg: asyncpg.Connec
                 str(fixture.david),
                 str(fixture.session_a),
             ),
-            ("field_service.technician_session.bound", str(fixture.sarah), str(fixture.session_a)),
+            (
+                "field_service.technician_session.bound",
+                handover["technicianId"],
+                str(fixture.session_a),
+            ),
         ]
     )
+    # The self-registered profile is recorded as a self-declared technician.
+    registration = await pg.fetchrow(
+        "SELECT technician.full_name, technician.employee_identifier, technician.phone,"
+        "technician.identity_verification, technician.created_by_user_id,"
+        "record.metadata->>'origin' AS origin "
+        "FROM service.technicians technician "
+        "JOIN audit.records record ON record.target_id=technician.id "
+        "AND record.action='field_service.technician.created' "
+        "WHERE technician.id=$1",
+        UUID(handover["technicianId"]),
+    )
+    assert registration is not None
+    assert registration["full_name"] == "Yossi Fixture"
+    assert registration["employee_identifier"] == "FS-YOSSI"
+    assert registration["phone"] == "+972500000000"
+    assert registration["identity_verification"] == "self_declared"
+    assert registration["created_by_user_id"] == fixture.shared_user
+    assert registration["origin"] == "shared_session_identification"
 
 
 async def _session_as_superuser(
@@ -378,9 +428,9 @@ async def test_binding_lapses_with_its_session_profile_or_shared_login(
 ) -> None:
     fixture = await _shared_technicians(pg, "Binding lifetime")
     await _as(pg, fixture, fixture.session_a)
-    await _bind(pg, fixture.david, "FS-DAVID")
+    await _bind(pg, "David Fixture", "FS-DAVID")
     await _as(pg, fixture, fixture.session_b)
-    await _bind(pg, fixture.moshe, "FS-MOSHE")
+    await _bind(pg, "Moshe Fixture", "FS-MOSHE")
 
     await pg.execute("RESET ROLE")
     await pg.execute(
@@ -446,9 +496,9 @@ async def test_queue_rls_and_claims_follow_the_session_technician(
     moshe_visit = await _visit(pg, fixture, moshe_case, fixture.moshe)
 
     await _as(pg, fixture, fixture.session_a)
-    await _bind(pg, fixture.david, "FS-DAVID")
+    await _bind(pg, "David Fixture", "FS-DAVID")
     await _as(pg, fixture, fixture.session_b)
-    await _bind(pg, fixture.moshe, "FS-MOSHE")
+    await _bind(pg, "Moshe Fixture", "FS-MOSHE")
 
     async def visible(session: UUID) -> dict[str, set[UUID]]:
         await _as(pg, fixture, session)
@@ -545,9 +595,9 @@ async def test_technician_created_cases_belong_to_the_sessions_technician(
 ) -> None:
     fixture = await _shared_technicians(pg, "Technician case creation")
     await _as(pg, fixture, fixture.session_a)
-    await _bind(pg, fixture.david, "FS-DAVID")
+    await _bind(pg, "David Fixture", "FS-DAVID")
     await _as(pg, fixture, fixture.session_b)
-    await _bind(pg, fixture.moshe, "FS-MOSHE")
+    await _bind(pg, "Moshe Fixture", "FS-MOSHE")
 
     create = (
         "SELECT service.create_technician_case($1,NULL,$2,'Synthetic fault',"
@@ -685,7 +735,7 @@ async def test_reports_are_tenant_records_worked_only_by_the_visit_technician(
     )
 
     await _as(pg, fixture, fixture.session_a)
-    await _bind(pg, fixture.david, "FS-DAVID")
+    await _bind(pg, "David Fixture", "FS-DAVID")
     david_report = await pg.fetchval(
         "INSERT INTO service.reports(tenant_id,case_id,visit_id) VALUES ($1,$2,$3) RETURNING id",
         fixture.tenant.tenant_id,
@@ -705,7 +755,7 @@ async def test_reports_are_tenant_records_worked_only_by_the_visit_technician(
     )
 
     await _as(pg, fixture, fixture.session_b)
-    await _bind(pg, fixture.moshe, "FS-MOSHE")
+    await _bind(pg, "Moshe Fixture", "FS-MOSHE")
     # Moshe shares the case, so he may read its history...
     assert (
         await pg.fetchval(
@@ -813,9 +863,9 @@ async def test_shared_sessions_create_and_claim_concurrently(isolated_postgres_u
         async with admin.transaction():
             fixture = await _shared_technicians(admin, "Concurrent shared sessions")
             await _as(admin, fixture, fixture.session_a)
-            await _bind(admin, fixture.david, "FS-DAVID")
+            await _bind(admin, "David Fixture", "FS-DAVID")
             await _as(admin, fixture, fixture.session_b)
-            await _bind(admin, fixture.moshe, "FS-MOSHE")
+            await _bind(admin, "Moshe Fixture", "FS-MOSHE")
             await admin.execute("RESET ROLE")
             race_case = await _case(admin, fixture, "Contested incident")
             gathered_case = await _case(admin, fixture, "Second contested incident")
@@ -847,6 +897,29 @@ async def test_shared_sessions_create_and_claim_concurrently(isolated_postgres_u
         finally:
             await first.close()
             await second.close()
+
+        # Two devices registering the same new technician keep one profile.
+        async def register(session: UUID) -> str:
+            connection = await connect(session)
+            try:
+                bound = await _bind(connection, "Dana Fixture", "FS-DANA")
+                await connection.execute("COMMIT")
+                return bound["technicianId"]
+            finally:
+                await connection.close()
+
+        registrations = await asyncio.gather(
+            register(fixture.session_c), register(fixture.session_c)
+        )
+        assert len(set(registrations)) == 1
+        assert (
+            await admin.fetchval(
+                "SELECT count(*) FROM service.technicians "
+                "WHERE tenant_id=$1 AND employee_identifier='FS-DANA'",
+                fixture.tenant.tenant_id,
+            )
+            == 1
+        )
 
         # Simultaneous creation from both sessions.
         async def create_as(session: UUID, title: str) -> dict:

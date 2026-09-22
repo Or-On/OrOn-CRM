@@ -60,14 +60,22 @@ that binding against the exact `auth_session_id`
 (`service.technician_session_bindings`, written only by SECURITY DEFINER
 functions and readable only by its own session).
 
+A shared device shows one generic identification form: the technician types
+their own name and employee identifier, and the identifier is the durable key.
+An existing active profile holding it is reused when the recorded name matches,
+and otherwise a self-declared `service.technicians` profile is created, so a
+tenant can run shared field work without pre-creating every technician. A
+profile a manager deactivated, or one linked to an individual account, can
+never be taken over from the shared login, and no roster of technicians is ever
+exposed to the device.
+
 `service.current_session_technician_id()` is the single resolver: an
 individually linked account (`service.technicians.linked_user_id`) keeps its own
 profile, and a shared account resolves the technician bound to this still-valid
 session while shared technician login is enabled. Case access, technician
 visibility, the dispatch queue, self-claim, technician-created cases, visit
 identity, report work and evidence all resolve through it, so two technicians
-sharing one login never inherit each other's work. Confirmation uses the
-profile's employee identifier, which is never returned to the device.
+sharing one login never inherit each other's work.
 
 ## Enforcement and verification
 

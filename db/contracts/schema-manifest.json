@@ -1,5 +1,5 @@
 {
-  "alembic_head": "7b3d9e5a1c48",
+  "alembic_head": "3f5c8b1d7e42",
   "expected_functions": [
     "agents.protect_approved_knowledge",
     "automation.protect_published_flow_version",
@@ -135,7 +135,6 @@
     "service.current_session_technician_id",
     "service.current_technician_session_mode",
     "service.lock_current_session_technician",
-    "service.list_session_technician_candidates",
     "service.bind_current_technician_session",
     "service.release_current_technician_session",
     "service.current_actor_can_work_visit",

@@ -988,8 +988,9 @@ async def test_shared_sessions_cannot_replace_signed_attendance_or_final_reports
     # A shared account reaches field work only after each browser session
     # names its physical technician; both sessions here are the same person.
     await pg.fetchval(
-        "SELECT service.bind_current_technician_session($1,'FIELD-01','bind-shared-a')",
-        technician_id,
+        "SELECT service.bind_current_technician_session($1,$2,NULL,'bind-shared-a')",
+        "Synthetic Field Technician",
+        "FIELD-01",
     )
     first_identity = await pg.fetchval(
         "INSERT INTO service.technician_session_identities"
@@ -1042,8 +1043,9 @@ async def test_shared_sessions_cannot_replace_signed_attendance_or_final_reports
     )
     await pg.execute("SELECT set_config('app.current_session',$1,true)", str(second_session))
     await pg.fetchval(
-        "SELECT service.bind_current_technician_session($1,'FIELD-01','bind-shared-b')",
-        technician_id,
+        "SELECT service.bind_current_technician_session($1,$2,NULL,'bind-shared-b')",
+        "Synthetic Field Technician",
+        "FIELD-01",
     )
     with pytest.raises(asyncpg.ObjectNotInPrerequisiteStateError):
         async with pg.transaction():

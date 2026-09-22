@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import {
   bindTechnicianSession,
   getTechnicianSessionContext,
-  listTechnicianSessionCandidates,
   releaseTechnicianSession,
 } from "@or-on/crm";
 
@@ -16,29 +15,20 @@ import {
   assertCrmMutation,
   crmErrorResponse,
 } from "../../../../features/crm-route";
-import { optionalText, uuid } from "../../../../features/field-service";
+import { optionalText, text } from "../../../../features/field-service";
 
 /**
  * The physical technician of the calling browser session. The session, user
- * and tenant always come from the authenticated cookie; the body may only
- * name a technician profile, which PostgreSQL validates before binding it.
+ * and tenant always come from the authenticated cookie, and the technician is
+ * resolved by PostgreSQL from the details typed on the device; no request may
+ * name a technician identifier.
  */
 export async function GET() {
   try {
-    const state = await withCurrentTenant(
-      "field-service:operate",
-      async (sql) => {
-        const context = await getTechnicianSessionContext(sql);
-        return {
-          ...context,
-          candidates:
-            context.mode === "shared" && context.technician === null
-              ? await listTechnicianSessionCandidates(sql)
-              : [],
-        };
-      },
+    const context = await withCurrentTenant("field-service:operate", (sql) =>
+      getTechnicianSessionContext(sql),
     );
-    return NextResponse.json(state, {
+    return NextResponse.json(context, {
       headers: { "cache-control": "private, no-store" },
     });
   } catch (error) {
@@ -50,19 +40,23 @@ export async function POST(request: Request) {
   try {
     await assertCrmMutation(request);
     const body = await jsonObject(request);
-    if ("sessionId" in body || "userId" in body || "tenantId" in body)
-      throw new TypeError("The session is resolved from the signed-in device");
-    const technicianId = uuid(body.technicianId, "Technician");
-    const employeeIdentifier = optionalText(
-      body.employeeIdentifier,
-      "Employee ID",
-    );
+    if (
+      "technicianId" in body ||
+      "sessionId" in body ||
+      "userId" in body ||
+      "tenantId" in body
+    )
+      throw new TypeError(
+        "The technician is resolved from the details typed on this device",
+      );
+    const phone = optionalText(body.phone, "Contact number");
     const technician = await withFreshCurrentTenant(
       "field-service:operate",
       (sql) =>
         bindTechnicianSession(sql, {
-          technicianId,
-          ...(employeeIdentifier === undefined ? {} : { employeeIdentifier }),
+          fullName: text(body.fullName, "Full name"),
+          employeeIdentifier: text(body.employeeIdentifier, "Employee ID"),
+          ...(phone === undefined ? {} : { phone }),
           requestId: requestId(request),
         }),
     );

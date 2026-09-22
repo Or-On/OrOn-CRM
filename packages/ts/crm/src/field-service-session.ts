@@ -31,14 +31,6 @@ export interface TechnicianSessionContext {
   readonly technician: SessionTechnician | null;
 }
 
-export interface TechnicianSessionCandidate {
-  readonly id: string;
-  readonly fullName: string;
-  readonly identityVerification: TechnicianSummary["identityVerification"];
-  /** Confirmation needs the profile's employee identifier, never shown. */
-  readonly requiresEmployeeIdentifier: boolean;
-}
-
 export async function getTechnicianSessionContext(
   sql: postgres.TransactionSql,
 ): Promise<TechnicianSessionContext> {
@@ -78,55 +70,38 @@ export async function getTechnicianSessionContext(
   };
 }
 
-export async function listTechnicianSessionCandidates(
-  sql: postgres.TransactionSql,
-): Promise<readonly TechnicianSessionCandidate[]> {
-  await requireFieldService(sql);
-  const rows = await sql<
-    {
-      technician_id: string;
-      full_name: string;
-      identity_verification: TechnicianSummary["identityVerification"];
-      requires_employee_identifier: boolean;
-    }[]
-  >`SELECT * FROM service.list_session_technician_candidates()`;
-  return rows.map((row) => ({
-    id: row.technician_id,
-    fullName: row.full_name,
-    identityVerification: row.identity_verification,
-    requiresEmployeeIdentifier: row.requires_employee_identifier,
-  }));
-}
-
 /**
- * Names the physical technician of the current authenticated session. The
- * database binds it to the transaction's own session; the caller cannot
- * supply a session, tenant or user, and sibling sessions are unaffected.
+ * Names the physical technician of the current authenticated session from the
+ * details that technician typed on the shared device. PostgreSQL reuses the
+ * active profile holding that employee identifier, or records a self-declared
+ * one, and binds it to the transaction's own session: the caller supplies no
+ * session, tenant, user or technician identifier, and sibling sessions of the
+ * same account are unaffected.
  */
 export async function bindTechnicianSession(
   sql: postgres.TransactionSql,
   input: {
-    readonly technicianId: string;
-    readonly employeeIdentifier?: string | null;
+    readonly fullName: string;
+    readonly employeeIdentifier: string;
+    readonly phone?: string | null;
     readonly requestId?: string;
   },
 ): Promise<SessionTechnician> {
   await requireFieldService(sql);
-  const identifier = input.employeeIdentifier?.trim() ?? "";
-  if (identifier.length > 100)
-    throw new TypeError("Employee identifier is too long");
+  const phone = input.phone?.trim() ?? "";
   const rows = await sql<
     {
       binding: {
         technicianId: string;
         fullName: string;
         identityVerification: TechnicianSummary["identityVerification"];
+        profileCreated: boolean;
       };
     }[]
   >`
     SELECT service.bind_current_technician_session(
-      ${input.technicianId}::uuid, ${identifier === "" ? null : identifier},
-      ${input.requestId ?? randomUUID()}
+      ${input.fullName}, ${input.employeeIdentifier},
+      ${phone === "" ? null : phone}, ${input.requestId ?? randomUUID()}
     ) AS binding
   `;
   const binding = rows[0]?.binding;

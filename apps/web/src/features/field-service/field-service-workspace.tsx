@@ -8,7 +8,6 @@ import type {
   ServiceCaseSummary,
   ServiceDirectory as Directory,
   TeamMember,
-  TechnicianSessionCandidate,
   TechnicianSessionContext,
   TechnicianSummary,
 } from "@or-on/crm";
@@ -96,7 +95,6 @@ export function FieldServiceWorkspace({
   isTechnician = false,
   serviceStores = [],
   technicianSession,
-  technicianCandidates = [],
 }: {
   readonly appointments: readonly ServiceAppointment[];
   readonly cases: readonly ServiceCaseSummary[];
@@ -112,7 +110,6 @@ export function FieldServiceWorkspace({
   readonly serviceStores?: Directory["stores"];
   /** The physical technician of this browser session, for technician roles. */
   readonly technicianSession?: TechnicianSessionContext;
-  readonly technicianCandidates?: readonly TechnicianSessionCandidate[];
 }) {
   const locale = useLocale();
   const he = locale.startsWith("he");
@@ -506,7 +503,7 @@ export function FieldServiceWorkspace({
 
       {isTechnician && !technicianReady ? (
         technicianSession?.mode === "shared" ? (
-          <TechnicianIdentityGate candidates={technicianCandidates} />
+          <TechnicianIdentityGate />
         ) : (
           <EmptyState
             title={

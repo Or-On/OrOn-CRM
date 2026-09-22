@@ -8,7 +8,6 @@ import {
   listServiceAppointments,
   listServiceCasePage,
   listTeamMembers,
-  listTechnicianSessionCandidates,
   listTechnicians,
 } from "@or-on/crm";
 import { isAuthorized } from "@or-on/auth";
@@ -41,11 +40,6 @@ export default async function FieldServicePage() {
         const technicianSession = isTechnician
           ? await getTechnicianSessionContext(sql)
           : undefined;
-        const technicianCandidates =
-          technicianSession?.mode === "shared" &&
-          technicianSession.technician === null
-            ? await listTechnicianSessionCandidates(sql)
-            : [];
         const [
           casePage,
           appointments,
@@ -81,7 +75,6 @@ export default async function FieldServicePage() {
           isTechnician,
           canOperate,
           ...(technicianSession === undefined ? {} : { technicianSession }),
-          technicianCandidates,
         };
       },
     );

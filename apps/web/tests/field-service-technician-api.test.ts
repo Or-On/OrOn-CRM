@@ -4,7 +4,6 @@ const state = vi.hoisted(() => ({
   role: "technician",
   bind: vi.fn(),
   context: vi.fn(),
-  candidates: vi.fn(),
   contacts: vi.fn(),
   createCase: vi.fn(),
   createTechnicianCase: vi.fn(),
@@ -20,7 +19,6 @@ vi.mock("@or-on/crm", () => ({
   getTechnicianSessionContext: state.context,
   listContacts: state.contacts,
   listServiceCasePage: vi.fn(),
-  listTechnicianSessionCandidates: state.candidates,
   releaseTechnicianSession: state.release,
   requireFieldService: () => Promise.resolve({}),
   serviceCaseStatuses: [
@@ -180,29 +178,13 @@ describe("technician field-service API", () => {
     );
   });
 
-  it("offers identification candidates only to an unidentified shared session", async () => {
+  it("reports this session's technician without exposing other technicians", async () => {
     state.context.mockResolvedValue({ mode: "shared", technician: null });
-    state.candidates.mockResolvedValue([
-      {
-        id: technicianId,
-        fullName: "David Fixture",
-        identityVerification: "verified",
-        requiresEmployeeIdentifier: true,
-      },
-    ]);
     const unidentified = await sessionTechnician();
     expect(unidentified.headers.get("cache-control")).toBe("private, no-store");
     expect(await unidentified.json()).toEqual({
       mode: "shared",
       technician: null,
-      candidates: [
-        {
-          id: technicianId,
-          fullName: "David Fixture",
-          identityVerification: "verified",
-          requiresEmployeeIdentifier: true,
-        },
-      ],
     });
 
     state.context.mockResolvedValue({
@@ -210,32 +192,38 @@ describe("technician field-service API", () => {
       technician: {
         id: technicianId,
         fullName: "David Fixture",
-        identityVerification: "verified",
+        identityVerification: "self_declared",
       },
     });
-    const identified = await sessionTechnician();
-    expect(await identified.json()).toMatchObject({ candidates: [] });
-    expect(state.candidates).toHaveBeenCalledOnce();
+    expect(await (await sessionTechnician()).json()).toEqual({
+      mode: "shared",
+      technician: {
+        id: technicianId,
+        fullName: "David Fixture",
+        identityVerification: "self_declared",
+      },
+    });
   });
 
-  it("binds a technician to this session and refuses caller-supplied session identity", async () => {
+  it("binds the typed details to this session and refuses a caller-chosen technician", async () => {
     state.bind.mockResolvedValue({
       id: technicianId,
       fullName: "David Fixture",
-      identityVerification: "verified",
+      identityVerification: "self_declared",
     });
-    const response = await identifyTechnician(
-      new Request(
-        "https://example.invalid/api/field-service/session-technician",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            technicianId,
-            employeeIdentifier: "FS-DAVID",
-          }),
-        },
-      ),
-    );
+    const identify = (body: Record<string, unknown>) =>
+      identifyTechnician(
+        new Request(
+          "https://example.invalid/api/field-service/session-technician",
+          { method: "POST", body: JSON.stringify(body) },
+        ),
+      );
+
+    const response = await identify({
+      fullName: "David Fixture",
+      employeeIdentifier: "FS-DAVID",
+      phone: "+972500000000",
+    });
 
     expect(response.status).toBe(200);
     expect(state.fresh).toHaveBeenCalledWith(
@@ -245,25 +233,26 @@ describe("technician field-service API", () => {
     expect(state.bind).toHaveBeenCalledWith(
       {},
       {
-        technicianId,
+        fullName: "David Fixture",
         employeeIdentifier: "FS-DAVID",
+        phone: "+972500000000",
         requestId: "technician-request",
       },
     );
 
-    const spoofed = await identifyTechnician(
-      new Request(
-        "https://example.invalid/api/field-service/session-technician",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            technicianId,
-            sessionId: "60000000-0000-4000-8000-000000000001",
-          }),
-        },
-      ),
-    );
-    expect(spoofed.status).toBe(400);
+    for (const forbidden of [
+      { technicianId },
+      { sessionId: "60000000-0000-4000-8000-000000000001" },
+      { userId: "70000000-0000-4000-8000-000000000001" },
+      { tenantId: "80000000-0000-4000-8000-000000000001" },
+    ]) {
+      const refused = await identify({
+        fullName: "David Fixture",
+        employeeIdentifier: "FS-DAVID",
+        ...forbidden,
+      });
+      expect(refused.status).toBe(400);
+    }
     expect(state.bind).toHaveBeenCalledOnce();
   });
 
