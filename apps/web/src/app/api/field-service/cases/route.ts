@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import {
+  createContact,
   createServiceCase,
   createTechnicianServiceCase,
   listServiceCasePage,
@@ -31,6 +32,13 @@ function warranty(value: unknown): WarrantyStatus {
   if (value !== "unknown" && value !== "yes" && value !== "no")
     throw new TypeError("Warranty status must be unknown, yes, or no");
   return value;
+}
+
+function customerField(value: unknown, label: string): string | undefined {
+  const parsed = optionalText(value, label);
+  return typeof parsed === "string" && parsed.trim() !== ""
+    ? parsed.trim()
+    : undefined;
 }
 
 export async function GET(request: Request) {
@@ -80,8 +88,39 @@ export async function POST(request: Request) {
     const productType = optionalText(body.productType, "Product type");
     const productModel = optionalText(body.productModel, "Product model");
     const serialNumber = optionalText(body.serialNumber, "Serial number");
+    const newCustomer = body.newCustomer;
+    if (
+      newCustomer !== undefined &&
+      (newCustomer === null ||
+        typeof newCustomer !== "object" ||
+        Array.isArray(newCustomer))
+    )
+      throw new TypeError("New customer details are invalid");
+    if (newCustomer !== undefined && body.customerContactId !== undefined)
+      throw new TypeError("Choose an existing customer or enter a new one");
+    const customer = newCustomer as Record<string, unknown> | undefined;
+    const customerPhone = customerField(customer?.phone, "Customer phone");
+    const customerEmail = customerField(customer?.email, "Customer email");
+    const customerCompany = customerField(
+      customer?.company,
+      "Customer company",
+    );
+    const customerInput =
+      customer === undefined
+        ? undefined
+        : {
+            name: text(customer.name, "Customer name"),
+            ...(customerPhone === undefined ? {} : { phone: customerPhone }),
+            ...(customerEmail === undefined ? {} : { email: customerEmail }),
+            ...(customerCompany === undefined
+              ? {}
+              : { company: customerCompany }),
+          };
+    const existingCustomerId =
+      customerInput === undefined
+        ? uuid(body.customerContactId, "Customer")
+        : undefined;
     const details = {
-      customerContactId: uuid(body.customerContactId, "Customer"),
       ...(body.serviceLocationId === undefined ||
       body.serviceLocationId === null
         ? {}
@@ -102,6 +141,17 @@ export async function POST(request: Request) {
     const created = await withCurrentTenant(
       "field-service:operate",
       async (sql, session) => {
+        const customerContactId =
+          customerInput === undefined
+            ? existingCustomerId
+            : (
+                await createContact(sql, session.userId, customerInput, {
+                  grantChannelConsent: false,
+                })
+              ).id;
+        if (customerContactId === undefined)
+          throw new TypeError("Customer is required");
+        const caseDetails = { ...details, customerContactId };
         if (session.tenant.role === "technician" && !session.isSuperuser) {
           // Field work belongs to the physical technician of this browser
           // session, resolved by PostgreSQL. The browser cannot name one.
@@ -114,7 +164,7 @@ export async function POST(request: Request) {
               "A technician case is assigned to the technician signed in on this device",
             );
           const receipt = await createTechnicianServiceCase(sql, {
-            ...details,
+            ...caseDetails,
             requestId: requestId(request),
           });
           return {
@@ -128,7 +178,7 @@ export async function POST(request: Request) {
             sql,
             { userId: session.userId },
             {
-              ...details,
+              ...caseDetails,
               ...(body.reportingContactId === undefined
                 ? {}
                 : {

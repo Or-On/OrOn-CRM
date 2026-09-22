@@ -15,6 +15,7 @@ import {
   AnimatedNumber,
   Badge,
   Button,
+  ConfirmDialog,
   DataTable,
   Dialog,
   EmptyState,
@@ -124,6 +125,7 @@ export function FieldServiceWorkspace({
   const [loadingCases, setLoadingCases] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [createCustomerId, setCreateCustomerId] = useState("");
+  const [createNewCustomer, setCreateNewCustomer] = useState(false);
   const [contactQuery, setContactQuery] = useState("");
   const [contactOptions, setContactOptions] =
     useState<readonly CaseCustomer[]>(contacts);
@@ -133,6 +135,9 @@ export function FieldServiceWorkspace({
   const [technicianOpen, setTechnicianOpen] = useState(false);
   const [editingTechnician, setEditingTechnician] =
     useState<TechnicianSummary>();
+  const [deletingTechnician, setDeletingTechnician] =
+    useState<TechnicianSummary>();
+  const [deleteTechnicianError, setDeleteTechnicianError] = useState<string>();
   const [pendingAction, setPendingAction] = useState<string>();
   const [error, setError] = useState<string>();
   useEffect(() => {
@@ -168,6 +173,7 @@ export function FieldServiceWorkspace({
     scheduleCase !== undefined ||
     technicianOpen ||
     editingTechnician !== undefined ||
+    deletingTechnician !== undefined ||
     manageAppointment !== undefined;
 
   const pending = pendingAction !== undefined;
@@ -194,6 +200,7 @@ export function FieldServiceWorkspace({
   function openCreateDialog() {
     setError(undefined);
     setCreateCustomerId("");
+    setCreateNewCustomer(false);
     setCreateOpen(true);
   }
 
@@ -230,6 +237,31 @@ export function FieldServiceWorkspace({
   function closeEditTechnicianDialog() {
     setError(undefined);
     setEditingTechnician(undefined);
+  }
+
+  async function removeTechnician() {
+    if (deletingTechnician === undefined) return;
+    setPendingAction("delete-technician");
+    setDeleteTechnicianError(undefined);
+    try {
+      await crmMutation(
+        `/api/field-service/technicians/${deletingTechnician.id}`,
+        {},
+        {
+          method: "DELETE",
+        },
+      );
+      setDeletingTechnician(undefined);
+      router.refresh();
+    } catch (reason) {
+      setDeleteTechnicianError(
+        reason instanceof Error
+          ? reason.message
+          : "Could not delete technician",
+      );
+    } finally {
+      setPendingAction(undefined);
+    }
   }
 
   function openManageAppointmentDialog(appointment: ServiceAppointment) {
@@ -310,10 +342,24 @@ export function FieldServiceWorkspace({
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     if (form.get("serviceLocationId") === "") form.delete("serviceLocationId");
+    const body: Record<string, unknown> = Object.fromEntries(form.entries());
+    if (createNewCustomer) {
+      body.newCustomer = {
+        name: form.get("newCustomerName"),
+        phone: form.get("newCustomerPhone"),
+        email: form.get("newCustomerEmail"),
+        company: form.get("newCustomerCompany"),
+      };
+      delete body.customerContactId;
+    }
+    delete body.newCustomerName;
+    delete body.newCustomerPhone;
+    delete body.newCustomerEmail;
+    delete body.newCustomerCompany;
     await run("create-case", async () => {
       const created = await crmMutation<{ case: ServiceCaseSummary }>(
         "/api/field-service/cases",
-        Object.fromEntries(form.entries()),
+        body,
       );
       closeCreateDialog();
       // The new case is already this technician's work; open it directly.
@@ -1003,39 +1049,82 @@ export function FieldServiceWorkspace({
               }
             />
           ) : null}
-          <div className="field-service-contact-search">
-            <Input
-              id="field-case-contact-search"
-              label={he ? "חיפוש לקוח" : "Find customer"}
-              onChange={(event) => setContactQuery(event.target.value)}
-              value={contactQuery}
-            />
-            <Button
-              disabled={loadingCases}
-              onClick={() => void searchContactOptions()}
-              type="button"
-              variant="secondary"
+          {createNewCustomer ? (
+            <>
+              <Input
+                id="field-case-new-customer-name"
+                label={he ? "שם לקוח חדש" : "New customer name"}
+                name="newCustomerName"
+                required
+              />
+              <Input
+                id="field-case-new-customer-phone"
+                label={he ? "טלפון (+972...)" : "Phone (+972...)"}
+                name="newCustomerPhone"
+                type="tel"
+              />
+              <Input
+                id="field-case-new-customer-email"
+                label={he ? "אימייל" : "Email"}
+                name="newCustomerEmail"
+                type="email"
+              />
+              <Input
+                id="field-case-new-customer-company"
+                label={he ? "חברה" : "Company"}
+                name="newCustomerCompany"
+              />
+            </>
+          ) : (
+            <div className="field-service-contact-search">
+              <Input
+                id="field-case-contact-search"
+                label={he ? "חיפוש לקוח" : "Find customer"}
+                onChange={(event) => setContactQuery(event.target.value)}
+                value={contactQuery}
+              />
+              <Button
+                disabled={loadingCases}
+                onClick={() => void searchContactOptions()}
+                type="button"
+                variant="secondary"
+              >
+                <Search aria-hidden="true" size={14} />
+                {he ? "חיפוש" : "Search"}
+              </Button>
+            </div>
+          )}
+          {createNewCustomer ? null : (
+            <Select
+              id="field-case-customer"
+              label={he ? "לקוח" : "Customer"}
+              name="customerContactId"
+              value={createCustomerId}
+              onChange={(event) => setCreateCustomerId(event.target.value)}
+              required
             >
-              <Search aria-hidden="true" size={14} />
-              {he ? "חיפוש" : "Search"}
-            </Button>
-          </div>
-          <Select
-            id="field-case-customer"
-            label={he ? "לקוח" : "Customer"}
-            name="customerContactId"
-            value={createCustomerId}
-            onChange={(event) => setCreateCustomerId(event.target.value)}
-            required
+              <option value="">{he ? "בחירת לקוח" : "Select customer"}</option>
+              {contactOptions.map((contact) => (
+                <option key={contact.id} value={contact.id}>
+                  {contact.name}
+                  {contact.company ? ` · ${contact.company}` : ""}
+                </option>
+              ))}
+            </Select>
+          )}
+          <Button
+            onClick={() => setCreateNewCustomer((current) => !current)}
+            type="button"
+            variant="secondary"
           >
-            <option value="">{he ? "בחירת לקוח" : "Select customer"}</option>
-            {contactOptions.map((contact) => (
-              <option key={contact.id} value={contact.id}>
-                {contact.name}
-                {contact.company ? ` · ${contact.company}` : ""}
-              </option>
-            ))}
-          </Select>
+            {createNewCustomer
+              ? he
+                ? "בחירת לקוח קיים"
+                : "Choose existing customer"
+              : he
+                ? "הוספת לקוח חדש"
+                : "Add new customer"}
+          </Button>
           {serviceStores.length > 0 ? (
             <Select
               key={createCustomerId}
@@ -1373,6 +1462,18 @@ export function FieldServiceWorkspace({
             </p>
             <div className="field-service-form__actions">
               <Button
+                disabled={pending}
+                onClick={() => {
+                  setDeleteTechnicianError(undefined);
+                  setDeletingTechnician(editingTechnician);
+                  setEditingTechnician(undefined);
+                }}
+                type="button"
+                variant="danger"
+              >
+                {he ? "מחיקת טכנאי" : "Delete technician"}
+              </Button>
+              <Button
                 onClick={closeEditTechnicianDialog}
                 type="button"
                 variant="quiet"
@@ -1390,6 +1491,33 @@ export function FieldServiceWorkspace({
           </form>
         )}
       </Dialog>
+
+      <ConfirmDialog
+        busy={pendingAction === "delete-technician"}
+        cancelLabel={he ? "ביטול" : "Cancel"}
+        confirmLabel={he ? "מחיקת טכנאי" : "Delete technician"}
+        destructive
+        description={
+          he
+            ? `למחוק את ${deletingTechnician?.fullName ?? ""}? ניתן למחוק רק טכנאי ללא עבודות קיימות.`
+            : `Delete ${deletingTechnician?.fullName ?? ""}? Only technicians without existing work can be deleted.`
+        }
+        onCancel={() => {
+          if (pending) return;
+          setEditingTechnician(deletingTechnician);
+          setDeletingTechnician(undefined);
+          setDeleteTechnicianError(undefined);
+        }}
+        onConfirm={() => void removeTechnician()}
+        open={deletingTechnician !== undefined}
+        title={he ? "למחוק את הטכנאי?" : "Delete this technician?"}
+      >
+        {deleteTechnicianError === undefined ? null : (
+          <p className="form-error" role="alert">
+            {deleteTechnicianError}
+          </p>
+        )}
+      </ConfirmDialog>
 
       <Dialog
         closeLabel={he ? "סגירה" : "Close"}

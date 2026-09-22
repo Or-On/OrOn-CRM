@@ -203,6 +203,7 @@ export async function createContact(
   sql: postgres.TransactionSql,
   actorUserId: string | null,
   input: ContactInput,
+  options: { readonly grantChannelConsent?: boolean } = {},
 ): Promise<ContactSummary> {
   const name = input.name.trim();
   if (name === "") throw new TypeError("contact name is required");
@@ -227,7 +228,9 @@ export async function createContact(
       (tenant_id, created_by_user_id, name, email, company, voice_consent, whatsapp_consent)
     VALUES (platform.current_tenant_id(), ${actorUserId}::uuid, ${name},
             ${email === undefined || email === "" ? null : email},
-            ${company === undefined || company === "" ? null : company}, 'granted', 'granted')
+            ${company === undefined || company === "" ? null : company},
+            ${options.grantChannelConsent === false ? "unknown" : "granted"},
+            ${options.grantChannelConsent === false ? "unknown" : "granted"})
     RETURNING id
   `;
   const id = rows[0]?.id;

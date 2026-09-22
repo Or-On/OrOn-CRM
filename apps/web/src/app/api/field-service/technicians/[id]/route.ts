@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { updateTechnician } from "@or-on/crm";
+import { deleteTechnician, updateTechnician } from "@or-on/crm";
 
 import { jsonObject, withCurrentTenant } from "../../../../../features/auth";
 import {
@@ -69,6 +69,29 @@ export async function PATCH(
         { status: 404 },
       );
     return NextResponse.json({ technician });
+  } catch (error) {
+    return crmErrorResponse(error);
+  }
+}
+
+export async function DELETE(
+  request: Request,
+  context: RouteContext<"/api/field-service/technicians/[id]">,
+) {
+  try {
+    await assertCrmMutation(request);
+    const { id } = await context.params;
+    const deleted = await withCurrentTenant(
+      "field-service:manage",
+      (sql, session) =>
+        deleteTechnician(sql, session.userId, uuid(id, "Technician")),
+    );
+    if (!deleted)
+      return NextResponse.json(
+        { error: "Technician not found" },
+        { status: 404 },
+      );
+    return NextResponse.json({ deleted: true });
   } catch (error) {
     return crmErrorResponse(error);
   }

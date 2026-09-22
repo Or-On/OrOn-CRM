@@ -9,6 +9,7 @@ import {
   createServiceCase,
   createServiceLocation,
   createServiceVisit,
+  deleteTechnician,
   deleteServiceReport,
   finalizeReportRevision,
   getServiceCaseDossier,
@@ -151,6 +152,35 @@ async function isolated(
 describe.skipIf(databaseUrl === undefined)(
   "field-service scheduling against PostgreSQL RLS",
   () => {
+    it("deletes an unused technician and records the action", async () =>
+      isolated(async (sql, fixture) => {
+        expect(
+          await deleteTechnician(sql, fixture.userId, fixture.technicianId),
+        ).toBe(true);
+        const rows = await sql<{ count: number }[]>`
+          SELECT count(*)::integer AS count FROM audit.records
+          WHERE target_id=${fixture.technicianId}::uuid
+            AND action='field_service.technician.deleted'
+        `;
+        expect(rows[0]?.count).toBe(1);
+      }));
+
+    it("refuses deletion when appointment history references the technician", async () =>
+      isolated(async (sql, fixture) => {
+        await scheduleServiceAppointment(sql, fixture.userId, {
+          caseId: fixture.caseId,
+          technicianId: fixture.technicianId,
+          startsAt: "2026-10-02T08:00:00.000Z",
+          endsAt: "2026-10-02T09:00:00.000Z",
+          timezone: "UTC",
+          source: "manual",
+          idempotencyKey: "technician-delete-conflict",
+        });
+        await expect(
+          deleteTechnician(sql, fixture.userId, fixture.technicianId),
+        ).rejects.toMatchObject({ code: "FS_TECHNICIAN_IN_USE" });
+      }));
+
     it("completes retail WhatsApp intake with transport identity and one linked support ticket", async () =>
       isolated(async (sql, fixture) => {
         await sql`RESET ROLE`;

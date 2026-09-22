@@ -41,6 +41,14 @@ export function crmErrorResponse(error: unknown): NextResponse {
       { error: "A matching record already exists" },
       { status: 409 },
     );
+  if (code === "FS_TECHNICIAN_IN_USE")
+    return NextResponse.json(
+      {
+        error:
+          "This technician has existing work. Deactivate the technician to preserve visit history.",
+      },
+      { status: 409 },
+    );
   if (code === "23P01")
     return NextResponse.json(
       { error: "This technician already has a conflicting appointment" },

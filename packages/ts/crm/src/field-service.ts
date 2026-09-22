@@ -1294,6 +1294,48 @@ export async function updateTechnician(
   );
 }
 
+export async function deleteTechnician(
+  sql: postgres.TransactionSql,
+  actorUserId: string,
+  technicianId: string,
+): Promise<boolean> {
+  await requireFieldService(sql);
+  try {
+    const rows = await sql<{ id: string }[]>`
+      DELETE FROM service.technicians
+      WHERE id=${technicianId}::uuid
+      RETURNING id
+    `;
+    if (rows.length === 0) return false;
+    await sql`
+      INSERT INTO audit.records(
+        tenant_id, actor_user_id, action, target_type, target_id, metadata
+      ) VALUES (
+        platform.current_tenant_id(), ${actorUserId}::uuid,
+        'field_service.technician.deleted', 'technician', ${technicianId}::uuid,
+        ${sql.json({})}
+      )
+    `;
+    return true;
+  } catch (error) {
+    if (
+      error !== null &&
+      typeof error === "object" &&
+      "code" in error &&
+      error.code === "23503"
+    )
+      throw Object.assign(
+        new Error(
+          "This technician has existing work. Deactivate the technician to preserve visit history.",
+        ),
+        {
+          code: "FS_TECHNICIAN_IN_USE",
+        },
+      );
+    throw error;
+  }
+}
+
 interface ServiceCaseRow {
   readonly workflow_policy?: unknown;
   readonly id: string;

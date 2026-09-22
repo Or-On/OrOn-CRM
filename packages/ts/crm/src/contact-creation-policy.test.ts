@@ -7,10 +7,12 @@ const actorId = "20000000-0000-4000-8000-000000000099";
 
 function transaction(duplicate = false, failInsertion?: Error) {
   const statements: string[] = [];
+  const bindings: unknown[][] = [];
   let insertions = 0;
-  const execute = vi.fn((parts: TemplateStringsArray) => {
+  const execute = vi.fn((parts: TemplateStringsArray, ...values: unknown[]) => {
     const statement = parts.join("?");
     statements.push(statement);
+    bindings.push(values);
     if (statement.includes("SELECT EXISTS"))
       return Promise.resolve([{ found: duplicate }]);
     if (statement.includes("INSERT INTO crm.contacts")) {
@@ -49,6 +51,7 @@ function transaction(duplicate = false, failInsertion?: Error) {
   return {
     sql,
     statements,
+    bindings,
     execute,
     unsafe,
     savepoint,
@@ -130,7 +133,13 @@ describe("prospective contact permission policy (no network)", () => {
       statement.includes("INSERT INTO crm.contacts"),
     );
     expect(insertion).toContain("voice_consent, whatsapp_consent");
-    expect(insertion).toMatch(/'granted',\s*'granted'/);
+    const insertionIndex = fixture.statements.findIndex((statement) =>
+      statement.includes("INSERT INTO crm.contacts"),
+    );
+    expect(fixture.bindings[insertionIndex]?.slice(-2)).toEqual([
+      "granted",
+      "granted",
+    ]);
     expect(
       fixture.statements.some((statement) =>
         statement.includes("UPDATE crm.contacts"),
@@ -145,13 +154,35 @@ describe("prospective contact permission policy (no network)", () => {
         { name: "Fictional new contact", phone: "+12025550199" },
       ]),
     ).toEqual({ created: 1, skipped: 0, errors: [] });
+    const insertionIndex = fixture.statements.findIndex((statement) =>
+      statement.includes("INSERT INTO crm.contacts"),
+    );
+    expect(fixture.bindings[insertionIndex]?.slice(-2)).toEqual([
+      "granted",
+      "granted",
+    ]);
+  });
+
+  it("keeps field-service contacts at unknown consent without a later update", async () => {
+    const fixture = transaction();
+    await createContact(
+      fixture.sql,
+      actorId,
+      { name: "Fictional on-site customer" },
+      { grantChannelConsent: false },
+    );
+    const insertionIndex = fixture.statements.findIndex((statement) =>
+      statement.includes("INSERT INTO crm.contacts"),
+    );
+    expect(fixture.bindings[insertionIndex]?.slice(-2)).toEqual([
+      "unknown",
+      "unknown",
+    ]);
     expect(
-      fixture.statements.some(
-        (statement) =>
-          statement.includes("voice_consent, whatsapp_consent") &&
-          statement.includes("'granted'"),
+      fixture.statements.some((statement) =>
+        statement.includes("UPDATE crm.contacts"),
       ),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it.each(["unknown", "revoked", "opted-out"])(
