@@ -43,6 +43,7 @@ def _execute(sql: str) -> None:
 
 
 def upgrade() -> None:
+    _repair_voice_admission()
     _schema()
     _helpers()
     _voice_inquiry()
@@ -52,8 +53,31 @@ def upgrade() -> None:
     _grants()
 
 
+def _repair_voice_admission() -> None:
+    """Repair 0f7b3c9d2a61, whose functions call ``pg_catalog.coalesce``.
+
+    COALESCE is SQL syntax, not a catalog function, so both functions raised
+    on every execution. ``resolve_voice_caller_contact`` runs when an inbound
+    caller is admitted, so every inbound call with a caller number and no
+    pre-resolved contact failed admission and was hung up with no session row.
+    Only the invalid qualifier is removed; bodies, owners and grants are kept.
+    A downgrade deliberately keeps the repair.
+    """
+
+    _execute("""
+      DO $$
+      DECLARE v_definition text;
+      BEGIN
+        v_definition := pg_get_functiondef('platform.resolve_voice_caller_contact(text)'::regprocedure);
+        EXECUTE replace(v_definition,'pg_catalog.coalesce(','coalesce(');
+        v_definition := pg_get_functiondef('support.open_ticket_from_voice_session(uuid,text,text)'::regprocedure);
+        EXECUTE replace(v_definition,'pg_catalog.coalesce(','coalesce(');
+      END $$
+    """)
+
+
 def _schema() -> None:
-    _execute(f"""
+    _execute("""
       ALTER TABLE ops.inbound_events DROP CONSTRAINT ck_inbound_event_status;
       ALTER TABLE ops.inbound_events ADD CONSTRAINT ck_inbound_event_status
         CHECK (status IN ('received','processing','processed','failed','ignored','quarantined'));
@@ -351,7 +375,7 @@ def _voice_inquiry() -> None:
 
 
 def _followup() -> None:
-    _execute(f"""
+    _execute("""
       CREATE FUNCTION service.enqueue_intake_followup(p_tenant uuid,p_intake uuid,p_cause text) RETURNS uuid
       LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
       DECLARE v_job uuid; v_ticket uuid;
@@ -389,7 +413,7 @@ def _followup() -> None:
           OR EXISTS(SELECT 1 FROM public.voice_session_controls WHERE tenant_id=v_tenant AND session_id=p_session AND desired_mode<>'ai') THEN
           RAISE EXCEPTION 'voice conversation no longer permits agent actions' USING ERRCODE='42501'; END IF;
         v_policy:=v_context->'policy';
-        IF coalesce((v_policy#>>'{{whatsappFollowUp,enabled}}')::boolean,false) IS NOT TRUE THEN
+        IF coalesce((v_policy#>>'{whatsappFollowUp,enabled}')::boolean,false) IS NOT TRUE THEN
           RETURN jsonb_build_object('status','unavailable','reason','followup_not_configured'); END IF;
         IF NOT platform.current_tenant_feature_enabled('whatsapp') THEN RETURN jsonb_build_object('status','unavailable','reason','whatsapp_disabled'); END IF;
         v_intake:=(v_context->>'intakeId')::uuid;
@@ -406,7 +430,7 @@ def _followup() -> None:
           RETURN jsonb_build_object('status','unavailable','reason','consent_revoked','intakeId',v_intake);
         END IF;
         IF v_contact.whatsapp_consent<>'granted' THEN
-          IF coalesce(p_customer_agreed,false) AND v_policy#>>'{{whatsappFollowUp,consent}}'='in_call_agreement' THEN
+          IF coalesce(p_customer_agreed,false) AND v_policy#>>'{whatsappFollowUp,consent}'='in_call_agreement' THEN
             UPDATE crm.contacts SET whatsapp_consent='granted',updated_at=clock_timestamp() WHERE tenant_id=v_tenant AND id=v_contact.id AND whatsapp_consent='unknown';
             INSERT INTO audit.records(tenant_id,actor_service,action,target_type,target_id,metadata)
               VALUES(v_tenant,'voice-intake','crm.contact.whatsapp_consent_granted','contact',v_contact.id,
@@ -418,22 +442,50 @@ def _followup() -> None:
         END IF;
         UPDATE service.intake_drafts SET followup_status=CASE WHEN followup_status IN ('not_requested','blocked_consent','no_recipient') THEN 'requested' ELSE followup_status END,
           followup_requested_at=coalesce(followup_requested_at,clock_timestamp()),updated_at=clock_timestamp() WHERE tenant_id=v_tenant AND id=v_intake;
-        IF v_policy#>>'{{whatsappFollowUp,trigger}}'='intake_saved' THEN
+        IF v_policy#>>'{whatsappFollowUp,trigger}'='intake_saved' THEN
           v_job:=service.enqueue_intake_followup(v_tenant,v_intake,'in_call_request');
           RETURN jsonb_build_object('status','queued','jobId',v_job,'intakeId',v_intake,'caseId',v_context->>'caseId');
         END IF;
         RETURN jsonb_build_object('status','deferred','intakeId',v_intake,'caseId',v_context->>'caseId','sendsWhen','call_ended');
       END $$;
 
-      -- Kept for compatibility with running agents: the model's message is
-      -- ignored and the server renders the follow-up itself.
+      -- Tenants that configured the WhatsApp follow-up get the server-rendered
+      -- summary. Every other tenant keeps the previous photo request to its
+      -- existing AI conversation unchanged. The runtime now supplies a
+      -- server-authored message and the worker validates it before delivery.
       CREATE OR REPLACE FUNCTION service.request_voice_intake_photos(p_session uuid,p_message text) RETURNS jsonb
       LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
-      DECLARE v_result jsonb;
+      DECLARE v_context jsonb; v_contact uuid; v_conversations uuid[]; v_conversation uuid; v_job uuid; v_tenant uuid:=platform.current_tenant_id(); v_policy jsonb;
       BEGIN
-        v_result:=service.request_intake_followup(p_session,true);
-        IF v_result->>'status'='deferred' THEN RETURN v_result||jsonb_build_object('status','queued'); END IF;
-        RETURN v_result;
+        v_policy:=service.voice_intake_context(p_session)->'policy';
+        IF coalesce((v_policy#>>'{whatsappFollowUp,enabled}')::boolean,false) THEN
+          RETURN service.request_intake_followup(p_session,true);
+        END IF;
+        v_context:=service.voice_intake_context(p_session);
+        IF v_context->>'status'='identity_required' OR NOT EXISTS(SELECT 1 FROM public.sessions WHERE tenant_id=v_tenant AND session_id=p_session AND ended_at IS NULL)
+          OR EXISTS(SELECT 1 FROM public.voice_session_controls WHERE tenant_id=v_tenant AND session_id=p_session AND desired_mode<>'ai') THEN
+          RAISE EXCEPTION 'voice conversation no longer permits agent actions' USING ERRCODE='42501'; END IF;
+        IF v_context->>'intakeId' IS NULL THEN RAISE EXCEPTION 'intake must be saved before requesting photos' USING ERRCODE='22023'; END IF;
+        IF char_length(btrim(coalesce(p_message,''))) NOT BETWEEN 1 AND 2000 THEN RAISE EXCEPTION 'invalid photo request' USING ERRCODE='22023'; END IF;
+        IF NOT platform.current_tenant_feature_enabled('whatsapp') THEN RETURN jsonb_build_object('status','unavailable','reason','whatsapp_disabled'); END IF;
+        SELECT contact_id INTO v_contact FROM public.sessions WHERE tenant_id=v_tenant AND session_id=p_session;
+        SELECT array_agg(c.id) INTO v_conversations FROM messaging.conversations c JOIN messaging.channels channel ON channel.tenant_id=c.tenant_id AND channel.id=c.channel_id
+          JOIN crm.contacts contact ON contact.tenant_id=c.tenant_id AND contact.id=c.contact_id
+          WHERE c.tenant_id=v_tenant AND c.contact_id=v_contact AND c.removed_from_inbox_at IS NULL
+            AND c.ownership_mode='ai' AND platform.messaging_ai_actor_authorized(c.ai_enabled_by_user_id)
+            AND channel.kind='whatsapp' AND channel.status='active' AND c.customer_service_window_expires_at>CURRENT_TIMESTAMP
+            AND contact.lifecycle_status='active' AND contact.whatsapp_consent='granted' AND contact.whatsapp_opted_out_at IS NULL;
+        IF coalesce(array_length(v_conversations,1),0)<>1 THEN RETURN jsonb_build_object('status','unavailable','reason','send_a_whatsapp_message_first'); END IF;
+        v_conversation:=v_conversations[1];
+        UPDATE service.intake_drafts SET conversation_id=v_conversation WHERE tenant_id=v_tenant AND id=(v_context->>'intakeId')::uuid;
+        IF v_context->>'caseId' IS NOT NULL THEN
+          INSERT INTO service.case_conversations(tenant_id,case_id,conversation_id,relationship) VALUES(v_tenant,(v_context->>'caseId')::uuid,v_conversation,'intake') ON CONFLICT DO NOTHING;
+        END IF;
+        INSERT INTO ops.jobs(tenant_id,queue,job_type,reference_type,reference_id,payload,idempotency_key,max_attempts)
+        VALUES(v_tenant,'messaging','field_service.photo_request','intake_draft',(v_context->>'intakeId')::uuid,jsonb_build_object('conversationId',v_conversation,'text',btrim(p_message)), 'service-photo:'||p_session::text,3)
+        ON CONFLICT DO NOTHING RETURNING id INTO v_job;
+        IF v_job IS NULL THEN SELECT id INTO v_job FROM ops.jobs WHERE tenant_id=v_tenant AND idempotency_key='service-photo:'||p_session::text; END IF;
+        RETURN jsonb_build_object('status','queued','jobId',v_job,'intakeId',v_context->>'intakeId','caseId',v_context->>'caseId');
       END $$;
 
       -- Everything the messaging worker needs to render and address the
@@ -451,7 +503,7 @@ def _followup() -> None:
           'sessionId',v_intake.source_session_id,'conversationId',v_intake.conversation_id,
           'fields',v_intake.collected_fields - 'customerPhone' - 'storeId' - 'nationalId',
           'missingFields',service.intake_missing_fields(v_intake.collected_fields,v_policy),
-          'requestPhoto',coalesce((v_policy#>>'{{whatsappFollowUp,requestPhoto}}')::boolean,false) AND NOT service.intake_has_photo(v_intake.id),
+          'requestPhoto',coalesce((v_policy#>>'{whatsappFollowUp,requestPhoto}')::boolean,false) AND NOT service.intake_has_photo(v_intake.id),
           'followUp',v_policy->'whatsappFollowUp',
           'hebrew',service.tenant_is_hebrew(v_tenant),
           'reference',coalesce((SELECT reference FROM service.cases WHERE tenant_id=v_tenant AND intake_draft_id=v_intake.id),
@@ -464,8 +516,10 @@ def _followup() -> None:
 
       -- Resolve the WhatsApp recipient and conversation for a voice intake.
       -- The recipient is the pinned telephony caller number or its WhatsApp
-      -- twin on the SAME contact. A number owned by another contact is a
-      -- conflict and is never messaged.
+      -- twin on the SAME contact, inheriting the caller number's validation.
+      -- A number owned by another contact is a conflict and is never
+      -- messaged. If the number is not on WhatsApp the provider rejects the
+      -- send and that failure is recorded on the inquiry.
       CREATE FUNCTION service.prepare_intake_followup_recipient(p_intake uuid) RETURNS jsonb
       LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
       DECLARE v_tenant uuid:=platform.current_tenant_id(); v_intake service.intake_drafts%ROWTYPE; v_caller crm.contact_channel_identities%ROWTYPE;
@@ -483,7 +537,8 @@ def _followup() -> None:
           IF FOUND AND v_whatsapp.validation_status IN ('invalid','revoked') THEN RETURN jsonb_build_object('status','no_recipient'); END IF;
           IF NOT FOUND THEN
             INSERT INTO crm.contact_channel_identities(tenant_id,contact_id,channel,normalized_value,display_value,validation_status,is_primary)
-              VALUES(v_tenant,v_caller.contact_id,'whatsapp',v_caller.normalized_value,v_caller.normalized_value,'unverified',false)
+              VALUES(v_tenant,v_caller.contact_id,'whatsapp',v_caller.normalized_value,v_caller.normalized_value,
+                CASE WHEN v_caller.validation_status='valid' THEN 'valid' ELSE 'unverified' END,false)
               RETURNING * INTO v_whatsapp;
           END IF;
         END IF;
@@ -664,7 +719,7 @@ def _correlation() -> None:
 
 
 def _settlement() -> None:
-    _execute(f"""
+    _execute("""
       -- The call's end gives every early inquiry an explicit disposition,
       -- whoever ended it: the agent, the caller, a webhook or the stale-session
       -- sweeper. Uses the row's tenant, never request context.
@@ -678,7 +733,7 @@ def _settlement() -> None:
         SELECT * INTO v_intake FROM service.intake_drafts WHERE tenant_id=NEW.tenant_id AND source_session_id=NEW.session_id FOR UPDATE;
         IF v_intake.id IS NOT NULL THEN
           SELECT id INTO v_case FROM service.cases WHERE tenant_id=NEW.tenant_id AND intake_draft_id=v_intake.id;
-          v_policy:=coalesce(v_intake.workflow_policy,'{{}}'::jsonb);
+          v_policy:=coalesce(v_intake.workflow_policy,'{}'::jsonb);
           v_missing:=service.intake_missing_fields(v_intake.collected_fields,v_policy);
         END IF;
         IF v_ticket.id IS NOT NULL AND v_ticket.status='open' THEN
@@ -694,10 +749,10 @@ def _settlement() -> None:
             next_action_due_at=coalesce(next_action_due_at,clock_timestamp()),updated_at=clock_timestamp()
             WHERE tenant_id=NEW.tenant_id AND id=v_ticket.id;
         END IF;
-        IF v_intake.id IS NOT NULL AND coalesce((v_policy#>>'{{whatsappFollowUp,enabled}}')::boolean,false) THEN
+        IF v_intake.id IS NOT NULL AND coalesce((v_policy#>>'{whatsappFollowUp,enabled}')::boolean,false) THEN
           IF v_intake.followup_status='requested' THEN
             PERFORM service.enqueue_intake_followup(NEW.tenant_id,v_intake.id,'call_ended');
-          ELSIF v_intake.followup_status='not_requested' AND v_policy#>>'{{whatsappFollowUp,trigger}}'='call_ended' THEN
+          ELSIF v_intake.followup_status='not_requested' AND v_policy#>>'{whatsappFollowUp,trigger}'='call_ended' THEN
             -- Without an in-call request, only a customer who already granted
             -- WhatsApp consent receives the follow-up.
             SELECT whatsapp_consent INTO v_consent FROM crm.contacts WHERE tenant_id=NEW.tenant_id AND id=v_intake.reporting_contact_id AND whatsapp_opted_out_at IS NULL;

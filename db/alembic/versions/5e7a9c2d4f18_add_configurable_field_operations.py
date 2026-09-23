@@ -149,6 +149,13 @@ def _policy() -> None:
         END IF;
         RETURN NEW;
       END $$;
+      -- The tenant's current (redacted) policy for a row-supplied tenant, for
+      -- triggers that may run without request context.
+      CREATE FUNCTION service.tenant_workflow_policy(p_tenant uuid) RETURNS jsonb
+      LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog AS $$
+        SELECT service.redact_workflow_policy(coalesce((SELECT configuration->'workflow' FROM platform.tenant_feature_entitlements
+          WHERE tenant_id=p_tenant AND feature_key='field_service'),'{LEGACY_POLICY}'::jsonb))
+      $$;
       -- The policy of the case itself, for its workflow gates.
       CREATE FUNCTION service.case_workflow_policy(p_tenant uuid,p_case uuid) RETURNS jsonb
       LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog AS $$
@@ -555,7 +562,7 @@ def _attachments_and_evidence() -> None:
           RAISE EXCEPTION 'this evidence category requires an image' USING ERRCODE = '23514';
         END IF;
         IF NEW.category='tenant_document' AND TG_OP='INSERT' THEN
-          SELECT item->'accept' INTO v_accept FROM jsonb_array_elements(coalesce(service.current_workflow_policy()->'attachmentCategories','[]'::jsonb)) item
+          SELECT item->'accept' INTO v_accept FROM jsonb_array_elements(coalesce(service.tenant_workflow_policy(NEW.tenant_id)->'attachmentCategories','[]'::jsonb)) item
             WHERE item->>'key'=NEW.document_type;
           IF v_accept IS NULL THEN RAISE EXCEPTION 'this document type is not configured' USING ERRCODE = '23514'; END IF;
           IF NOT ((v_accept ? 'image' AND v_content_type IN ('image/jpeg','image/png','image/webp'))
@@ -633,6 +640,7 @@ def _attachments_and_evidence() -> None:
 def _grants() -> None:
     for signature in (
         "service.redact_workflow_policy(jsonb)",
+        "service.tenant_workflow_policy(uuid)",
         "service.case_workflow_policy(uuid,uuid)",
         "support.mark_ticket_emergency(uuid,text,text)",
         "support.record_ticket_escalation(uuid,text,text)",
@@ -649,7 +657,7 @@ def _grants() -> None:
         _execute(f"REVOKE ALL ON FUNCTION {signature} FROM PUBLIC")
     # Invoked by triggers under the statement's role; they only read.
     _execute(
-        "GRANT EXECUTE ON FUNCTION service.case_workflow_policy(uuid,uuid),"
+        "GRANT EXECUTE ON FUNCTION service.case_workflow_policy(uuid,uuid),service.tenant_workflow_policy(uuid),"
         "service.valid_evidence_photo_exists(uuid,uuid,uuid,text) TO platform_web,platform_worker,platform_messaging,platform_voice"
     )
     _execute(
@@ -661,14 +669,18 @@ def _grants() -> None:
         "GRANT EXECUTE ON FUNCTION support.mark_ticket_emergency(uuid,text,text),"
         "support.record_ticket_escalation(uuid,text,text) TO platform_voice"
     )
-    _execute("GRANT SELECT ON service.visit_time_corrections,service.visit_preparations TO platform_web")
+    _execute(
+        "GRANT SELECT ON service.visit_time_corrections,service.visit_preparations TO platform_web"
+    )
     _execute(
         "GRANT SELECT ON service.visit_time_corrections,service.visit_preparations TO platform_readonly"
     )
 
 
 def downgrade() -> None:
-    _execute("DROP TRIGGER IF EXISTS trg_service_report_evidence_insert ON service.report_revisions")
+    _execute(
+        "DROP TRIGGER IF EXISTS trg_service_report_evidence_insert ON service.report_revisions"
+    )
     _execute("DROP TRIGGER IF EXISTS trg_service_report_evidence ON service.report_revisions")
     _execute("DROP TRIGGER IF EXISTS trg_service_visit_evidence ON service.visits")
     _execute("DROP TRIGGER IF EXISTS trg_service_case_evidence ON service.cases")
@@ -685,6 +697,7 @@ def downgrade() -> None:
         "support.record_ticket_escalation(uuid,text,text)",
         "support.mark_ticket_emergency(uuid,text,text)",
         "service.case_workflow_policy(uuid,uuid)",
+        "service.tenant_workflow_policy(uuid)",
     ):
         _execute(f"DROP FUNCTION IF EXISTS {signature}")
     _execute("DROP TABLE service.visit_preparations")

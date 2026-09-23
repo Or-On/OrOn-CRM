@@ -165,9 +165,7 @@ async def test_a_disclosure_split_across_chunks_stops_before_the_second_half():
 
 
 async def test_a_normal_service_request_is_spoken_unchanged():
-    pipeline, llm, tts = voice_chain(
-        ["<lang:he>", "הבנתי שהמדפסת לא עובדת. ", "באיזה סניף מדובר?"]
-    )
+    pipeline, llm, tts = voice_chain(["<lang:he>", "הבנתי שהמדפסת לא עובדת. ", "באיזה סניף מדובר?"])
     await run_test(pipeline, frames_to_send=[caller("שלום, המדפסת בסניף לא עובדת")])
     assert llm.calls == 1
     assert tts.spoken == ["הבנתי שהמדפסת לא עובדת.", "באיזה סניף מדובר?"]

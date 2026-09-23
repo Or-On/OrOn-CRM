@@ -63,6 +63,11 @@ export async function acceptWhatsAppWebhook(
               ...(envelope.occurredAt === undefined
                 ? {}
                 : { occurredAt: envelope.occurredAt }),
+              ...(envelope.replyToProviderMessageId === undefined
+                ? {}
+                : {
+                    replyToProviderMessageId: envelope.replyToProviderMessageId,
+                  }),
             })}
           )).id
         `;

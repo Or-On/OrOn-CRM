@@ -99,7 +99,7 @@ from oron_agent.tokens import mint_room_token
 from oron_agent.tool_call_guard import HallucinatedToolCallGuard
 from oron_agent.tracing import conversation_span_attributes, setup_process_tracing
 from oron_agent.transcript import TranscriptHandler, TranscriptMessage
-from oron_agent.transfer import make_transfer_action
+from oron_agent.transfer import make_emergency_transfer, make_transfer_action
 from oron_agent.transport import build_transport_params
 from oron_agent.tts import TtsProvider, build_tts
 from oron_agent.tts_trim import TrimLeadingSilence
@@ -304,6 +304,14 @@ async def run_bot(
         accepted_turns,
         ticket_receipt_state,
         context_locked=verification_runtime_state["state"] != "context_unlocked",
+        # The on-call number reaches only this function, from server
+        # configuration; the model sees neither the number nor the call.
+        emergency_transfer=make_emergency_transfer(
+            room=room,
+            url=st.livekit_url,
+            api_key=st.livekit_api_key.get_secret_value(),
+            api_secret=st.livekit_api_secret.get_secret_value(),
+        ),
     )
     if service_intake is not None:
         intake_prompt = service_intake_instruction(service_intake.initial)
@@ -397,6 +405,8 @@ async def run_bot(
     scope_event = background_event_recorder(
         record_policy_event if policy_writer is not None else None
     )
+    if service_intake is not None:
+        service_intake.bind_language(lambda: conversation_language.current)
 
     stt = OwnershipSonioxSTTService(
         api_key=st.soniox_api_key.get_secret_value(),

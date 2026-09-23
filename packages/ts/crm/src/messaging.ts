@@ -761,6 +761,12 @@ export async function ingestWhatsAppInbound(
   }
   if (senderIdentityId === undefined)
     throw new Error("inbound WhatsApp identity resolution failed");
+  // A message received from the number proves it is on WhatsApp. An identity
+  // created for a phone caller's follow-up starts unverified until then.
+  await sql`
+    UPDATE crm.contact_channel_identities SET validation_status='valid'
+    WHERE id=${senderIdentityId}::uuid AND validation_status='unverified'
+  `;
 
   await sql`
     UPDATE crm.contacts
@@ -817,14 +823,22 @@ export async function ingestWhatsAppInbound(
     INSERT INTO messaging.messages
       (tenant_id, conversation_id, direction, sender_type, sender_contact_id,
        content_type, content_text, provider, provider_message_id, status,
-       structured_content, provider_payload, created_at)
+       structured_content, provider_payload, created_at, reply_to_message_id)
     VALUES (platform.current_tenant_id(), ${conversationId}::uuid, 'inbound',
             'contact', ${contactId}::uuid, ${contentType},
             ${text === "" ? null : text}, 'meta',
             ${input.providerMessageId}, 'received',
             ${structuredContent === null ? null : sql.json(structuredContent)},
             ${sql.json({ providerEventId: input.providerEventId })},
-            COALESCE(${occurredAt}, CURRENT_TIMESTAMP))
+            COALESCE(${occurredAt}, CURRENT_TIMESTAMP),
+            -- The stable provider reference a reply correlates through; only
+            -- a message in this same conversation can be the replied-to one.
+            (SELECT replied.id FROM messaging.messages replied
+              WHERE replied.tenant_id=platform.current_tenant_id()
+                AND replied.conversation_id=${conversationId}::uuid
+                AND replied.provider='meta'
+                AND replied.provider_message_id=${input.replyToProviderMessageId ?? null}
+              LIMIT 1))
     ON CONFLICT (tenant_id, provider, provider_message_id)
       WHERE provider IS NOT NULL AND provider_message_id IS NOT NULL
     DO NOTHING

@@ -14,8 +14,14 @@ export type WhatsAppOutboundInput =
       readonly recipientAddress?: string;
       readonly recipientIdentityId?: string;
       readonly senderUserId: string;
-      readonly senderType?: "user" | "agent";
+      readonly senderType?: "user" | "agent" | "system";
       readonly text: string;
+      /**
+       * A phone intake's follow-up. The recipient must then be the intake's
+       * pinned telephony caller number (or its WhatsApp twin), verified in
+       * PostgreSQL, instead of the latest inbound WhatsApp origin.
+       */
+      readonly voiceFollowUpIntakeId?: string;
     }
   | {
       readonly conversationId: string;
@@ -29,8 +35,9 @@ export type WhatsAppOutboundInput =
       readonly recipientAddress?: string;
       readonly recipientIdentityId?: string;
       readonly senderUserId: string;
-      readonly senderType?: "user" | "agent";
+      readonly senderType?: "user" | "agent" | "system";
       readonly templateName: string;
+      readonly voiceFollowUpIntakeId?: string;
     };
 
 export interface WhatsAppChannelConfiguration {
@@ -91,6 +98,16 @@ function validateInput(input: WhatsAppOutboundInput): void {
     normalizeE164(input.recipientAddress) !== input.recipientAddress
   )
     throw new TypeError("invalid WhatsApp recipient address");
+  if (
+    input.voiceFollowUpIntakeId !== undefined &&
+    (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/iu.test(
+      input.voiceFollowUpIntakeId,
+    ) ||
+      input.recipientIdentityId === undefined)
+  )
+    throw new TypeError(
+      "a voice follow-up requires its intake and a verified recipient",
+    );
   if (input.kind === "text") {
     const text = input.text.trim();
     if (text.length === 0 || text.length > 4096)
@@ -198,8 +215,41 @@ export async function queueWhatsAppOutbound(
   }
 
   const contacts =
-    input.provider === "meta"
+    input.voiceFollowUpIntakeId !== undefined
       ? await sql<ConversationContact[]>`
+          SELECT conversation.id AS conversation_id,
+                 conversation.channel_id, conversation.contact_id,
+                 conversation.customer_service_window_expires_at,
+                 conversation.ownership_epoch, contact.lifecycle_status,
+                 contact.whatsapp_consent, contact.whatsapp_opted_out_at,
+                 identity.id AS recipient_identity_id,
+                 identity.normalized_value
+          FROM messaging.conversations conversation
+          JOIN messaging.channels channel
+            ON channel.id=conversation.channel_id
+           AND channel.tenant_id=conversation.tenant_id
+           AND channel.kind='whatsapp' AND channel.provider=${input.provider}
+           AND channel.status='active'
+          JOIN crm.contacts contact ON contact.id=conversation.contact_id
+           AND contact.tenant_id=conversation.tenant_id
+          JOIN crm.contact_channel_identities identity
+            ON identity.id=${input.recipientIdentityId ?? null}::uuid
+           AND identity.tenant_id=conversation.tenant_id
+           AND identity.contact_id=contact.id
+          WHERE conversation.id=${input.conversationId}::uuid
+            AND conversation.removed_from_inbox_at IS NULL
+            AND service.verified_followup_recipient(
+              ${input.voiceFollowUpIntakeId}::uuid, conversation.id,
+              identity.id, ${input.recipientAddress ?? null})
+            AND (${input.provider} <> 'meta' OR (
+              channel.provider_account_id=${channelConfiguration?.phoneNumberId ?? null}
+              AND channel.configuration->>'phoneNumberId'=${channelConfiguration?.phoneNumberId ?? null}
+              AND channel.configuration->>'wabaId'=${channelConfiguration?.wabaId ?? null}
+              AND channel.configuration->>'graphApiVersion'=${channelConfiguration?.graphApiVersion ?? null}))
+          LIMIT 1
+        `
+      : input.provider === "meta"
+        ? await sql<ConversationContact[]>`
           SELECT conversation.id AS conversation_id,
                  conversation.channel_id, conversation.contact_id,
                  conversation.customer_service_window_expires_at,
@@ -247,7 +297,7 @@ export async function queueWhatsAppOutbound(
               OR origin.sender_address=${input.recipientAddress ?? null})
           LIMIT 1
         `
-      : await sql<ConversationContact[]>`
+        : await sql<ConversationContact[]>`
           SELECT conversation.id AS conversation_id,
                  conversation.channel_id, conversation.contact_id,
                  conversation.customer_service_window_expires_at,

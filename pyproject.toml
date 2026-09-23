@@ -58,6 +58,7 @@ ignore = ["S101"]
 "packages/py/oron-hebrew/src/oron_hebrew/ecapa_model.py" = ["SIM108"]
 # Generated mirror of db/contracts/lead-capture.v1.json; its regex strings cannot wrap.
 "packages/py/oron-agent/src/oron_agent/lead_capture_contract.py" = ["E501"]
+"packages/py/oron-agent/src/oron_agent/scope_policy_contract.py" = ["E501"]
 # FastAPI intentionally declares dependency markers in parameter defaults.
 "packages/py/oron-sessions/src/oron_sessions/api.py" = ["B008", "B904"]
 "packages/py/oron-sessions/src/oron_sessions/deps.py" = ["B008"]

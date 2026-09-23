@@ -607,6 +607,58 @@ class PostgresVoiceRuntime:
             raise ValueError("service photo request receipt is unavailable")
         return result
 
+    async def _session_call(self, context: CallContext, statement: str, **parameters: object):
+        """Run one tenant-bound SECURITY DEFINER call for this call's session."""
+
+        async with self._sessionmaker() as database, database.begin():
+            await set_tenant(database, str(context.tenant_id))
+            return (
+                await database.execute(
+                    text(statement), {"session_id": str(context.session_id), **parameters}
+                )
+            ).scalar_one()
+
+    async def open_service_inquiry(self, context: CallContext) -> dict:
+        result = await self._session_call(context, "SELECT service.open_voice_inquiry(:session_id)")
+        if not isinstance(result, dict):
+            raise ValueError("service inquiry receipt is unavailable")
+        return result
+
+    async def request_service_followup(
+        self, context: CallContext, *, customer_agreed: bool
+    ) -> dict:
+        result = await self._session_call(
+            context,
+            "SELECT service.request_intake_followup(:session_id,:agreed)",
+            agreed=customer_agreed,
+        )
+        if not isinstance(result, dict):
+            raise ValueError("service follow-up receipt is unavailable")
+        return result
+
+    async def escalate_emergency(self, context: CallContext, *, reason: str) -> dict:
+        result = await self._session_call(
+            context, "SELECT service.escalate_voice_emergency(:session_id,:reason)", reason=reason
+        )
+        if not isinstance(result, dict):
+            raise ValueError("emergency escalation receipt is unavailable")
+        return result
+
+    async def emergency_transfer_target(self, context: CallContext) -> str | None:
+        """The configured on-call number; only the runtime ever sees it."""
+
+        result = await self._session_call(
+            context, "SELECT service.voice_emergency_transfer(:session_id)"
+        )
+        if result is None:
+            return None
+        return validate_e164(str(result))
+
+    async def record_escalation_outcome(self, context: CallContext, *, outcome: str) -> None:
+        await self._session_call(
+            context, "SELECT service.record_voice_escalation(:session_id,:outcome)", outcome=outcome
+        )
+
     async def get_flow(
         self,
         flow_id: UUID,
@@ -1444,6 +1496,21 @@ class AgentPostgresSessions:
 
     async def request_service_photos(self, ctx: CallContext, *, message: str) -> dict:
         return await self._backend.request_service_photos(ctx, message=message)
+
+    async def open_service_inquiry(self, ctx: CallContext) -> dict:
+        return await self._backend.open_service_inquiry(ctx)
+
+    async def request_service_followup(self, ctx: CallContext, *, customer_agreed: bool) -> dict:
+        return await self._backend.request_service_followup(ctx, customer_agreed=customer_agreed)
+
+    async def escalate_emergency(self, ctx: CallContext, *, reason: str) -> dict:
+        return await self._backend.escalate_emergency(ctx, reason=reason)
+
+    async def emergency_transfer_target(self, ctx: CallContext) -> str | None:
+        return await self._backend.emergency_transfer_target(ctx)
+
+    async def record_escalation_outcome(self, ctx: CallContext, *, outcome: str) -> None:
+        await self._backend.record_escalation_outcome(ctx, outcome=outcome)
 
     async def get_flow(self, flow_id: UUID, *, tenant_id: UUID) -> FlowSpec | None:
         return await self._backend.get_flow(flow_id, tenant_id=tenant_id)

@@ -175,7 +175,8 @@
     "service.attach_message_to_intake",
     "service.resolve_followup_triage",
     "service.link_case_ticket_intake",
-    "service.settle_voice_inquiry"
+    "service.settle_voice_inquiry",
+    "service.tenant_workflow_policy"
   ],
   "expected_indexes": [
     "ix_appointment_technician_time",

@@ -78,3 +78,29 @@ async def test_an_action_without_a_target_does_not_propagate():
     lkapi = _api(models.ParticipantInfo.Kind.SIP)
     await _action(lkapi)({"type": "transfer"}, None)
     lkapi.sip.transfer_sip_participant.assert_not_awaited()
+
+
+def _emergency(lkapi: MagicMock):
+    from oron_agent.transfer import make_emergency_transfer
+
+    return make_emergency_transfer(
+        room=ROOM, url="x", api_key="k", api_secret="s", api_factory=lambda *a: lkapi
+    )
+
+
+async def test_emergency_transfer_reports_an_initiated_refer_not_an_answer():
+    lkapi = _api(models.ParticipantInfo.Kind.SIP)
+    assert await _emergency(lkapi)(DESK) == "transfer_initiated"
+    assert lkapi.sip.transfer_sip_participant.await_args.args[0].transfer_to == f"tel:{DESK}"
+
+
+async def test_emergency_transfer_reports_a_refused_refer_as_failed():
+    lkapi = _api(models.ParticipantInfo.Kind.SIP)
+    lkapi.sip.transfer_sip_participant.side_effect = RuntimeError("486 Busy")
+    assert await _emergency(lkapi)(DESK) == "transfer_failed"
+
+
+async def test_emergency_transfer_without_a_caller_reports_the_disconnect():
+    lkapi = _api(models.ParticipantInfo.Kind.AGENT)
+    assert await _emergency(lkapi)(DESK) == "caller_disconnected"
+    lkapi.sip.transfer_sip_participant.assert_not_awaited()

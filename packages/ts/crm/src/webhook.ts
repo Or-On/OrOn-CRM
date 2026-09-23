@@ -36,6 +36,8 @@ export interface WhatsAppInboundEnvelope {
   readonly profileName: string;
   readonly contentType?: "text" | "image" | "document" | "location";
   readonly text: string;
+  /** The provider message this one replies to (WhatsApp `context.id`). */
+  readonly replyToProviderMessageId?: string;
   readonly media?: {
     readonly id: string;
     readonly mimeType?: string;
@@ -122,11 +124,13 @@ export function parseStoredWhatsAppEnvelope(
     (contentType === "text" && envelope.text.trim() === "")
   )
     return undefined;
+  const replyTo = boundedString(envelope.replyToProviderMessageId, 1_000);
   return {
     ...(typeof envelope.occurredAt === "string" &&
     Number.isFinite(Date.parse(envelope.occurredAt))
       ? { occurredAt: envelope.occurredAt }
       : {}),
+    ...(replyTo === undefined ? {} : { replyToProviderMessageId: replyTo }),
     providerAccountId: envelope.providerAccountId,
     providerEventId: envelope.providerEventId,
     providerMessageId: envelope.providerMessageId,
@@ -233,8 +237,12 @@ export function parseWhatsAppMessageEnvelopes(
         const from = `+${rawFrom.replace(/^\+/u, "")}`;
         const profileName = boundedString(profile?.name, 500) ?? from;
         const occurredAt = messageOccurredAt(message);
+        const replyTo = boundedString(record(message.context)?.id, 1_000);
         const base = {
           ...(occurredAt === undefined ? {} : { occurredAt }),
+          ...(replyTo === undefined
+            ? {}
+            : { replyToProviderMessageId: replyTo }),
           providerAccountId: accountId,
           providerEventId: `${entryId}:${id}`,
           providerMessageId: id,

@@ -110,6 +110,12 @@ import {
   type TenantBusinessContext,
 } from "./tenant-business-context.js";
 import {
+  followupDelivery,
+  followupTemplateParameters,
+  renderIntakeFollowup,
+  type IntakeFollowupPlan,
+} from "./intake-followup.js";
+import {
   FieldServiceAiProviderError,
   type FieldServiceAiProvider,
 } from "./field-service-provider.js";
@@ -2108,6 +2114,183 @@ async function processPostCallReply(
   }
 }
 
+/**
+ * Send a phone inquiry's WhatsApp summary and photo request.
+ *
+ * Every outcome lands on the inquiry: admitted for delivery, or an explicit
+ * blocked/failed state staff can act on. A missing prerequisite is a durable
+ * business outcome, not a retry loop. Only transient infrastructure errors
+ * retry, bounded by the job's attempt limit, under one idempotency key.
+ */
+async function processIntakeFollowup(
+  sql: Sql,
+  workerId: string,
+  job: JobRow,
+  automation: MessagingAutomationOptions,
+): Promise<void> {
+  const intakeId = job.reference_id ?? "";
+  const settle = async (
+    transaction: postgres.TransactionSql,
+    status: string,
+    error: string | null,
+  ) => {
+    await transaction`SELECT service.record_intake_followup(${intakeId}::uuid,${status},NULL,${error})`;
+    await finishJob(transaction, job.id, workerId);
+  };
+  try {
+    await sql.begin(async (transaction) => {
+      await setTenantContext(transaction, job.tenant_id);
+      await requireOwnedJob(transaction, workerId, job.id);
+      try {
+        await requireTenantFeatures(transaction, ["field_service", "whatsapp"]);
+      } catch (error) {
+        if (!(error instanceof TenantFeatureRuntimeError)) throw error;
+        await settle(transaction, "no_channel", "feature_disabled");
+        return;
+      }
+      const plans = await transaction<{ plan: IntakeFollowupPlan }[]>`
+        SELECT service.intake_followup_plan(${intakeId}::uuid) AS plan
+      `;
+      const plan = plans[0]?.plan;
+      if (plan === undefined)
+        throw new TypeError("intake follow-up plan missing");
+      if (plan.followupStatus === "admitted") {
+        await finishJob(transaction, job.id, workerId);
+        return;
+      }
+      if (plan.optedOut === true || plan.consent !== "granted") {
+        await settle(transaction, "blocked_consent", null);
+        return;
+      }
+      const prepared = await transaction<
+        {
+          recipient: {
+            status: string;
+            conversationId?: string;
+            provider?: "meta" | "simulator";
+            channelConfiguration?: Record<string, unknown>;
+            recipientIdentityId?: string;
+            recipientAddress?: string;
+            windowOpen?: boolean;
+          };
+        }[]
+      >`SELECT service.prepare_intake_followup_recipient(${intakeId}::uuid) AS recipient`;
+      const recipient = prepared[0]?.recipient;
+      if (
+        recipient === undefined ||
+        recipient.status !== "ready" ||
+        recipient.conversationId === undefined ||
+        recipient.provider === undefined ||
+        recipient.recipientIdentityId === undefined ||
+        recipient.recipientAddress === undefined
+      ) {
+        const status = recipient?.status;
+        await settle(
+          transaction,
+          status === "recipient_conflict" || status === "no_recipient"
+            ? status
+            : "no_channel",
+          null,
+        );
+        return;
+      }
+      if (
+        recipient.provider === "meta" &&
+        automation.realWhatsAppEnabled !== true
+      ) {
+        await settle(transaction, "no_channel", "real_whatsapp_disabled");
+        return;
+      }
+      const actor = await postCallActor(transaction);
+      if (actor === null) {
+        await settle(transaction, "no_channel", "no_authorized_sender");
+        return;
+      }
+      await transaction`SELECT set_config('app.current_user', ${actor}, true)`;
+      const delivery = followupDelivery(
+        plan,
+        recipient.provider,
+        recipient.windowOpen === true,
+      );
+      if (delivery.kind === "blocked") {
+        await settle(transaction, delivery.reason, null);
+        return;
+      }
+      const identities = await transaction<
+        { profile: TenantIdentityProjection | null }[]
+      >`SELECT platform.current_voice_tenant_support_profile() AS profile`;
+      const businessName = tenantDisplayNameFrom(
+        identities[0]?.profile ?? null,
+      );
+      const configuration = recipient.channelConfiguration ?? {};
+      const channelConfig =
+        typeof configuration.graphApiVersion === "string" &&
+        typeof configuration.phoneNumberId === "string" &&
+        typeof configuration.wabaId === "string"
+          ? {
+              graphApiVersion: configuration.graphApiVersion,
+              phoneNumberId: configuration.phoneNumberId,
+              wabaId: configuration.wabaId,
+            }
+          : undefined;
+      const common = {
+        conversationId: recipient.conversationId,
+        explicitlyConfirmed: true,
+        idempotencyKey: `service-followup:${intakeId}`,
+        provider: recipient.provider,
+        realProviderEnabled: automation.realWhatsAppEnabled === true,
+        recipientIdentityId: recipient.recipientIdentityId,
+        recipientAddress: recipient.recipientAddress,
+        senderUserId: actor,
+        senderType: "system" as const,
+        voiceFollowUpIntakeId: intakeId,
+      };
+      const outbound = await queueWhatsAppOutbound(
+        transaction,
+        delivery.kind === "text"
+          ? {
+              ...common,
+              kind: "text",
+              text: renderIntakeFollowup(plan, businessName),
+            }
+          : {
+              ...common,
+              kind: "template",
+              templateName: delivery.templateName,
+              language: delivery.language,
+              parameters: followupTemplateParameters(plan, businessName),
+            },
+        channelConfig,
+      );
+      await transaction`
+        SELECT service.record_intake_followup(${intakeId}::uuid,'admitted',${outbound.messageId}::uuid,NULL)
+      `;
+      await finishJob(transaction, job.id, workerId);
+    });
+  } catch (error) {
+    // A refusal from the outbound boundary (consent, window, recipient) is a
+    // business outcome; anything else is transient and retried.
+    const refused = error instanceof TypeError;
+    await sql.begin(async (transaction) => {
+      await setTenantContext(transaction, job.tenant_id);
+      if (refused) {
+        await transaction`
+          SELECT service.record_intake_followup(${intakeId}::uuid,'failed',NULL,
+            ${error.message.slice(0, 200)})
+        `;
+        await transaction`UPDATE ops.jobs SET max_attempts=attempts WHERE id=${job.id}::uuid AND status='running' AND locked_by=${workerId}`;
+      }
+      await transaction`SELECT ops.fail_job(${job.id}::uuid,${workerId},${refused ? "intake_followup_refused" : "intake_followup_failed"},30)`;
+      // Retries exhausted: the inquiry must say so rather than stay queued.
+      if (!refused)
+        await transaction`
+          SELECT service.record_intake_followup(${intakeId}::uuid,'failed',NULL,'delivery_admission_failed')
+          FROM ops.jobs WHERE id=${job.id}::uuid AND status='dead'
+        `;
+    });
+  }
+}
+
 async function processJob(
   sql: Sql,
   workerId: string,
@@ -2159,6 +2342,13 @@ async function processJob(
           return;
         }
         await transaction`SELECT set_config('app.current_user',${candidate.actor_id},true)`;
+        // Older agents supplied this text themselves. Whatever its origin it
+        // must pass the platform scope boundary before a customer sees it.
+        const photoText = validateAgentOutput(candidate.text).allowed
+          ? candidate.text
+          : /[\u0590-\u05ff]/u.test(candidate.text)
+            ? "שלום, כדי להמשיך בטיפול בפנייה שלך נשמח לקבל תמונה של התקלה בתשובה להודעה זו."
+            : "Hello, to continue with your service request please reply with a photo of the fault.";
         const config = candidate.configuration;
         const channelConfig =
           typeof config.graphApiVersion === "string" &&
@@ -2181,7 +2371,7 @@ async function processJob(
             realProviderEnabled: automation.realWhatsAppEnabled === true,
             senderUserId: candidate.actor_id,
             senderType: "agent",
-            text: candidate.text,
+            text: photoText,
           },
           channelConfig,
         );
@@ -2195,6 +2385,13 @@ async function processJob(
         await transaction`SELECT ops.fail_job(${job.id}::uuid,${workerId},'photo_request_admission_failed',10)`;
       });
     }
+    return;
+  }
+  if (
+    job.job_type === "field_service.intake_followup" &&
+    job.reference_id !== null
+  ) {
+    await processIntakeFollowup(sql, workerId, job, automation);
     return;
   }
   if (job.job_type === "support.postcall.process") {
