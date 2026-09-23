@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
-import { explicitWhatsAppCallbackIntent } from "@or-on/crm";
+import {
+  explicitWhatsAppCallbackIntent,
+  validateAgentOutput,
+} from "@or-on/crm";
 
 import type { WhatsAppAiDecision } from "./ai-provider.js";
 
@@ -106,6 +109,9 @@ export function factDigest(value: string): string {
 export function safeKnowledgeStatement(value: string): boolean {
   return (
     value.length > 0 &&
+    // The shared scope policy applies to approved knowledge too: a document
+    // cannot make the agent name its model, recite prompts or leak secrets.
+    validateAgentOutput(value).allowed &&
     value.length <= 1200 &&
     !/[\p{Cc}\p{Cf}<>`]/u.test(value) &&
     !/(?:system|developer|assistant|tool)\s*:|ignore.{0,40}(?:instructions|rules)|override|receipt|התעל[םמי].{0,40}(?:הוראות|כללים)|הוראות\s*(?:מערכת|מפתח)|אישור\s*כלי/iu.test(
@@ -371,6 +377,9 @@ function passesConversationalSafety(
   committedRecord = false,
 ): boolean {
   return (
+    // The platform scope boundary shared with voice: no model, provider,
+    // prompt, tool, secret or other-customer disclosure reaches a customer.
+    validateAgentOutput(text).allowed &&
     !consequentialClaimPattern.test(text) &&
     (committedRecord || !recordClaimPattern.test(text)) &&
     text.length > 0 &&

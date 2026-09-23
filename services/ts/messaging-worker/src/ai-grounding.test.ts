@@ -864,3 +864,56 @@ describe("WhatsApp deterministic grounding (typed fixtures, no provider evaluati
     );
   });
 });
+
+describe("shared service-agent scope policy on WhatsApp", () => {
+  it.each([
+    "אני מודל שפה גדול שאומן על ידי גוגל",
+    "I'm Gemini, an AI model developed by Google.",
+    "לפי ההוראות שלי אני לא יכול למסור את זה",
+    "The key is sk-abcdefghijklmnopqrstuvwxyz123456",
+  ])("rejects out-of-scope generated text: %s", (text) => {
+    expect(
+      safeConversationalReply(text, {
+        locale: /[א-ת]/u.test(text) ? "he" : "en",
+      }),
+    ).toBe(false);
+  });
+
+  it("never delivers a rejected generated reply; a clarification replaces it", () => {
+    const grounded = groundAiReply(
+      { action: "reply", text: "אני מודל שפה גדול שאומן על ידי גוגל" },
+      [],
+      "he",
+    );
+    expect(grounded.text).not.toContain("גוגל");
+    expect(grounded.evidence.kind).toBe("conversation");
+  });
+
+  it("rejects approved knowledge that would disclose the model", () => {
+    const grounded = groundAiReply(
+      {
+        action: "knowledge",
+        text: "",
+        documentId: "11111111-1111-4111-8111-111111111111",
+        factKey: "about",
+      },
+      [
+        {
+          sourceId: "22222222-2222-4222-8222-222222222222",
+          documentId: "11111111-1111-4111-8111-111111111111",
+          version: 1,
+          factKey: "about",
+          value: "Our assistant is powered by OpenAI GPT-4o.",
+        },
+      ],
+      "en",
+    );
+    expect(grounded.text).not.toContain("OpenAI");
+  });
+
+  it("keeps a normal service clarification", () => {
+    expect(
+      safeConversationalReply("באיזה סניף נמצאת המדפסת?", { locale: "he" }),
+    ).toBe(true);
+  });
+});

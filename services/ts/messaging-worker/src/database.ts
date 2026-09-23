@@ -69,6 +69,11 @@ import {
   type PrivateObjectStorageOptions,
   type StagedPrivateObject,
   type MessageDeliveryFailure,
+  agentScopePolicyVersion,
+  approvedAgentResponse,
+  approvedAgentResponses,
+  classifyCustomerTurn,
+  validateAgentOutput,
 } from "@or-on/crm";
 
 import type { WhatsAppProvider, WhatsAppSendRequest } from "./providers.js";
@@ -3482,52 +3487,73 @@ async function processWhatsAppAiReply(
     const intakeRequiresHuman = work.serviceIntake?.status === "handed_off";
     const receipts: WhatsAppActionReceipt[] = [];
     let leadState = work.lead;
+    // Server-owned scope routing: a turn that only probes the model, asks for
+    // prompts, other customers' data or another recipient, or asks for a
+    // general-purpose task is answered with the approved response and never
+    // reaches the model. Mixed turns still reach it; the output is validated.
+    const scopeRoute =
+      identityConflict || intakeRequiresHuman || explicitCallRequested
+        ? null
+        : classifyCustomerTurn(triggerText).route;
+    const scopeResponse =
+      scopeRoute === null
+        ? null
+        : approvedAgentResponse(
+            scopeRoute,
+            work.locale,
+            work.tenantDisplayName,
+          );
     const classifiedDecision: WhatsAppAiDecision =
-      identityConflict || intakeRequiresHuman
-        ? {
-            action: "handoff",
-            reasonCode: "insufficient_context",
-            text: "",
-          }
-        : explicitCallRequested
+      scopeResponse !== null
+        ? { action: "reply", text: scopeResponse }
+        : identityConflict || intakeRequiresHuman
           ? {
-              action: "request_call",
-              reasonCode: "call_requested",
+              action: "handoff",
+              reasonCode: "insufficient_context",
               text: "",
             }
-          : await (async () => {
-              const provider = automation.aiProvider;
-              if (provider === undefined)
-                throw new TypeError("WhatsApp AI is disabled");
-              // A turn may take a few real actions and must still end in
-              // something the customer can read, so the budget is bounded and
-              // the last pass is offered no further actions.
-              for (let round = 0; ; round += 1) {
-                const last = round >= maximumLeadActionsPerTurn;
-                const proposed = await provider.decide(
-                  aiRequestFor(work, leadState, receipts, {
-                    ...(last ? { replyOnly: true } : {}),
-                  }),
-                );
-                const action = leadActionName(proposed);
-                if (action === undefined) return proposed;
-                if (last)
-                  throw new WhatsAppAiProviderError("ai_invalid_output", false);
-                const executed = await runWhatsAppLeadAction(
-                  sql,
-                  workerId,
-                  job,
-                  work,
-                  leadState,
-                  action,
-                  proposed as WhatsAppAiDecision & {
-                    readonly action: typeof action;
-                  },
-                );
-                receipts.push(executed.receipt);
-                leadState = executed.lead;
+          : explicitCallRequested
+            ? {
+                action: "request_call",
+                reasonCode: "call_requested",
+                text: "",
               }
-            })();
+            : await (async () => {
+                const provider = automation.aiProvider;
+                if (provider === undefined)
+                  throw new TypeError("WhatsApp AI is disabled");
+                // A turn may take a few real actions and must still end in
+                // something the customer can read, so the budget is bounded and
+                // the last pass is offered no further actions.
+                for (let round = 0; ; round += 1) {
+                  const last = round >= maximumLeadActionsPerTurn;
+                  const proposed = await provider.decide(
+                    aiRequestFor(work, leadState, receipts, {
+                      ...(last ? { replyOnly: true } : {}),
+                    }),
+                  );
+                  const action = leadActionName(proposed);
+                  if (action === undefined) return proposed;
+                  if (last)
+                    throw new WhatsAppAiProviderError(
+                      "ai_invalid_output",
+                      false,
+                    );
+                  const executed = await runWhatsAppLeadAction(
+                    sql,
+                    workerId,
+                    job,
+                    work,
+                    leadState,
+                    action,
+                    proposed as WhatsAppAiDecision & {
+                      readonly action: typeof action;
+                    },
+                  );
+                  receipts.push(executed.receipt);
+                  leadState = executed.lead;
+                }
+              })();
     const decision = enforceStandaloneCallbackConsent(
       classifiedDecision,
       explicitCallRequested,
@@ -3577,7 +3603,40 @@ async function processWhatsAppAiReply(
             kind: "receipt";
             operation: "handoff" | "callback";
             resourceId: string;
+          }
+        | {
+            kind: "scope_policy";
+            route: string;
+            policyVersion: string;
           } = grounded.evidence;
+      if (scopeRoute !== null && scopeResponse !== null) {
+        responseText = scopeResponse;
+        evidence = {
+          kind: "scope_policy",
+          route: scopeRoute,
+          policyVersion: agentScopePolicyVersion,
+        };
+      }
+      const modelScope =
+        scopeRoute === null && decision.action === "reply"
+          ? validateAgentOutput(decision.text)
+          : { allowed: true, category: null };
+      if (scopeRoute !== null || !modelScope.allowed)
+        // Sanitized security record: the category and policy, never the
+        // customer's words or the rejected model text.
+        await transaction`
+          INSERT INTO audit.records
+            (tenant_id, actor_user_id, action, target_type, target_id, metadata)
+          VALUES (platform.current_tenant_id(), ${work.authorizedUserId}::uuid,
+                  ${scopeRoute !== null ? "agent.scope.routed" : "agent.scope.output_rejected"},
+                  'conversation', ${work.conversationId}::uuid,
+                  ${transaction.json({
+                    policyVersion: agentScopePolicyVersion,
+                    channel: "whatsapp",
+                    category: scopeRoute ?? modelScope.category,
+                    triggerMessageId: work.triggerMessageId,
+                  })})
+        `;
       let automaticCallQueued = false;
       if (decision.action === "handoff" && !explicitCallRequested) {
         const resourceId = await createAiHandoff(
@@ -4344,6 +4403,20 @@ async function requireGroundedOutbound(
       })
     )
       expected = row.content_text ?? "";
+  } else if (evidence.kind === "scope_policy") {
+    // Re-derive the route from the stored trigger and the approved wording
+    // from the tenant's current identity: neither is taken from the payload.
+    const identities = await transaction<
+      { profile: TenantIdentityProjection | null }[]
+    >`SELECT platform.current_voice_tenant_support_profile() AS profile`;
+    const route = classifyCustomerTurn(latestCustomerMessage).route;
+    const name = tenantDisplayNameFrom(identities[0]?.profile ?? null);
+    if (
+      route !== null &&
+      route === evidence.route &&
+      approvedAgentResponses(name).has(row.content_text ?? "")
+    )
+      expected = approvedAgentResponse(route, metadata.locale, name);
   } else if (evidence.kind === "receipt" && uuid(evidence.resourceId)) {
     if (evidence.operation === "handoff") {
       const receipt = await transaction<{ id: string }[]>`

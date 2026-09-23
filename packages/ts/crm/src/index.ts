@@ -17,6 +17,7 @@ export * from "./cross-channel.js";
 export * from "./execution-contract.js";
 export * from "./expenses.js";
 export * from "./flow-runtime.js";
+export * from "./agent-scope-policy.js";
 export * from "./campaigns.js";
 export * from "./contacts.js";
 export * from "./csv.js";
