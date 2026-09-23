@@ -1,5 +1,5 @@
 {
-  "alembic_head": "3f5c8b1d7e42",
+  "alembic_head": "6f8b0d3e5a29",
   "expected_functions": [
     "agents.protect_approved_knowledge",
     "automation.protect_published_flow_version",
@@ -143,7 +143,39 @@
     "service.apply_case_assignment",
     "service.create_technician_case",
     "support.enqueue_post_call",
-    "support.queue_post_call_from_session"
+    "support.queue_post_call_from_session",
+    "service.redact_workflow_policy",
+    "service.case_workflow_policy",
+    "support.mark_ticket_emergency",
+    "support.record_ticket_escalation",
+    "service.valid_evidence_photo_exists",
+    "service.record_visit_event",
+    "service.correct_visit_time",
+    "service.visit_preparation_hash",
+    "service.visit_preparation",
+    "service.acknowledge_visit_preparation",
+    "service.enforce_case_evidence",
+    "service.enforce_visit_evidence",
+    "service.enforce_report_evidence",
+    "service.visit_time_correction_active",
+    "support.append_ticket_event",
+    "service.tenant_is_hebrew",
+    "service.voice_session_caller_identity",
+    "service.open_voice_inquiry",
+    "service.voice_session_event",
+    "service.escalate_voice_emergency",
+    "service.voice_emergency_transfer",
+    "service.record_voice_escalation",
+    "service.enqueue_intake_followup",
+    "service.request_intake_followup",
+    "service.intake_followup_plan",
+    "service.prepare_intake_followup_recipient",
+    "service.verified_followup_recipient",
+    "service.record_intake_followup",
+    "service.attach_message_to_intake",
+    "service.resolve_followup_triage",
+    "service.link_case_ticket_intake",
+    "service.settle_voice_inquiry"
   ],
   "expected_indexes": [
     "ix_appointment_technician_time",
@@ -360,6 +392,7 @@
       "cases",
       "export_records",
       "feature_change_history",
+      "followup_triage",
       "intake_drafts",
       "intake_messages",
       "ocr_results",
@@ -370,6 +403,8 @@
       "technician_session_identities",
       "technicians",
       "tenant_configuration",
+      "visit_preparations",
+      "visit_time_corrections",
       "visits"
     ],
     "support": [
@@ -502,6 +537,9 @@
     "support.assurance_policies",
     "support.ticket_call_attempts",
     "support.ticket_events",
-    "support.tickets"
+    "support.tickets",
+    "service.followup_triage",
+    "service.visit_preparations",
+    "service.visit_time_corrections"
   ]
 }

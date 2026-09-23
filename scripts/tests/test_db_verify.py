@@ -27,7 +27,7 @@ def test_graph_has_preserved_oron_root_and_one_target_head() -> None:
     # (f3a8c61e4b27), 94 session-scoped technician identity (7b3d9e5a1c48), and
     # 95 typed shared-technician identification (3f5c8b1d7e42). An unexplained
     # change here means a migration arrived that nobody reviewed.
-    assert report.revision_count == 95
+    assert report.revision_count == 97
 
 
 def test_lead_workflow_guard_is_present_in_the_final_configuration_validator() -> None:
