@@ -35,6 +35,14 @@ class IdempotencyConflict(RuntimeError):
     """A previously admitted call key was reused with different parameters."""
 
 
+class UnroutableInboundCall(RuntimeError):
+    """A signed inbound call reached no tenant; it is quarantined, never defaulted."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
 class BotHandle(Protocol):
     async def cancel(self) -> None: ...
 
@@ -134,12 +142,21 @@ class Dispatcher:
         room = event.room.name
         if participant.kind != ParticipantInfo.SIP or room in self._active:
             return
-        resolution = await self._resolve_inbound_number(
-            participant.attributes.get("sip.trunkPhoneNumber")
-        )
+        dialed = participant.attributes.get("sip.trunkPhoneNumber")
+        resolution = await self._resolve_inbound_number(dialed)
         if resolution is None:
             await self._hangup_room(room)
-            return
+            # Never assigned to a default tenant. The webhook ledger keeps the
+            # signed event as quarantined so the call stays reconcilable.
+            if not dialed:
+                reason = "missing_did"
+            else:
+                try:
+                    validate_e164(dialed)
+                    reason = "unregistered_did"
+                except ValueError:
+                    reason = "malformed_did"
+            raise UnroutableInboundCall(reason)
         context = CallContext(
             call_id=room,
             provider="livekit",

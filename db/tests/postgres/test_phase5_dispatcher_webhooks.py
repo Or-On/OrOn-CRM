@@ -53,6 +53,49 @@ async def test_platform_voice_can_durably_deduplicate_livekit_webhooks(
             await admin.close()
 
 
+async def test_unroutable_inbound_calls_are_quarantined_not_dropped(postgres_url: str) -> None:
+    provider_event_id = f"EV_{uuid4().hex}"
+
+    async def assume_voice_role(connection: asyncpg.Connection) -> None:
+        await connection.execute("SET ROLE platform_voice")
+
+    pool = await asyncpg.create_pool(postgres_url, min_size=1, max_size=2, init=assume_voice_role)
+    ledger = PostgresWebhookLedger(postgres_url, provider_account_id="quarantine-test", pool=pool)
+    try:
+        claim = await ledger.claim(
+            provider_event_id=provider_event_id,
+            event_type="participant_joined",
+            payload={"id": provider_event_id, "event": "participant_joined"},
+        )
+        await ledger.quarantine(claim.event_id, "unregistered_did")
+        replay = await ledger.claim(
+            provider_event_id=provider_event_id,
+            event_type="participant_joined",
+            payload={"id": provider_event_id, "event": "participant_joined"},
+        )
+        assert replay.should_process is False
+        with pytest.raises(ValueError):
+            await ledger.quarantine(claim.event_id, "free text is never stored")
+    finally:
+        await pool.close()
+        admin = await asyncpg.connect(postgres_url)
+        try:
+            row = await admin.fetchrow(
+                "SELECT status,last_error_safe,tenant_id FROM ops.inbound_events "
+                "WHERE provider_account_id='quarantine-test' AND provider_event_id=$1",
+                provider_event_id,
+            )
+            assert row is not None and row["status"] == "quarantined"
+            assert row["last_error_safe"] == "unregistered_did" and row["tenant_id"] is None
+            await admin.execute(
+                "DELETE FROM ops.inbound_events WHERE provider_account_id='quarantine-test' "
+                "AND provider_event_id=$1",
+                provider_event_id,
+            )
+        finally:
+            await admin.close()
+
+
 async def test_platform_voice_has_only_required_webhook_ledger_privileges(
     pg: asyncpg.Connection,
 ) -> None:

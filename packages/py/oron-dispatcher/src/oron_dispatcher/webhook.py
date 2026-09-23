@@ -26,6 +26,7 @@ from oron_dispatcher.dispatcher import (
     HealthReport,
     IdempotencyConflict,
     PersistenceUnavailable,
+    UnroutableInboundCall,
 )
 from oron_dispatcher.sip_client import RealTelephonyDenied
 from oron_dispatcher.webhook_ledger import WebhookLedger
@@ -168,6 +169,14 @@ def create_app(
             elif event_type == "room_finished":
                 await dispatcher.handle_room_finished(event)
             await ledger.complete(claim.event_id)
+        except UnroutableInboundCall as unroutable:
+            # Acknowledged so the provider stops redelivering, and durably
+            # quarantined with a safe reason for reconciliation.
+            logger.warning(
+                "Quarantined unroutable inbound call", extra={"reason": unroutable.reason}
+            )
+            await ledger.quarantine(claim.event_id, unroutable.reason)
+            return WebhookAck()
         except Exception:
             await ledger.fail(claim.event_id)
             raise HTTPException(status_code=503, detail="webhook processing failed") from None

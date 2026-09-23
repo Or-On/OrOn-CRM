@@ -24,6 +24,8 @@ class WebhookLedger(Protocol):
 
     async def fail(self, event_id: str) -> None: ...
 
+    async def quarantine(self, event_id: str, reason: str) -> None: ...
+
     async def ready(self) -> bool: ...
 
     async def close(self) -> None: ...
@@ -140,6 +142,24 @@ class PostgresWebhookLedger:
                 """,
                 event_id,
             )
+
+    async def quarantine(self, event_id: str, reason: str) -> None:
+        if reason not in {"missing_did", "malformed_did", "unregistered_did"}:
+            raise ValueError("unsupported quarantine reason")
+        pool = await self._get_pool()
+        async with pool.acquire() as connection:
+            result = await connection.execute(
+                """
+                UPDATE ops.inbound_events
+                SET status = 'quarantined', processed_at = CURRENT_TIMESTAMP,
+                    locked_at = NULL, locked_by = NULL, last_error_safe = $2
+                WHERE id = $1::uuid AND status = 'processing' AND locked_by = 'dispatcher'
+                """,
+                event_id,
+                reason,
+            )
+        if result != "UPDATE 1":
+            raise RuntimeError("webhook quarantine lost its durable claim")
 
     async def ready(self) -> bool:
         try:

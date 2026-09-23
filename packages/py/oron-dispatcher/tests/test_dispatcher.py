@@ -13,6 +13,7 @@ from oron_dispatcher.dispatcher import (
     Dispatcher,
     IdempotencyConflict,
     PersistenceUnavailable,
+    UnroutableInboundCall,
 )
 from oron_dispatcher.sip_client import RealTelephonyDenied, SipClient
 from oron_dispatcher.tenancy_client import PhoneResolution
@@ -100,11 +101,14 @@ async def test_unknown_malformed_or_missing_did_is_rejected_before_session(did: 
     resolver = AsyncMock(return_value=None)
     dispatcher, sessions, launch, hangup = _dispatcher(resolve=resolver)
 
-    await dispatcher.handle_participant_joined(_participant_event(did=did))
+    with pytest.raises(UnroutableInboundCall) as rejected:
+        await dispatcher.handle_participant_joined(_participant_event(did=did))
 
     sessions.begin.assert_not_awaited()
     launch.assert_not_awaited()
     hangup.assert_awaited_once_with("call-inbound")
+    expected = {None: "missing_did", "+000": "malformed_did", "+14155550101": "unregistered_did"}
+    assert rejected.value.reason == expected[did]
 
 
 async def test_inbound_persistence_failure_hangs_up_before_agent_launch() -> None:

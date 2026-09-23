@@ -32,6 +32,7 @@ class FakeLedger:
         self.seen: set[str] = set()
         self.completed: list[str] = []
         self.failed: list[str] = []
+        self.quarantined: list[tuple[str, str]] = []
 
     async def claim(self, *, provider_event_id: str, event_type: str, payload: dict[str, object]):
         duplicate = provider_event_id in self.seen
@@ -43,6 +44,9 @@ class FakeLedger:
 
     async def fail(self, event_id: str) -> None:
         self.failed.append(event_id)
+
+    async def quarantine(self, event_id: str, reason: str) -> None:
+        self.quarantined.append((event_id, reason))
 
     async def ready(self) -> bool:
         return True
@@ -352,3 +356,17 @@ def test_outbound_contract_reports_binding_conflict_without_private_details():
         response = client.post("/api/v1/dispatch/outbound", json=request, headers=headers)
     assert response.status_code == 409
     assert "private" not in response.text
+
+
+def test_unroutable_inbound_call_is_acknowledged_and_quarantined() -> None:
+    from oron_dispatcher.dispatcher import UnroutableInboundCall
+
+    dispatcher = AsyncMock()
+    dispatcher.handle_room_finished.side_effect = UnroutableInboundCall("unregistered_did")
+    ledger = FakeLedger()
+    body, token = _livekit_delivery("EV_unroutable")
+    with TestClient(_app(dispatcher, ledger)) as client:
+        response = client.post("/livekit/webhook", content=body, headers={"Authorization": token})
+    assert response.status_code == 200
+    assert ledger.quarantined == [("EV_unroutable", "unregistered_did")]
+    assert ledger.completed == [] and ledger.failed == []
