@@ -138,6 +138,16 @@ export async function POST(request: Request) {
       ...(serialNumber === undefined ? {} : { serialNumber }),
       priority: priority as "low" | "normal" | "high" | "urgent",
     };
+    if (
+      body.emergencyReason !== undefined &&
+      (typeof body.emergencyReason !== "string" ||
+        body.emergencyReason.trim() === "")
+    )
+      throw new TypeError("Describe why this call is an emergency");
+    const emergencyReason =
+      typeof body.emergencyReason === "string"
+        ? body.emergencyReason
+        : undefined;
     const created = await withCurrentTenant(
       "field-service:operate",
       async (sql, session) => {
@@ -158,7 +168,8 @@ export async function POST(request: Request) {
           if (
             "technicianId" in body ||
             "assignedTechnicianId" in body ||
-            "reportingContactId" in body
+            "reportingContactId" in body ||
+            emergencyReason !== undefined
           )
             throw new TypeError(
               "A technician case is assigned to the technician signed in on this device",
@@ -187,6 +198,7 @@ export async function POST(request: Request) {
                       "Reporting contact",
                     ),
                   }),
+              ...(emergencyReason === undefined ? {} : { emergencyReason }),
             },
           ),
         };

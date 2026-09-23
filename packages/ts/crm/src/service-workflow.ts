@@ -11,6 +11,8 @@ export const serviceIntakeFieldKeys = [
   "faultDescription",
   "exactFailure",
   "warrantyStatus",
+  "callbackNumber",
+  "urgency",
 ] as const;
 export const serviceReportFieldKeys = [
   "diagnosis",
@@ -22,13 +24,86 @@ export const serviceReportFieldKeys = [
   "modulePhoto",
 ] as const;
 export type ServiceReportField = (typeof serviceReportFieldKeys)[number];
+export const followUpTemplateParameterKeys = [
+  "customerName",
+  "reference",
+  "faultSummary",
+  "businessName",
+] as const;
+export type FollowUpTemplateParameter =
+  (typeof followUpTemplateParameterKeys)[number];
+
+/** Phone intake opens a visible inquiry at call admission. */
+export type InquiryPolicy = {
+  readonly openOnFirstContact: boolean;
+};
+/** The server-rendered WhatsApp summary and photo request after a call. */
+export type WhatsAppFollowUpPolicy = {
+  readonly enabled: boolean;
+  readonly trigger: "intake_saved" | "call_ended";
+  readonly requestPhoto: boolean;
+  readonly consent: "in_call_agreement" | "existing_only";
+  readonly templateName?: string;
+  readonly templateLanguage?: string;
+  readonly templateParameters?: readonly FollowUpTemplateParameter[];
+};
+export type EmergencyPolicy = {
+  readonly enabled: boolean;
+  /** Tenant wording for the label, e.g. a business's own name for a red call. */
+  readonly label: string;
+  readonly manualRedCall: boolean;
+  /** Administrator-only routing contact; redacted from every other reader. */
+  readonly transferTo?: string;
+  readonly fallback: "urgent_followup" | "notify_staff";
+};
+export type PreparationChecklistItem = {
+  readonly key: string;
+  readonly label: string;
+  readonly required: boolean;
+};
+export type PreparationPolicy = {
+  readonly enabled: boolean;
+  readonly instructions?: string;
+  readonly requireAcknowledgement: boolean;
+  readonly checklist: readonly PreparationChecklistItem[];
+};
+export type AttachmentCategoryPolicy = {
+  readonly key: string;
+  readonly label: string;
+  readonly accept: readonly ("image" | "pdf")[];
+};
+export type EvidencePolicy = {
+  readonly beforePhotoRequired: boolean;
+  readonly afterPhotoRequired: boolean;
+};
 export interface ServiceWorkflowPolicy {
   readonly version: 1;
   readonly requiredIntakeFields: readonly IntakeRequiredField[];
   readonly photoPolicy: "optional" | "requested" | "required";
   readonly selfAssignmentEnabled: boolean;
   readonly requiredReportFields: readonly ServiceReportField[];
+  readonly inquiry?: InquiryPolicy;
+  readonly whatsappFollowUp?: WhatsAppFollowUpPolicy;
+  readonly emergency?: EmergencyPolicy;
+  readonly preparation?: PreparationPolicy;
+  readonly attachmentCategories?: readonly AttachmentCategoryPolicy[];
+  readonly evidence?: EvidencePolicy;
 }
+
+const builtInAttachmentCategories = new Set([
+  "fault",
+  "module",
+  "product_label",
+  "repair",
+  "environment",
+  "document",
+  "customer_photo",
+  "arrival_signature",
+  "departure_signature",
+  "before_photo",
+  "after_photo",
+  "tenant_document",
+]);
 export const serviceWorkflowDefaults: ServiceWorkflowPolicy = {
   version: 1,
   requiredIntakeFields: [
@@ -81,6 +156,12 @@ export function parseServiceWorkflowPolicy(
           "photoPolicy",
           "selfAssignmentEnabled",
           "requiredReportFields",
+          "inquiry",
+          "whatsappFollowUp",
+          "emergency",
+          "preparation",
+          "attachmentCategories",
+          "evidence",
         ].includes(key),
     )
   )
@@ -117,7 +198,248 @@ export function parseServiceWorkflowPolicy(
       input.requiredReportFields,
       serviceReportFieldKeys,
     ),
+    ...optionalPolicies(input),
   };
+}
+
+function object(
+  value: unknown,
+  allowed: readonly string[],
+  name: string,
+): Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value))
+    throw new TypeError(`${name} must be an object`);
+  if (Object.keys(value).some((key) => !allowed.includes(key)))
+    throw new TypeError(`Unknown ${name} setting`);
+  return value as Record<string, unknown>;
+}
+
+function flag(value: unknown, name: string): boolean {
+  if (typeof value !== "boolean")
+    throw new TypeError(`${name} must be true or false`);
+  return value;
+}
+
+function label(value: unknown, maximum: number, name: string): string {
+  if (
+    typeof value !== "string" ||
+    value.trim().length === 0 ||
+    value.trim().length > maximum
+  )
+    throw new TypeError(`${name} must contain 1-${String(maximum)} characters`);
+  return value;
+}
+
+/** Optional capabilities; absent keys keep the tenant's existing behaviour. */
+function optionalPolicies(
+  input: Record<string, unknown>,
+): Partial<ServiceWorkflowPolicy> {
+  const result: {
+    inquiry?: InquiryPolicy;
+    whatsappFollowUp?: WhatsAppFollowUpPolicy;
+    emergency?: EmergencyPolicy;
+    preparation?: PreparationPolicy;
+    attachmentCategories?: readonly AttachmentCategoryPolicy[];
+    evidence?: EvidencePolicy;
+  } = {};
+  if (input.inquiry !== undefined) {
+    const inquiry = object(input.inquiry, ["openOnFirstContact"], "inquiry");
+    result.inquiry = {
+      openOnFirstContact: flag(
+        inquiry.openOnFirstContact,
+        "Open on first contact",
+      ),
+    };
+  }
+  if (input.whatsappFollowUp !== undefined) {
+    const value = object(
+      input.whatsappFollowUp,
+      [
+        "enabled",
+        "trigger",
+        "requestPhoto",
+        "consent",
+        "templateName",
+        "templateLanguage",
+        "templateParameters",
+      ],
+      "WhatsApp follow-up",
+    );
+    if (value.trigger !== "intake_saved" && value.trigger !== "call_ended")
+      throw new TypeError("Choose when the WhatsApp follow-up is sent");
+    if (
+      value.consent !== "in_call_agreement" &&
+      value.consent !== "existing_only"
+    )
+      throw new TypeError("Choose how WhatsApp consent is obtained");
+    if (
+      (value.templateName === undefined) !==
+      (value.templateLanguage === undefined)
+    )
+      throw new TypeError(
+        "An approved template needs both a name and a language",
+      );
+    if (
+      value.templateName !== undefined &&
+      (typeof value.templateName !== "string" ||
+        !/^[a-z0-9_]{1,512}$/u.test(value.templateName) ||
+        typeof value.templateLanguage !== "string" ||
+        !/^[a-z]{2,3}(?:_[A-Z]{2})?$/u.test(value.templateLanguage))
+    )
+      throw new TypeError("Invalid approved WhatsApp template");
+    let parameters: readonly FollowUpTemplateParameter[] | undefined;
+    if (value.templateParameters !== undefined) {
+      if (
+        value.templateName === undefined ||
+        !Array.isArray(value.templateParameters) ||
+        value.templateParameters.length > 5 ||
+        value.templateParameters.some(
+          (item) =>
+            typeof item !== "string" ||
+            !(followUpTemplateParameterKeys as readonly string[]).includes(
+              item,
+            ),
+        )
+      )
+        throw new TypeError("Invalid template parameters");
+      parameters = value.templateParameters as FollowUpTemplateParameter[];
+    }
+    result.whatsappFollowUp = {
+      enabled: flag(value.enabled, "WhatsApp follow-up"),
+      trigger: value.trigger,
+      requestPhoto: flag(value.requestPhoto, "Photo request"),
+      consent: value.consent,
+      ...(typeof value.templateName === "string" &&
+      typeof value.templateLanguage === "string"
+        ? {
+            templateName: value.templateName,
+            templateLanguage: value.templateLanguage,
+          }
+        : {}),
+      ...(parameters === undefined ? {} : { templateParameters: parameters }),
+    };
+  }
+  if (input.emergency !== undefined) {
+    const value = object(
+      input.emergency,
+      ["enabled", "label", "manualRedCall", "transferTo", "fallback"],
+      "emergency",
+    );
+    if (
+      value.fallback !== "urgent_followup" &&
+      value.fallback !== "notify_staff"
+    )
+      throw new TypeError("Choose the emergency fallback");
+    if (
+      value.transferTo !== undefined &&
+      (typeof value.transferTo !== "string" ||
+        !/^\+[1-9][0-9]{7,14}$/u.test(value.transferTo))
+    )
+      throw new TypeError(
+        "The on-call number must be in international E.164 format",
+      );
+    result.emergency = {
+      enabled: flag(value.enabled, "Emergency handling"),
+      label: label(value.label, 40, "Emergency label"),
+      manualRedCall: flag(value.manualRedCall, "Manual emergency calls"),
+      ...(typeof value.transferTo === "string"
+        ? { transferTo: value.transferTo }
+        : {}),
+      fallback: value.fallback,
+    };
+  }
+  if (input.preparation !== undefined) {
+    const value = object(
+      input.preparation,
+      ["enabled", "instructions", "requireAcknowledgement", "checklist"],
+      "preparation",
+    );
+    if (!Array.isArray(value.checklist) || value.checklist.length > 30)
+      throw new TypeError("The preparation checklist can hold up to 30 items");
+    const checklist = value.checklist.map((item) => {
+      const entry = object(
+        item,
+        ["key", "label", "required"],
+        "checklist item",
+      );
+      if (
+        typeof entry.key !== "string" ||
+        !/^[a-z0-9_]{1,40}$/u.test(entry.key)
+      )
+        throw new TypeError(
+          "Checklist keys use lowercase letters, digits and underscores",
+        );
+      return {
+        key: entry.key,
+        label: label(entry.label, 160, "Checklist label"),
+        required: flag(entry.required, "Required checklist item"),
+      };
+    });
+    if (new Set(checklist.map((item) => item.key)).size !== checklist.length)
+      throw new TypeError("Checklist keys must be unique");
+    if (
+      value.instructions !== undefined &&
+      (typeof value.instructions !== "string" ||
+        value.instructions.length > 2000)
+    )
+      throw new TypeError(
+        "Preparation instructions can hold up to 2000 characters",
+      );
+    result.preparation = {
+      enabled: flag(value.enabled, "Preparation"),
+      ...(typeof value.instructions === "string"
+        ? { instructions: value.instructions }
+        : {}),
+      requireAcknowledgement: flag(
+        value.requireAcknowledgement,
+        "Preparation acknowledgement",
+      ),
+      checklist,
+    };
+  }
+  if (input.attachmentCategories !== undefined) {
+    if (
+      !Array.isArray(input.attachmentCategories) ||
+      input.attachmentCategories.length > 12
+    )
+      throw new TypeError("Up to 12 document types can be configured");
+    const categories = input.attachmentCategories.map((item) => {
+      const entry = object(item, ["key", "label", "accept"], "document type");
+      if (
+        typeof entry.key !== "string" ||
+        !/^[a-z][a-z0-9_]{1,31}$/u.test(entry.key) ||
+        builtInAttachmentCategories.has(entry.key)
+      )
+        throw new TypeError("Invalid document type key");
+      if (
+        !Array.isArray(entry.accept) ||
+        entry.accept.length < 1 ||
+        entry.accept.length > 2 ||
+        entry.accept.some((kind) => kind !== "image" && kind !== "pdf")
+      )
+        throw new TypeError("A document type accepts images and/or PDF files");
+      return {
+        key: entry.key,
+        label: label(entry.label, 40, "Document type label"),
+        accept: entry.accept as ("image" | "pdf")[],
+      };
+    });
+    if (new Set(categories.map((item) => item.key)).size !== categories.length)
+      throw new TypeError("Document type keys must be unique");
+    result.attachmentCategories = categories;
+  }
+  if (input.evidence !== undefined) {
+    const value = object(
+      input.evidence,
+      ["beforePhotoRequired", "afterPhotoRequired"],
+      "evidence",
+    );
+    result.evidence = {
+      beforePhotoRequired: flag(value.beforePhotoRequired, "Before photo"),
+      afterPhotoRequired: flag(value.afterPhotoRequired, "After photo"),
+    };
+  }
+  return result;
 }
 
 export async function getServiceWorkflowPolicy(

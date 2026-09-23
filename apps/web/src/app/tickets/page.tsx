@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
 import {
+  getServiceWorkflowPolicy,
   getTenantSettings,
   listContacts,
   listTickets,
@@ -25,7 +26,7 @@ export default async function TicketsPage() {
     const since = new Date(until.getTime() - 30 * 24 * 60 * 60 * 1000);
     const data = await withCurrentTenant("crm:read", async (sql) => {
       await requireTenantFeature(sql, "tickets");
-      const [page, contacts, settings, metrics] = await Promise.all([
+      const [page, contacts, settings, metrics, policy] = await Promise.all([
         listTickets(sql, { status: "open", limit: 25 }),
         listContacts(sql, { limit: 500 }),
         getTenantSettings(sql),
@@ -34,8 +35,11 @@ export default async function TicketsPage() {
           since: since.toISOString(),
           until: until.toISOString(),
         }),
+        getServiceWorkflowPolicy(sql),
       ]);
-      return { page, contacts, settings, metrics };
+      const emergencyLabel =
+        policy.emergency?.enabled === true ? policy.emergency.label : null;
+      return { page, contacts, settings, metrics, emergencyLabel };
     });
     // Names are resolved here so the browser receives only the names belonging
     // to the page it is showing, never the tenant's contact table.
@@ -47,6 +51,7 @@ export default async function TicketsPage() {
         <ProductHeading page="tickets" premium />
         <TicketsWorkspace
           contactNames={contactNames}
+          emergencyLabel={data.emergencyLabel}
           initialPage={data.page}
           metrics={data.metrics}
           tenantTimeZone={data.settings.timezone}

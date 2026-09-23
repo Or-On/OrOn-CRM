@@ -1,6 +1,7 @@
 "use client";
 
 import type {
+  InquiryDetail,
   PostCallAnalysis,
   TicketCallAttempt,
   TicketDetail,
@@ -9,6 +10,8 @@ import { useLocale } from "next-intl";
 import Link from "next/link";
 
 import { tenantDateFormatter } from "../../i18n/tenant-date-time";
+import { inquiryCopy, nextActionLabel } from "./inquiry-copy";
+import { InquiryPanel } from "./inquiry-panel";
 import styles from "./tickets-workspace.module.css";
 
 const COPY = {
@@ -401,12 +404,19 @@ export function TicketDetailView({
   detail,
   contactName,
   tenantTimeZone,
+  inquiry = null,
+  emergencyLabel = null,
+  canMarkEmergency = false,
 }: {
   readonly detail: TicketDetail;
   readonly contactName: string;
   readonly tenantTimeZone: string;
+  readonly inquiry?: InquiryDetail | null;
+  readonly emergencyLabel?: string | null;
+  readonly canMarkEmergency?: boolean;
 }) {
   const locale = useLocale();
+  const shared = inquiryCopy(locale);
   const t = COPY[locale.startsWith("he") ? "he" : "en"];
   const formatter = tenantDateFormatter(locale, tenantTimeZone, {
     dateStyle: "medium",
@@ -465,7 +475,9 @@ export function TicketDetailView({
         </div>
         <div>
           <dt>{t.nextAction}</dt>
-          <dd>{ticket.nextAction ?? t.noNextAction}</dd>
+          <dd>
+            {nextActionLabel(shared, ticket.nextAction) ?? t.noNextAction}
+          </dd>
         </div>
         <div>
           <dt>{t.origin}</dt>
@@ -515,6 +527,14 @@ export function TicketDetailView({
         )}
       </dl>
       <p className={styles.legacyHint ?? ""}>{t.assuranceHint}</p>
+
+      <InquiryPanel
+        canMarkEmergency={canMarkEmergency}
+        emergencyLabel={emergencyLabel}
+        inquiry={inquiry}
+        tenantTimeZone={tenantTimeZone}
+        ticket={ticket}
+      />
 
       <h2>{t.attempts}</h2>
       {attempts.length === 0 ? (

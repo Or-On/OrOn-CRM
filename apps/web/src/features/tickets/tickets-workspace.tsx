@@ -1,7 +1,7 @@
 "use client";
 
 import type {
-  Ticket,
+  TicketSummary,
   TicketHandlingMode,
   TicketOutcomeMetrics,
   TicketPage,
@@ -18,6 +18,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import { tenantDateFormatter } from "../../i18n/tenant-date-time";
+import { attentionTone, inquiryCopy, nextActionLabel } from "./inquiry-copy";
 import styles from "./tickets-workspace.module.css";
 
 const COPY = {
@@ -333,7 +334,10 @@ export function TicketsWorkspace({
   contactNames,
   tenantTimeZone,
   metrics,
+  emergencyLabel = null,
 }: {
+  /** The tenant's own wording for emergencies; null when not enabled. */
+  readonly emergencyLabel?: string | null;
   readonly initialPage: TicketPage;
   /** Resolved server-side; the browser never receives the contact table. */
   readonly contactNames: Readonly<Record<string, string>>;
@@ -342,11 +346,12 @@ export function TicketsWorkspace({
 }) {
   const locale = useLocale();
   const t = COPY[locale.startsWith("he") ? "he" : "en"];
+  const shared = inquiryCopy(locale);
   const formatter = tenantDateFormatter(locale, tenantTimeZone, {
     dateStyle: "medium",
     timeStyle: "short",
   });
-  const [tickets, setTickets] = useState<readonly Ticket[]>(
+  const [tickets, setTickets] = useState<readonly TicketSummary[]>(
     initialPage.tickets,
   );
   const [cursor, setCursor] = useState<Cursor | null>(initialPage.nextCursor);
@@ -358,6 +363,7 @@ export function TicketsWorkspace({
   const [resolution, setResolution] = useState<TicketResolution | "">("");
   const [activeSince, setActiveSince] = useState("");
   const [query, setQuery] = useState("");
+  const [emergencyOnly, setEmergencyOnly] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
 
@@ -380,6 +386,7 @@ export function TicketsWorkspace({
             new Date(`${activeSince}T00:00:00`).toISOString(),
           );
         if (query.trim() !== "") parameters.set("q", query.trim());
+        if (emergencyOnly) parameters.set("emergency", "1");
         if (append !== null) {
           parameters.set("beforeActivityAt", append.activityAt);
           parameters.set("beforeId", append.id);
@@ -403,6 +410,7 @@ export function TicketsWorkspace({
     [
       activeSince,
       channel,
+      emergencyOnly,
       handling,
       priority,
       query,
@@ -539,6 +547,18 @@ export function TicketsWorkspace({
             type="date"
             value={activeSince}
           />
+          {emergencyLabel === null ? null : (
+            <label className={styles.emergencyToggle ?? ""}>
+              <input
+                checked={emergencyOnly}
+                onChange={(event) => {
+                  setEmergencyOnly(event.target.checked);
+                }}
+                type="checkbox"
+              />
+              {emergencyLabel} · {shared.emergencyOnly}
+            </label>
+          )}
           <Input
             id="ticket-search"
             label={t.search}
@@ -599,6 +619,14 @@ export function TicketsWorkspace({
                         <strong dir="ltr">{ticket.reference}</strong>
                         <small>{t.priorities[ticket.priority]}</small>
                       </Link>
+                      {ticket.emergency === null ? null : (
+                        <span className={styles.rowBadges ?? ""}>
+                          <Badge
+                            label={emergencyLabel ?? shared.emergencyFallback}
+                            tone="critical"
+                          />
+                        </span>
+                      )}
                     </td>
                     <td>
                       <strong dir="auto">
@@ -619,9 +647,33 @@ export function TicketsWorkspace({
                         label={t.stages[ticket.stage]}
                         tone={stageTone(ticket.stage)}
                       />
+                      {ticket.inquiry === null &&
+                      ticket.pendingReplyLinks === 0 ? null : (
+                        <span className={styles.rowBadges ?? ""}>
+                          {ticket.inquiry === null ||
+                          ticket.inquiry.attention ===
+                            "not_requested" ? null : (
+                            <Badge
+                              label={shared.attention[ticket.inquiry.attention]}
+                              tone={attentionTone(ticket.inquiry.attention)}
+                            />
+                          )}
+                          {ticket.pendingReplyLinks === 0 ? null : (
+                            <Badge
+                              label={shared.replyLinks(
+                                ticket.pendingReplyLinks,
+                              )}
+                              tone="warning"
+                            />
+                          )}
+                        </span>
+                      )}
                     </td>
                     <td>{t.handlingModes[ticket.handlingMode]}</td>
-                    <td>{ticket.nextAction ?? t.noNextAction}</td>
+                    <td>
+                      {nextActionLabel(shared, ticket.nextAction) ??
+                        t.noNextAction}
+                    </td>
                     <td>
                       <Link
                         className={styles.openRow ?? ""}

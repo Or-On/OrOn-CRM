@@ -96,6 +96,7 @@ export async function GET(request: Request) {
       "resolution",
     );
     const limit = listLimit(parameters.get("limit"));
+    const emergencyOnly = parameters.get("emergency") === "1";
     const activeSince = cursorInstant(parameters.get("activeSince"));
     const beforeActivityAt = cursorInstant(parameters.get("beforeActivityAt"));
     const beforeId = parameters.get("beforeId");
@@ -112,6 +113,7 @@ export async function GET(request: Request) {
         ...(sourceChannel === undefined ? {} : { sourceChannel }),
         ...(handlingMode === undefined ? {} : { handlingMode }),
         ...(resolution === undefined ? {} : { resolution }),
+        ...(emergencyOnly ? { emergencyOnly: true } : {}),
         ...(limit === undefined ? {} : { limit }),
         ...(query === null ? {} : { query }),
         ...(owner === null ? {} : { ownerUserId: owner }),

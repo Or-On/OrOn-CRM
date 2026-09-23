@@ -36,6 +36,7 @@ export * from "./tickets.js";
 export * from "./tenant-features.js";
 export * from "./tenant-processes.js";
 export * from "./tenant-configuration.js";
+export * from "./field-operations.js";
 export * from "./field-service-domain.js";
 export * from "./field-service-export.js";
 export * from "./field-service.js";

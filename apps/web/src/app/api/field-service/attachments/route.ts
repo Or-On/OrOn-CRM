@@ -29,6 +29,9 @@ const categories = [
   "customer_photo",
   "arrival_signature",
   "departure_signature",
+  "before_photo",
+  "after_photo",
+  "tenant_document",
 ] as const;
 type Category = (typeof categories)[number];
 
@@ -58,6 +61,22 @@ export async function POST(request: Request) {
       throw new TypeError(
         "Attendance signatures must be uploaded through the visit attendance action",
       );
+    if (selectedCategory === "customer_photo")
+      throw new TypeError(
+        "Customer photos arrive from the customer's own messages",
+      );
+    const documentTypeEntry = form.get("documentType");
+    const documentType =
+      typeof documentTypeEntry === "string" && documentTypeEntry !== ""
+        ? documentTypeEntry
+        : undefined;
+    if (
+      (selectedCategory === "tenant_document") !==
+        (documentType !== undefined) ||
+      (documentType !== undefined &&
+        !/^[a-z][a-z0-9_]{1,31}$/u.test(documentType))
+    )
+      throw new TypeError("Choose a configured document type");
     const visitId = optionalUuid(form.get("visitId"), "Visit");
     const reportRevisionId = optionalUuid(
       form.get("reportRevisionId"),
@@ -93,6 +112,7 @@ export async function POST(request: Request) {
           ...(reportRevisionId === undefined ? {} : { reportRevisionId }),
           objectId,
           category: selectedCategory,
+          ...(documentType === undefined ? {} : { documentType }),
           source: "technician",
           ...(caption === undefined ? {} : { caption }),
         });

@@ -324,3 +324,67 @@
   font-size: 1rem;
   font-weight: 600;
 }
+
+.inquiry {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.emergency {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.75rem 1rem;
+  border: 2px solid var(--or-color-critical, #b42318);
+  border-radius: 0.6rem;
+}
+
+.emergency p {
+  margin: 0;
+  font-weight: 600;
+}
+
+.emergencyForm {
+  display: grid;
+  gap: 0.5rem;
+  max-width: 36rem;
+}
+
+.emergencyForm textarea {
+  font: inherit;
+  padding: 0.5rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.4rem;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.error {
+  color: var(--or-color-critical, #b42318);
+  margin: 0;
+}
+
+.replyLinks {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rowBadges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-block-start: 0.25rem;
+}
+
+.emergencyToggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+}

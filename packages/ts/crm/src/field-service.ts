@@ -1,6 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import type postgres from "postgres";
+import {
+  markTicketEmergency,
+  withFieldWorkflowGates,
+} from "./field-operations.js";
 import type { Message } from "./types.js";
 import { listMessages } from "./messaging.js";
 
@@ -1516,10 +1520,15 @@ export async function createServiceCase(
     readonly serialNumber?: string | null;
     readonly priority?: ServiceCaseSummary["priority"];
     readonly source?: "manual" | "whatsapp";
+    /** Mark the case's inquiry as the tenant's emergency (red call). */
+    readonly emergencyReason?: string | null;
   },
 ): Promise<ServiceCaseSummary> {
   await requireFieldService(sql);
-  await requireCaseTicketing(sql, input.source === "whatsapp");
+  await requireCaseTicketing(
+    sql,
+    input.source === "whatsapp" || typeof input.emergencyReason === "string",
+  );
   if ((actor.userId === undefined) === (actor.service === undefined))
     throw new TypeError("Exactly one case actor is required");
   if (
@@ -1578,6 +1587,17 @@ export async function createServiceCase(
       input.source === "whatsapp" ? "intake" : "relevant",
       actor.userId ?? null,
     );
+  }
+  if (typeof input.emergencyReason === "string") {
+    const tickets = await sql<{ id: string }[]>`
+      SELECT id FROM support.tickets WHERE service_case_id=${id}::uuid
+    `;
+    const ticketId = tickets[0]?.id;
+    if (ticketId === undefined)
+      throw new TypeError(
+        "An emergency needs the case's inquiry; enable Tickets",
+      );
+    await markTicketEmergency(sql, ticketId, input.emergencyReason);
   }
   const created = await getServiceCase(sql, id);
   if (created === undefined) throw new Error("Created case could not be read");
@@ -1672,11 +1692,13 @@ export async function transitionServiceCase(
   if (row === undefined) throw new Error("Service case was not found");
   assertServiceCaseTransition(row.status, nextStatus);
   if (row.status !== nextStatus) {
-    await sql`
+    await withFieldWorkflowGates(
+      () => sql`
       UPDATE service.cases SET status = ${nextStatus},
         closed_at = CASE WHEN ${nextStatus} = 'closed' THEN CURRENT_TIMESTAMP ELSE closed_at END,
         updated_at = CURRENT_TIMESTAMP WHERE id = ${caseId}::uuid
-    `;
+    `,
+    );
     await sql`
       INSERT INTO service.case_status_history(
         tenant_id, case_id, from_status, to_status, reason,
@@ -3384,6 +3406,23 @@ export async function deleteServiceReport(
   return { reportId: row.report_id, caseId: row.case_id };
 }
 
+export const serviceAttachmentCategories = [
+  "fault",
+  "module",
+  "product_label",
+  "repair",
+  "environment",
+  "document",
+  "customer_photo",
+  "arrival_signature",
+  "departure_signature",
+  "before_photo",
+  "after_photo",
+  "tenant_document",
+] as const;
+export type ServiceAttachmentCategory =
+  (typeof serviceAttachmentCategories)[number];
+
 export async function linkReportAttachment(
   sql: postgres.TransactionSql,
   actorUserId: string | null,
@@ -3393,29 +3432,26 @@ export async function linkReportAttachment(
     readonly reportRevisionId?: string | null;
     readonly messageId?: string | null;
     readonly objectId: string;
-    readonly category:
-      | "fault"
-      | "module"
-      | "product_label"
-      | "repair"
-      | "environment"
-      | "document"
-      | "customer_photo"
-      | "arrival_signature"
-      | "departure_signature";
+    readonly category: ServiceAttachmentCategory;
+    /** A tenant-configured document type (for example RCG); required for tenant_document. */
+    readonly documentType?: string | null;
     readonly source: "customer" | "technician" | "operator" | "system";
     readonly caption?: string | null;
   },
 ): Promise<string> {
   await requireFieldService(sql);
+  const documentType = input.documentType ?? null;
+  if ((input.category === "tenant_document") !== (documentType !== null))
+    throw new TypeError("Choose a configured document type");
   const rows = await sql<{ id: string }[]>`
     INSERT INTO service.report_attachments(
       tenant_id, case_id, visit_id, report_revision_id, message_id, object_id,
-      category, source, processing_status, caption, created_by_user_id
+      category, document_type, source, processing_status, caption, created_by_user_id
     ) SELECT
       platform.current_tenant_id(), ${input.caseId}::uuid,
       ${input.visitId ?? null}::uuid, ${input.reportRevisionId ?? null}::uuid,
-      ${input.messageId ?? null}::uuid, object.id, ${input.category}, ${input.source},
+      ${input.messageId ?? null}::uuid, object.id, ${input.category}, ${documentType},
+      ${input.source},
       CASE WHEN object.status = 'available' THEN 'available' ELSE 'pending' END,
       ${nullableText(input.caption, 500)}, ${actorUserId}::uuid
     FROM objects.object_metadata object
@@ -3911,20 +3947,21 @@ export async function finalizeReportRevision(
     WHERE prior.report_id=${row.report_id}::uuid
       AND prior.status='finalized' AND prior.id<>${revisionId}::uuid
   `;
-  const updated = await sql<
-    {
-      id: string;
-      report_id: string;
-      version: number;
-      status: ReportRevision["status"];
-      diagnosis: string | null;
-      work_performed: string | null;
-      part_replaced: boolean | null;
-      replacement_part_details: string | null;
-      technician_notes: string | null;
-      finalized_at: Date | null;
-    }[]
-  >`
+  const updated = await withFieldWorkflowGates(
+    () => sql<
+      {
+        id: string;
+        report_id: string;
+        version: number;
+        status: ReportRevision["status"];
+        diagnosis: string | null;
+        work_performed: string | null;
+        part_replaced: boolean | null;
+        replacement_part_details: string | null;
+        technician_notes: string | null;
+        finalized_at: Date | null;
+      }[]
+    >`
     UPDATE service.report_revisions revision SET
       status = 'finalized', finalized_at = clock_timestamp(),
       finalized_by_user_id = ${actorUserId}::uuid,
@@ -4037,7 +4074,8 @@ export async function finalizeReportRevision(
       revision.diagnosis, revision.work_performed, revision.part_replaced,
       revision.replacement_part_details, revision.technician_notes,
       revision.finalized_at
-  `;
+  `,
+  );
   const finalized = updated[0];
   if (finalized === undefined) throw new Error("Report finalization failed");
   await sql`

@@ -3,6 +3,8 @@ import { notFound, redirect } from "next/navigation";
 
 import {
   getContact,
+  getInquiryDetail,
+  getServiceWorkflowPolicy,
   getTenantSettings,
   getTicketDetail,
   requireTenantFeature,
@@ -24,22 +26,39 @@ export default async function TicketDetailPage({
 }) {
   const { id } = await params;
   try {
-    const data = await withCurrentTenant("crm:read", async (sql) => {
+    const data = await withCurrentTenant("crm:read", async (sql, session) => {
       await requireTenantFeature(sql, "tickets");
       const detail = await getTicketDetail(sql, id);
       if (detail === undefined) return undefined;
-      const [contact, settings] = await Promise.all([
+      const [contact, settings, inquiry, policy] = await Promise.all([
         getContact(sql, detail.ticket.contactId),
         getTenantSettings(sql),
+        getInquiryDetail(sql, id),
+        getServiceWorkflowPolicy(sql),
       ]);
-      return { contact, detail, settings };
+      const emergency = policy.emergency;
+      return {
+        contact,
+        detail,
+        settings,
+        inquiry: inquiry ?? null,
+        emergencyLabel: emergency?.enabled === true ? emergency.label : null,
+        // The database decides; this only avoids offering an action the
+        // role or tenant setting would refuse.
+        canMarkEmergency:
+          emergency?.manualRedCall === true &&
+          ["owner", "admin", "agent"].includes(session.tenant.role),
+      };
     });
     if (data === undefined) notFound();
     return (
       <main className="page page--wide">
         <TicketDetailView
+          canMarkEmergency={data.canMarkEmergency}
           contactName={data.contact?.name ?? data.detail.ticket.contactId}
           detail={data.detail}
+          emergencyLabel={data.emergencyLabel}
+          inquiry={data.inquiry}
           tenantTimeZone={data.settings.timezone}
         />
       </main>

@@ -182,6 +182,128 @@ const TICKET_COLUMNS = `
   ticket.last_activity_at, ticket.opened_at, ticket.closed_at
 `;
 
+/**
+ * Where a phone inquiry's customer follow-up stands. Waiting on the customer
+ * and a failed delivery are different situations for staff and never merged.
+ */
+export type InquiryFollowupAttention =
+  | "not_requested"
+  | "pending"
+  | "awaiting_customer"
+  | "customer_replied"
+  | "delivery_failed"
+  | "blocked";
+
+export interface TicketInquiryState {
+  readonly intakeStatus: string;
+  readonly followupStatus: string;
+  readonly followupMessageStatus: string | null;
+  readonly followupRequestedAt: string | null;
+  readonly customerRepliedAt: string | null;
+  readonly customerMediaReceivedAt: string | null;
+  readonly followupError: string | null;
+  readonly attention: InquiryFollowupAttention;
+}
+
+export interface TicketSummary extends Ticket {
+  readonly emergency: {
+    readonly at: string;
+    readonly reason: string;
+    readonly source: "voice" | "manual";
+  } | null;
+  readonly inquiry: TicketInquiryState | null;
+  /** Customer replies that could belong to this inquiry and await linking. */
+  readonly pendingReplyLinks: number;
+}
+
+interface TicketSummaryRow extends TicketRow {
+  emergency_at: Date | null;
+  emergency_reason: string | null;
+  emergency_source: "voice" | "manual" | null;
+  inquiry_state: {
+    intakeStatus: string;
+    followupStatus: string;
+    followupMessageStatus: string | null;
+    followupRequestedAt: string | null;
+    customerRepliedAt: string | null;
+    customerMediaReceivedAt: string | null;
+    followupError: string | null;
+  } | null;
+  pending_reply_links: number;
+}
+
+const TICKET_SUMMARY_COLUMNS = `${TICKET_COLUMNS},
+  ticket.emergency_at, ticket.emergency_reason, ticket.emergency_source,
+  (SELECT jsonb_build_object(
+      'intakeStatus', draft.status, 'followupStatus', draft.followup_status,
+      'followupMessageStatus', followup.status,
+      'followupRequestedAt', draft.followup_requested_at,
+      'customerRepliedAt', draft.customer_replied_at,
+      'customerMediaReceivedAt', draft.customer_media_received_at,
+      'followupError', draft.followup_error_safe)
+    FROM service.intake_drafts draft
+    LEFT JOIN messaging.messages followup
+      ON followup.tenant_id = draft.tenant_id AND followup.id = draft.followup_message_id
+    WHERE draft.tenant_id = ticket.tenant_id AND draft.id = ticket.intake_draft_id
+  ) AS inquiry_state,
+  (SELECT count(*)::integer FROM service.followup_triage triage
+    WHERE triage.tenant_id = ticket.tenant_id AND triage.resolved_at IS NULL
+      AND ticket.intake_draft_id = ANY(triage.candidate_intake_ids)
+  ) AS pending_reply_links
+`;
+
+/** Pure: the staff-facing follow-up situation from durable states. */
+export function inquiryFollowupAttention(state: {
+  readonly followupStatus: string;
+  readonly followupMessageStatus: string | null;
+  readonly customerRepliedAt: string | null;
+}): InquiryFollowupAttention {
+  if (state.customerRepliedAt !== null) return "customer_replied";
+  if (
+    state.followupStatus === "failed" ||
+    state.followupMessageStatus === "failed"
+  )
+    return "delivery_failed";
+  if (
+    [
+      "blocked_consent",
+      "blocked_window",
+      "no_channel",
+      "no_recipient",
+      "recipient_conflict",
+    ].includes(state.followupStatus)
+  )
+    return "blocked";
+  if (state.followupStatus === "admitted") return "awaiting_customer";
+  if (state.followupStatus === "requested" || state.followupStatus === "queued")
+    return "pending";
+  return "not_requested";
+}
+
+function mapTicketSummary(row: TicketSummaryRow): TicketSummary {
+  return {
+    ...mapTicket(row),
+    emergency:
+      row.emergency_at === null ||
+      row.emergency_reason === null ||
+      row.emergency_source === null
+        ? null
+        : {
+            at: row.emergency_at.toISOString(),
+            reason: row.emergency_reason,
+            source: row.emergency_source,
+          },
+    inquiry:
+      row.inquiry_state === null
+        ? null
+        : {
+            ...row.inquiry_state,
+            attention: inquiryFollowupAttention(row.inquiry_state),
+          },
+    pendingReplyLinks: row.pending_reply_links,
+  };
+}
+
 export interface OpenTicketInput {
   readonly contactId: string;
   readonly subject: string;
@@ -577,7 +699,7 @@ export interface TicketCallAttempt {
 }
 
 export interface TicketDetail {
-  readonly ticket: Ticket;
+  readonly ticket: TicketSummary;
   readonly timeline: readonly TicketTimelineEntry[];
   readonly attempts: readonly TicketCallAttempt[];
 }
@@ -594,8 +716,8 @@ export async function getTicketDetail(
   timelineLimit = 200,
 ): Promise<TicketDetail | undefined> {
   const id = identifier(ticketId, "ticket identifier");
-  const rows = await sql<TicketRow[]>`
-    SELECT ${sql.unsafe(TICKET_COLUMNS)}
+  const rows = await sql<TicketSummaryRow[]>`
+    SELECT ${sql.unsafe(TICKET_SUMMARY_COLUMNS)}
     FROM support.tickets ticket
     WHERE ticket.tenant_id = platform.current_tenant_id() AND ticket.id = ${id}::uuid
   `;
@@ -661,7 +783,7 @@ export async function getTicketDetail(
     ORDER BY attempt_number DESC
   `;
   return {
-    ticket: mapTicket(row),
+    ticket: mapTicketSummary(row),
     timeline: events.map((event) => ({
       sequence: event.sequence,
       kind: event.kind,
@@ -716,6 +838,8 @@ export interface TicketListOptions {
   readonly handlingMode?: TicketHandlingMode;
   /** Filter on the evidence-backed outcome, not on a model's opinion of it. */
   readonly resolution?: TicketResolution;
+  /** Only open emergencies (red calls). */
+  readonly emergencyOnly?: boolean;
   readonly query?: string;
   readonly ownerUserId?: string;
   /** Inclusive lower bound on `lastActivityAt`. */
@@ -727,7 +851,7 @@ export interface TicketListOptions {
 }
 
 export interface TicketPage {
-  readonly tickets: readonly Ticket[];
+  readonly tickets: readonly TicketSummary[];
   readonly nextCursor: {
     readonly activityAt: string;
     readonly id: string;
@@ -755,14 +879,15 @@ export async function listTickets(
   const sourceChannel = options.sourceChannel ?? null;
   const handlingMode = options.handlingMode ?? null;
   const resolution = options.resolution ?? null;
+  const emergencyOnly = options.emergencyOnly === true;
   const activeSince = options.activeSince ?? null;
   if (activeSince !== null && !Number.isFinite(Date.parse(activeSince)))
     throw new TypeError("ticket activity filter must be an instant");
   const limit = Math.min(Math.max(Math.trunc(options.limit ?? 25), 1), 100);
   const cursorActivity = options.beforeActivityAt ?? null;
   const cursorId = optionalIdentifier(options.beforeId, "ticket cursor");
-  const rows = await sql<TicketRow[]>`
-    SELECT ${sql.unsafe(TICKET_COLUMNS)}
+  const rows = await sql<TicketSummaryRow[]>`
+    SELECT ${sql.unsafe(TICKET_SUMMARY_COLUMNS)}
     FROM support.tickets ticket
     LEFT JOIN crm.contacts contact
       ON contact.tenant_id = ticket.tenant_id AND contact.id = ticket.contact_id
@@ -774,6 +899,7 @@ export async function listTickets(
       AND (${handlingMode}::text IS NULL OR ticket.handling_mode = ${handlingMode})
       AND (${resolution}::text IS NULL
            OR ticket.resolution_classification = ${resolution})
+      AND (NOT ${emergencyOnly}::boolean OR ticket.emergency_at IS NOT NULL)
       AND (${activeSince}::timestamptz IS NULL
            OR ticket.last_activity_at >= ${activeSince}::timestamptz)
       AND (${ownerUserId}::uuid IS NULL OR ticket.owner_user_id = ${ownerUserId}::uuid)
@@ -797,7 +923,7 @@ export async function listTickets(
     ORDER BY ticket.last_activity_at DESC, ticket.id DESC
     LIMIT ${limit + 1}
   `;
-  const page = rows.slice(0, limit).map(mapTicket);
+  const page = rows.slice(0, limit).map(mapTicketSummary);
   const last = page.at(-1);
   return {
     tickets: page,

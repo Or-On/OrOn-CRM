@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { FieldWorkflowRequirementError } from "@or-on/crm";
 
 import {
   assertAuthenticatedMutation,
@@ -35,6 +36,13 @@ export function crmErrorResponse(error: unknown): NextResponse {
     );
   if (error instanceof TypeError)
     return NextResponse.json({ error: error.message }, { status: 400 });
+  // A workflow requirement the user can satisfy (a missing before/after
+  // photo, an unacknowledged preparation) is explained, not hidden.
+  if (error instanceof FieldWorkflowRequirementError)
+    return NextResponse.json(
+      { error: error.messages.en, messages: error.messages, code: error.code },
+      { status: 422 },
+    );
   const code = errorCode;
   if (code === "23505")
     return NextResponse.json(

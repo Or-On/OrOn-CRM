@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import type { Ticket, TicketDetail, TicketPage } from "@or-on/crm";
+import type { TicketDetail, TicketPage, TicketSummary } from "@or-on/crm";
 import {
   cleanup,
   fireEvent,
@@ -14,8 +14,11 @@ import { localized } from "./localized";
 
 afterEach(cleanup);
 
-function ticket(overrides: Partial<Ticket> = {}): Ticket {
+function ticket(overrides: Partial<TicketSummary> = {}): TicketSummary {
   return {
+    emergency: null,
+    inquiry: null,
+    pendingReplyLinks: 0,
     id: "11111111-1111-4111-8111-111111111111",
     reference: "T-2026-ABCD1234",
     contactId: "22222222-2222-4222-8222-222222222222",
@@ -44,7 +47,7 @@ const contactNames = {
   "22222222-2222-4222-8222-222222222222": "Fictional caller",
 };
 
-function page(tickets: readonly Ticket[], cursor = false): TicketPage {
+function page(tickets: readonly TicketSummary[], cursor = false): TicketPage {
   return {
     tickets,
     nextCursor: cursor
@@ -183,7 +186,7 @@ it("renders the Hebrew register right-to-left", () => {
 
 function detail(
   attempt: Partial<TicketDetail["attempts"][number]> = {},
-  overrides: Partial<Ticket> = {},
+  overrides: Partial<TicketSummary> = {},
 ): TicketDetail {
   return {
     ticket: ticket(overrides),
@@ -393,4 +396,122 @@ it("labels a phone association as channel control, not verified identity", () =>
   expect(screen.getByText("Phone associated with this contact")).toBeTruthy();
   expect(container.textContent).toContain("not verified identity");
   expect(screen.queryByText("Identity verified")).toBeNull();
+});
+
+it("labels a red call with the tenant's own words and separates waiting on the customer from a failed delivery", () => {
+  render(
+    localized(
+      <TicketsWorkspace
+        contactNames={contactNames}
+        emergencyLabel="קריאה אדומה"
+        initialPage={page([
+          ticket({
+            id: "44444444-4444-4444-8444-444444444444",
+            reference: "T-RED",
+            priority: "urgent",
+            emergency: {
+              at: "2026-09-18T08:30:00.000Z",
+              reason: "Flooding",
+              source: "manual",
+            },
+            inquiry: {
+              intakeStatus: "collecting",
+              followupStatus: "admitted",
+              followupMessageStatus: "delivered",
+              followupRequestedAt: null,
+              customerRepliedAt: null,
+              customerMediaReceivedAt: null,
+              followupError: null,
+              attention: "awaiting_customer",
+            },
+          }),
+          ticket({
+            id: "55555555-5555-4555-8555-555555555555",
+            reference: "T-FAILED",
+            inquiry: {
+              intakeStatus: "collecting",
+              followupStatus: "admitted",
+              followupMessageStatus: "failed",
+              followupRequestedAt: null,
+              customerRepliedAt: null,
+              customerMediaReceivedAt: null,
+              followupError: null,
+              attention: "delivery_failed",
+            },
+            pendingReplyLinks: 1,
+          }),
+        ])}
+        tenantTimeZone="Asia/Jerusalem"
+      />,
+    ),
+  );
+  expect(screen.getAllByText("קריאה אדומה").length).toBeGreaterThan(0);
+  expect(screen.getByText("Awaiting customer details/photo")).toBeTruthy();
+  expect(screen.getByText("WhatsApp delivery failed")).toBeTruthy();
+  expect(screen.getByText("1 reply awaits linking")).toBeTruthy();
+});
+
+it("shows the phone inquiry, its follow-up state and replies awaiting linking", () => {
+  const view = detail(
+    {},
+    {
+      inquiry: {
+        intakeStatus: "collecting",
+        followupStatus: "blocked_window",
+        followupMessageStatus: null,
+        followupRequestedAt: null,
+        customerRepliedAt: null,
+        customerMediaReceivedAt: null,
+        followupError: null,
+        attention: "blocked",
+      },
+    },
+  );
+  render(
+    localized(
+      <TicketDetailView
+        canMarkEmergency
+        contactName="Fictional caller"
+        detail={view}
+        emergencyLabel="Red call"
+        inquiry={{
+          intakeId: "66666666-6666-4666-8666-666666666666",
+          status: "collecting",
+          source: "voice",
+          fields: { faultDescription: "Freezer is warm", urgency: "high" },
+          missingFields: ["customerName"],
+          followupStatus: "blocked_window",
+          followupError: null,
+          customerRepliedAt: null,
+          customerMediaReceivedAt: null,
+          messages: [],
+          repliesToLink: [
+            {
+              messageId: "77777777-7777-4777-8777-777777777777",
+              contentType: "text",
+              text: "Here is the photo",
+              at: "2026-09-18T10:00:00.000Z",
+              candidates: [
+                {
+                  intakeId: "66666666-6666-4666-8666-666666666666",
+                  reference: "T-A",
+                },
+                {
+                  intakeId: "88888888-8888-4888-8888-888888888888",
+                  reference: "T-B",
+                },
+              ],
+            },
+          ],
+        }}
+        tenantTimeZone="Asia/Jerusalem"
+      />,
+    ),
+  );
+  expect(screen.getByText("Freezer is warm")).toBeTruthy();
+  expect(screen.getByText("Phone call")).toBeTruthy();
+  expect(screen.getByText("WhatsApp follow-up not sent")).toBeTruthy();
+  expect(screen.getByText("Link to T-A")).toBeTruthy();
+  expect(screen.getByText("Link to T-B")).toBeTruthy();
+  expect(screen.getByText("Mark as Red call")).toBeTruthy();
 });

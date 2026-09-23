@@ -100,6 +100,11 @@ const intakeSchema = {
         productType: nullableIntakeField,
         productModel: nullableIntakeField,
         serialNumber: nullableIntakeField,
+        callbackNumber: nullableIntakeField,
+        urgency: {
+          type: ["string", "null"],
+          enum: ["low", "normal", "high", "urgent", null],
+        },
       },
       required: [
         "customerName",
@@ -117,6 +122,8 @@ const intakeSchema = {
         "productType",
         "productModel",
         "serialNumber",
+        "callbackNumber",
+        "urgency",
       ],
     },
   },

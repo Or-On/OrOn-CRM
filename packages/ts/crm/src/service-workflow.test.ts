@@ -95,3 +95,83 @@ describe("published service workflow policy", () => {
     ).toEqual({ chainName: "Retail", exactFailure: "Blank paper" });
   });
 });
+
+describe("configurable field operations policy", () => {
+  const full = {
+    version: 1,
+    requiredIntakeFields: ["customerName", "faultDescription", "urgency"],
+    photoPolicy: "requested",
+    selfAssignmentEnabled: true,
+    requiredReportFields: ["diagnosis", "workPerformed"],
+    inquiry: { openOnFirstContact: true },
+    whatsappFollowUp: {
+      enabled: true,
+      trigger: "call_ended",
+      requestPhoto: true,
+      consent: "in_call_agreement",
+      templateName: "service_followup",
+      templateLanguage: "he",
+      templateParameters: ["customerName", "reference"],
+    },
+    emergency: {
+      enabled: true,
+      label: "קריאה אדומה",
+      manualRedCall: true,
+      transferTo: "+972501111111",
+      fallback: "urgent_followup",
+    },
+    preparation: {
+      enabled: true,
+      requireAcknowledgement: true,
+      checklist: [{ key: "spare_board", label: "Spare board", required: true }],
+    },
+    attachmentCategories: [
+      { key: "rcg", label: "RCG", accept: ["pdf", "image"] },
+    ],
+    evidence: { beforePhotoRequired: true, afterPhotoRequired: true },
+  };
+
+  it("accepts every optional capability and keeps absent keys absent", () => {
+    expect(parseServiceWorkflowPolicy(full)).toEqual(full);
+    const legacy = parseServiceWorkflowPolicy(retailServiceWorkflowPolicy);
+    expect(Object.keys(legacy)).not.toContain("emergency");
+  });
+
+  it.each([
+    { ...full, unknown: true },
+    { ...full, emergency: { ...full.emergency, transferTo: "0501234567" } },
+    { ...full, emergency: { ...full.emergency, label: "" } },
+    {
+      ...full,
+      whatsappFollowUp: {
+        ...full.whatsappFollowUp,
+        templateLanguage: undefined,
+      },
+    },
+    {
+      ...full,
+      attachmentCategories: [
+        { key: "before_photo", label: "x", accept: ["pdf"] },
+      ],
+    },
+    {
+      ...full,
+      attachmentCategories: [{ key: "rcg", label: "RCG", accept: ["exe"] }],
+    },
+    {
+      ...full,
+      preparation: {
+        ...full.preparation,
+        checklist: [{ key: "A B", label: "x", required: true }],
+      },
+    },
+    {
+      ...full,
+      evidence: { beforePhotoRequired: "yes", afterPhotoRequired: true },
+    },
+  ])("rejects malformed policy %#", (policy) => {
+    expect(() =>
+      parseServiceWorkflowPolicy(JSON.parse(JSON.stringify(policy)) as unknown),
+    ).toThrow(TypeError);
+  });
+});

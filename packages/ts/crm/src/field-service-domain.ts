@@ -26,7 +26,13 @@ export interface ServiceIntakeFields {
   readonly productType?: string;
   readonly productModel?: string;
   readonly serialNumber?: string;
+  /** A number the customer asked to be called back on; never a message destination. */
+  readonly callbackNumber?: string;
+  readonly urgency?: IntakeUrgency;
 }
+
+export const intakeUrgencies = ["low", "normal", "high", "urgent"] as const;
+export type IntakeUrgency = (typeof intakeUrgencies)[number];
 
 export type IntakeRequiredField =
   | "customerName"
@@ -37,7 +43,9 @@ export type IntakeRequiredField =
   | "exactFailure"
   | "serviceLocation"
   | "faultDescription"
-  | "warrantyStatus";
+  | "warrantyStatus"
+  | "callbackNumber"
+  | "urgency";
 
 const transitions: Readonly<
   Record<ServiceCaseStatus, ReadonlySet<ServiceCaseStatus>>
@@ -106,6 +114,8 @@ export function missingIntakeFields(
         "serviceLocation",
         "faultDescription",
         "warrantyStatus",
+        "callbackNumber",
+        "urgency",
       ] as const
     ).filter((key) => !required.includes(key)),
   ]);
@@ -139,6 +149,10 @@ export function missingIntakeFields(
     !skipped.has("warrantyStatus")
   )
     missing.push("warrantyStatus");
+  if (!present(fields.callbackNumber) && !skipped.has("callbackNumber"))
+    missing.push("callbackNumber");
+  if (fields.urgency === undefined && !skipped.has("urgency"))
+    missing.push("urgency");
   return missing;
 }
 
@@ -193,6 +207,14 @@ export function sanitizeIntakeProposal(
   copyText("productType", 160);
   copyText("productModel", 160);
   copyText("serialNumber", 160);
+  const callback = optionalText(input.callbackNumber, 32);
+  if (callback !== undefined && /^\+?[0-9][0-9 ()-]{6,22}$/u.test(callback))
+    output.callbackNumber = callback;
+  if (
+    typeof input.urgency === "string" &&
+    (intakeUrgencies as readonly string[]).includes(input.urgency)
+  )
+    output.urgency = input.urgency;
   const latitude = coordinate(input.latitude, -90, 90);
   const longitude = coordinate(input.longitude, -180, 180);
   if (latitude !== undefined) output.latitude = latitude;
