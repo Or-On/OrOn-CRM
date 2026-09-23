@@ -32,6 +32,8 @@ def build_agent_processors(
     tool_call_guard=None,
     ownership_speech=None,
     ownership_output=None,
+    scope_router=None,
+    scope_output=None,
 ) -> list:
     """Ordered pipeline: input -> {gender classifier || STT} -> user ctx -> LLM
     -> TTS -> output -> assistant ctx -> [audio buffer].
@@ -87,6 +89,11 @@ def build_agent_processors(
         processors.append(evidence_context)
     if ownership_model is not None:
         processors.append(ownership_model)
+    # Last before inference and after the ownership gate: a routed caller turn
+    # is answered by the approved server response and never reaches the model,
+    # and nothing is spoken while a person owns the call.
+    if scope_router is not None:
+        processors.append(scope_router)
     processors.append(llm)
     if ownership_generated is not None:
         processors.append(ownership_generated)
@@ -107,6 +114,10 @@ def build_agent_processors(
     # frame reaches the synthesis service.
     if response_language is not None:
         processors.append(response_language)
+    # Each chunk now holds exactly the words TTS will receive. Scope validation
+    # happens here, before any audio exists for this generation.
+    if scope_output is not None:
+        processors.append(scope_output)
     # BETWEEN the LLM and TTS, not before both. Its prompt is a TTSSpeakFrame — a
     # DataFrame, so it waits in the queue of every processor ahead of it — and
     # `OpenAILLMService.process_frame` awaits the completion inline. A provider

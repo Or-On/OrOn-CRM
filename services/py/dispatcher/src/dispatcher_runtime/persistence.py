@@ -6,6 +6,7 @@ import base64
 import hashlib
 import hmac
 import json
+import re
 import unicodedata
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
@@ -42,6 +43,12 @@ if TYPE_CHECKING:
     from oron_agent.lead_capture import LeadStoreRefusal
 
 _CALL_CONFIGURATION_EVENT = "voice.call.configuration.v1"
+# Mirrors db/contracts/service-agent-policy.v1.json without importing the
+# optional voice runtime. Categories are policy identifiers, never caller text.
+SCOPE_POLICY_VERSION = "service-agent-policy/1"
+_POLICY_STAGES = frozenset({"caller_turn", "model_output", "synthesis", "tool"})
+_POLICY_ACTIONS = frozenset({"routed", "scope_notice", "rejected", "refused"})
+_POLICY_CATEGORY = re.compile(r"[a-z_]{1,40}(?:,[a-z_]{1,40}){0,7}")
 
 
 def _normalize_identity_name(value: str) -> str:
@@ -1115,6 +1122,58 @@ class PostgresVoiceRuntime:
                 )
             )
 
+    async def record_policy_event(
+        self, context: CallContext, *, stage: str, category: str, action: str
+    ) -> None:
+        """Append one sanitized scope decision: identifiers and categories, never text."""
+
+        if (
+            stage not in _POLICY_STAGES
+            or action not in _POLICY_ACTIONS
+            or not _POLICY_CATEGORY.fullmatch(category)
+        ):
+            raise ValueError("unsupported policy event")
+        async with self._sessionmaker() as database, database.begin():
+            await set_tenant(database, str(context.tenant_id))
+            row = await database.get(Session, context.session_id, with_for_update=True)
+            if row is None:
+                return
+            recorded = (
+                await database.execute(
+                    text("""
+                SELECT count(*) FROM session_events WHERE tenant_id = :tenant_id
+                  AND session_id = :session_id AND event_type = 'voice.policy.v1'
+            """),
+                    {"tenant_id": str(context.tenant_id), "session_id": str(context.session_id)},
+                )
+            ).scalar_one()
+            # A caller repeating probes must not grow the session without bound.
+            if recorded >= 50:
+                return
+            sequence = (
+                await database.execute(
+                    text("""
+                SELECT coalesce(max(sequence), -1) + 1 FROM session_events
+                WHERE tenant_id = :tenant_id AND session_id = :session_id
+            """),
+                    {"tenant_id": str(context.tenant_id), "session_id": str(context.session_id)},
+                )
+            ).scalar_one()
+            database.add(
+                SessionEvent(
+                    tenant_id=context.tenant_id,
+                    session_id=context.session_id,
+                    sequence=sequence,
+                    event_type="voice.policy.v1",
+                    payload={
+                        "policyVersion": SCOPE_POLICY_VERSION,
+                        "stage": stage,
+                        "category": category,
+                        "action": action,
+                    },
+                )
+            )
+
     async def _published_agent_prompt(self, flow_id: UUID, *, tenant_id: UUID) -> str | None:
         """Resolve the agent attached to the latest published canonical voice flow."""
 
@@ -1471,6 +1530,13 @@ class AgentPostgresSessions:
     ) -> None:
         await self._backend.record_voice_quality(
             context, summary, agent_version_id=agent_version_id
+        )
+
+    async def record_policy_event(
+        self, context: CallContext, *, stage: str, category: str, action: str
+    ) -> None:
+        await self._backend.record_policy_event(
+            context, stage=stage, category=category, action=action
         )
 
     async def aclose(self) -> None:

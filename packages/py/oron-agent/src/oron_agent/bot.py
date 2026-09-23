@@ -83,6 +83,12 @@ from oron_agent.pipeline import build_agent_processors
 from oron_agent.quality_observer import VoiceQualityObserver, component_latency_observer
 from oron_agent.recognition import RecognitionAcceptanceProcessor
 from oron_agent.runtime_sessions import RuntimeSessions
+from oron_agent.scope_guard import (
+    ServiceScopeOutputGate,
+    ServiceScopeRouter,
+    ServiceScopeTextFilter,
+    background_event_recorder,
+)
 from oron_agent.service_intake import build_voice_service_intake, service_intake_instruction
 from oron_agent.session_recorder import SessionRecorder, finish_after_cancellation
 from oron_agent.spoken_safety import BusinessClaimGuardFilter
@@ -374,6 +380,23 @@ async def run_bot(
     st = settings_for_call(st, spec.voice, overrides)
     profile = language_profile(spec.language)
     conversation_language = ConversationLanguageState(spec.language)
+    # The only name the approved scope responses may use: the reviewed tenant
+    # profile resolved by the server, never caller or model text.
+    support_profile = configuration.get("supportProfile")
+    business_name = (
+        support_profile.get("supportDisplayName") or support_profile.get("displayName")
+        if isinstance(support_profile, dict)
+        else None
+    )
+    policy_writer = getattr(sessions, "record_policy_event", None)
+
+    async def record_policy_event(stage: str, category: str, action: str) -> None:
+        if policy_writer is not None:
+            await policy_writer(ctx, stage=stage, category=category, action=action)
+
+    scope_event = background_event_recorder(
+        record_policy_event if policy_writer is not None else None
+    )
 
     stt = OwnershipSonioxSTTService(
         api_key=st.soniox_api_key.get_secret_value(),
@@ -548,6 +571,13 @@ async def run_bot(
                 lambda: bool(ticket_receipt_state.get("ticketId")),
                 save_claim_receipted,
             ),
+            # Last filter: every utterance, including ones that never passed
+            # the model, is checked against the scope policy before synthesis.
+            ServiceScopeTextFilter(
+                language=lambda: conversation_language.current,
+                business_name=business_name if isinstance(business_name, str) else None,
+                on_event=scope_event,
+            ),
         ],
         text_aggregation_mode=st.tts_text_aggregation,
         first_clause=st.tts_first_clause,
@@ -697,6 +727,16 @@ async def run_bot(
         tool_call_guard=tool_call_guard,
         ownership_speech=VoiceControlGate(voice_control) if voice_control else None,
         ownership_output=VoiceControlGate(voice_control, audio=True) if voice_control else None,
+        scope_router=ServiceScopeRouter(
+            language=lambda: conversation_language.current,
+            business_name=business_name if isinstance(business_name, str) else None,
+            on_event=scope_event,
+        ),
+        scope_output=ServiceScopeOutputGate(
+            language=lambda: conversation_language.current,
+            business_name=business_name if isinstance(business_name, str) else None,
+            on_event=scope_event,
+        ),
     )
     if voice_control is not None:
         voice_control.attach(

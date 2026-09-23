@@ -102,7 +102,9 @@ def test_unverified_external_action_claims_are_suppressed(claim):
 def test_protocol_explicitly_keeps_small_talk_multi_point_and_support_turns_in_llm():
     instruction = grounding_instruction([], "he")
     assert "greetings, small talk, clarifications" in instruction
-    assert "every meaningful part" in instruction
+    assert "every meaningful part that belongs to this business's service" in instruction
+    assert "never a general-purpose assistant" in instruction
+    assert "unrelated questions" not in instruction
     assert "supplements the trusted tenant role" in instruction
     assert "does not replace or reinterpret them" in instruction
     assert "begin every natural-language answer with <lang:xx>" in instruction
