@@ -39,7 +39,7 @@ def test_output_vectors(vector):
 
 
 def test_normalization_removes_points_controls_and_joiners():
-    assert normalize("אִיזֶה​ מוֹדֶל, ג׳מיני?") == " איזה מודל גמיני "
+    assert normalize("אִיזֶה\u200b מוֹדֶל, ג׳מיני?") == " איזה מודל גמיני "
     assert normalize("  GPT-4o  ") == " gpt 4o "
 
 

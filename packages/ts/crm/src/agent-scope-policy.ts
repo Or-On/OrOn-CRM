@@ -15,7 +15,10 @@ export const agentScopePolicyVersion = serviceAgentPolicy.policyVersion;
 export type ApprovedResponseKind =
   "identity" | "scope" | "data" | "recipient" | "fallback";
 
-const strip = /[֑-ׇ­​-‏‪-‮⁠-⁤⁦-⁩﻿]/gu;
+const strip = new RegExp(
+  "[\u0591-\u05c7\u00ad\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]",
+  "gu",
+);
 const joiners = new RegExp(
   `[${serviceAgentPolicy.normalization.joiners.replace(/[\\\]^-]/gu, "\\$&")}]`,
   "gu",

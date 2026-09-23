@@ -20,7 +20,9 @@ from oron_agent.scope_policy_contract import POLICY
 
 POLICY_VERSION: Final[str] = POLICY["policyVersion"]
 
-_STRIP = re.compile("[֑-ׇ­​-‏‪-‮⁠-⁤⁦-⁩﻿]")
+_STRIP = re.compile(
+    "[\u0591-\u05c7\u00ad\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]"
+)
 _JOINERS = re.compile("[" + re.escape(POLICY["normalization"]["joiners"]) + "]")
 _OUTSIDE = re.compile("[^" + POLICY["normalization"]["keep"] + "]+")
 

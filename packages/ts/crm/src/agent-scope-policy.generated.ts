@@ -363,7 +363,7 @@ export const serviceAgentPolicy = {
         route: "identity",
       },
       {
-        text: "Which​ model are you",
+        text: "Which\u200b model are you",
         route: "identity",
       },
     ],

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -25,12 +26,21 @@ _HEADER = (
 )
 
 
+_INVISIBLE = re.compile("[\u00ad\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]")
+
+
+def _visible(source: str) -> str:
+    """Escape zero-width and bidi controls so no mirror hides characters in source."""
+
+    return _INVISIBLE.sub(lambda match: f"\\u{ord(match.group()):04x}", source)
+
+
 def _canonical() -> dict:
     return json.loads(CANONICAL.read_text(encoding="utf-8"))
 
 
 def _typescript(contract: dict) -> str:
-    body = json.dumps(contract, ensure_ascii=False, indent=2)
+    body = _visible(json.dumps(contract, ensure_ascii=False, indent=2))
     source = f"// {_HEADER}\n\nexport const serviceAgentPolicy = {body} as const;\n"
     prettier = shutil.which("pnpm")
     if prettier is None:
@@ -47,7 +57,7 @@ def _typescript(contract: dict) -> str:
 
 
 def _python(contract: dict) -> str:
-    body = json.dumps(contract, ensure_ascii=False, indent=2)
+    body = _visible(json.dumps(contract, ensure_ascii=False, indent=2))
     if '"""' in body:
         raise RuntimeError("agent policy cannot be embedded in a triple-quoted string")
     return (

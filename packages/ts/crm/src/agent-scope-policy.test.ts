@@ -41,7 +41,7 @@ describe("service agent scope policy", () => {
   );
 
   it("normalizes exactly like the Python runtime", () => {
-    expect(normalizeScopeText("אִיזֶה​ מוֹדֶל, ג׳מיני?")).toBe(
+    expect(normalizeScopeText("אִיזֶה\u200b מוֹדֶל, ג׳מיני?")).toBe(
       " איזה מודל גמיני ",
     );
     expect(normalizeScopeText("  GPT-4o  ")).toBe(" gpt 4o ");
