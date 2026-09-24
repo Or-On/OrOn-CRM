@@ -26,8 +26,10 @@ export async function POST(request: Request) {
         { status: 503 },
       );
     }
+
     const session = await assertAuthenticatedMutation(request);
     const body = await jsonObject(request);
+
     if (
       typeof body.contactId !== "string" ||
       typeof body.flowId !== "string" ||
@@ -38,6 +40,7 @@ export async function POST(request: Request) {
         "contactId, flowId, idempotencyKey, and callerGender are required",
       );
     }
+
     if (
       body.idempotencyKey.length < 8 ||
       body.idempotencyKey.length > 128 ||
@@ -45,6 +48,7 @@ export async function POST(request: Request) {
     ) {
       throw new TypeError("The real-call idempotency key is invalid");
     }
+
     if (body.explicitApproval !== true) {
       throw new TypeError(
         "A real telephone call requires explicit confirmation",
@@ -53,60 +57,76 @@ export async function POST(request: Request) {
 
     const admission = await withCurrentTenant("voice:operate", async (sql) => {
       const contact = await getContact(sql, body.contactId as string);
+
       if (contact?.lifecycleStatus !== "active") {
         throw new TypeError("The selected contact is not callable");
       }
+
       if (contact.voiceConsent !== "granted") {
         throw new TypeError("Voice consent is required");
       }
+
       const identity = contact.identities.find(
         (candidate) =>
           (candidate.channel === "phone" || candidate.channel === "whatsapp") &&
           candidate.normalizedValue !== null &&
           candidate.validationStatus !== "invalid",
       );
+
       const normalizedDestination = identity?.normalizedValue;
+
       if (!normalizedDestination) {
         throw new TypeError("A valid E.164 phone identity is required");
       }
+
       const bindings = await sql<
         { agent_version_id: string; flow_version: number }[]
       >`
-          WITH candidates AS (
-            SELECT canonical.*,
-              row_number() OVER (
-                PARTITION BY canonical.flow_definition_id
-                ORDER BY canonical.version DESC
-              ) AS latest
-            FROM automation.flow_versions canonical
-            WHERE canonical.tenant_id = platform.current_tenant_id()
-              AND canonical.published_at IS NOT NULL
-          )
-          SELECT DISTINCT agent.id::text AS agent_version_id,
-            (node #>> '{configuration,flowVersion}')::integer AS flow_version
-          FROM candidates canonical
-          CROSS JOIN LATERAL
-            jsonb_array_elements(canonical.definition -> 'nodes') node
-          JOIN agents.agent_profile_versions agent
-            ON agent.tenant_id = canonical.tenant_id
-           AND (
-             (node #>> '{configuration,agentVersionId}' IS NULL
-              AND agent.id = canonical.agent_profile_version_id)
-             OR node #>> '{configuration,agentVersionId}' = agent.id::text
+        WITH candidates AS (
+          SELECT
+            canonical.*,
+            row_number() OVER (
+              PARTITION BY canonical.flow_definition_id
+              ORDER BY canonical.version DESC
+            ) AS latest
+          FROM automation.flow_versions canonical
+          JOIN automation.flow_definitions definition
+            ON definition.id = canonical.flow_definition_id
+           AND definition.tenant_id = canonical.tenant_id
+           AND definition.archived_at IS NULL
+          WHERE canonical.tenant_id = platform.current_tenant_id()
+            AND canonical.published_at IS NOT NULL
+        )
+        SELECT DISTINCT
+          agent.id::text AS agent_version_id,
+          (node #>> '{configuration,flowVersion}')::integer AS flow_version
+        FROM candidates canonical
+        CROSS JOIN LATERAL
+          jsonb_array_elements(canonical.definition -> 'nodes') node
+        JOIN agents.agent_profile_versions agent
+          ON agent.tenant_id = canonical.tenant_id
+         AND (
+           (
+             node #>> '{configuration,agentVersionId}' IS NULL
+             AND agent.id = canonical.agent_profile_version_id
            )
-          JOIN public.flows voice
-            ON voice.tenant_id = canonical.tenant_id
-           AND voice.flow_id = ${body.flowId as string}::uuid
-           AND voice.version =
-             (node #>> '{configuration,flowVersion}')::integer
-          WHERE canonical.latest = 1
-            AND canonical.validation_status = 'valid'
-            AND agent.published_at IS NOT NULL
-            AND agent.validation_status = 'valid'
-            AND 'voice' = ANY(agent.channel_capabilities)
-            AND node ->> 'type' = 'voice.call'
-            AND node #>> '{configuration,flowId}' = ${body.flowId as string}
-        `;
+           OR node #>> '{configuration,agentVersionId}' = agent.id::text
+         )
+        JOIN public.flows voice
+          ON voice.tenant_id = canonical.tenant_id
+         AND voice.flow_id = ${body.flowId as string}::uuid
+         AND voice.version =
+           (node #>> '{configuration,flowVersion}')::integer
+        WHERE canonical.latest = 1
+          AND canonical.validation_status = 'valid'
+          AND agent.published_at IS NOT NULL
+          AND agent.validation_status = 'valid'
+          AND 'voice' = ANY(agent.channel_capabilities)
+          AND node ->> 'type' = 'voice.call'
+          AND node #>> '{configuration,flowId}' =
+            ${body.flowId as string}
+      `;
+
       if (bindings.length !== 1 || bindings[0] === undefined) {
         throw new TypeError(
           bindings.length > 1
@@ -114,6 +134,7 @@ export async function POST(request: Request) {
             : "The selected published voice flow and agent binding are unavailable",
         );
       }
+
       return {
         agentVersionId: bindings[0].agent_version_id,
         destination: normalizedDestination,
@@ -122,10 +143,12 @@ export async function POST(request: Request) {
     });
 
     const assertion = await issueDispatcherGrant(session);
+
     const dispatcherUrl = new URL(
       "/api/v1/dispatch/outbound",
       process.env.DISPATCHER_URL ?? "http://127.0.0.1:8082",
     );
+
     const response = await fetch(dispatcherUrl, {
       method: "POST",
       headers: {
@@ -146,8 +169,10 @@ export async function POST(request: Request) {
       cache: "no-store",
       signal: AbortSignal.timeout(15_000),
     });
+
     if (!response.ok) {
       const failure: unknown = await response.json().catch(() => null);
+
       const safeDetail =
         failure !== null &&
         typeof failure === "object" &&
@@ -155,6 +180,7 @@ export async function POST(request: Request) {
         typeof failure.detail === "string"
           ? failure.detail
           : null;
+
       return Response.json(
         {
           error:
@@ -169,15 +195,23 @@ export async function POST(request: Request) {
         },
       );
     }
+
     const result: unknown = await response.json();
+
     return Response.json(result, { status: response.status });
   } catch (error) {
-    if (error instanceof UnauthenticatedError)
+    if (error instanceof UnauthenticatedError) {
       return Response.json({ error: "Unauthenticated" }, { status: 401 });
-    if (error instanceof ForbiddenError)
+    }
+
+    if (error instanceof ForbiddenError) {
       return Response.json({ error: "Forbidden" }, { status: 403 });
-    if (error instanceof TypeError)
+    }
+
+    if (error instanceof TypeError) {
       return Response.json({ error: error.message }, { status: 400 });
+    }
+
     return Response.json({ error: "Real call unavailable" }, { status: 503 });
   }
 }
