@@ -1,0 +1,77 @@
+{
+  "$comment": "ProTouch field-operations settings, applied ONLY through Business configuration (save draft -> submit -> platform administrator approval). This is tenant configuration data; no application code references this file or the tenant. The on-call transfer number is deliberately absent: an administrator enters emergency.transferTo in the editor. Merge `workflow` into the tenant's existing field_service workflow (keep its reviewed requiredReportFields/selfAssignmentEnabled if they differ).",
+  "tenantSlugHint": "protouch",
+  "features": [
+    "contacts",
+    "agents",
+    "whatsapp",
+    "voice",
+    "tickets",
+    "field_service",
+    "technicians",
+    "documents",
+    "reports",
+    "appointments"
+  ],
+  "featureConfiguration": {
+    "field_service": {
+      "workflow": {
+        "version": 1,
+        "requiredIntakeFields": [
+          "customerName",
+          "customerPhone",
+          "serviceLocation",
+          "faultDescription",
+          "urgency"
+        ],
+        "photoPolicy": "requested",
+        "selfAssignmentEnabled": true,
+        "requiredReportFields": ["diagnosis", "workPerformed"],
+        "inquiry": { "openOnFirstContact": true },
+        "whatsappFollowUp": {
+          "enabled": true,
+          "trigger": "call_ended",
+          "requestPhoto": true,
+          "consent": "in_call_agreement"
+        },
+        "emergency": {
+          "enabled": true,
+          "label": "קריאה אדומה",
+          "manualRedCall": true,
+          "fallback": "notify_staff"
+        },
+        "preparation": {
+          "enabled": true,
+          "requireAcknowledgement": true,
+          "instructions": "יש לעבור על פרטי הקריאה ולוודא שכל הציוד הנדרש ברכב לפני היציאה.",
+          "checklist": [
+            {
+              "key": "case_reviewed",
+              "label": "קראתי את פרטי הקריאה והתקלה",
+              "required": true
+            },
+            {
+              "key": "parts_loaded",
+              "label": "חלקי החילוף הרלוונטיים ברכב",
+              "required": true
+            },
+            {
+              "key": "tools_loaded",
+              "label": "כלי העבודה והציוד הנדרש ברכב",
+              "required": true
+            },
+            {
+              "key": "rcg_forms",
+              "label": "טופסי RCG זמינים",
+              "required": false
+            }
+          ]
+        },
+        "attachmentCategories": [
+          { "key": "rcg", "label": "RCG", "accept": ["pdf", "image"] }
+        ],
+        "evidence": { "beforePhotoRequired": true, "afterPhotoRequired": true }
+      }
+    }
+  }
+}
