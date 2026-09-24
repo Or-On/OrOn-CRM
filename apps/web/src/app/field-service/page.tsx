@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import {
   getFieldServiceFeatureState,
   getServiceDirectory,
+  getServiceWorkflowPolicy,
   getTechnicianSessionContext,
   getTenantSettings,
   listContacts,
@@ -35,6 +36,11 @@ export default async function FieldServicePage() {
         const canManage = isAuthorized(principal, "field-service:manage");
         const canOperate = isAuthorized(principal, "field-service:operate");
         const isTechnician = session.tenant.role === "technician";
+        // The database decides; this only avoids offering a red call the
+        // role or tenant setting would refuse.
+        const mayMarkRedCall = ["owner", "admin", "agent"].includes(
+          session.tenant.role,
+        );
         // The physical technician belongs to this browser session, not to
         // the (possibly shared) platform account.
         const technicianSession = isTechnician
@@ -48,6 +54,7 @@ export default async function FieldServicePage() {
           settings,
           teamMembers,
           directory,
+          policy,
         ] = await Promise.all([
           listServiceCasePage(sql, { limit: 50 }),
           listServiceAppointments(sql),
@@ -58,7 +65,14 @@ export default async function FieldServicePage() {
           canManage || (isTechnician && canOperate)
             ? getServiceDirectory(sql)
             : Promise.resolve({ stores: [] }),
+          mayMarkRedCall
+            ? getServiceWorkflowPolicy(sql)
+            : Promise.resolve(null),
         ]);
+        const redCallLabel =
+          policy?.emergency?.enabled === true && policy.emergency.manualRedCall
+            ? policy.emergency.label
+            : null;
         return {
           appointments,
           cases: casePage.cases,
@@ -74,6 +88,7 @@ export default async function FieldServicePage() {
           canManage,
           isTechnician,
           canOperate,
+          redCallLabel,
           ...(technicianSession === undefined ? {} : { technicianSession }),
         };
       },

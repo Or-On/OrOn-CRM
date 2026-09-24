@@ -293,16 +293,17 @@ class VoiceServiceIntake:
             self._ticket_receipt.setdefault("ticketId", receipt["ticketId"])
         outcome = "no_transfer_target"
         target = None
-        if receipt.get("transferAvailable") and self._emergency_transfer is not None:
+        transfer = self._emergency_transfer
+        if receipt.get("transferAvailable") and transfer is not None:
             try:
                 target = await self._sessions.emergency_transfer_target(self._context)
             except Exception:
                 target = None
-        if target:
+        if target and transfer is not None:
             language = "he" if str(self._language()).startswith("he") else "en"
             await speak(_TRANSFER_LINE[language])
             await asyncio.sleep(_TRANSFER_ANNOUNCEMENT_SECS)
-            outcome = await self._emergency_transfer(target)
+            outcome = await transfer(target)
         elif receipt.get("transferAvailable"):
             outcome = "transfer_failed"
         await self._record(outcome)

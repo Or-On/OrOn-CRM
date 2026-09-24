@@ -2177,8 +2177,7 @@ async function processIntakeFollowup(
       >`SELECT service.prepare_intake_followup_recipient(${intakeId}::uuid) AS recipient`;
       const recipient = prepared[0]?.recipient;
       if (
-        recipient === undefined ||
-        recipient.status !== "ready" ||
+        recipient?.status !== "ready" ||
         recipient.conversationId === undefined ||
         recipient.provider === undefined ||
         recipient.recipientIdentityId === undefined ||

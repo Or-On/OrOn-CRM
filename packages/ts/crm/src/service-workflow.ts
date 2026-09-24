@@ -33,6 +33,9 @@ export const followUpTemplateParameterKeys = [
 export type FollowUpTemplateParameter =
   (typeof followUpTemplateParameterKeys)[number];
 
+/* eslint-disable @typescript-eslint/consistent-type-definitions --
+   Nested policy sections stay type aliases: interfaces are not assignable to
+   JsonValue, which tenant configuration packages require. */
 /** Phone intake opens a visible inquiry at call admission. */
 export type InquiryPolicy = {
   readonly openOnFirstContact: boolean;
@@ -76,6 +79,7 @@ export type EvidencePolicy = {
   readonly beforePhotoRequired: boolean;
   readonly afterPhotoRequired: boolean;
 };
+/* eslint-enable @typescript-eslint/consistent-type-definitions */
 export interface ServiceWorkflowPolicy {
   readonly version: 1;
   readonly requiredIntakeFields: readonly IntakeRequiredField[];

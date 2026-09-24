@@ -15,6 +15,7 @@ import {
   AnimatedNumber,
   Badge,
   Button,
+  Checkbox,
   ConfirmDialog,
   DataTable,
   Dialog,
@@ -96,6 +97,7 @@ export function FieldServiceWorkspace({
   isTechnician = false,
   serviceStores = [],
   technicianSession,
+  redCallLabel = null,
 }: {
   readonly appointments: readonly ServiceAppointment[];
   readonly cases: readonly ServiceCaseSummary[];
@@ -109,6 +111,8 @@ export function FieldServiceWorkspace({
   readonly canOperate: boolean;
   readonly isTechnician?: boolean;
   readonly serviceStores?: Directory["stores"];
+  /** The tenant's red-call wording when this user may mark one, else null. */
+  readonly redCallLabel?: string | null;
   /** The physical technician of this browser session, for technician roles. */
   readonly technicianSession?: TechnicianSessionContext;
 }) {
@@ -126,6 +130,7 @@ export function FieldServiceWorkspace({
   const [createOpen, setCreateOpen] = useState(false);
   const [createCustomerId, setCreateCustomerId] = useState("");
   const [createNewCustomer, setCreateNewCustomer] = useState(false);
+  const [markRedCall, setMarkRedCall] = useState(false);
   const [contactQuery, setContactQuery] = useState("");
   const [contactOptions, setContactOptions] =
     useState<readonly CaseCustomer[]>(contacts);
@@ -207,6 +212,7 @@ export function FieldServiceWorkspace({
   function closeCreateDialog() {
     setError(undefined);
     setCreateOpen(false);
+    setMarkRedCall(false);
   }
 
   function openScheduleDialog(serviceCase: ServiceCaseSummary) {
@@ -356,6 +362,8 @@ export function FieldServiceWorkspace({
     delete body.newCustomerPhone;
     delete body.newCustomerEmail;
     delete body.newCustomerCompany;
+    delete body.redCall;
+    if (!markRedCall) delete body.emergencyReason;
     await run("create-case", async () => {
       const created = await crmMutation<{ case: ServiceCaseSummary }>(
         "/api/field-service/cases",
@@ -1187,6 +1195,28 @@ export function FieldServiceWorkspace({
             label={he ? "מספר סידורי (אופציונלי)" : "Serial number (optional)"}
             name="serialNumber"
           />
+          {redCallLabel === null ? null : (
+            <>
+              <Checkbox
+                checked={markRedCall}
+                name="redCall"
+                onChange={(event) => {
+                  setMarkRedCall(event.currentTarget.checked);
+                }}
+              >
+                {he ? `לסמן כ${redCallLabel}` : `Mark as ${redCallLabel}`}
+              </Checkbox>
+              {markRedCall ? (
+                <Textarea
+                  id="field-case-emergency-reason"
+                  label={he ? "סיבת הדחיפות" : "Why is this an emergency?"}
+                  name="emergencyReason"
+                  required
+                  rows={2}
+                />
+              ) : null}
+            </>
+          )}
           <div className="field-service-form__actions">
             <Button onClick={closeCreateDialog} type="button" variant="quiet">
               {he ? "ביטול" : "Cancel"}

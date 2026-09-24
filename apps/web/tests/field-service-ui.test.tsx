@@ -738,6 +738,61 @@ describe("field-service UI contracts", () => {
     expect(within(createCaseDialog).queryByRole("alert")).toBeNull();
   });
 
+  it("offers the tenant's red call wording only when the workspace allows it", async () => {
+    state.crmMutation.mockResolvedValueOnce({ case: serviceCase });
+    const props = {
+      appointments: [],
+      canManage: true,
+      canOperate: true,
+      cases: [serviceCase],
+      contacts: [],
+      feature,
+      technicians: [],
+      timezone: "Asia/Jerusalem",
+    };
+    const { unmount } = render(localized(<FieldServiceWorkspace {...props} />));
+    fireEvent.click(screen.getByRole("button", { name: "New service case" }));
+    expect(
+      within(
+        screen.getByRole("dialog", { name: "New service case" }),
+      ).queryByRole("checkbox", { name: /red call/i }),
+    ).toBeNull();
+    unmount();
+
+    render(
+      localized(<FieldServiceWorkspace {...props} redCallLabel="Red call" />),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "New service case" }));
+    const dialog = screen.getByRole("dialog", { name: "New service case" });
+    expect(
+      within(dialog).queryByLabelText("Why is this an emergency?"),
+    ).toBeNull();
+    fireEvent.click(
+      within(dialog).getByRole("checkbox", { name: "Mark as Red call" }),
+    );
+    fireEvent.change(within(dialog).getByLabelText("Case title"), {
+      target: { value: "Freezer down" },
+    });
+    fireEvent.change(
+      within(dialog).getByLabelText("Why is this an emergency?"),
+      {
+        target: { value: "Stock is spoiling" },
+      },
+    );
+    const form = within(dialog).getByLabelText("Case title").closest("form");
+    if (form === null) throw new Error("create-case form missing");
+    fireEvent.submit(form);
+
+    await waitFor(() => expect(state.crmMutation).toHaveBeenCalled());
+    const [path, body] = state.crmMutation.mock.calls.at(-1) as [
+      string,
+      Record<string, unknown>,
+    ];
+    expect(path).toBe("/api/field-service/cases");
+    expect(body.emergencyReason).toBe("Stock is spoiling");
+    expect(body).not.toHaveProperty("redCall");
+  });
+
   it("rejects malformed case routes before querying tenant data", async () => {
     const { default: ServiceCasePage } =
       await import("../src/app/field-service/cases/[id]/page");

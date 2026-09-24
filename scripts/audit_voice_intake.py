@@ -272,11 +272,12 @@ async def collect(
         f"{row['followup_status']}:{row['message_status'] or '-'}": row["total"]
         for row in followups
     }
-    report.unresolved_reply_links = await connection.fetchval(
+    unresolved = await connection.fetchval(
         "SELECT count(*) FROM service.followup_triage WHERE resolved_at IS NULL "
         "AND ($1::uuid IS NULL OR tenant_id = $1::uuid)",
         tenant_id,
     )
+    report.unresolved_reply_links = int(unresolved or 0)
     if not events:
         report.coverage_gaps.append(
             "No LiveKit webhook events in the window: either no calls, a different "

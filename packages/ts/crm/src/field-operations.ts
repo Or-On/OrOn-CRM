@@ -78,7 +78,7 @@ export function fieldWorkflowRequirement(
 ): FieldWorkflowRequirementError | undefined {
   const message =
     typeof error === "object" && error !== null && "message" in error
-      ? String((error as { message: unknown }).message)
+      ? String(error.message)
       : "";
   const code = (
     Object.keys(requirementMessages) as FieldWorkflowRequirement[]
