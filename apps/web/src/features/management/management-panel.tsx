@@ -1334,6 +1334,14 @@ export function ManagementPanel({
               <p>{t("tenantSettings.productScope")}</p>
             </header>
             <div className="settings-product-links">
+              {/* This tab is shown only to tenant managers, like the page. */}
+              <Link href="/settings/business">
+                <div>
+                  <strong>{t("shell.businessConfiguration")}</strong>
+                  <p>{t("tenantSettings.businessConfigurationHint")}</p>
+                </div>
+                <ArrowUpRight aria-hidden="true" size={18} />
+              </Link>
               {canReadCrm ? (
                 <Link href="/operations">
                   <div>

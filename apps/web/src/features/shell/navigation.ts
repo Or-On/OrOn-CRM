@@ -9,7 +9,8 @@ export type NavigationGroup = "Workspace" | "Operations" | "Platform";
 export function destinationPermission(href: string): Permission {
   if (href === "/voice" || href === "/flows" || href.startsWith("/voice/"))
     return "voice:read";
-  if (href === "/finance") return "tenant:manage";
+  if (href === "/finance" || href === "/settings/business")
+    return "tenant:manage";
   if (href === "/field-service" || href.startsWith("/field-service/"))
     return "field-service:read";
   if (href === "/users" || href === "/roles") return "members:manage";
@@ -64,7 +65,8 @@ export type NavigationIcon =
   | "settings"
   | "health"
   | "tenants"
-  | "fieldService";
+  | "fieldService"
+  | "businessConfiguration";
 
 export interface NavigationDestination {
   readonly group: NavigationGroup;
@@ -165,6 +167,12 @@ export const navigation = [
     icon: "health",
   },
   {
+    href: "/settings/business",
+    label: "Business configuration",
+    group: "Platform",
+    icon: "businessConfiguration",
+  },
+  {
     href: "/settings",
     label: "Settings",
     group: "Platform",
@@ -196,14 +204,6 @@ export const contextualDestinations = [
     icon: "voice",
     parentHref: "/voice",
     translationKey: "flows",
-  },
-  {
-    href: "/settings/business",
-    label: "Business configuration",
-    group: "Platform",
-    icon: "settings",
-    parentHref: "/settings",
-    translationKey: "settings",
   },
 ] as const;
 

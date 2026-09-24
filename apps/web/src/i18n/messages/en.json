@@ -78,7 +78,8 @@
     "productScope": "Manage product-specific settings in their dedicated workspaces. Your existing permissions apply.",
     "messagingHint": "Manage messaging templates, audiences and campaigns.",
     "voiceHint": "Manage voice flows, phone numbers and call activity.",
-    "agentHint": "Manage agents, workflows and team handoffs."
+    "agentHint": "Manage agents, workflows and team handoffs.",
+    "businessConfigurationHint": "Choose modules, service workflows and conversation processes, then submit them for approval."
   },
   "tenantSupportSettings": {
     "tab": "AI support",
@@ -574,6 +575,7 @@
     "agents": "Agents & Flows",
     "flows": "Voice flow library",
     "settings": "Settings",
+    "businessConfiguration": "Business configuration",
     "health": "System health",
     "notifications": "Notifications",
     "notificationCount": "{count, plural, =0 {All caught up} one {# unread} other {# unread}}",
@@ -753,6 +755,9 @@
     "settingsEyebrow": "Workspace administration",
     "settingsTitle": "Settings & Team",
     "settingsDescription": "Personal preferences, workspace details and access.",
+    "businessConfigurationEyebrow": "Workspace administration",
+    "businessConfigurationTitle": "Business configuration",
+    "businessConfigurationDescription": "Tailor modules and workflows to this business, review the experience, and approve changes before publication.",
     "voiceEyebrow": "Voice operations",
     "voiceTitle": "Calls & Phone numbers",
     "voiceDescription": "Inspect call state, simulator outcomes and configured phone numbers.",

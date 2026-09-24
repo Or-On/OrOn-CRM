@@ -7,8 +7,6 @@ import {
   tenantFeatureRegistry,
   tenantTemplateRegistry,
 } from "@or-on/crm";
-import { PageHeader } from "@or-on/ui";
-import { getLocale } from "next-intl/server";
 
 import { BusinessConfiguration } from "../../../features/business-configuration";
 import {
@@ -17,11 +15,10 @@ import {
   withCurrentTenant,
 } from "../../../features/auth";
 import { AccessDenied } from "../../../i18n/access-denied";
+import { ProductHeading } from "../../../i18n/product-heading";
 
 export default async function BusinessConfigurationPage() {
   try {
-    const locale = await getLocale();
-    const he = locale.startsWith("he");
     const data = await withCurrentTenant(
       "tenant:manage",
       async (sql, session) => {
@@ -35,16 +32,8 @@ export default async function BusinessConfigurationPage() {
       },
     );
     return (
-      <main className="page page--wide page--workspace-premium">
-        <PageHeader
-          eyebrow={he ? "הגדרות" : "Settings"}
-          title={he ? "הגדרת העסק" : "Business configuration"}
-          description={
-            he
-              ? "התאימו יכולות ותהליכים לעסק, בדקו את חוויית הלקוח ושלחו לאישור לפני הפרסום."
-              : "Tailor the workspace and workflows to this business, review the experience, and approve changes before publication."
-          }
-        />
+      <main className="page page--wide page--settings page--workspace-premium">
+        <ProductHeading page="businessConfiguration" premium />
         <BusinessConfiguration
           definitions={tenantFeatureRegistry}
           initialFeatures={data.features}

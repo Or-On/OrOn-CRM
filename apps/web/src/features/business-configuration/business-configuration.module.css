@@ -286,3 +286,91 @@
   align-items: end;
   gap: 0.5rem;
 }
+
+/* Settings-style side panel: status, section navigation and draft actions. */
+.status {
+  display: grid;
+  gap: 0.5rem;
+  padding-block-end: 0.875rem;
+  margin-block-end: 1rem;
+  border-block-end: 1px solid var(--or-divider);
+}
+.status > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.status strong {
+  font-size: 0.8125rem;
+}
+.status p {
+  margin: 0;
+  color: var(--or-text-muted);
+  font-size: 0.75rem;
+  line-height: 1.55;
+}
+.navActions {
+  display: grid;
+  gap: 0.5rem;
+  margin-block-start: 1rem;
+  padding-block-start: 1rem;
+  border-block-start: 1px solid var(--or-divider);
+}
+.navActions > button {
+  inline-size: 100%;
+  min-block-size: 2.75rem;
+}
+
+/* Modules read as selectable cards rather than a long list. */
+.moduleList {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 17rem), 1fr));
+  gap: 0.75rem;
+}
+.moduleList .module {
+  align-items: start;
+  padding: 1rem;
+  background: var(--or-surface);
+  border: 1px solid var(--or-border);
+  border-radius: var(--or-radius-md);
+  transition: border-color 150ms ease;
+}
+.moduleList .module:hover {
+  border-color: var(--or-border-strong, var(--or-accent));
+}
+.moduleList .module[data-selected="true"] {
+  border-color: color-mix(in srgb, var(--or-accent) 55%, var(--or-border));
+  background: color-mix(in srgb, var(--or-accent) 5%, var(--or-surface));
+}
+.moduleList .module p {
+  font-size: 0.8125rem;
+  line-height: 1.55;
+}
+.moduleList .module small {
+  display: block;
+  margin-block-start: 0.5rem;
+  font-size: 0.75rem;
+}
+.moduleList .module > input {
+  margin-block-start: 0.15rem;
+}
+@media (prefers-reduced-motion: reduce) {
+  .moduleList .module {
+    transition: none;
+  }
+}
+.subheading {
+  display: grid;
+  gap: 0.35rem;
+}
+.subheading h3 {
+  margin: 0;
+}
+.subheading p {
+  margin: 0;
+  max-inline-size: 48rem;
+  color: var(--or-text-secondary);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+}

@@ -38,6 +38,7 @@ import {
   Plus,
   Search,
   Settings,
+  SlidersHorizontal,
   ShieldCheck,
   Sun,
   UserCircle,
@@ -101,6 +102,7 @@ const icons: Record<NavigationIcon, LucideIcon> = {
   health: Activity,
   tenants: Building2,
   fieldService: Wrench,
+  businessConfiguration: SlidersHorizontal,
 };
 
 const groups: readonly NavigationGroup[] = [

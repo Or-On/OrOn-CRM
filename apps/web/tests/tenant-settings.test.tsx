@@ -451,8 +451,10 @@ describe("tenant settings controls", () => {
     expect(notifications.getByText(/1 unread of 1/u)).toBeTruthy();
     expect(notifications.queryByRole("checkbox")).toBeNull();
     const products = tab(en.tenantSettings.productSettings);
-    expect(products.getAllByRole("link")).toHaveLength(1);
-    expect(products.getByRole("link").getAttribute("href")).toBe("/voice");
+    // Business configuration follows tenant management, not CRM or voice.
+    expect(
+      products.getAllByRole("link").map((link) => link.getAttribute("href")),
+    ).toEqual(["/settings/business", "/voice"]);
     expect(screen.queryByText("Real delivery enabled")).toBeNull();
   });
 

@@ -145,10 +145,16 @@ describe("business configuration", () => {
     );
   }
 
+  // Sections are tab panels, as on the Settings page; open one before using it.
+  function openSection(name: RegExp) {
+    fireEvent.click(screen.getByRole("tab", { name }));
+  }
+
   it("keeps feature choices in the draft until explicit save and approval", async () => {
     const saved = state();
     vi.mocked(crmMutation).mockResolvedValue({ configuration: saved });
     render(workspace());
+    openSection(/^Modules/);
     fireEvent.click(screen.getByRole("checkbox", { name: "Enable Tickets" }));
     expect(crmMutation).not.toHaveBeenCalled();
     expect(screen.getByText("Unsaved changes")).toBeTruthy();
@@ -180,6 +186,7 @@ describe("business configuration", () => {
       .mockResolvedValueOnce({ configuration: saved })
       .mockResolvedValueOnce({ configuration: submitted });
     render(workspace());
+    openSection(/^Modules/);
     fireEvent.click(screen.getByRole("checkbox", { name: "Enable Tickets" }));
     fireEvent.click(
       screen.getByRole("button", { name: "Submit for approval" }),
@@ -204,6 +211,8 @@ describe("business configuration", () => {
 
   it("shows publication only to the platform reviewer and requires a rejection note", () => {
     render(workspace(state("submitted", true)));
+    // The side panel points the reviewer at the review section.
+    fireEvent.click(screen.getByRole("button", { name: "Review submission" }));
     expect(
       screen.getByRole("button", { name: "Approve & publish" }),
     ).toBeTruthy();
@@ -231,6 +240,7 @@ describe("business configuration", () => {
       );
     if (!card) throw new Error("Missing service template card");
     fireEvent.click(within(card).getByRole("button", { name: "Use template" }));
+    openSection(/^Service workflow/);
     expect(
       screen.getByRole<HTMLInputElement>("checkbox", { name: "Chain" }).checked,
     ).toBe(true);
@@ -277,7 +287,9 @@ describe("business configuration", () => {
         templates={tenantTemplateRegistry}
       />,
     );
+    openSection(/^Modules/);
     expect(screen.getByText("Platform access required")).toBeTruthy();
+    openSection(/^Review & publish/);
     expect(
       screen.getByText(/selecting a template does not grant module access/),
     ).toBeTruthy();

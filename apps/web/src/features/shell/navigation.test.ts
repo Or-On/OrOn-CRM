@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   activeDestination,
   contextualDestinations,
+  destinationPermission,
   findDestinations,
   navigation,
   requiredFeatureForHref,
@@ -113,7 +114,7 @@ describe("operator navigation", () => {
       contextualDestinations.map((item) => item.parentHref),
     );
 
-    expect(parents).toEqual(new Set(["/tickets", "/voice", "/settings"]));
+    expect(parents).toEqual(new Set(["/tickets", "/voice"]));
     for (const item of contextualDestinations)
       expect(navigation.map(({ href }) => href)).toContain(item.parentHref);
   });
@@ -124,6 +125,13 @@ describe("operator navigation", () => {
     expect(requiredFeatureForHref("/field-service/ocr")).toBe("field_service");
     expect(requiredFeatureForHref("/orchestration")).toBe("agents");
     expect(requiredFeatureForHref("/settings/business")).toBeUndefined();
+  });
+
+  it("shows business configuration only to people who can manage the tenant", () => {
+    // The page itself requires tenant:manage; the sidebar mirrors it.
+    expect(destinationPermission("/settings/business")).toBe("tenant:manage");
+    expect(destinationPermission("/settings")).toBe("platform:read");
+    expect(activeDestination("/settings/business")).toBe("/settings/business");
   });
 
   it("searches available destinations and excludes deferred Live Lab", () => {
@@ -149,6 +157,7 @@ describe("operator navigation", () => {
       "/roles",
       "/tenants",
       "/system/health",
+      "/settings/business",
       "/settings",
     ]);
   });

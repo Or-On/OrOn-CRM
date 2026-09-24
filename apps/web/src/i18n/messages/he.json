@@ -78,7 +78,8 @@
     "productScope": "הגדרות ייעודיות מנוהלות בסביבות העבודה של המוצרים, בהתאם להרשאות הקיימות שלך.",
     "messagingHint": "ניהול תבניות הודעות, קהלים וקמפיינים.",
     "voiceHint": "ניהול תהליכים קוליים, מספרי טלפון ופעילות שיחות.",
-    "agentHint": "ניהול סוכנים, תהליכי עבודה והעברות לצוות."
+    "agentHint": "ניהול סוכנים, תהליכי עבודה והעברות לצוות.",
+    "businessConfigurationHint": "בחירת מודולים, תהליכי שירות ותהליכי שיחה, ושליחתם לאישור."
   },
   "tenantSupportSettings": {
     "tab": "תמיכת AI",
@@ -574,6 +575,7 @@
     "agents": "סוכנים ותהליכים",
     "flows": "ספריית תהליכי קול",
     "settings": "הגדרות",
+    "businessConfiguration": "הגדרת העסק",
     "health": "תקינות המערכת",
     "notifications": "התראות",
     "notificationCount": "{count, plural, =0 {הכול טופל} one {התראה אחת שלא נקראה} two {שתי התראות שלא נקראו} other {# התראות שלא נקראו}}",
@@ -753,6 +755,9 @@
     "settingsEyebrow": "ניהול סביבת העבודה",
     "settingsTitle": "הגדרות וצוות",
     "settingsDescription": "העדפות אישיות, פרטי סביבת העבודה והרשאות גישה.",
+    "businessConfigurationEyebrow": "ניהול סביבת העבודה",
+    "businessConfigurationTitle": "הגדרת העסק",
+    "businessConfigurationDescription": "התאימו מודולים ותהליכים לעסק, בדקו את חוויית הלקוח ושלחו לאישור לפני הפרסום.",
     "voiceEyebrow": "תפעול שיחות קוליות",
     "voiceTitle": "שיחות ומספרי טלפון",
     "voiceDescription": "בדיקת מצב שיחות, תוצאות סימולציה ומספרי טלפון מוגדרים.",
