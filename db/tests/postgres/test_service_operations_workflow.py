@@ -851,6 +851,15 @@ async def _evidence(
     return obj
 
 
+async def _acknowledge_preparation(pg, visit: UUID) -> None:
+    preparation = await _json(pg, "SELECT service.visit_preparation($1)", visit)
+    await pg.fetchval(
+        "SELECT service.acknowledge_visit_preparation($1,$2,'[\"spare_board\"]'::jsonb)",
+        visit,
+        preparation["requirementsHash"],
+    )
+
+
 async def test_before_and_after_photos_gate_every_server_transition(pg):
     tenant = await _service_tenant(pg, "Evidence fixture", FULL_POLICY)
     user, technician, session, case, visit = await _technician_visit(pg, tenant)
@@ -871,6 +880,7 @@ async def test_before_and_after_photos_gate_every_server_transition(pg):
     )
     await _evidence(pg, tenant, case, visit, "before_photo", status="pending")
     await _as_technician(pg, tenant, user, session)
+    await _acknowledge_preparation(pg, visit)
     with pytest.raises(asyncpg.CheckViolationError, match="BEFORE_PHOTO_REQUIRED"):
         async with pg.transaction():
             await pg.fetchval("SELECT service.record_visit_event($1,'work_started','r2')", visit)
@@ -1042,6 +1052,26 @@ async def test_preparation_acknowledgement_is_required_once_until_requirements_c
     )
     await _as_technician(pg, tenant, user, session)
     assert (await _json(pg, "SELECT service.visit_preparation($1)", visit))["acknowledged"] is False
+
+
+async def test_skipping_en_route_does_not_skip_preparation(pg):
+    tenant = await _service_tenant(pg, "Preparation skip fixture", FULL_POLICY)
+    user, technician, session, case, visit = await _technician_visit(pg, tenant)
+    await _arrive(pg, tenant, case, visit, technician)
+    await _evidence(pg, tenant, case, visit, "before_photo")
+    await _as_technician(pg, tenant, user, session)
+    with pytest.raises(asyncpg.CheckViolationError, match="PREPARATION_ACKNOWLEDGEMENT_REQUIRED"):
+        async with pg.transaction():
+            await pg.fetchval("SELECT service.record_visit_event($1,'work_started','s1')", visit)
+    await _acknowledge_preparation(pg, visit)
+    # A checklist edit after acknowledgement does not block work already on site.
+    await _migrator(pg)
+    await pg.execute(
+        "UPDATE service.cases SET fault_description='Not cooling and leaking' WHERE id=$1", case
+    )
+    await _as_technician(pg, tenant, user, session)
+    started = await _json(pg, "SELECT service.record_visit_event($1,'work_started','s2')", visit)
+    assert started["workStartedAt"]
 
 
 async def test_configured_document_types_accept_only_their_file_types(pg):

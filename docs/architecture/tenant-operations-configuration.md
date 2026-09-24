@@ -63,6 +63,35 @@ The retail policy asks for customer, chain, store, fault and exact failure, requ
 
 Technicians see a minimal available queue and their assigned work. Claiming is atomic and exclusive; full customer/case access follows successful assignment. Managers can reassign through the audited assignment API and maintain the chain/store directory. Report requirements come from the case's pinned policy. The UI uses the shared page headers, surfaces, status feedback and bilingual responsive shell; disabled modules disappear from navigation, dashboard actions and command-palette results.
 
+## Field operations workflow settings
+
+The Field Service `workflow` policy has six optional sections. They are validated by `service.validate_workflow_policy` and by `parseServiceWorkflowPolicy` in the same way. When a section is absent, the tenant keeps its previous behaviour. Business configuration edits them through the normal draft → submit → approve review.
+
+| Section                | Effect when enabled                                                                                                                                                                                                                                                                                                              |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `inquiry`              | A voice call opens a visible inquiry (a ticket linked to the intake draft) when it is admitted. Nothing waits for a photo or for the end of the call. Details are saved on the inquiry as they are collected.                                                                                                                    |
+| `whatsappFollowUp`     | Sends a server-rendered WhatsApp summary and photo request with `trigger` `call_ended` or `intake_saved`. Consent is either recorded in-call agreement or existing consent only. An optional approved template (`templateName`, `templateLanguage`, positional `templateParameters`) covers messages outside the 24-hour window. |
+| `emergency`            | Adds a tenant-worded label, such as "קריאה אדומה". Other settings: `manualRedCall` for owners and dispatchers, an optional `transferTo` target, and `fallback` (`urgent_followup` or `notify_staff`).                                                                                                                            |
+| `preparation`          | Adds a preparation popup with instructions and a checklist before the technician starts. With `requireAcknowledgement`, the acknowledgement is persisted per visit. It is required before the technician goes en route and before work starts, even if the en-route step is skipped.                                             |
+| `attachmentCategories` | Adds tenant document types, such as an RCG form, each with accepted types (`image`, `pdf`).                                                                                                                                                                                                                                      |
+| `evidence`             | Makes before and/or after photos mandatory. The database enforces this on every completion path: API, worker, direct SQL and report finalization.                                                                                                                                                                                |
+
+Configuration cannot relax the following protections, which apply to every tenant:
+
+- **Agent scope policy.** `db/contracts/service-agent-policy.v1.json` covers identity and model non-disclosure, prompt and data non-disclosure, recipient redirection and the output gate before TTS/WhatsApp. Its Python and TypeScript mirrors are generated from it.
+- **Authorization and tenant isolation.**
+- **Server-side recipient verification** for WhatsApp follow-ups.
+- **Emergency transfer target redaction.** `transferTo` is removed from every reader except the voice runtime's transfer function.
+- **Audit records** for red calls, time corrections, reply linking and preparation acknowledgements.
+
+How policy changes apply to existing records:
+
+- **Service cases** pin the workflow policy at intake. An approved change to `evidence` or required fields applies to new intakes, and open cases keep the rules they were created with.
+- **Preparation and document types** always follow the current policy.
+- **Emergency labels** use the current tenant wording.
+
+The canonical example is `infra/tenant-configurations/protouch.field-operations.json`. It is configuration data only. Another tenant enables the same behaviour by submitting an equivalent package; no code changes are needed.
+
 ## Adding a module
 
 1. Add the key, label, purpose and real dependencies to the canonical TypeScript catalog and the database key constraint.

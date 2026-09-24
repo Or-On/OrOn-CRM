@@ -362,6 +362,12 @@ def _technician_timeline() -> None:
         ELSIF p_event='work_started' THEN
           IF v_visit.arrival_at IS NULL THEN RAISE EXCEPTION 'ARRIVAL_REQUIRED' USING ERRCODE='23514'; END IF;
           IF v_visit.work_started_at IS NULL THEN
+            -- Skipping en route must not skip preparation. Any acknowledgement
+            -- counts here so a later checklist edit does not block work on site.
+            IF coalesce((service.current_workflow_policy()#>>'{preparation,enabled}')::boolean,false)
+              AND coalesce((service.current_workflow_policy()#>>'{preparation,requireAcknowledgement}')::boolean,false)
+              AND NOT EXISTS(SELECT 1 FROM service.visit_preparations WHERE tenant_id=v_tenant AND visit_id=p_visit) THEN
+              RAISE EXCEPTION 'PREPARATION_ACKNOWLEDGEMENT_REQUIRED' USING ERRCODE='23514'; END IF;
             IF coalesce((v_policy#>>'{evidence,beforePhotoRequired}')::boolean,false)
               AND NOT service.valid_evidence_photo_exists(v_tenant,v_visit.case_id,p_visit,'before_photo') THEN
               RAISE EXCEPTION 'BEFORE_PHOTO_REQUIRED' USING ERRCODE='23514'; END IF;
