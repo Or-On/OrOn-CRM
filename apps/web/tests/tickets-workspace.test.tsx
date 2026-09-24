@@ -236,6 +236,33 @@ function detail(
 
 const session = "55555555-5555-4555-8555-555555555555";
 
+it("puts the manager's next action and assignee in the ticket overview", () => {
+  const ownerId = "66666666-6666-4666-8666-666666666666";
+  render(
+    localized(
+      <TicketDetailView
+        contactName="Fictional caller"
+        detail={detail(
+          {},
+          {
+            ownerUserId: ownerId,
+            nextAction: "Call the customer back",
+            nextActionDueAt: "2026-09-19T09:00:00.000Z",
+          },
+        )}
+        ownerName="Fictional manager"
+        tenantTimeZone="Asia/Jerusalem"
+      />,
+    ),
+  );
+
+  const overview = screen.getByRole("region", { name: "At a glance" });
+  expect(overview.textContent).toContain("Call the customer back");
+  expect(overview.textContent).toContain("Fictional manager");
+  expect(overview.textContent).toContain("Due");
+  expect(overview.textContent).not.toContain(ownerId);
+});
+
 it("never offers playback for a recording that is not verified ready", () => {
   render(
     localized(

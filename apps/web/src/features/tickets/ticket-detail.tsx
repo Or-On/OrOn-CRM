@@ -6,6 +6,7 @@ import type {
   TicketCallAttempt,
   TicketDetail,
 } from "@or-on/crm";
+import { Badge, DataTable, PageHeader, Surface } from "@or-on/ui";
 import { useLocale } from "next-intl";
 import Link from "next/link";
 
@@ -16,6 +17,51 @@ import styles from "./tickets-workspace.module.css";
 
 const COPY = {
   en: {
+    title: "Ticket",
+    inquiry: "Inquiry details",
+    overview: "At a glance",
+    details: "Ticket details",
+    related: "Related channels",
+    opened: "Opened",
+    lastActivity: "Last activity",
+    due: "Due",
+    stage: "Stage",
+    priority: "Priority",
+    status: "Status",
+    source: "Source channel",
+    channels: { whatsapp: "WhatsApp", voice: "Voice", manual: "Manual" },
+    events: {
+      opened: "Opened",
+      reopened: "Reopened",
+      customer_message: "Customer message",
+      agent_message: "Agent message",
+      call_attempt: "Call attempt",
+      call_outcome: "Call outcome",
+      recording_state: "Recording",
+      summary: "Summary",
+      status_change: "Status change",
+      assignment: "Assignment",
+      human_note: "Internal note",
+      customer_update: "Customer update",
+      escalation: "Escalation",
+      action_result: "Action result",
+    },
+    statuses: { open: "Open", closed: "Closed" },
+    stages: {
+      new: "New",
+      ai_handling: "AI handling",
+      callback_pending: "Callback pending",
+      in_call: "On a call",
+      awaiting_customer: "Awaiting customer",
+      awaiting_human: "Awaiting human",
+      closed: "Closed",
+    },
+    priorities: {
+      low: "Low",
+      normal: "Normal",
+      high: "High",
+      urgent: "Urgent",
+    },
     back: "All tickets",
     contact: "Contact",
     assurance: "Identification",
@@ -151,6 +197,51 @@ const COPY = {
     confidences: { high: "High", medium: "Medium", low: "Low" },
   },
   he: {
+    title: "פנייה",
+    inquiry: "פרטי הפנייה",
+    overview: "במבט אחד",
+    details: "פרטי הפנייה",
+    related: "ערוצים קשורים",
+    opened: "נפתחה",
+    lastActivity: "פעילות אחרונה",
+    due: "עד",
+    stage: "שלב",
+    priority: "עדיפות",
+    status: "סטטוס",
+    source: "ערוץ מקור",
+    channels: { whatsapp: "וואטסאפ", voice: "קולי", manual: "ידני" },
+    events: {
+      opened: "נפתחה",
+      reopened: "נפתחה מחדש",
+      customer_message: "הודעת לקוח",
+      agent_message: "הודעת נציג",
+      call_attempt: "ניסיון חיוג",
+      call_outcome: "תוצאת שיחה",
+      recording_state: "הקלטה",
+      summary: "סיכום",
+      status_change: "שינוי סטטוס",
+      assignment: "שיוך",
+      human_note: "הערה פנימית",
+      customer_update: "עדכון ללקוח",
+      escalation: "הסלמה",
+      action_result: "תוצאת פעולה",
+    },
+    statuses: { open: "פתוחה", closed: "סגורה" },
+    stages: {
+      new: "חדשה",
+      ai_handling: "בטיפול AI",
+      callback_pending: "ממתינה לחיוג",
+      in_call: "בשיחה",
+      awaiting_customer: "ממתינה ללקוח",
+      awaiting_human: "ממתינה לנציג",
+      closed: "סגורה",
+    },
+    priorities: {
+      low: "נמוכה",
+      normal: "רגילה",
+      high: "גבוהה",
+      urgent: "דחופה",
+    },
     back: "כל הפניות",
     contact: "איש קשר",
     assurance: "זיהוי",
@@ -403,6 +494,7 @@ function AnalysisPanel({
 export function TicketDetailView({
   detail,
   contactName,
+  ownerName = null,
   tenantTimeZone,
   inquiry = null,
   emergencyLabel = null,
@@ -410,6 +502,7 @@ export function TicketDetailView({
 }: {
   readonly detail: TicketDetail;
   readonly contactName: string;
+  readonly ownerName?: string | null;
   readonly tenantTimeZone: string;
   readonly inquiry?: InquiryDetail | null;
   readonly emergencyLabel?: string | null;
@@ -436,200 +529,339 @@ export function TicketDetailView({
     attempts.find((attempt) => attempt.analysis !== null)?.analysis ?? null;
 
   return (
-    <section className={styles.workspace ?? ""}>
-      <header className={styles.header ?? ""}>
-        <div>
-          <h1>{ticket.reference}</h1>
-          <p>{ticket.subject}</p>
-        </div>
-        <Link className={styles.legacy ?? ""} href="/tickets">
-          {t.back}
-        </Link>
-      </header>
-
-      <dl className={styles.facts ?? ""}>
-        <div>
-          <dt>{t.contact}</dt>
-          <dd>{contactName}</dd>
-        </div>
-        <div>
-          <dt>{t.assurance}</dt>
-          {/* Labelled precisely: low assurance is never shown as "verified". */}
-          <dd>{t.assuranceLevels[assurance]}</dd>
-        </div>
-        <div>
-          <dt>{t.resolution}</dt>
-          <dd>{t.resolutions[ticket.resolutionClassification]}</dd>
-        </div>
-        <div>
-          <dt>{t.confirmedBy}</dt>
-          <dd>{t.confirmations[ticket.resolutionConfirmedBy]}</dd>
-        </div>
-        <div>
-          <dt>{t.handling}</dt>
-          <dd>{t.handlingModes[ticket.handlingMode]}</dd>
-        </div>
-        <div>
-          <dt>{t.owner}</dt>
-          <dd>{ticket.ownerUserId ?? t.unassigned}</dd>
-        </div>
-        <div>
-          <dt>{t.nextAction}</dt>
-          <dd>
-            {nextActionLabel(shared, ticket.nextAction) ?? t.noNextAction}
-          </dd>
-        </div>
-        <div>
-          <dt>{t.origin}</dt>
-          <dd>
-            {/* The Inbox selects a conversation by query parameter; there is
-                no per-conversation route to link to. */}
-            {ticket.sourceConversationId === null ? (
-              t.noConversation
-            ) : (
-              <Link href={`/inbox?conversation=${ticket.sourceConversationId}`}>
-                {t.openConversation}
-              </Link>
-            )}
-          </dd>
-        </div>
-        <div>
-          <dt>{t.voiceCall}</dt>
-          <dd>
-            {/* The deeper call experience stays where it is; the ticket links
-                to it rather than reimplementing it. */}
-            {latest?.sessionId == null ? (
-              t.noCall
-            ) : (
-              <Link href={`/voice/calls/${latest.sessionId}`}>
-                {t.openCall}
-              </Link>
-            )}
-          </dd>
-        </div>
-        {latest === undefined ? null : (
-          <div>
-            <dt>{t.postCall}</dt>
-            <dd>{t.postCallStages[latest.postCallStage]}</dd>
+    <>
+      <PageHeader
+        className="page-heading page-heading--premium"
+        eyebrow={t.title}
+        title={<bdi>{ticket.subject}</bdi>}
+        description={<bdi dir="ltr">{ticket.reference}</bdi>}
+        meta={
+          <div className={styles.headerMeta}>
+            <Badge
+              label={`${t.stage}: ${t.stages[ticket.stage]}`}
+              tone={
+                ticket.stage === "closed"
+                  ? "positive"
+                  : ticket.stage === "awaiting_human" ||
+                      ticket.stage === "callback_pending"
+                    ? "warning"
+                    : "info"
+              }
+            />
+            <Badge
+              label={`${t.priority}: ${t.priorities[ticket.priority]}`}
+              tone={
+                ticket.priority === "urgent"
+                  ? "critical"
+                  : ticket.priority === "high"
+                    ? "warning"
+                    : "neutral"
+              }
+            />
           </div>
-        )}
-        {latest?.postCallErrorSafe == null ? null : (
-          <div>
-            <dt>{t.postCallError}</dt>
-            <dd>{latest.postCallErrorSafe}</dd>
-          </div>
-        )}
-        {latest === undefined ? null : (
-          <div>
-            <dt>{t.followup}</dt>
-            <dd>{t.followupStates[latest.followupState]}</dd>
-          </div>
-        )}
-      </dl>
-      <p className={styles.legacyHint ?? ""}>{t.assuranceHint}</p>
-
-      <InquiryPanel
-        canMarkEmergency={canMarkEmergency}
-        emergencyLabel={emergencyLabel}
-        inquiry={inquiry}
-        tenantTimeZone={tenantTimeZone}
-        ticket={ticket}
+        }
+        actions={
+          <Link
+            className="or-button or-button--secondary or-button--medium"
+            href="/tickets"
+          >
+            {t.back}
+          </Link>
+        }
       />
 
-      <h2>{t.attempts}</h2>
-      {attempts.length === 0 ? (
-        <p className={styles.legacyHint ?? ""}>{t.noAttempts}</p>
-      ) : (
-        <table className={styles.table ?? ""}>
-          <thead>
-            <tr>
-              <th scope="col">{t.attempt}</th>
-              <th scope="col">{t.outcome}</th>
-              <th scope="col">{t.recording}</th>
-              <th scope="col">{t.transcript}</th>
-              <th scope="col">{t.summary}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {attempts.map((attempt) => (
-              <tr key={attempt.id}>
-                <td>{attempt.attemptNumber}</td>
-                <td>{t.outcomes[attempt.outcome]}</td>
-                <td>
-                  {/* The state is always stated. The control appears beside it
-                      only once the pipeline read the bytes through the same
-                      route this link uses. */}
-                  <span>{t.recordingStates[attempt.recordingState]}</span>
-                  {playable(attempt) ? (
-                    <>
-                      {" "}
+      <section className={styles.detailWorkspace}>
+        <div className={styles.detailLayout}>
+          <div className={styles.mainColumn}>
+            <Surface
+              as="section"
+              className={styles.overviewCard}
+              aria-label={t.overview}
+              level="raised"
+            >
+              <div className={styles.sectionHeading}>
+                <h2>{t.overview}</h2>
+                <span className={styles.dateNote}>
+                  {t.lastActivity}:{" "}
+                  {formatter.format(new Date(ticket.lastActivityAt))}
+                </span>
+              </div>
+              <dl className={styles.overviewFacts}>
+                <div className={styles.nextActionFact}>
+                  <dt>{t.nextAction}</dt>
+                  <dd>
+                    {nextActionLabel(shared, ticket.nextAction) ??
+                      t.noNextAction}
+                    {ticket.nextActionDueAt === null ? null : (
+                      <span className={styles.dueNote}>
+                        {t.due}:{" "}
+                        {formatter.format(new Date(ticket.nextActionDueAt))}
+                      </span>
+                    )}
+                  </dd>
+                </div>
+                <div>
+                  <dt>{t.owner}</dt>
+                  <dd dir="auto">
+                    {ticket.ownerUserId === null
+                      ? t.unassigned
+                      : (ownerName ?? ticket.ownerUserId)}
+                  </dd>
+                </div>
+                <div>
+                  <dt>{t.resolution}</dt>
+                  <dd>{t.resolutions[ticket.resolutionClassification]}</dd>
+                </div>
+              </dl>
+            </Surface>
+
+            {inquiry !== null ||
+            ticket.emergency !== null ||
+            (emergencyLabel !== null &&
+              canMarkEmergency &&
+              ticket.status === "open") ? (
+              <Surface
+                as="section"
+                className={styles.detailCard}
+                aria-label={t.inquiry}
+                level="raised"
+              >
+                <InquiryPanel
+                  canMarkEmergency={canMarkEmergency}
+                  emergencyLabel={emergencyLabel}
+                  inquiry={inquiry}
+                  tenantTimeZone={tenantTimeZone}
+                  ticket={ticket}
+                />
+              </Surface>
+            ) : null}
+
+            <Surface
+              as="section"
+              className={styles.detailCard}
+              aria-label={t.attempts}
+              level="raised"
+            >
+              <h2>{t.attempts}</h2>
+              {attempts.length === 0 ? (
+                <p className={styles.emptyState}>{t.noAttempts}</p>
+              ) : (
+                <div className={styles.tableWrap}>
+                  <DataTable label={t.attempts} minWidth="42rem">
+                    <thead>
+                      <tr>
+                        <th scope="col">{t.attempt}</th>
+                        <th scope="col">{t.outcome}</th>
+                        <th scope="col">{t.recording}</th>
+                        <th scope="col">{t.transcript}</th>
+                        <th scope="col">{t.summary}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {attempts.map((attempt) => (
+                        <tr key={attempt.id}>
+                          <td>{attempt.attemptNumber}</td>
+                          <td>{t.outcomes[attempt.outcome]}</td>
+                          <td>
+                            <span>
+                              {t.recordingStates[attempt.recordingState]}
+                            </span>
+                            {playable(attempt) ? (
+                              <>
+                                {" "}
+                                <Link
+                                  href={`/api/voice/sessions/${attempt.sessionId}/recording`}
+                                >
+                                  {t.playback}
+                                </Link>
+                              </>
+                            ) : null}
+                            {attempt.recordingDurationSeconds ===
+                            null ? null : (
+                              <span className={styles.sources}>
+                                {" "}
+                                ({t.duration}:{" "}
+                                {Math.round(attempt.recordingDurationSeconds)}
+                                {t.seconds})
+                              </span>
+                            )}
+                          </td>
+                          <td>
+                            <span>
+                              {t.transcriptStates[attempt.transcriptState]}
+                            </span>
+                            {attempt.transcriptTurnCount === null ||
+                            attempt.transcriptTurnCount === 0 ? null : (
+                              <span className={styles.sources}>
+                                {" "}
+                                ({attempt.transcriptTurnCount} {t.turns})
+                              </span>
+                            )}
+                          </td>
+                          <td>{t.summaryStates[attempt.summaryState]}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </DataTable>
+                </div>
+              )}
+            </Surface>
+
+            {latest === undefined ? null : (
+              <Surface
+                as="section"
+                className={styles.detailCard}
+                aria-label={t.summary}
+                level="raised"
+              >
+                <h2>{t.summary}</h2>
+                {analysis !== null ? (
+                  <AnalysisPanel analysis={analysis} t={t} />
+                ) : (
+                  <p className={styles.emptyState}>
+                    {latest.summaryState === "failed"
+                      ? t.summaryFailed
+                      : latest.summaryState === "not_applicable"
+                        ? t.summaryNotApplicable
+                        : latest.summaryState === "ready"
+                          ? t.noSummary
+                          : t.summaryPending}
+                  </p>
+                )}
+              </Surface>
+            )}
+
+            <Surface
+              as="section"
+              className={styles.detailCard}
+              aria-label={t.timeline}
+              level="raised"
+            >
+              <h2>{t.timeline}</h2>
+              <ol className={styles.timeline}>
+                {timeline.map((entry) => (
+                  <li key={entry.sequence}>
+                    <span className={styles.timelineWhen}>
+                      {formatter.format(new Date(entry.occurredAt))}
+                    </span>
+                    <span className={styles.timelineKind}>
+                      {t.events[entry.kind]}
+                    </span>
+                    <span dir="auto">{entry.summarySafe}</span>
+                    <span className={styles.timelineVisibility}>
+                      {entry.visibility === "customer_visible"
+                        ? t.customerVisible
+                        : t.internal}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            </Surface>
+          </div>
+
+          <aside className={styles.sideColumn}>
+            <Surface
+              as="section"
+              className={styles.detailCard}
+              aria-label={t.details}
+              level="raised"
+            >
+              <h2>{t.details}</h2>
+              <dl className={styles.detailFacts}>
+                <div>
+                  <dt>{t.contact}</dt>
+                  <dd dir="auto">{contactName}</dd>
+                </div>
+                <div>
+                  <dt>{t.status}</dt>
+                  <dd>{t.statuses[ticket.status]}</dd>
+                </div>
+                <div>
+                  <dt>{t.source}</dt>
+                  <dd>{t.channels[ticket.sourceChannel]}</dd>
+                </div>
+                <div>
+                  <dt>{t.opened}</dt>
+                  <dd>{formatter.format(new Date(ticket.openedAt))}</dd>
+                </div>
+                <div>
+                  <dt>{t.assurance}</dt>
+                  {/* Labelled precisely: low assurance is never shown as "verified". */}
+                  <dd>{t.assuranceLevels[assurance]}</dd>
+                </div>
+                <div>
+                  <dt>{t.confirmedBy}</dt>
+                  <dd>{t.confirmations[ticket.resolutionConfirmedBy]}</dd>
+                </div>
+                <div>
+                  <dt>{t.handling}</dt>
+                  <dd>{t.handlingModes[ticket.handlingMode]}</dd>
+                </div>
+              </dl>
+              <p className={styles.assuranceHint}>{t.assuranceHint}</p>
+            </Surface>
+
+            <Surface
+              as="section"
+              className={styles.detailCard}
+              aria-label={t.related}
+              level="raised"
+            >
+              <h2>{t.related}</h2>
+              <dl className={styles.detailFacts}>
+                <div>
+                  <dt>{t.origin}</dt>
+                  <dd>
+                    {/* The Inbox selects a conversation by query parameter; there is
+                no per-conversation route to link to. */}
+                    {ticket.sourceConversationId === null ? (
+                      t.noConversation
+                    ) : (
                       <Link
-                        href={`/api/voice/sessions/${attempt.sessionId}/recording`}
+                        href={`/inbox?conversation=${ticket.sourceConversationId}`}
                       >
-                        {t.playback}
+                        {t.openConversation}
                       </Link>
-                    </>
-                  ) : null}
-                  {attempt.recordingDurationSeconds === null ? null : (
-                    <span className={styles.sources ?? ""}>
-                      {" "}
-                      ({t.duration}:{" "}
-                      {Math.round(attempt.recordingDurationSeconds)}
-                      {t.seconds})
-                    </span>
-                  )}
-                </td>
-                <td>
-                  <span>{t.transcriptStates[attempt.transcriptState]}</span>
-                  {attempt.transcriptTurnCount === null ||
-                  attempt.transcriptTurnCount === 0 ? null : (
-                    <span className={styles.sources ?? ""}>
-                      {" "}
-                      ({attempt.transcriptTurnCount} {t.turns})
-                    </span>
-                  )}
-                </td>
-                <td>{t.summaryStates[attempt.summaryState]}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      <h2>{t.summary}</h2>
-      {analysis !== null ? (
-        <AnalysisPanel analysis={analysis} t={t} />
-      ) : (
-        <p className={styles.legacyHint ?? ""}>
-          {latest === undefined
-            ? t.noSummary
-            : latest.summaryState === "failed"
-              ? t.summaryFailed
-              : latest.summaryState === "not_applicable"
-                ? t.summaryNotApplicable
-                : latest.summaryState === "ready"
-                  ? t.noSummary
-                  : t.summaryPending}
-        </p>
-      )}
-
-      <h2>{t.timeline}</h2>
-      <ol className={styles.timeline ?? ""}>
-        {timeline.map((entry) => (
-          <li key={entry.sequence}>
-            <span className={styles.timelineWhen ?? ""}>
-              {formatter.format(new Date(entry.occurredAt))}
-            </span>
-            <span className={styles.timelineKind ?? ""}>{entry.kind}</span>
-            <span>{entry.summarySafe}</span>
-            <span className={styles.timelineVisibility ?? ""}>
-              {entry.visibility === "customer_visible"
-                ? t.customerVisible
-                : t.internal}
-            </span>
-          </li>
-        ))}
-      </ol>
-    </section>
+                    )}
+                  </dd>
+                </div>
+                <div>
+                  <dt>{t.voiceCall}</dt>
+                  <dd>
+                    {/* The deeper call experience stays where it is; the ticket links
+                to it rather than reimplementing it. */}
+                    {latest?.sessionId == null ? (
+                      t.noCall
+                    ) : (
+                      <Link href={`/voice/calls/${latest.sessionId}`}>
+                        {t.openCall}
+                      </Link>
+                    )}
+                  </dd>
+                </div>
+                {latest === undefined ? null : (
+                  <div>
+                    <dt>{t.postCall}</dt>
+                    <dd>{t.postCallStages[latest.postCallStage]}</dd>
+                  </div>
+                )}
+                {latest?.postCallErrorSafe == null ? null : (
+                  <div>
+                    <dt>{t.postCallError}</dt>
+                    <dd>{latest.postCallErrorSafe}</dd>
+                  </div>
+                )}
+                {latest === undefined ? null : (
+                  <div>
+                    <dt>{t.followup}</dt>
+                    <dd>{t.followupStates[latest.followupState]}</dd>
+                  </div>
+                )}
+              </dl>
+            </Surface>
+          </aside>
+        </div>
+      </section>
+    </>
   );
 }

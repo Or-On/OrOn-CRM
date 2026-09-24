@@ -225,7 +225,7 @@
 
 .facts dt {
   font-size: 0.8rem;
-  color: var(--text-muted);
+  color: var(--or-text-muted);
 }
 
 .facts dd {
@@ -255,7 +255,7 @@
    heading: a statement and the evidence for it belong in the same line. */
 .sources {
   font-size: 0.8rem;
-  color: var(--text-muted);
+  color: var(--or-text-muted);
 }
 
 .metrics {
@@ -305,7 +305,7 @@
 .timelineKind,
 .timelineVisibility {
   font-size: 0.82rem;
-  color: var(--text-muted);
+  color: var(--or-text-muted);
   white-space: nowrap;
 }
 
@@ -387,4 +387,215 @@
   align-items: center;
   gap: 0.4rem;
   font-size: 0.9rem;
+}
+
+/* Ticket record */
+.detailWorkspace {
+  display: grid;
+  gap: 1.25rem;
+  inline-size: 100%;
+  max-inline-size: 96rem;
+  min-inline-size: 0;
+}
+
+.headerMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.detailLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(18rem, 21rem);
+  align-items: start;
+  gap: 1.25rem;
+  min-inline-size: 0;
+}
+
+.mainColumn,
+.sideColumn {
+  display: grid;
+  align-content: start;
+  gap: 1.25rem;
+  min-inline-size: 0;
+}
+
+.overviewCard,
+.detailCard {
+  display: grid;
+  gap: 1rem;
+  min-inline-size: 0;
+  padding: clamp(1rem, 1.8vw, 1.5rem);
+}
+
+.overviewCard {
+  background: color-mix(in srgb, var(--or-accent) 4%, var(--or-surface-raised));
+  border-color: color-mix(in srgb, var(--or-accent) 25%, var(--or-border));
+}
+
+.detailCard h2,
+.overviewCard h2 {
+  margin: 0;
+  font-size: var(--or-text-section);
+  font-weight: 650;
+}
+
+.sectionHeading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.4rem 1rem;
+}
+
+.dateNote {
+  color: var(--or-text-muted);
+  font-size: var(--or-text-meta);
+}
+
+.overviewFacts,
+.detailFacts {
+  display: grid;
+  margin: 0;
+}
+
+.overviewFacts {
+  grid-template-columns: minmax(0, 2fr) repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.overviewFacts > div,
+.detailFacts > div {
+  display: grid;
+  align-content: start;
+  gap: 0.25rem;
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+.overviewFacts > div + div {
+  border-inline-start: 1px solid var(--or-border);
+  padding-inline-start: 1rem;
+}
+
+.overviewFacts dt,
+.detailFacts dt {
+  color: var(--or-text-muted);
+  font-size: var(--or-text-meta);
+}
+
+.overviewFacts dd,
+.detailFacts dd {
+  margin: 0;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.nextActionFact dd {
+  font-size: 1.05rem;
+}
+
+.dueNote {
+  display: block;
+  margin-block-start: 0.3rem;
+  color: var(--or-text-muted);
+  font-size: var(--or-text-meta);
+  font-weight: 500;
+}
+
+.detailFacts {
+  gap: 0;
+}
+
+.detailFacts > div {
+  padding-block: 0.7rem;
+  border-block-end: 1px solid var(--or-border);
+}
+
+.detailFacts > div:first-child {
+  padding-block-start: 0;
+}
+
+.detailFacts > div:last-child {
+  border-block-end: 0;
+  padding-block-end: 0;
+}
+
+.assuranceHint,
+.emptyState {
+  margin: 0;
+  color: var(--or-text-muted);
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+.assuranceHint {
+  padding: 0.75rem;
+  background: var(--or-surface-subtle);
+  border-radius: var(--or-radius-sm);
+}
+
+.emptyState {
+  padding: 1rem;
+  background: var(--or-surface-subtle);
+  border: 1px dashed var(--or-border);
+  border-radius: var(--or-radius-sm);
+}
+
+.tableWrap {
+  min-inline-size: 0;
+  overflow-x: auto;
+  border: 1px solid var(--or-border);
+  border-radius: var(--or-radius-md);
+}
+
+.tableWrap :global(.or-data-table) {
+  border: 0;
+  border-radius: 0;
+}
+
+.detailCard .timeline li {
+  grid-template-columns:
+    minmax(8rem, auto) minmax(5rem, auto) minmax(0, 1fr)
+    auto;
+}
+
+.detailCard .timeline li > * {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+.detailCard a:focus-visible,
+.detailWorkspace a:focus-visible {
+  outline: 2px solid var(--or-focus);
+  outline-offset: 2px;
+}
+
+@media (max-width: 70rem) {
+  .detailLayout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sideColumn {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .detailCard .timeline li {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.25rem;
+  }
+}
+
+@media (max-width: 46rem) {
+  .overviewFacts,
+  .sideColumn {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .overviewFacts > div + div {
+    border-inline-start: 0;
+    border-block-start: 1px solid var(--or-border);
+    padding-inline-start: 0;
+    padding-block-start: 0.75rem;
+  }
 }

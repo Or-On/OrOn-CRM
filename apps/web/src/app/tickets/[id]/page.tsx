@@ -7,6 +7,7 @@ import {
   getServiceWorkflowPolicy,
   getTenantSettings,
   getTicketDetail,
+  listTeamMembers,
   requireTenantFeature,
   TenantFeatureDisabledError,
 } from "@or-on/crm";
@@ -30,16 +31,23 @@ export default async function TicketDetailPage({
       await requireTenantFeature(sql, "tickets");
       const detail = await getTicketDetail(sql, id);
       if (detail === undefined) return undefined;
-      const [contact, settings, inquiry, policy] = await Promise.all([
+      const [contact, settings, inquiry, policy, members] = await Promise.all([
         getContact(sql, detail.ticket.contactId),
         getTenantSettings(sql),
         getInquiryDetail(sql, id),
         getServiceWorkflowPolicy(sql),
+        detail.ticket.ownerUserId === null
+          ? Promise.resolve([])
+          : listTeamMembers(sql),
       ]);
+      const owner = members.find(
+        (member) => member.userId === detail.ticket.ownerUserId,
+      );
       const emergency = policy.emergency;
       return {
         contact,
         detail,
+        ownerName: owner?.displayName ?? owner?.email ?? null,
         settings,
         inquiry: inquiry ?? null,
         emergencyLabel: emergency?.enabled === true ? emergency.label : null,
@@ -52,11 +60,12 @@ export default async function TicketDetailPage({
     });
     if (data === undefined) notFound();
     return (
-      <main className="page page--wide">
+      <main className="page page--wide page--workspace-premium">
         <TicketDetailView
           canMarkEmergency={data.canMarkEmergency}
           contactName={data.contact?.name ?? data.detail.ticket.contactId}
           detail={data.detail}
+          ownerName={data.ownerName}
           emergencyLabel={data.emergencyLabel}
           inquiry={data.inquiry}
           tenantTimeZone={data.settings.timezone}
