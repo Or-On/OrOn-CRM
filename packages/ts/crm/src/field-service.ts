@@ -154,6 +154,10 @@ export interface ServiceVisit {
   readonly departureSignatureObjectId: string | null;
   readonly arrivalIdentity: Readonly<Record<string, unknown>> | null;
   readonly departureIdentity: Readonly<Record<string, unknown>> | null;
+  /** Explicit technician events, recorded by the server clock. */
+  readonly enRouteAt?: string | null;
+  readonly workStartedAt?: string | null;
+  readonly workCompletedAt?: string | null;
 }
 
 export interface ServiceAttachmentSummary {
@@ -162,12 +166,16 @@ export interface ServiceAttachmentSummary {
   readonly visitId: string | null;
   readonly reportRevisionId: string | null;
   readonly category: string;
+  /** The configured document type of a tenant_document (for example RCG). */
+  readonly documentType?: string | null;
   readonly source: string;
   readonly processingStatus: string;
   readonly contentType: string;
   readonly byteSize: number;
   readonly caption: string | null;
   readonly createdAt: string;
+  /** The uploader, for audit display. */
+  readonly createdByUserId?: string | null;
 }
 
 export const serviceOcrStatuses = [
@@ -2593,6 +2601,9 @@ function visit(row: {
   departure_signature_object_id?: string | null;
   arrival_identity?: Readonly<Record<string, unknown>> | null;
   departure_identity?: Readonly<Record<string, unknown>> | null;
+  en_route_at?: Date | null;
+  work_started_at?: Date | null;
+  work_completed_at?: Date | null;
 }): ServiceVisit {
   return {
     id: row.id,
@@ -2616,6 +2627,13 @@ function visit(row: {
     departureSignatureObjectId: row.departure_signature_object_id ?? null,
     arrivalIdentity: row.arrival_identity ?? null,
     departureIdentity: row.departure_identity ?? null,
+    ...(row.en_route_at === undefined
+      ? {}
+      : {
+          enRouteAt: row.en_route_at?.toISOString() ?? null,
+          workStartedAt: row.work_started_at?.toISOString() ?? null,
+          workCompletedAt: row.work_completed_at?.toISOString() ?? null,
+        }),
   };
 }
 
@@ -5030,12 +5048,16 @@ async function getServiceCaseDossierRecord(
         departure_signature_object_id: string | null;
         arrival_identity: Readonly<Record<string, unknown>> | null;
         departure_identity: Readonly<Record<string, unknown>> | null;
+        en_route_at: Date | null;
+        work_started_at: Date | null;
+        work_completed_at: Date | null;
         technician_full_name: string;
       }[]
     >`
         SELECT visit.id, visit.case_id, visit.appointment_id,
                visit.technician_id, visit.visit_number, visit.status,
                visit.arrival_at, visit.departure_at,
+               visit.en_route_at, visit.work_started_at, visit.work_completed_at,
                visit.arrival_signature_object_id,
                visit.departure_signature_object_id, visit.arrival_identity,
                visit.departure_identity,
@@ -5100,19 +5122,22 @@ async function getServiceCaseDossierRecord(
         visit_id: string | null;
         report_revision_id: string | null;
         category: string;
+        document_type: string | null;
         source: string;
         processing_status: string;
         content_type: string;
         byte_size: string;
         caption: string | null;
         created_at: Date;
+        created_by_user_id: string | null;
       }[]
     >`
         SELECT attachment.id, attachment.object_id, attachment.visit_id,
                attachment.report_revision_id, attachment.category,
+               attachment.document_type,
                attachment.source, attachment.processing_status,
                object.content_type, object.byte_size, attachment.caption,
-               attachment.created_at
+               attachment.created_at, attachment.created_by_user_id
         FROM service.report_attachments attachment
         JOIN objects.object_metadata object ON object.id = attachment.object_id
         WHERE attachment.case_id = ${caseId}::uuid AND object.deleted_at IS NULL
@@ -5339,12 +5364,14 @@ async function getServiceCaseDossierRecord(
       visitId: row.visit_id,
       reportRevisionId: row.report_revision_id,
       category: row.category,
+      documentType: row.document_type,
       source: row.source,
       processingStatus: row.processing_status,
       contentType: row.content_type,
       byteSize: Number(row.byte_size),
       caption: row.caption,
       createdAt: row.created_at.toISOString(),
+      createdByUserId: row.created_by_user_id,
     })),
     ocrResults: ocrResults.map((row) => ({
       id: row.id,

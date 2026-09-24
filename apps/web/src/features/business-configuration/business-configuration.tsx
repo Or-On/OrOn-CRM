@@ -1,6 +1,7 @@
 "use client";
 
 import type {
+  JsonValue,
   TenantConfiguration,
   TenantConfigurationState,
   TenantFeatureDefinition,
@@ -29,6 +30,7 @@ import { useRouter } from "next/navigation";
 import { useState, type SyntheticEvent } from "react";
 import { crmMutation } from "../crm";
 import styles from "./business-configuration.module.css";
+import { FieldOperationsSettings } from "./field-operations-settings";
 
 const triggers: readonly TenantProcessTrigger[] = [
   "whatsapp.new_conversation",
@@ -63,6 +65,8 @@ const intakeFields = [
   ["faultDescription", "Fault description", "תיאור התקלה"],
   ["exactFailure", "What exactly does not work", "מה בדיוק לא עובד"],
   ["warrantyStatus", "Warranty status", "מצב אחריות"],
+  ["callbackNumber", "Different callback number", "מספר אחר לחזרה"],
+  ["urgency", "Urgency", "דחיפות"],
   ["nationalId", "Identity number", "מספר זהות"],
 ] as const;
 const reportFields = [
@@ -192,17 +196,23 @@ export function BusinessConfiguration({
     setDirty(true);
     setFeedback(undefined);
   }
-  function setWorkflow(
-    key: string,
-    value: string | boolean | readonly string[],
-  ) {
+  function setWorkflow(key: string, value: unknown) {
+    // An undefined value removes the optional key, which restores the
+    // tenant's previous behaviour for that capability.
+    const next: Record<string, unknown> = Object.fromEntries(
+      Object.entries({ ...workflow, version: 1, [key]: value } as Record<
+        string,
+        unknown
+      >).filter(([, entry]) => entry !== undefined),
+    );
     update({
       ...draft,
       featureConfiguration: {
         ...draft.featureConfiguration,
         field_service: {
           ...draft.featureConfiguration.field_service,
-          workflow: { ...workflow, version: 1, [key]: value },
+          // Validated again by the parser on render and by the server on save.
+          workflow: next as unknown as JsonValue,
         },
       },
     });
@@ -652,6 +662,12 @@ export function BusinessConfiguration({
               )}
             </span>
           </label>
+          <FieldOperationsSettings
+            he={he}
+            locked={locked}
+            onChange={setWorkflow}
+            workflow={workflow}
+          />
         </Surface>
       ) : null}
       <Surface className={styles.section} level="raised">

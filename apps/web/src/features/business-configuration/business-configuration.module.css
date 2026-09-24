@@ -279,3 +279,10 @@
     margin-block-start: 0.5rem;
   }
 }
+
+.inlineRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.5rem;
+}

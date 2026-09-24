@@ -57,6 +57,7 @@ import {
   visitStatusLabel,
   warrantyStatusLabel,
 } from "./field-service-labels";
+import { PreparationPrompt, VisitWorkflow } from "./visit-workflow";
 
 type UploadCategory =
   | "fault"
@@ -66,7 +67,10 @@ type UploadCategory =
   | "environment"
   | "document"
   | "arrival_signature"
-  | "departure_signature";
+  | "departure_signature"
+  | "before_photo"
+  | "after_photo"
+  | "tenant_document";
 
 const uploadCategories = new Set<UploadCategory>([
   "fault",
@@ -77,7 +81,19 @@ const uploadCategories = new Set<UploadCategory>([
   "document",
   "arrival_signature",
   "departure_signature",
+  "before_photo",
+  "after_photo",
+  "tenant_document",
 ]);
+
+/** Configured document types are submitted as "tenant_document:<key>". */
+function splitCategory(value: string): {
+  readonly category: string;
+  readonly documentType?: string;
+} {
+  const [category = "", documentType] = value.split(":", 2);
+  return documentType === undefined ? { category } : { category, documentType };
+}
 
 function formText(form: FormData, key: string): string {
   const value = form.get(key);
@@ -425,7 +441,9 @@ export function ServiceCaseWorkspace({
       capturedFile instanceof File && capturedFile.size > 0
         ? capturedFile
         : selectedFile;
-    const categoryValue = formText(form, "category");
+    const { category: categoryValue, documentType } = splitCategory(
+      formText(form, "category"),
+    );
     if (!uploadCategories.has(categoryValue as UploadCategory)) {
       setError(
         he ? "קטגוריית הראיה אינה תקינה" : "Evidence category is invalid",
@@ -447,7 +465,7 @@ export function ServiceCaseWorkspace({
         evidenceVisit !== undefined &&
         (category === "arrival_signature" ||
           category === "departure_signature");
-      const scope = `${evidenceVisit?.id ?? "case"}:${category}`;
+      const scope = `${evidenceVisit?.id ?? "case"}:${category}:${documentType ?? ""}`;
       const key =
         uploadRequest?.scope === scope
           ? uploadRequest.key
@@ -466,6 +484,7 @@ export function ServiceCaseWorkspace({
               }
             : {
                 category,
+                ...(documentType === undefined ? {} : { documentType }),
                 ...(evidenceVisit === undefined
                   ? {}
                   : { visitId: evidenceVisit.id }),
@@ -600,6 +619,15 @@ export function ServiceCaseWorkspace({
                 : "Structured case context without an unfiltered transcript."}
             </p>
           </div>
+          <PreparationPrompt
+            canWork={
+              canOperate &&
+              evidenceDefaultVisit !== undefined &&
+              canWorkVisit(evidenceDefaultVisit)
+            }
+            timezone={timezone}
+            visit={evidenceDefaultVisit}
+          />
         </header>
         <div className="technician-briefing__grid">
           <section>
@@ -827,6 +855,9 @@ export function ServiceCaseWorkspace({
                   const technician = technicians.find(
                     (item) => item.id === visit.technicianId,
                   );
+                  const appointment = dossier.appointments.find(
+                    (item) => item.id === visit.appointmentId,
+                  );
                   return (
                     <article key={visit.id}>
                       <div className="service-visit-index">
@@ -875,6 +906,13 @@ export function ServiceCaseWorkspace({
                             />
                           ) : null}
                         </div>
+                        <VisitWorkflow
+                          canWork={canOperate && canWorkVisit(visit)}
+                          scheduledEnd={appointment?.endsAt ?? null}
+                          scheduledStart={appointment?.startsAt ?? null}
+                          timezone={appointment?.timezone ?? timezone}
+                          visit={visit}
+                        />
                       </div>
                       {canOperate && canWorkVisit(visit) ? (
                         <div className="service-visit-actions">
@@ -1620,6 +1658,16 @@ export function ServiceCaseWorkspace({
             <option value="document">{he ? "מסמך" : "Document"}</option>
             {evidenceVisit ? (
               <>
+                <option value="before_photo">
+                  {he
+                    ? "תמונת לפני (לפני תחילת העבודה)"
+                    : "Before photo (before work starts)"}
+                </option>
+                <option value="after_photo">
+                  {he
+                    ? "תמונת אחרי (בסיום העבודה)"
+                    : "After photo (when work is done)"}
+                </option>
                 <option value="arrival_signature">
                   {he ? "חתימת הגעה" : "Arrival signature"}
                 </option>
@@ -1628,6 +1676,18 @@ export function ServiceCaseWorkspace({
                 </option>
               </>
             ) : null}
+            {(
+              workflowPolicy?.attachmentCategories ??
+              reportPolicy.attachmentCategories ??
+              []
+            ).map((documentKind) => (
+              <option
+                key={documentKind.key}
+                value={`tenant_document:${documentKind.key}`}
+              >
+                {documentKind.label}
+              </option>
+            ))}
           </Select>
           <div className="service-file-options">
             <label className="service-file-input">

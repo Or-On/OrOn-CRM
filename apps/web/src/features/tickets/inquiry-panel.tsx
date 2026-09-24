@@ -7,6 +7,7 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { tenantDateFormatter } from "../../i18n/tenant-date-time";
+import { csrfToken } from "../crm";
 import { attentionTone, inquiryCopy } from "./inquiry-copy";
 import styles from "./tickets-workspace.module.css";
 
@@ -74,7 +75,10 @@ const COPY = {
 async function post(url: string, body: unknown): Promise<string | null> {
   const response = await fetch(url, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      "x-csrf-token": csrfToken(),
+    },
     body: JSON.stringify(body),
   });
   if (response.ok) return null;
