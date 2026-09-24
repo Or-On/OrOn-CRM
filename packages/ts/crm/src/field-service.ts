@@ -1334,7 +1334,8 @@ export async function deleteTechnician(
       error !== null &&
       typeof error === "object" &&
       "code" in error &&
-      error.code === "23503"
+      // RESTRICT foreign keys report 23001 rather than 23503.
+      (error.code === "23503" || error.code === "23001")
     )
       throw Object.assign(
         new Error(
