@@ -71,7 +71,8 @@
           { "key": "rcg", "label": "RCG", "accept": ["pdf", "image"] }
         ],
         "evidence": { "beforePhotoRequired": true, "afterPhotoRequired": true }
-      }
+      },
+      "experience": "service_manager"
     }
   }
 }

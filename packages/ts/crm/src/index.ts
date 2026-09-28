@@ -49,3 +49,4 @@ export * from "./webhook-store.js";
 export * from "./whatsapp-outbound.js";
 export * from "./whatsapp-diagnostics.js";
 export type * from "./types.js";
+export * from "./service-manager.js";

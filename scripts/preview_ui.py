@@ -117,6 +117,7 @@ async def main(
             {
                 "DATABASE_URL": target,
                 "ENABLE_REAL_WHATSAPP": "false",
+                "ENABLE_REAL_SMS": "false",
                 "ENABLE_REAL_TELEPHONY": "false",
                 "ENABLE_REAL_VOICE_PROVIDERS": "false",
                 "ENABLE_WHATSAPP_AI": "false",

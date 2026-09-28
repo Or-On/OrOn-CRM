@@ -42,6 +42,7 @@ export interface IssuedSession {
 }
 
 export interface LoginRecord {
+  readonly smsEnabled?: boolean;
   readonly userId: string;
   readonly email: string;
   readonly displayName: string | undefined;

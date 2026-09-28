@@ -279,13 +279,19 @@ async def run_bot(
     verification_requirements: IdentityVerificationRequirements | None = None
     verify_identity = getattr(sessions, "verify_caller_identity", None)
     load_handoff_context = getattr(sessions, "get_verified_handoff_context", None)
-    if ctx.handoff_id is not None:
-        requirements_reader = getattr(sessions, "get_identity_verification_requirements", None)
+    requirements_reader = getattr(sessions, "get_identity_verification_requirements", None)
+    if ctx.handoff_id is not None or requirements_reader is not None:
         if requirements_reader is None or verify_identity is None or load_handoff_context is None:
             raise StoredFlowUnavailable("secure handoff verification runtime is unavailable")
         verification_requirements = IdentityVerificationRequirements.model_validate(
             await requirements_reader(ctx)
         )
+        if (
+            ctx.handoff_id is None
+            and not verification_requirements.factors
+            and not verification_requirements.required
+        ):
+            verification_requirements = None
     verification_runtime_state = {
         "state": (
             verification_requirements.state
@@ -1044,6 +1050,9 @@ async def run_bot(
                     verify=submit_identity,
                     load_context=fetch_unlocked_context,
                     action_guard=action_guard,
+                    send_sms=(lambda: sessions.send_caller_sms(ctx))
+                    if hasattr(sessions, "send_caller_sms")
+                    else None,
                 )
         await flow_manager.initialize(entry)
         max_session_seconds = quality.get("budgets", {}).get("maxSessionSeconds", 1800)

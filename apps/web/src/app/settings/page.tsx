@@ -6,6 +6,8 @@ import { hasPermission } from "@or-on/auth";
 
 import {
   getTenantSettings,
+  getTenantFeatureSnapshot,
+  usesServiceManagerExperience,
   getFieldServiceFeatureState,
   listApiKeys,
   listTenantInvitations,
@@ -19,6 +21,7 @@ import {
   withCurrentTenant,
 } from "../../features/auth";
 import { ManagementPanel, type SettingsTab } from "../../features/management";
+import { AdvancedServiceTools } from "../../features/service-manager";
 import { fieldServiceRuntimeReadiness } from "../../features/field-service-server";
 
 const SETTINGS_TABS = new Set<SettingsTab>([
@@ -58,6 +61,9 @@ export default async function SettingsPage({
           session.isSuperuser ||
           hasPermission(session.tenant.role, "tenant:manage");
         return {
+          features: canManageTenant
+            ? await getTenantFeatureSnapshot(sql)
+            : undefined,
           members: canManageMembers ? await listTeamMembers(sql) : [],
           invitations: canManageMembers ? await listTenantInvitations(sql) : [],
           notifications: await listNotifications(sql, session.userId),
@@ -98,6 +104,14 @@ export default async function SettingsPage({
       <main className="page page--wide page--settings page--workspace-premium">
         <ProductHeading page="settings" premium />
         <ManagementPanel {...data} initialTab={initialTab} />
+        {data.features !== undefined &&
+        usesServiceManagerExperience(data.features) ? (
+          <AdvancedServiceTools
+            enabled={Object.values(data.features)
+              .filter((feature) => feature.effective)
+              .map((feature) => feature.key)}
+          />
+        ) : null}
       </main>
     );
   } catch (error) {

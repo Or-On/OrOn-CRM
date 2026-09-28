@@ -17,8 +17,14 @@ import type {
   AuthSession,
   InvitationRecord,
   IssuedSession,
+  LoginRecord,
   PublicSession,
 } from "./types.js";
+import {
+  SmsChallengeRequiredError,
+  SmsUnavailableError,
+  type StaffSmsAuthentication,
+} from "./sms.js";
 
 const IDLE_SECONDS = 12 * 60 * 60;
 const ABSOLUTE_SECONDS = 7 * 24 * 60 * 60;
@@ -48,6 +54,7 @@ export interface AuthServiceOptions {
   readonly tokenPepper: string;
   readonly dummyPasswordHash: string;
   readonly now?: () => Date;
+  readonly sms?: StaffSmsAuthentication;
 }
 
 export class AuthService {
@@ -55,12 +62,14 @@ export class AuthService {
   readonly #tokenPepper: string;
   readonly #dummyPasswordHash: string;
   readonly #now: () => Date;
+  readonly #sms: StaffSmsAuthentication | undefined;
 
   public constructor(repository: AuthRepository, options: AuthServiceOptions) {
     this.#repository = repository;
     this.#tokenPepper = options.tokenPepper;
     this.#dummyPasswordHash = options.dummyPasswordHash;
     this.#now = options.now ?? (() => new Date());
+    this.#sms = options.sms;
   }
 
   public async login(input: {
@@ -85,6 +94,44 @@ export class AuthService {
         await this.#repository.recordLoginFailure(record.userId);
       throw new InvalidCredentialsError();
     }
+    if (record.smsEnabled === true) {
+      if (this.#sms === undefined) throw new SmsUnavailableError();
+      throw new SmsChallengeRequiredError(
+        await this.#sms.startLogin(record.userId),
+      );
+    }
+    return this.#issueSession(record, input);
+  }
+
+  public async finishSmsLogin(input: {
+    id: string;
+    code: string;
+    requestId: string;
+    userAgent?: string;
+    ipAddress?: string;
+  }): Promise<IssuedSession> {
+    if (this.#sms === undefined) throw new SmsUnavailableError();
+    const email = await this.#sms.finishLogin(
+      input.id,
+      input.code,
+      input.requestId,
+    );
+    if (email === undefined) throw new InvalidCredentialsError();
+    const record = await this.#repository.lookupLogin(email);
+    if (
+      record?.status !== "active" ||
+      record.smsEnabled !== true ||
+      (record.lockedUntil?.getTime() ?? 0) > this.#now().getTime()
+    )
+      throw new InvalidCredentialsError();
+    return this.#issueSession(record, input);
+  }
+
+  async #issueSession(
+    record: LoginRecord,
+    input: { requestId: string; userAgent?: string; ipAddress?: string },
+  ): Promise<IssuedSession> {
+    const now = this.#now();
     const memberships = await this.#repository.membershipsForUser(
       record.userId,
     );

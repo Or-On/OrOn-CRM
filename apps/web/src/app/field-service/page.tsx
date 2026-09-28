@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
 import {
   getFieldServiceFeatureState,
+  getTenantFeatureSnapshot,
+  usesServiceManagerExperience,
   getServiceDirectory,
   getServiceWorkflowPolicy,
   getTechnicianSessionContext,
@@ -27,6 +29,9 @@ export default async function FieldServicePage() {
       "field-service:read",
       async (sql, session) => {
         const feature = await getFieldServiceFeatureState(sql);
+        const serviceManager = usesServiceManagerExperience(
+          await getTenantFeatureSnapshot(sql),
+        );
         if (!feature.effective)
           throw new ForbiddenError("Field service disabled");
         const principal = {
@@ -74,6 +79,7 @@ export default async function FieldServicePage() {
             ? policy.emergency.label
             : null;
         return {
+          serviceManager,
           appointments,
           cases: casePage.cases,
           nextCaseCursor: casePage.nextCursor,

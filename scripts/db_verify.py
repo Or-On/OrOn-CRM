@@ -105,12 +105,16 @@ def graph_report() -> GraphReport:
 def _alembic(*arguments: str) -> subprocess.CompletedProcess[str]:
     environment = dict(os.environ)
     environment["DATABASE_URL"] = OFFLINE_DATABASE_URL
+    # Alembic emits Hebrew SQL literals; use the same encoding on both sides
+    # rather than the Windows console's locale-dependent default.
+    environment["PYTHONIOENCODING"] = "utf-8"
     return subprocess.run(  # noqa: S603
         [sys.executable, "-m", "alembic", "-c", str(ALEMBIC_INI), *arguments],
         cwd=ROOT,
         env=environment,
         check=True,
         text=True,
+        encoding="utf-8",
         capture_output=True,
     )
 

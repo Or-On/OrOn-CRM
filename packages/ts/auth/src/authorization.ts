@@ -125,7 +125,7 @@ const scopedRoutes: Readonly<
   Record<ApplicationScope, readonly string[] | undefined>
 > = {
   workspace: undefined,
-  "field-service": ["/field-service"],
+  "field-service": ["/field-service", "/account/security"],
 };
 
 /** Sign-in, invitation and locale entry routes serve every application. */

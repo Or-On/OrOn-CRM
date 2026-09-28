@@ -10,6 +10,7 @@ export interface ApplicationPageRoute {
  */
 export const applicationPageManifest = [
   { template: "/", navigationParent: "/" },
+  { template: "/account/security" },
   { template: "/calendar", navigationParent: "/calendar" },
   { template: "/contacts", navigationParent: "/contacts" },
   { template: "/contacts/[id]", navigationParent: "/contacts" },

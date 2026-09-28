@@ -124,12 +124,14 @@ export function VisitWorkflow({
   timezone,
   scheduledStart,
   scheduledEnd,
+  simple = false,
 }: {
   readonly visit: ServiceVisit;
   readonly canWork: boolean;
   readonly timezone: string;
   readonly scheduledStart?: string | null;
   readonly scheduledEnd?: string | null;
+  readonly simple?: boolean;
 }) {
   const locale = useLocale();
   const he = locale.startsWith("he");
@@ -181,14 +183,26 @@ export function VisitWorkflow({
   return (
     <div className="service-visit-timeline">
       <dl>
-        {rows.map(([label, value]) => (
+        {(simple
+          ? [
+              [
+                he ? "הגעתי" : "Arrived",
+                formatInstant(visit.arrivalAt, locale, timezone),
+              ],
+              [
+                he ? "יצאתי" : "Left",
+                formatInstant(visit.departureAt, locale, timezone),
+              ],
+            ]
+          : rows
+        ).map(([label, value]) => (
           <div key={label}>
             <dt>{label}</dt>
             <dd>{value ?? t.notYet}</dd>
           </div>
         ))}
       </dl>
-      {canWork && next !== undefined ? (
+      {!simple && canWork && next !== undefined ? (
         <Button
           busy={busy === next}
           disabled={busy !== undefined}
@@ -200,7 +214,7 @@ export function VisitWorkflow({
           {t.actions[next]}
         </Button>
       ) : null}
-      {canWork && visit.enRouteAt && !visit.arrivalAt && !closed ? (
+      {!simple && canWork && visit.enRouteAt && !visit.arrivalAt && !closed ? (
         <small>{t.arrivalHint}</small>
       ) : null}
       {message === undefined ? null : (

@@ -3,6 +3,9 @@ import { redirect } from "next/navigation";
 
 import {
   getServiceWorkflowPolicy,
+  getTenantFeatureSnapshot,
+  usesServiceManagerExperience,
+  listServiceInquiries,
   getTenantSettings,
   listContacts,
   listTickets,
@@ -19,6 +22,7 @@ import {
   withCurrentTenant,
 } from "../../features/auth";
 import { TicketsWorkspace } from "../../features/tickets";
+import { ServiceInquiryRegister } from "../../features/service-manager";
 
 export default async function TicketsPage() {
   try {
@@ -26,6 +30,20 @@ export default async function TicketsPage() {
     const since = new Date(until.getTime() - 30 * 24 * 60 * 60 * 1000);
     const data = await withCurrentTenant("crm:read", async (sql) => {
       await requireTenantFeature(sql, "tickets");
+      const features = await getTenantFeatureSnapshot(sql);
+      if (usesServiceManagerExperience(features)) {
+        const settings = await getTenantSettings(sql);
+        const policy = await getServiceWorkflowPolicy(sql);
+        return {
+          serviceManager: true as const,
+          settings,
+          emergencyLabel:
+            policy.emergency?.enabled === true ? policy.emergency.label : null,
+          servicePage: await listServiceInquiries(sql, {
+            timezone: settings.timezone,
+          }),
+        };
+      }
       const [page, contacts, settings, metrics, policy] = await Promise.all([
         listTickets(sql, { status: "open", limit: 25 }),
         listContacts(sql, { limit: 500 }),
@@ -43,6 +61,16 @@ export default async function TicketsPage() {
     });
     // Names are resolved here so the browser receives only the names belonging
     // to the page it is showing, never the tenant's contact table.
+    if (data.serviceManager === true)
+      return (
+        <main className="page page--wide">
+          <ServiceInquiryRegister
+            initialPage={data.servicePage}
+            timezone={data.settings.timezone}
+            emergencyLabel={data.emergencyLabel}
+          />
+        </main>
+      );
     const contactNames = Object.fromEntries(
       data.contacts.map((contact) => [contact.id, contact.name]),
     );

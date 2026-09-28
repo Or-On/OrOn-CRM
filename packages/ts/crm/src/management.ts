@@ -426,6 +426,8 @@ export async function updateTenantSettings(
     if (
       rawPolicy.schemaVersion !== "1.0" ||
       typeof rawPolicy.enabled !== "boolean" ||
+      (rawPolicy.smsOtp !== undefined &&
+        typeof rawPolicy.smsOtp !== "boolean") ||
       !Array.isArray(rawPolicy.requiredFactors) ||
       factors.length < 1 ||
       factors.length > 4 ||

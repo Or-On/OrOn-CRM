@@ -1,5 +1,6 @@
 from unittest.mock import AsyncMock
 
+import pytest
 from oron_agent.identity_verification import (
     IdentityVerificationRequirements,
     identity_verification_entry,
@@ -104,3 +105,41 @@ async def test_failed_verification_is_generic_and_never_loads_context() -> None:
     assert target["name"] == "identity_verification_locked"
     assert "which" not in str(target).casefold()
     assert "customer context remains locked" in str(target).casefold()
+
+
+@pytest.mark.parametrize("on_failure", ["human_handoff", "end_call"])
+async def test_sms_send_uses_no_model_destination_and_provider_failure_keeps_context_locked(
+    on_failure,
+):
+    send = AsyncMock(return_value={"sent": False, "nextStep": "human_handoff"})
+    context = AsyncMock()
+    gate = identity_verification_entry(
+        _requirements(factors=["smsOtp"], onFailure=on_failure),
+        _entry(),
+        verify=AsyncMock(),
+        load_context=context,
+        send_sms=send,
+    )
+    send_tool = gate["functions"][1]
+    assert send_tool.properties == {} and send_tool.required == []
+    result, target = await send_tool.handler({}, object())
+    assert result["sent"] is False
+    assert target["name"] == "identity_verification_locked"
+    assert ("a person will need" in str(target)) is (on_failure == "human_handoff")
+    context.assert_not_awaited()
+
+
+async def test_sms_success_resumes_only_after_server_verdict():
+    context = AsyncMock(return_value={})
+    verify = AsyncMock(return_value={"verified": True, "state": "context_unlocked"})
+    gate = identity_verification_entry(
+        _requirements(factors=["smsOtp"]),
+        _entry(),
+        verify=verify,
+        load_context=context,
+        send_sms=AsyncMock(return_value={"sent": True}),
+    )
+    result, target = await gate["functions"][0].handler({"smsOtp": "012345"}, object())
+    assert result == {"verified": True} and target["name"] == "support"
+    verify.assert_awaited_once_with({"smsOtp": "012345"})
+    context.assert_awaited_once()

@@ -1,6 +1,8 @@
 import { notFound, redirect } from "next/navigation";
 import {
   getFieldServiceFeatureState,
+  getTenantFeatureSnapshot,
+  usesServiceManagerExperience,
   getTechnicianSessionContext,
   getTenantSettings,
   getServiceCaseDossier,
@@ -38,6 +40,9 @@ export default async function ServiceCasePage({
       "field-service:read",
       async (sql, session) => {
         const feature = await getFieldServiceFeatureState(sql);
+        const serviceManager = usesServiceManagerExperience(
+          await getTenantFeatureSnapshot(sql),
+        );
         if (!feature.effective)
           throw new ForbiddenError("Field service disabled");
         const canManage = isAuthorized(
@@ -63,6 +68,7 @@ export default async function ServiceCasePage({
             getTenantSettings(sql),
           ]);
         return {
+          serviceManager,
           dossier:
             dossier === undefined
               ? undefined
@@ -94,6 +100,7 @@ export default async function ServiceCasePage({
   return (
     <main className="page page--wide page--field-service page--workspace-premium">
       <ServiceCaseWorkspace
+        serviceManager={data.serviceManager}
         canOperate={data.canOperate}
         canManage={data.canManage}
         canReadVoice={data.canReadVoice}

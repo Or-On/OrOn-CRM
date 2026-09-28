@@ -29,6 +29,7 @@ vi.mock("../src/features/auth", () => ({
     ),
 }));
 vi.mock("@or-on/crm", () => ({
+  usesServiceManagerExperience: () => false,
   getTenantFeatureSnapshot: () =>
     Promise.resolve(
       Object.fromEntries(

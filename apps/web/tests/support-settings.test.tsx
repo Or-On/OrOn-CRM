@@ -99,6 +99,7 @@ describe("tenant AI support settings", () => {
       target: { value: "Example Tenant Care" },
     });
     fireEvent.click(screen.getByLabelText("Customer number"));
+    fireEvent.click(screen.getByLabelText(en.smsVerification.customerToggle));
     fireEvent.change(screen.getByLabelText("Maximum attempts"), {
       target: { value: "4" },
     });
@@ -131,6 +132,7 @@ describe("tenant AI support settings", () => {
         maxAttempts: 4,
         onFailure: "human_handoff",
         contextDisclosure: "after_verification",
+        smsOtp: true,
       },
     });
     expect(state.refresh).toHaveBeenCalledTimes(1);

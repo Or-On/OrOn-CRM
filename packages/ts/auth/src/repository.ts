@@ -86,10 +86,17 @@ export function createAuthRepository(databaseUrl: string): AuthRepository {
         SELECT * FROM platform.auth_login_record(${email}::citext)
       `;
       const row = rows[0];
+      const sms =
+        row === undefined
+          ? []
+          : await sql<
+              { phone: string | null }[]
+            >`SELECT platform.auth_sms_phone(${row.user_id}::uuid) AS phone`;
       return row === undefined
         ? undefined
         : {
             userId: row.user_id,
+            smsEnabled: sms[0]?.phone != null,
             email: row.email,
             displayName: row.display_name ?? undefined,
             status: row.status,

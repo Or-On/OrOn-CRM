@@ -769,6 +769,47 @@ export function BusinessConfiguration({
               </p>
             </header>
             <Surface className={styles.section} level="raised">
+              <label className={styles.check}>
+                <input
+                  type="checkbox"
+                  disabled={
+                    locked ||
+                    (!draft.features.includes("tickets") &&
+                      draft.featureConfiguration.field_service?.experience !==
+                        "service_manager")
+                  }
+                  checked={
+                    draft.featureConfiguration.field_service?.experience ===
+                    "service_manager"
+                  }
+                  onChange={(event) =>
+                    update({
+                      ...draft,
+                      featureConfiguration: {
+                        ...draft.featureConfiguration,
+                        field_service: {
+                          ...draft.featureConfiguration.field_service,
+                          experience: event.target.checked
+                            ? "service_manager"
+                            : "standard",
+                        },
+                      },
+                    })
+                  }
+                />
+                <span>
+                  {copy(
+                    "Simple service-manager screens",
+                    "מסכי ניהול שירות פשוטים",
+                  )}
+                </span>
+              </label>
+              <p>
+                {copy(
+                  "Requires Tickets. Shows inquiries, appointments and service results. Telephone, messaging and automation remain active; their advanced screens stay accessible from settings.",
+                  "נדרשת הפעלת פניות. מציג פניות, תיאומים ותוצאות שירות. הטלפון, ההודעות והאוטומציה ממשיכים לפעול; המסכים המתקדמים זמינים מתוך ההגדרות.",
+                )}
+              </p>
               <div className={styles.policyGrid}>
                 <fieldset className={styles.fieldset} disabled={locked}>
                   <legend>

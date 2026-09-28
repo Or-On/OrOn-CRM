@@ -29,6 +29,7 @@ import {
   getFieldServiceFeatureState,
   getTenantFeatureSnapshot,
   getTenantSettings,
+  usesServiceManagerExperience,
 } from "@or-on/crm";
 import { Providers } from "./providers";
 import { product } from "../branding";
@@ -68,6 +69,7 @@ const currentShellContext = cache(async () => {
       businessName: settings.businessName ?? session.tenant.tenantName,
       accentToken: settings.accentToken ?? null,
       fieldServiceEnabled: fieldService?.effective === true,
+      serviceManager: usesServiceManagerExperience(features),
       enabledFeatures: Object.values(features)
         .filter((feature) => feature.effective)
         .map((feature) => feature.key),
@@ -130,6 +132,7 @@ export default async function RootLayout({
                   fieldServiceEnabled={
                     shellContext?.fieldServiceEnabled === true
                   }
+                  serviceManager={shellContext?.serviceManager ?? false}
                   enabledFeatures={shellContext?.enabledFeatures}
                   session={session}
                   {...(shellContext === undefined

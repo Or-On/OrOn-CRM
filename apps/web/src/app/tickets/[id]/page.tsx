@@ -3,6 +3,10 @@ import { notFound, redirect } from "next/navigation";
 
 import {
   getContact,
+  getTenantFeatureSnapshot,
+  usesServiceManagerExperience,
+  listServiceInquiries,
+  getServiceCaseDossier,
   getInquiryDetail,
   getServiceWorkflowPolicy,
   getTenantSettings,
@@ -12,6 +16,8 @@ import {
   TenantFeatureDisabledError,
 } from "@or-on/crm";
 
+import { isAuthorized } from "@or-on/auth";
+import { ServiceInquiryDetail } from "../../../features/service-manager";
 import { AccessDenied } from "../../../i18n/access-denied";
 import {
   ForbiddenError,
@@ -40,11 +46,31 @@ export default async function TicketDetailPage({
           ? Promise.resolve([])
           : listTeamMembers(sql),
       ]);
+      const features = await getTenantFeatureSnapshot(sql);
+      const serviceManager = usesServiceManagerExperience(features);
+      const serviceInquiry = serviceManager
+        ? (await listServiceInquiries(sql, { id, timezone: settings.timezone }))
+            .inquiries[0]
+        : undefined;
+      const canReadField = isAuthorized(
+        { role: session.tenant.role, isSuperuser: session.isSuperuser },
+        "field-service:read",
+      );
+      const dossier =
+        serviceManager && canReadField && detail.ticket.serviceCaseId !== null
+          ? await getServiceCaseDossier(sql, detail.ticket.serviceCaseId)
+          : undefined;
       const owner = members.find(
         (member) => member.userId === detail.ticket.ownerUserId,
       );
       const emergency = policy.emergency;
       return {
+        serviceInquiry,
+        dossier,
+        canResolve: isAuthorized(
+          { role: session.tenant.role, isSuperuser: session.isSuperuser },
+          "field-service:manage",
+        ),
         contact,
         detail,
         ownerName: owner?.displayName ?? owner?.email ?? null,
@@ -59,6 +85,21 @@ export default async function TicketDetailPage({
       };
     });
     if (data === undefined) notFound();
+    if (data.serviceInquiry !== undefined)
+      return (
+        <main className="page page--wide">
+          <ServiceInquiryDetail
+            item={data.serviceInquiry}
+            inquiry={data.inquiry}
+            attachments={data.dossier?.attachments ?? []}
+            timezone={data.settings.timezone}
+            canResolve={data.canResolve}
+            ticket={data.detail.ticket}
+            emergencyLabel={data.emergencyLabel}
+            canMarkEmergency={data.canMarkEmergency}
+          />
+        </main>
+      );
     return (
       <main className="page page--wide page--workspace-premium">
         <TicketDetailView

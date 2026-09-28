@@ -226,6 +226,49 @@ describe("business configuration", () => {
     expect(reject.disabled).toBe(false);
   });
 
+  it("saves the service-manager choice before submitting an existing draft", async () => {
+    const saved = state();
+    if (!saved.draft) throw new Error("Missing draft fixture");
+    const governance = {
+      ...saved,
+      draft: {
+        ...saved.draft,
+        configuration: configurationFromTemplate("field_service"),
+      },
+    };
+    vi.mocked(crmMutation)
+      .mockResolvedValueOnce({ configuration: governance })
+      .mockResolvedValueOnce({ configuration: state("submitted") });
+    render(workspace(governance));
+    openSection(/^Service workflow/);
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Simple service-manager screens" }),
+    );
+    expect(screen.getByText("Unsaved changes")).toBeTruthy();
+    expect(crmMutation).not.toHaveBeenCalled();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Submit for approval" }),
+    );
+    await waitFor(() => expect(crmMutation).toHaveBeenCalledTimes(2));
+    const submittedConfiguration =
+      vi.mocked(crmMutation).mock.calls[0]?.[1].configuration;
+    expect(submittedConfiguration).toHaveProperty(
+      "featureConfiguration.field_service.experience",
+      "service_manager",
+    );
+    expect(submittedConfiguration).toHaveProperty(
+      "featureConfiguration.field_service.workflow",
+      governance.draft.configuration.featureConfiguration.field_service
+        ?.workflow,
+    );
+    expect(vi.mocked(crmMutation).mock.calls[0]?.[2]).toEqual({
+      method: "PUT",
+    });
+    expect(vi.mocked(crmMutation).mock.calls[1]?.[1]).toEqual(
+      expect.objectContaining({ action: "submit" }),
+    );
+  });
+
   it("loads the reusable service template with retail intake and technician policy", () => {
     render(workspace());
     // The Field Service template card, not the Field Service module card.

@@ -10,6 +10,7 @@ export { OcrReviewWorkspace } from "./ocr-review-workspace";
 export { ReportActions } from "./report-actions";
 export { ReportsWorkspace } from "./reports-workspace";
 export { ServiceCaseWorkspace } from "./service-case-workspace";
+export { VisitWorkflow } from "./visit-workflow";
 export {
   dossierForVoiceAccess,
   linkCandidatesForVoiceAccess,

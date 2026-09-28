@@ -117,6 +117,12 @@ export function parseTenantConfiguration(value: unknown): TenantConfiguration {
     featureConfiguration[key as TenantFeatureKey] =
       validateTenantFeatureConfiguration(key as TenantFeatureKey, settings);
   }
+  if (
+    featureConfiguration.field_service?.experience === "service_manager" &&
+    features.includes("field_service") &&
+    !features.includes("tickets")
+  )
+    throw new TypeError("Service manager requires Field Service and Tickets");
   if (!Array.isArray(input.processes) || input.processes.length > 50)
     throw new TypeError("A workspace can configure up to 50 processes");
   const processes = input.processes.map((value): TenantProcessInput => {

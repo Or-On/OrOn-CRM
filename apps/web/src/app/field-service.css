@@ -2266,3 +2266,35 @@
     break-inside: avoid;
   }
 }
+.service-photo-groups {
+  display: grid;
+  gap: 1.5rem;
+}
+.service-photo-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 1rem;
+}
+.service-photo-card {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid var(--or-border);
+  border-radius: 0.5rem;
+}
+.service-photo-card img {
+  width: 100%;
+  height: 160px;
+  object-fit: contain;
+}
+.service-visit-list--simple .service-visit-details > p,
+.service-visit-list--simple
+  .service-visit-details
+  > div:not(.service-visit-timeline),
+.service-visit-list--simple .service-visit-actions > button:first-child {
+  display: none;
+}
+.service-case-aside > details[open] {
+  display: grid;
+  gap: 1rem;
+}

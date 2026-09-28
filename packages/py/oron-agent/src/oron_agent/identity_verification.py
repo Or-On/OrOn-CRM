@@ -9,7 +9,7 @@ from typing import Any, Literal, cast
 from pipecat.flows import FlowsFunctionSchema, NodeConfig
 from pydantic import BaseModel, ConfigDict, Field
 
-VerificationFactor = Literal["fullName", "phone", "nationalId", "customerNumber"]
+VerificationFactor = Literal["fullName", "phone", "nationalId", "customerNumber", "smsOtp"]
 Verify = Callable[[dict[str, object]], Awaitable[dict]]
 LoadContext = Callable[[], Awaitable[dict]]
 ActionGuard = Callable[..., Awaitable[Any]]
@@ -19,7 +19,7 @@ class IdentityVerificationRequirements(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     required: bool
-    factors: list[VerificationFactor] = Field(default_factory=list, max_length=4)
+    factors: list[VerificationFactor] = Field(default_factory=list, max_length=5)
     state: Literal[
         "identity_required",
         "collecting_identity",
@@ -34,6 +34,9 @@ class IdentityVerificationRequirements(BaseModel):
 
 
 _FACTOR_DESCRIPTIONS: dict[VerificationFactor, str] = {
+    "smsOtp": (
+        "The six-digit SMS code stated by the caller for this active call. Never repeat it aloud."
+    ),
     "fullName": "The caller's full name, exactly as they state it.",
     "phone": (
         "The caller's phone number; ordinary local or international spoken format is accepted."
@@ -101,6 +104,7 @@ def identity_verification_entry(
     verify: Verify,
     load_context: LoadContext,
     action_guard: ActionGuard | None = None,
+    send_sms: Callable[[], Awaitable[dict]] | None = None,
 ) -> NodeConfig:
     """Return the secured initial node for this authoritative session state."""
 
@@ -165,6 +169,38 @@ def identity_verification_entry(
             handler=handler,
             cancel_on_interruption=action_guard is not None,
         )
+        functions: list[Any] = [function]
+        if "smsOtp" in current.factors:
+            if send_sms is None:
+                raise ValueError("SMS verification runtime is unavailable")
+
+            async def send_handler(args: dict, manager: Any) -> tuple[dict, NodeConfig]:
+                async def execute_send(_args: dict, _manager: Any) -> tuple[dict, NodeConfig]:
+                    assert send_sms is not None
+                    result = await send_sms()
+                    return result, build_gate(current) if result.get(
+                        "sent"
+                    ) is True else _locked_terminal(
+                        entry, escalated=current.onFailure == "human_handoff"
+                    )
+
+                if action_guard is not None:
+                    return await action_guard(execute_send, args, manager)
+                return await execute_send(args, manager)
+
+            functions.append(
+                FlowsFunctionSchema(
+                    name="send_caller_sms",
+                    description=(
+                        "Send a verification code to the server-pinned customer number "
+                        "after the caller consents. No destination can be supplied."
+                    ),
+                    properties={},
+                    required=[],
+                    handler=send_handler,
+                    cancel_on_interruption=action_guard is not None,
+                )
+            )
         role = str(entry.get("role_message") or "").strip()
         return {
             "name": "identity_verification",
@@ -184,11 +220,16 @@ def identity_verification_entry(
                         "corrections, and call verify_caller_identity only after every factor "
                         "is available. Never repeat a complete identifier aloud. A failed "
                         "result is deliberately generic: "
-                        "do not guess or reveal which value differed."
+                        "do not guess or reveal which value differed. "
+                        "If smsOtp is required, first ask for consent to send an SMS, "
+                        "call send_caller_sms, then collect the six digits. Never ask "
+                        "for a different destination or invent a sent/delivered result. "
+                        "If the caller declines or cannot receive it, arrange human follow-up "
+                        "without disclosing customer data. Do not repeat or retain the code."
                     ),
                 }
             ],
-            "functions": [function],
+            "functions": functions,
             "respond_immediately": True,
         }
 

@@ -191,6 +191,7 @@ export function TenantSupportSettings({
         maxAttempts: Number(form.get("maxAttempts")),
         onFailure: formText(form, "onFailure") as "human_handoff" | "end_call",
         contextDisclosure: "after_verification",
+        smsOtp: form.get("smsOtp") === "on",
       };
       validateTenantSupportText(supportProfile);
       await crmMutation(
@@ -508,6 +509,16 @@ export function TenantSupportSettings({
                     <option value="end_call">{t("endCall")}</option>
                   </Select>
                 </div>
+                <Checkbox
+                  defaultChecked={policy.smsOtp ?? false}
+                  id="customer-sms-otp"
+                  name="smsOtp"
+                >
+                  {translate("smsVerification.customerToggle")}
+                </Checkbox>
+                <InlineFeedback
+                  description={translate("smsVerification.customerHint")}
+                />
                 <InlineFeedback description={t("disclosurePolicy")} />
               </div>
             </section>

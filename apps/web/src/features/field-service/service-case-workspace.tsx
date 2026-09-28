@@ -58,6 +58,7 @@ import {
   warrantyStatusLabel,
 } from "./field-service-labels";
 import { PreparationPrompt, VisitWorkflow } from "./visit-workflow";
+import { AttachmentGallery } from "./attachment-gallery";
 
 type UploadCategory =
   | "fault"
@@ -196,6 +197,7 @@ export function ServiceCaseWorkspace({
   dossier,
   feature,
   isTechnician = false,
+  serviceManager = false,
   linkCandidates,
   sessionTechnician = null,
   technicians,
@@ -208,6 +210,7 @@ export function ServiceCaseWorkspace({
   readonly dossier: ServiceCaseDossier;
   readonly feature: FieldServiceFeatureState;
   readonly isTechnician?: boolean;
+  readonly serviceManager?: boolean;
   readonly linkCandidates: ServiceCaseLinkCandidates | undefined;
   /** The physical technician of this browser session (technician roles). */
   readonly sessionTechnician?: SessionTechnician | null;
@@ -835,7 +838,13 @@ export function ServiceCaseWorkspace({
             <header>
               <div>
                 <span className="eyebrow">
-                  {he ? "ביקורים ונוכחות" : "Visits & attendance"}
+                  {serviceManager && !isTechnician
+                    ? he
+                      ? "הגעה ויציאה"
+                      : "Arrival and departure"
+                    : he
+                      ? "ביקורים ונוכחות"
+                      : "Visits & attendance"}
                 </span>
                 <h2>{he ? "עבודת שטח" : "Field work"}</h2>
               </div>
@@ -850,7 +859,9 @@ export function ServiceCaseWorkspace({
                 }
               />
             ) : (
-              <div className="service-visit-list">
+              <div
+                className={`service-visit-list${serviceManager && !isTechnician ? " service-visit-list--simple" : ""}`}
+              >
                 {dossier.visits.map((visit) => {
                   const technician = technicians.find(
                     (item) => item.id === visit.technicianId,
@@ -863,7 +874,7 @@ export function ServiceCaseWorkspace({
                       <div className="service-visit-index">
                         {visit.visitNumber}
                       </div>
-                      <div>
+                      <div className="service-visit-details">
                         <h3 dir="auto">
                           {technician?.fullName ??
                             (he ? "טכנאי" : "Technician")}
@@ -907,6 +918,7 @@ export function ServiceCaseWorkspace({
                           ) : null}
                         </div>
                         <VisitWorkflow
+                          simple={serviceManager && !isTechnician}
                           canWork={canOperate && canWorkVisit(visit)}
                           scheduledEnd={appointment?.endsAt ?? null}
                           scheduledStart={appointment?.startsAt ?? null}
@@ -954,7 +966,9 @@ export function ServiceCaseWorkspace({
           <Surface className="service-case-section" level="raised">
             <header>
               <div>
-                <span className="eyebrow">{he ? "ראיות" : "Evidence"}</span>
+                {!serviceManager ? (
+                  <span className="eyebrow">{he ? "ראיות" : "Evidence"}</span>
+                ) : null}
                 <h2>{he ? "תמונות ומסמכים" : "Photos & documents"}</h2>
               </div>
               {canOperate ? (
@@ -970,7 +984,9 @@ export function ServiceCaseWorkspace({
                 </Button>
               ) : null}
             </header>
-            {dossier.attachments.length === 0 ? (
+            {serviceManager ? (
+              <AttachmentGallery items={dossier.attachments} />
+            ) : dossier.attachments.length === 0 ? (
               <EmptyState
                 title={he ? "אין ראיות מצורפות" : "No evidence attached"}
                 description={
@@ -1075,213 +1091,230 @@ export function ServiceCaseWorkspace({
           </Surface>
 
           <Surface className="service-case-section" level="raised">
-            <header>
-              <div>
-                <span className="eyebrow">
-                  {he ? "היסטוריית מקור" : "Source history"}
-                </span>
-                <h2>{he ? "WhatsApp ושיחות" : "WhatsApp & calls"}</h2>
+            <details open={!serviceManager}>
+              <summary hidden={!serviceManager}>
+                {he ? "שיחות והודעות" : "Calls and messages"}
+              </summary>
+              <header>
+                <div>
+                  <span className="eyebrow">
+                    {he ? "היסטוריית מקור" : "Source history"}
+                  </span>
+                  <h2>{he ? "WhatsApp ושיחות" : "WhatsApp & calls"}</h2>
+                </div>
+                {canManage ? (
+                  <Button
+                    onClick={openLinkDialog}
+                    size="small"
+                    variant="secondary"
+                  >
+                    <Link2 aria-hidden="true" size={15} />
+                    {he ? "קישור ראיות" : "Link evidence"}
+                  </Button>
+                ) : null}
+              </header>
+              <div className="service-source-grid">
+                <div>
+                  <h3>
+                    <MessageCircleMore aria-hidden="true" size={16} />
+                    WhatsApp{" "}
+                    <Badge
+                      label={String(conversations.length)}
+                      tone="neutral"
+                    />
+                  </h3>
+                  {conversations.length === 0 ? (
+                    <p>{he ? "לא קושרה שיחה." : "No conversation linked."}</p>
+                  ) : (
+                    <ol>
+                      {conversations.map((message) => (
+                        <li key={message.id}>
+                          <span>{message.senderType}</span>
+                          <p dir="auto">
+                            {message.contentText ?? `[${message.contentType}]`}
+                          </p>
+                          <time dateTime={message.createdAt}>
+                            {new Intl.DateTimeFormat(locale, {
+                              dateStyle: "short",
+                              timeStyle: "short",
+                              timeZone: timezone,
+                            }).format(new Date(message.createdAt))}
+                          </time>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                </div>
+                <div>
+                  <h3>
+                    <PhoneCall aria-hidden="true" size={16} />
+                    {he ? "שיחות" : "Calls"}{" "}
+                    <Badge
+                      label={String(dossier.calls.length)}
+                      tone="neutral"
+                    />
+                  </h3>
+                  {dossier.calls.length === 0 ? (
+                    <p>{he ? "לא קושרו שיחות." : "No calls linked."}</p>
+                  ) : (
+                    <ol>
+                      {dossier.calls.map((call) => (
+                        <li key={call.sessionId}>
+                          <span>
+                            {call.direction} · {call.status}
+                          </span>
+                          <p dir="auto">
+                            {call.outcome ??
+                              (he ? "ללא תוצאה מתועדת" : "No recorded outcome")}
+                          </p>
+                          <small>
+                            {he ? "הקלטה" : "Recording"}: {call.recordingStatus}{" "}
+                            · {he ? "תמלול" : "Transcript"}:{" "}
+                            {call.transcriptStatus}
+                          </small>
+                          {canReadVoice ? (
+                            <Link
+                              className="service-source-link"
+                              href={`/voice/calls/${call.sessionId}`}
+                            >
+                              {he ? "פתיחת שיחה וראיות" : "Open call evidence"}
+                            </Link>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                </div>
               </div>
-              {canManage ? (
-                <Button
-                  onClick={openLinkDialog}
-                  size="small"
-                  variant="secondary"
-                >
-                  <Link2 aria-hidden="true" size={15} />
-                  {he ? "קישור ראיות" : "Link evidence"}
-                </Button>
-              ) : null}
-            </header>
-            <div className="service-source-grid">
-              <div>
-                <h3>
-                  <MessageCircleMore aria-hidden="true" size={16} />
-                  WhatsApp{" "}
-                  <Badge label={String(conversations.length)} tone="neutral" />
-                </h3>
-                {conversations.length === 0 ? (
-                  <p>{he ? "לא קושרה שיחה." : "No conversation linked."}</p>
-                ) : (
-                  <ol>
-                    {conversations.map((message) => (
-                      <li key={message.id}>
-                        <span>{message.senderType}</span>
-                        <p dir="auto">
-                          {message.contentText ?? `[${message.contentType}]`}
-                        </p>
-                        <time dateTime={message.createdAt}>
-                          {new Intl.DateTimeFormat(locale, {
-                            dateStyle: "short",
-                            timeStyle: "short",
-                            timeZone: timezone,
-                          }).format(new Date(message.createdAt))}
-                        </time>
-                      </li>
-                    ))}
-                  </ol>
-                )}
-              </div>
-              <div>
-                <h3>
-                  <PhoneCall aria-hidden="true" size={16} />
-                  {he ? "שיחות" : "Calls"}{" "}
-                  <Badge label={String(dossier.calls.length)} tone="neutral" />
-                </h3>
-                {dossier.calls.length === 0 ? (
-                  <p>{he ? "לא קושרו שיחות." : "No calls linked."}</p>
-                ) : (
-                  <ol>
-                    {dossier.calls.map((call) => (
-                      <li key={call.sessionId}>
-                        <span>
-                          {call.direction} · {call.status}
-                        </span>
-                        <p dir="auto">
-                          {call.outcome ??
-                            (he ? "ללא תוצאה מתועדת" : "No recorded outcome")}
-                        </p>
-                        <small>
-                          {he ? "הקלטה" : "Recording"}: {call.recordingStatus} ·{" "}
-                          {he ? "תמלול" : "Transcript"}: {call.transcriptStatus}
-                        </small>
-                        {canReadVoice ? (
-                          <Link
-                            className="service-source-link"
-                            href={`/voice/calls/${call.sessionId}`}
-                          >
-                            {he ? "פתיחת שיחה וראיות" : "Open call evidence"}
-                          </Link>
-                        ) : null}
-                      </li>
-                    ))}
-                  </ol>
-                )}
-              </div>
-            </div>
+            </details>
           </Surface>
         </div>
 
         <aside className="service-case-aside">
-          {canOperate ? (
-            <Surface className="service-case-section" level="raised">
+          <details open={!serviceManager || isTechnician}>
+            <summary hidden={!serviceManager || isTechnician}>
+              {he ? "פרטי טיפול נוספים" : "Additional work details"}
+            </summary>
+            {canOperate ? (
+              <Surface className="service-case-section" level="raised">
+                <header>
+                  <div>
+                    <span className="eyebrow">
+                      {he ? "מחזור חיים" : "Lifecycle"}
+                    </span>
+                    <h2>{he ? "עדכון סטטוס" : "Update status"}</h2>
+                  </div>
+                </header>
+                {nextStatuses.length === 0 ? (
+                  <p className="public-note">
+                    {he
+                      ? "התיק סגור ואין מעבר סטטוס נוסף."
+                      : "This case is closed and has no further status transition."}
+                  </p>
+                ) : (
+                  <form
+                    className="service-status-form"
+                    onSubmit={(event) => void updateStatus(event)}
+                  >
+                    <Select
+                      id="service-case-status"
+                      label={he ? "סטטוס הבא" : "Next status"}
+                      name="status"
+                      required
+                    >
+                      {nextStatuses.map((status) => (
+                        <option key={status} value={status}>
+                          {caseStatusLabel(status, he)}
+                        </option>
+                      ))}
+                    </Select>
+                    <Textarea
+                      id="service-case-status-reason"
+                      label={he ? "סיבה" : "Reason"}
+                      name="reason"
+                      rows={2}
+                    />
+                    <Button
+                      busy={pendingAction === "update-status"}
+                      disabled={pending}
+                      type="submit"
+                    >
+                      {he ? "עדכון" : "Update"}
+                    </Button>
+                  </form>
+                )}
+              </Surface>
+            ) : null}
+            <Surface
+              className="service-case-section service-case-timeline"
+              level="raised"
+            >
               <header>
                 <div>
                   <span className="eyebrow">
-                    {he ? "מחזור חיים" : "Lifecycle"}
+                    {he ? "עקיבות" : "Traceability"}
                   </span>
-                  <h2>{he ? "עדכון סטטוס" : "Update status"}</h2>
+                  <h2>{he ? "היסטוריית תיק" : "Case history"}</h2>
                 </div>
               </header>
-              {nextStatuses.length === 0 ? (
-                <p className="public-note">
-                  {he
-                    ? "התיק סגור ואין מעבר סטטוס נוסף."
-                    : "This case is closed and has no further status transition."}
-                </p>
+              <ol>
+                {dossier.statusHistory.map((item) => (
+                  <li key={`${item.changedAt}-${item.toStatus}`}>
+                    <span>
+                      <CheckCircle2 aria-hidden="true" size={14} />
+                    </span>
+                    <div>
+                      <strong>{caseStatusLabel(item.toStatus, he)}</strong>
+                      <p dir="auto">
+                        {item.reason ?? (he ? "שינוי סטטוס" : "Status changed")}
+                      </p>
+                      <time dateTime={item.changedAt}>
+                        {new Intl.DateTimeFormat(locale, {
+                          dateStyle: "medium",
+                          timeStyle: "short",
+                          timeZone: timezone,
+                        }).format(new Date(item.changedAt))}
+                      </time>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </Surface>
+            <Surface className="service-case-section" level="raised">
+              <header>
+                <div>
+                  <span className="eyebrow">{he ? "עיבוד" : "Processing"}</span>
+                  <h2>{he ? "סיכומים" : "Summaries"}</h2>
+                </div>
+              </header>
+              {dossier.summaries.length === 0 ? (
+                <InlineFeedback
+                  description={
+                    he
+                      ? "אין סיכום AI. היסטוריית המקור נשמרת במלואה."
+                      : "No AI summary is available. Complete source history remains preserved."
+                  }
+                />
               ) : (
-                <form
-                  className="service-status-form"
-                  onSubmit={(event) => void updateStatus(event)}
-                >
-                  <Select
-                    id="service-case-status"
-                    label={he ? "סטטוס הבא" : "Next status"}
-                    name="status"
-                    required
+                dossier.summaries.map((summary, index) => (
+                  <div
+                    className="service-summary"
+                    key={`${summary.sourceKind}-${String(index)}`}
                   >
-                    {nextStatuses.map((status) => (
-                      <option key={status} value={status}>
-                        {caseStatusLabel(status, he)}
-                      </option>
-                    ))}
-                  </Select>
-                  <Textarea
-                    id="service-case-status-reason"
-                    label={he ? "סיבה" : "Reason"}
-                    name="reason"
-                    rows={2}
-                  />
-                  <Button
-                    busy={pendingAction === "update-status"}
-                    disabled={pending}
-                    type="submit"
-                  >
-                    {he ? "עדכון" : "Update"}
-                  </Button>
-                </form>
+                    <Badge
+                      label={`${summary.sourceKind} · ${summary.status}`}
+                      tone={
+                        summary.status === "completed" ? "positive" : "neutral"
+                      }
+                    />
+                    <p dir="auto">
+                      {summary.summary ?? (he ? "אין תוכן" : "No content")}
+                    </p>
+                  </div>
+                ))
               )}
             </Surface>
-          ) : null}
-          <Surface
-            className="service-case-section service-case-timeline"
-            level="raised"
-          >
-            <header>
-              <div>
-                <span className="eyebrow">
-                  {he ? "עקיבות" : "Traceability"}
-                </span>
-                <h2>{he ? "היסטוריית תיק" : "Case history"}</h2>
-              </div>
-            </header>
-            <ol>
-              {dossier.statusHistory.map((item) => (
-                <li key={`${item.changedAt}-${item.toStatus}`}>
-                  <span>
-                    <CheckCircle2 aria-hidden="true" size={14} />
-                  </span>
-                  <div>
-                    <strong>{caseStatusLabel(item.toStatus, he)}</strong>
-                    <p dir="auto">
-                      {item.reason ?? (he ? "שינוי סטטוס" : "Status changed")}
-                    </p>
-                    <time dateTime={item.changedAt}>
-                      {new Intl.DateTimeFormat(locale, {
-                        dateStyle: "medium",
-                        timeStyle: "short",
-                        timeZone: timezone,
-                      }).format(new Date(item.changedAt))}
-                    </time>
-                  </div>
-                </li>
-              ))}
-            </ol>
-          </Surface>
-          <Surface className="service-case-section" level="raised">
-            <header>
-              <div>
-                <span className="eyebrow">{he ? "עיבוד" : "Processing"}</span>
-                <h2>{he ? "סיכומים" : "Summaries"}</h2>
-              </div>
-            </header>
-            {dossier.summaries.length === 0 ? (
-              <InlineFeedback
-                description={
-                  he
-                    ? "אין סיכום AI. היסטוריית המקור נשמרת במלואה."
-                    : "No AI summary is available. Complete source history remains preserved."
-                }
-              />
-            ) : (
-              dossier.summaries.map((summary, index) => (
-                <div
-                  className="service-summary"
-                  key={`${summary.sourceKind}-${String(index)}`}
-                >
-                  <Badge
-                    label={`${summary.sourceKind} · ${summary.status}`}
-                    tone={
-                      summary.status === "completed" ? "positive" : "neutral"
-                    }
-                  />
-                  <p dir="auto">
-                    {summary.summary ?? (he ? "אין תוכן" : "No content")}
-                  </p>
-                </div>
-              ))
-            )}
-          </Surface>
+          </details>
         </aside>
       </div>
 

@@ -129,6 +129,7 @@ export async function markTicketEmergency(
 // --- phone inquiry details ------------------------------------------------------
 
 export interface InquiryMessage {
+  readonly objectId?: string | null;
   readonly messageId: string;
   readonly direction: "inbound" | "outbound";
   readonly contentType: string;
@@ -258,6 +259,7 @@ export async function getInquiryDetail(
     customerMediaReceivedAt:
       draft.customer_media_received_at?.toISOString() ?? null,
     messages: messages.map((message) => ({
+      objectId: message.object_id,
       messageId: message.id,
       direction: message.direction,
       contentType: message.content_type,

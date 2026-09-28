@@ -26,8 +26,9 @@ def test_graph_has_preserved_oron_root_and_one_target_head() -> None:
     # retention inspection (e1c4b7a92d10), 93 the reopened-inbox marker
     # (f3a8c61e4b27), 94 session-scoped technician identity (7b3d9e5a1c48), and
     # 95 typed shared-technician identification (3f5c8b1d7e42). An unexplained
-    # change here means a migration arrived that nobody reviewed.
-    assert report.revision_count == 97
+    # change here means a migration arrived that nobody reviewed. Revision 99
+    # adds bound staff/customer SMS verification (9b2e7a4c6d18).
+    assert report.revision_count == 99
 
 
 def test_lead_workflow_guard_is_present_in_the_final_configuration_validator() -> None:

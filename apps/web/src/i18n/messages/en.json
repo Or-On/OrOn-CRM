@@ -1,4 +1,24 @@
 {
+  "smsVerification": {
+    "title": "SMS sign-in verification",
+    "staffHint": "Add a code sent to your verified phone after your password. Your account permissions stay the same.",
+    "phone": "Mobile number (international format)",
+    "password": "Current password",
+    "code": "Six-digit SMS code",
+    "sent": "A code was sent to {phone}. It expires in 5 minutes. Wait 60 seconds before requesting another code.",
+    "verify": "Verify code",
+    "restart": "Start again",
+    "enable": "Verify phone and enable",
+    "disable": "Send code to disable",
+    "loading": "Loading verification settings…",
+    "notEnrolled": "SMS verification is not enabled for your account.",
+    "enrolled": "SMS verification is enabled for {phone}.",
+    "saved": "Your verification settings were saved.",
+    "failed": "Verification failed or is temporarily unavailable. Check the code, or wait before starting again.",
+    "unavailable": "SMS sending is disabled or the provider is not configured. Existing SMS-protected accounts remain protected. Contact your administrator if you cannot sign in.",
+    "customerToggle": "Require SMS verification during customer calls",
+    "customerHint": "Send a code, with consent, to the stored number associated with the call. Customer information stays locked until verification succeeds. SMS must be configured in the web and voice services; unavailable verification requires human follow-up. Existing handoff identity factors still apply."
+  },
   "tenantHealth": {
     "operational": "Core services operational",
     "partial": "Partial service outage",

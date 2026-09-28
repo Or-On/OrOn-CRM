@@ -16,9 +16,11 @@ export const fieldServiceSectionDestinations = {
 
 export function FieldServiceNavigation({
   active,
+  simple = false,
   destinations = fieldServiceSectionDestinations,
 }: {
   readonly active: FieldServiceSection;
+  readonly simple?: boolean;
   readonly destinations?: Readonly<Record<FieldServiceSection, string>>;
 }) {
   const he = useLocale().startsWith("he");
@@ -42,18 +44,20 @@ export function FieldServiceNavigation({
       className={styles.navigation}
     >
       <ul className={styles.list}>
-        {items.map(({ Icon, key, label }) => (
-          <li key={key}>
-            <Link
-              aria-current={active === key ? "page" : undefined}
-              className={styles.link}
-              href={destinations[key]}
-            >
-              <Icon aria-hidden="true" size={16} strokeWidth={1.8} />
-              <span>{label}</span>
-            </Link>
-          </li>
-        ))}
+        {items
+          .filter((item) => !simple || item.key !== "ocr")
+          .map(({ Icon, key, label }) => (
+            <li key={key}>
+              <Link
+                aria-current={active === key ? "page" : undefined}
+                className={styles.link}
+                href={destinations[key]}
+              >
+                <Icon aria-hidden="true" size={16} strokeWidth={1.8} />
+                <span>{label}</span>
+              </Link>
+            </li>
+          ))}
       </ul>
     </nav>
   );

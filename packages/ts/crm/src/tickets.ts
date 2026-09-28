@@ -515,6 +515,7 @@ export async function setTicketHandlingMode(
 }
 
 export interface CloseTicketInput {
+  readonly serviceResolutionMethod?: "telephone" | "technician";
   readonly ticketId: string;
   readonly closureReason: TicketClosureReason;
   readonly resolutionClassification: TicketResolution;
@@ -565,6 +566,9 @@ export async function closeTicket(
       closureReason: input.closureReason,
       resolutionClassification: input.resolutionClassification,
       resolutionConfirmedBy: input.resolutionConfirmedBy,
+      ...(input.serviceResolutionMethod === undefined
+        ? {}
+        : { serviceResolutionMethod: input.serviceResolutionMethod }),
     },
   });
   return mapTicket(row);

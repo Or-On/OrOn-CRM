@@ -236,6 +236,8 @@ export interface TenantSupportProfile {
 }
 
 export interface IdentityVerificationPolicy {
+  /** Opt-in code sent to the customer identity pinned to the call. */
+  readonly smsOtp?: boolean;
   readonly schemaVersion: "1.0";
   readonly enabled: boolean;
   readonly requiredFactors: readonly (

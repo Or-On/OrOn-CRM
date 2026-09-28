@@ -27,6 +27,8 @@ vi.mock("@or-on/auth", () => ({
     (role === "agent" && permission === "members:manage"),
 }));
 vi.mock("@or-on/crm", () => ({
+  getTenantFeatureSnapshot: () => Promise.resolve({}),
+  usesServiceManagerExperience: () => false,
   getFieldServiceFeatureState: state.fieldService,
   getTenantSettings: state.settings,
   listApiKeys: state.apiKeys,

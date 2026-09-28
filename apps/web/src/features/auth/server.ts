@@ -3,6 +3,8 @@ import { cache } from "react";
 
 import {
   AuthService,
+  StaffSmsService,
+  createTwilioSmsSender,
   assertTrustedUnsafeRequest,
   createAuthRepository,
   isAuthorized,
@@ -42,6 +44,7 @@ function authConfig() {
       process.env.AUTH_COOKIE_SECURE === "true",
     serviceSecret: config.secrets.authServiceSecret,
     tokenPepper: config.secrets.authTokenPepper,
+    sms: config.sms,
   };
 }
 
@@ -55,10 +58,48 @@ export async function withAuthService<T>(
       new AuthService(repository, {
         dummyPasswordHash: config.dummyPasswordHash,
         tokenPepper: config.tokenPepper,
+        sms: {
+          startLogin: (userId) => withStaffSms((sms) => sms.startLogin(userId)),
+          finishLogin: (id, code, requestId) =>
+            withStaffSms((sms) => sms.finishLogin(id, code, requestId)),
+        },
       }),
     );
   } finally {
     await repository.close();
+  }
+}
+
+function createStaffSmsService(): StaffSmsService {
+  const config = authConfig();
+  const settings = config.sms;
+  const ready =
+    settings.enabled &&
+    settings.otpPepper !== undefined &&
+    settings.accountSid !== undefined &&
+    settings.authToken !== undefined &&
+    settings.fromNumber !== undefined;
+  return new StaffSmsService(
+    config.databaseUrl,
+    ready
+      ? createTwilioSmsSender({
+          accountSid: settings.accountSid,
+          authToken: settings.authToken,
+          fromNumber: settings.fromNumber,
+        })
+      : undefined,
+    ready ? settings.otpPepper : undefined,
+  );
+}
+
+export async function withStaffSms<T>(
+  operation: (service: StaffSmsService) => Promise<T>,
+): Promise<T> {
+  const service = createStaffSmsService();
+  try {
+    return await operation(service);
+  } finally {
+    await service.close();
   }
 }
 

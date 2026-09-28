@@ -7,9 +7,10 @@ import hashlib
 import hmac
 import json
 import re
+import secrets
 import unicodedata
 from typing import TYPE_CHECKING, Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from oron_common import CallContext, CallUsage, Direction, validate_e164
 from oron_db import make_engine, make_sessionmaker, set_tenant
@@ -22,13 +23,14 @@ from oron_sessions.crypto import LocalFieldCipher
 from oron_sessions.models import Session, SessionCreate, SessionEvent, SessionUpdate
 from oron_tenancy.flow_store import FlowNotFound, PostgresFlowStore
 from oron_tenancy.models import PhoneNumber
-from pydantic import Field, PostgresDsn, SecretStr
+from pydantic import Field, PostgresDsn, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlmodel import col
 
+from dispatcher_runtime.sms import SmsSender, SmsUnavailable, TwilioSmsSender, code_digest
 from dispatcher_runtime.support_context import (
     TenantSupportProfile,
     compile_voice_runtime_prompt,
@@ -112,6 +114,26 @@ class VoicePersistenceSettings(BaseSettings):
     database_url: PostgresDsn = Field(validation_alias="VOICE_DATABASE_URL")
     field_cipher_local_key: SecretStr = Field(validation_alias="FIELD_CIPHER_LOCAL_KEY")
     blind_index_key: SecretStr = Field(validation_alias="BLIND_INDEX_KEY")
+    enable_real_sms: bool = Field(default=False, validation_alias="ENABLE_REAL_SMS")
+    sms_otp_pepper: SecretStr | None = Field(default=None, validation_alias="SMS_OTP_PEPPER")
+    twilio_account_sid: str | None = Field(default=None, validation_alias="TWILIO_ACCOUNT_SID")
+    twilio_auth_token: SecretStr | None = Field(default=None, validation_alias="TWILIO_AUTH_TOKEN")
+    sms_from_number: str | None = Field(default=None, validation_alias="SMS_FROM_NUMBER")
+
+    @model_validator(mode="after")
+    def validate_sms(self) -> VoicePersistenceSettings:
+        if self.enable_real_sms and (
+            self.sms_otp_pepper is None
+            or len(self.sms_otp_pepper.get_secret_value()) < 32
+            or self.twilio_account_sid is None
+            or re.fullmatch(r"AC[0-9a-fA-F]{32}", self.twilio_account_sid) is None
+            or self.twilio_auth_token is None
+            or not self.twilio_auth_token.get_secret_value()
+            or self.sms_from_number is None
+            or re.fullmatch(r"\+[1-9][0-9]{7,14}", self.sms_from_number) is None
+        ):
+            raise ValueError("real SMS requires valid provider settings and SMS_OTP_PEPPER")
+        return self
 
     def cipher_key(self) -> bytes:
         value = base64.b64decode(self.field_cipher_local_key.get_secret_value(), validate=True)
@@ -129,12 +151,29 @@ class VoicePersistenceSettings(BaseSettings):
 class PostgresVoiceRuntime:
     """Shared stateless backend; each operation owns a scoped transaction."""
 
-    def __init__(self, settings: VoicePersistenceSettings) -> None:
+    def __init__(
+        self, settings: VoicePersistenceSettings, *, sms_sender: SmsSender | None = None
+    ) -> None:
         self._engine: AsyncEngine = make_engine(_async_database_url(str(settings.database_url)))
         self._sessionmaker: async_sessionmaker[AsyncSession] = make_sessionmaker(self._engine)
         self._cipher = LocalFieldCipher(settings.cipher_key())
         self._blind_index_key = settings.index_key()
         self._flows = PostgresFlowStore(self._sessionmaker)
+        self._sms_pepper = (
+            settings.sms_otp_pepper.get_secret_value() if settings.sms_otp_pepper else None
+        )
+        self._sms_sender = sms_sender
+        if self._sms_sender is None and settings.enable_real_sms:
+            assert (
+                settings.twilio_account_sid
+                and settings.twilio_auth_token
+                and settings.sms_from_number
+            )
+            self._sms_sender = TwilioSmsSender(
+                settings.twilio_account_sid,
+                settings.twilio_auth_token.get_secret_value(),
+                settings.sms_from_number,
+            )
 
     async def close(self) -> None:
         await self._engine.dispose()
@@ -909,20 +948,11 @@ class PostgresVoiceRuntime:
     async def get_identity_verification_requirements(self, context: CallContext) -> dict:
         """Return policy/state only; expected identity values never cross this boundary."""
 
-        if context.handoff_id is None:
-            return {
-                "required": False,
-                "factors": [],
-                "state": "context_unlocked",
-                "maxAttempts": 0,
-                "remainingAttempts": 0,
-                "onFailure": "end_call",
-            }
         async with self._sessionmaker() as database, database.begin():
             await set_tenant(database, str(context.tenant_id))
             result = (
                 await database.execute(
-                    text("SELECT platform.voice_identity_verification_requirements(:session_id)"),
+                    text("SELECT platform.prepare_voice_sms_verification(:session_id)"),
                     {"session_id": str(context.session_id)},
                 )
             ).scalar_one_or_none()
@@ -930,13 +960,67 @@ class PostgresVoiceRuntime:
             raise ValueError("voice verification state is unavailable")
         return result
 
+    async def send_caller_sms(self, context: CallContext) -> dict:
+        """The destination comes from the exact server-pinned customer identity."""
+        challenge, code = uuid4(), f"{secrets.randbelow(1_000_000):06d}"
+        try:
+            if self._sms_sender is None or self._sms_pepper is None:
+                raise SmsUnavailable()
+            digest = code_digest(challenge, code, self._sms_pepper)
+            async with self._sessionmaker() as database, database.begin():
+                await set_tenant(database, str(context.tenant_id))
+                phone = (
+                    await database.execute(
+                        text("SELECT platform.voice_start_sms(:id,:session,:digest)"),
+                        {
+                            "id": str(challenge),
+                            "session": str(context.session_id),
+                            "digest": digest,
+                        },
+                    )
+                ).scalar_one()
+            try:
+                await self._sms_sender.send(phone, code)
+            except Exception:
+                async with self._sessionmaker() as database, database.begin():
+                    await set_tenant(database, str(context.tenant_id))
+                    await database.execute(
+                        text("SELECT platform.voice_sms_delivery(:id,:session,false)"),
+                        {"id": str(challenge), "session": str(context.session_id)},
+                    )
+                raise SmsUnavailable() from None
+            async with self._sessionmaker() as database, database.begin():
+                await set_tenant(database, str(context.tenant_id))
+                await database.execute(
+                    text("SELECT platform.voice_sms_delivery(:id,:session,true)"),
+                    {"id": str(challenge), "session": str(context.session_id)},
+                )
+            return {"sent": True, "expiresInSeconds": 300}
+        except Exception:
+            async with self._sessionmaker() as database, database.begin():
+                await set_tenant(database, str(context.tenant_id))
+                await database.execute(
+                    text("SELECT platform.voice_sms_unavailable(:session)"),
+                    {"session": str(context.session_id)},
+                )
+                requirements = (
+                    await database.execute(
+                        text("SELECT platform.voice_identity_verification_requirements(:session)"),
+                        {"session": str(context.session_id)},
+                    )
+                ).scalar_one_or_none()
+            return {
+                "sent": False,
+                "nextStep": "end_call"
+                if isinstance(requirements, dict) and requirements.get("state") == "failed"
+                else "human_handoff",
+            }
+
     async def verify_caller_identity(
         self, context: CallContext, supplied: dict[str, object]
     ) -> dict:
         """Normalize submitted factors and compare only inside the tenant-scoped database."""
 
-        if context.handoff_id is None:
-            raise ValueError("voice verification is not required for this call")
         requirements = await self.get_identity_verification_requirements(context)
         factors = requirements.get("factors")
         if not isinstance(factors, list) or not all(isinstance(item, str) for item in factors):
@@ -951,7 +1035,10 @@ class PostgresVoiceRuntime:
             value = supplied.get(factor)
             if not isinstance(value, str):
                 raise ValueError("all configured verification factors are required")
-            if factor == "fullName":
+            if factor == "smsOtp":
+                if re.fullmatch(r"[0-9]{6}", value) is None:
+                    raise ValueError("SMS code must contain six digits")
+            elif factor == "fullName":
                 normalized[factor] = _normalize_identity_name(value)
             elif factor == "phone":
                 normalized[factor] = validate_e164(value, region="IL")
@@ -972,6 +1059,32 @@ class PostgresVoiceRuntime:
 
         async with self._sessionmaker() as database, database.begin():
             await set_tenant(database, str(context.tenant_id))
+            if "smsOtp" in factors:
+                if self._sms_pepper is None:
+                    raise SmsUnavailable()
+                challenge = (
+                    await database.execute(
+                        text("SELECT platform.voice_sms_challenge(:session)"),
+                        {"session": str(context.session_id)},
+                    )
+                ).scalar_one_or_none()
+                digest = code_digest(
+                    UUID(str(challenge)) if challenge else UUID(int=0),
+                    str(supplied["smsOtp"]),
+                    self._sms_pepper,
+                )
+                sms_result = (
+                    await database.execute(
+                        text("SELECT platform.voice_complete_sms(:id,:session,:digest)"),
+                        {
+                            "id": str(challenge) if challenge else None,
+                            "session": str(context.session_id),
+                            "digest": digest,
+                        },
+                    )
+                ).scalar_one()
+                if sms_result.get("verified") is not True or len(factors) == 1:
+                    return dict(sms_result)
             result = (
                 await database.execute(
                     text(
@@ -1552,6 +1665,9 @@ class AgentPostgresSessions:
 
     async def get_identity_verification_requirements(self, context: CallContext) -> dict:
         return await self._backend.get_identity_verification_requirements(context)
+
+    async def send_caller_sms(self, context: CallContext) -> dict:
+        return await self._backend.send_caller_sms(context)
 
     async def verify_caller_identity(
         self, context: CallContext, supplied: dict[str, object]

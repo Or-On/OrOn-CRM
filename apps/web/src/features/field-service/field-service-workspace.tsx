@@ -95,6 +95,7 @@ export function FieldServiceWorkspace({
   canManage,
   canOperate,
   isTechnician = false,
+  serviceManager = false,
   serviceStores = [],
   technicianSession,
   redCallLabel = null,
@@ -110,6 +111,7 @@ export function FieldServiceWorkspace({
   readonly canManage: boolean;
   readonly canOperate: boolean;
   readonly isTechnician?: boolean;
+  readonly serviceManager?: boolean;
   readonly serviceStores?: Directory["stores"];
   /** The tenant's red-call wording when this user may mark one, else null. */
   readonly redCallLabel?: string | null;
@@ -581,9 +583,9 @@ export function FieldServiceWorkspace({
             />
           ) : null}
 
-          <FieldServiceNavigation active="overview" />
+          <FieldServiceNavigation active="overview" simple={serviceManager} />
 
-          {!isTechnician ? (
+          {!isTechnician && !serviceManager ? (
             <section
               className="field-service-metrics"
               aria-label={he ? "סקירת שירות" : "Service overview"}

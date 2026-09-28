@@ -202,12 +202,14 @@ export function AppShell({
   children,
   fieldServiceEnabled = false,
   enabledFeatures,
+  serviceManager = false,
   session,
   tenantBranding,
 }: {
   readonly children: ReactNode;
   readonly environment?: Environment;
   readonly fieldServiceEnabled?: boolean;
+  readonly serviceManager?: boolean;
   readonly enabledFeatures?: readonly string[] | undefined;
   readonly session: PublicSession | undefined;
   readonly tenantBranding?: {
@@ -275,13 +277,20 @@ export function AppShell({
     (href: string) => {
       // Email has no approved tenant module yet and is not part of a package.
       if (href === "/email" && enabledFeatures !== undefined) return false;
+      if (
+        serviceManager &&
+        ["/inbox", "/operations", "/voice", "/flows", "/orchestration"].some(
+          (hidden) => href === hidden || href.startsWith(`${hidden}/`),
+        )
+      )
+        return false;
       const required = requiredFeatureForHref(href);
       if (required === undefined) return true;
       if (enabledFeatures !== undefined)
         return enabledFeatures.includes(required);
       return required !== "field_service" || fieldServiceEnabled;
     },
-    [enabledFeatures, fieldServiceEnabled],
+    [enabledFeatures, fieldServiceEnabled, serviceManager],
   );
   const isInbox = pathname === "/inbox";
   // `parentHref` was previously ignored, so every contextual destination
@@ -885,6 +894,17 @@ export function AppShell({
                     {t("shell.profile")}
                   </Link>
                 )}
+                <Link
+                  className="text-link"
+                  href="/account/security"
+                  onClick={() => {
+                    setAccountOpen(false);
+                    closeMobileNavigation(false);
+                  }}
+                >
+                  <UserCircle aria-hidden="true" size={16} />
+                  {t("smsVerification.title")}
+                </Link>
                 <Button
                   disabled={sessionPending}
                   onClick={() => void postSession("/api/auth/logout")}

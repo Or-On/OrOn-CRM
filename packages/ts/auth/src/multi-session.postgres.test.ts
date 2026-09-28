@@ -134,21 +134,21 @@ describe.skipIf(databaseUrl === undefined)(
           });
         const bind = (
           session: AuthSession,
-          technicianId: string,
+          fullName: string,
           identifier: string,
         ) =>
           inSession(
             session,
             (sql) => sql`
               SELECT service.bind_current_technician_session(
-                ${technicianId}::uuid, ${identifier}, ${randomUUID()}
+                ${fullName}, ${identifier}, ${null}, ${randomUUID()}
               )
             `,
           );
 
-        await bind(tabletA.session, david, "FS-DAVID");
+        await bind(tabletA.session, "David Fixture", "FS-DAVID");
         expect(await technicianOf(tabletB.session)).toBeNull();
-        await bind(tabletB.session, moshe, "FS-MOSHE");
+        await bind(tabletB.session, "Moshe Fixture", "FS-MOSHE");
 
         // Interleaved concurrent requests never share process or user state.
         const interleaved = await Promise.all(

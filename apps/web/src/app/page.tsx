@@ -8,6 +8,10 @@ import {
   tenantOperationalInsights,
   getTenantFeatureSnapshot,
   countLeads,
+  getTenantSettings,
+  usesServiceManagerExperience,
+  serviceManagerMetrics,
+  type ServiceOverviewPeriod,
 } from "@or-on/crm";
 import { isAuthorized } from "@or-on/auth";
 import {
@@ -17,6 +21,7 @@ import {
 } from "../features/auth";
 import { AccessDenied } from "../i18n/access-denied";
 import { Overview } from "../features/overview";
+import { ServiceManagerOverview } from "../features/service-manager";
 
 export async function generateMetadata(): Promise<Metadata> {
   return {
@@ -25,7 +30,16 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-export default async function OverviewPage() {
+export default async function OverviewPage({
+  searchParams,
+}: {
+  readonly searchParams?: Promise<{ readonly period?: string }>;
+} = {}) {
+  const requestedPeriod = (await searchParams)?.period;
+  const period: ServiceOverviewPeriod =
+    requestedPeriod === "today" || requestedPeriod === "week"
+      ? requestedPeriod
+      : "month";
   try {
     const data = await withCurrentTenant(
       "platform:read",
@@ -43,6 +57,19 @@ export default async function OverviewPage() {
           )
         )
           throw new ForbiddenError("Workspace access is unavailable");
+        if (usesServiceManagerExperience(features)) {
+          const settings = await getTenantSettings(sql);
+          return {
+            serviceManager: true as const,
+            tenantName: session.tenant.tenantName,
+            serviceMetrics: await serviceManagerMetrics(
+              sql,
+              settings.timezone,
+              period,
+            ),
+            period,
+          };
+        }
         const metrics = await overviewMetrics(sql);
         const dashboard = await dashboardMetrics(sql);
         const insights = await overviewInsights(sql);
@@ -64,6 +91,14 @@ export default async function OverviewPage() {
       },
     );
     if ("technician" in data) redirect("/field-service");
+    if (data.serviceManager === true)
+      return (
+        <ServiceManagerOverview
+          tenantName={data.tenantName}
+          metrics={data.serviceMetrics}
+          period={data.period}
+        />
+      );
     return <Overview {...data} />;
   } catch (error) {
     if (error instanceof ForbiddenError) return <AccessDenied />;

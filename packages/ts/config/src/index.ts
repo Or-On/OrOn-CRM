@@ -100,6 +100,14 @@ const sourceSchema = z.object({
   ENABLE_WHATSAPP_AI: booleanFlag,
   ENABLE_WHATSAPP_AUTO_CALLS: booleanFlag,
   ENABLE_REAL_BILLING: booleanFlag,
+  ENABLE_REAL_SMS: booleanFlag,
+  SMS_OTP_PEPPER: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.string().min(32).optional(),
+  ),
+  TWILIO_ACCOUNT_SID: optionalText,
+  TWILIO_AUTH_TOKEN: optionalSecret,
+  SMS_FROM_NUMBER: optionalText,
   LIVEKIT_API_SECRET: optionalSecret,
   WHATSAPP_ACCESS_TOKEN: optionalSecret,
   WHATSAPP_APP_SECRET: optionalSecret,
@@ -147,6 +155,13 @@ export interface LoadConfigOptions {
 }
 
 export interface PlatformConfig {
+  readonly sms: {
+    readonly enabled: boolean;
+    readonly otpPepper: string | undefined;
+    readonly accountSid: string | undefined;
+    readonly authToken: string | undefined;
+    readonly fromNumber: string | undefined;
+  };
   readonly publicSiteUrl?: string;
   readonly environment: "development" | "test" | "production";
   readonly service: string;
@@ -281,7 +296,25 @@ export function loadConfig(
     );
   }
 
+  if (
+    result.data.ENABLE_REAL_SMS &&
+    (result.data.SMS_OTP_PEPPER === undefined ||
+      !/^AC[0-9a-fA-F]{32}$/u.test(result.data.TWILIO_ACCOUNT_SID ?? "") ||
+      result.data.TWILIO_AUTH_TOKEN === undefined ||
+      !/^\+[1-9]\d{7,14}$/u.test(result.data.SMS_FROM_NUMBER ?? ""))
+  )
+    throw new ConfigurationError(
+      "Invalid platform configuration: real SMS requires valid provider settings and SMS_OTP_PEPPER",
+    );
+
   return {
+    sms: {
+      enabled: result.data.ENABLE_REAL_SMS,
+      otpPepper: result.data.SMS_OTP_PEPPER,
+      accountSid: result.data.TWILIO_ACCOUNT_SID,
+      authToken: result.data.TWILIO_AUTH_TOKEN,
+      fromNumber: result.data.SMS_FROM_NUMBER,
+    },
     environment: result.data.PLATFORM_ENV,
     service:
       options.service ?? result.data.PLATFORM_SERVICE ?? "unknown-service",
@@ -327,6 +360,9 @@ export function configDiagnostics(
   config: PlatformConfig,
 ): Readonly<Record<string, unknown>> {
   return {
+    enableRealSms: config.sms.enabled,
+    smsOtpPepper: config.sms.otpPepper === undefined ? "unset" : "[REDACTED]",
+    smsAuthToken: config.sms.authToken === undefined ? "unset" : "[REDACTED]",
     environment: config.environment,
     service: config.service,
     databaseUrl: config.databaseUrl === undefined ? "unset" : "[REDACTED]",

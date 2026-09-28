@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import {
   InvalidCredentialsError,
+  SmsChallengeRequiredError,
   applicationHome,
   applicationScope,
   assertTrustedUnsafeRequest,
@@ -43,6 +44,12 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ ok: true, home: applicationHome[scope] });
   } catch (error) {
+    if (error instanceof SmsChallengeRequiredError) {
+      return NextResponse.json(
+        { smsChallenge: error.challenge },
+        { headers: { "cache-control": "no-store" } },
+      );
+    }
     if (error instanceof InvalidCredentialsError) {
       return NextResponse.json({ error: error.message }, { status: 401 });
     }

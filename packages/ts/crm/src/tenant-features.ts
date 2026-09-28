@@ -246,16 +246,44 @@ export function validateTenantFeatureConfiguration(
   const serialized = JSON.stringify(value);
   if (new TextEncoder().encode(serialized).byteLength > 16_384)
     throw new TypeError("feature configuration is too large");
-  if (key === "field_service" && "workflow" in value) {
-    if (Object.keys(value).some((name) => name !== "workflow"))
+  if (key === "field_service") {
+    if (
+      Object.keys(value).some(
+        (name) => !["workflow", "experience"].includes(name),
+      )
+    )
       throw new TypeError("unknown field service configuration option");
-    return { workflow: { ...parseServiceWorkflowPolicy(value.workflow) } };
+    if (
+      "experience" in value &&
+      value.experience !== "standard" &&
+      value.experience !== "service_manager"
+    )
+      throw new TypeError("unknown field service experience");
+    return {
+      ...("workflow" in value
+        ? { workflow: { ...parseServiceWorkflowPolicy(value.workflow) } }
+        : {}),
+      ...("experience" in value
+        ? { experience: value.experience as string }
+        : {}),
+    };
   }
   if (Object.keys(value).length > 0)
     throw new TypeError(
       "this feature has no configurable fields in schema version 1",
     );
   return value as Readonly<Record<string, JsonValue>>;
+}
+
+/** Presentation only: channel capabilities and authorization stay independent. */
+export function usesServiceManagerExperience(
+  features: TenantFeatureSnapshot,
+): boolean {
+  return (
+    features.field_service.effective &&
+    features.tickets.effective &&
+    features.field_service.configuration.experience === "service_manager"
+  );
 }
 
 interface GenericFeatureRow {
