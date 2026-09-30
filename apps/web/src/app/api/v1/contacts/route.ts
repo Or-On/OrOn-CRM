@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 
-import { createContact, listContacts, withApiKeyTenant } from "@or-on/crm";
+import {
+  InvalidApiKeyError,
+  createContact,
+  listContacts,
+  withApiKeyTenant,
+} from "@or-on/crm";
 import { loadConfig } from "@or-on/config";
 
 function apiConfiguration() {
@@ -22,13 +27,15 @@ function apiConfiguration() {
 function bearer(request: Request): string {
   const authorization = request.headers.get("authorization");
   if (!authorization?.startsWith("Bearer "))
-    throw new TypeError("invalid API key");
+    throw new InvalidApiKeyError("invalid API key");
   return authorization.slice(7);
 }
 
 function apiError(error: unknown): NextResponse {
-  if (error instanceof TypeError)
+  if (error instanceof InvalidApiKeyError)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (error instanceof SyntaxError)
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   console.error("Public CRM API failed", {
     errorType: error instanceof Error ? error.name : "UnknownError",
   });
@@ -63,7 +70,9 @@ export async function POST(request: Request) {
       typeof body.name !== "string"
     )
       return NextResponse.json({ error: "name is required" }, { status: 400 });
-    const name = body.name;
+    const name = body.name.trim();
+    if (name === "")
+      return NextResponse.json({ error: "name is required" }, { status: 400 });
     const contact = await withApiKeyTenant(
       config.databaseUrl,
       config.pepper,

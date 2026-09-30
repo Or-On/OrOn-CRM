@@ -807,7 +807,7 @@ export function InboxWorkspace({
             )}
           </IconButton>
           <div className="inbox-list__title">
-            <h2>{t("shell.inbox")}</h2>
+            <h1>{t("shell.inbox")}</h1>
           </div>
           <div className="inbox-list__actions">
             <Popover

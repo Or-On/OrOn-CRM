@@ -112,6 +112,8 @@ export async function revokeApiKey(
   return rows.length === 1;
 }
 
+export class InvalidApiKeyError extends Error {}
+
 export async function withApiKeyTenant<T>(
   databaseUrl: string,
   pepper: string,
@@ -120,7 +122,7 @@ export async function withApiKeyTenant<T>(
   operation: (transaction: postgres.TransactionSql) => Promise<T>,
 ): Promise<T> {
   if (!token.startsWith("oron_") || token.length < 40)
-    throw new TypeError("invalid API key");
+    throw new InvalidApiKeyError("invalid API key");
   const sql = postgres(databaseUrl, { max: 1, prepare: false });
   try {
     return (await sql.begin(async (transaction) => {
@@ -131,7 +133,7 @@ export async function withApiKeyTenant<T>(
     `;
       const identity = resolved[0];
       if (!identity?.resolved_scopes.includes(requiredScope)) {
-        throw new TypeError("invalid API key");
+        throw new InvalidApiKeyError("invalid API key");
       }
       await transaction`
         SELECT set_config('app.current_tenant', ${identity.resolved_tenant_id}, true),
