@@ -6,21 +6,27 @@ import argparse
 import asyncio
 import json
 from pathlib import Path
+from urllib.parse import urlsplit
 from uuid import UUID
 
 import asyncpg
 
+from scripts.dev import _load_environment
+from scripts.preview_ui import isolated_url
 from scripts.preview_ui_fixtures import TENANT_ID, USER_ID, fixture_id, validate_fixture_database
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-async def main(role: str, port: int) -> None:
+async def main(role: str, port: int | None) -> None:
     fixture = json.loads((ROOT / ".artifacts/phase7-preview-login.json").read_text())
     if fixture["email"] != "demo@example.invalid":
         raise ValueError("Only the fictional preview account may be changed")
     database = fixture["database"]
-    url = f"postgresql://platform_migrator@127.0.0.1:{port}/{database}"
+    source = _load_environment().get("MIGRATION_DATABASE_URL", "")
+    url = isolated_url(source, database)
+    if port is not None and urlsplit(url).port != port:
+        raise ValueError("Requested port does not match the preview database source")
     validate_fixture_database(url, database)
     connection = await asyncpg.connect(url, timeout=10)
     try:
@@ -39,7 +45,7 @@ async def main(role: str, port: int) -> None:
                 USER_ID,
                 role == "reviewer",
             )
-            if role == "technician":
+            if role not in {"owner", "reviewer"}:
                 await connection.execute(
                     "UPDATE public.memberships SET role = 'owner' "
                     "WHERE user_id = $1 AND tenant_id = $2",
@@ -50,7 +56,7 @@ async def main(role: str, port: int) -> None:
                 "UPDATE public.memberships SET role = $3 WHERE user_id = $1 AND tenant_id = $2",
                 USER_ID,
                 TENANT_ID,
-                "technician" if role == "technician" else "owner",
+                "owner" if role == "reviewer" else role,
             )
             if role == "reviewer" and not await connection.fetchval(
                 "SELECT available FROM platform.tenant_feature_entitlements "
@@ -83,7 +89,9 @@ async def main(role: str, port: int) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("role", choices=("owner", "reviewer", "technician"))
-    parser.add_argument("--port", type=int, default=5456)
+    parser.add_argument(
+        "role", choices=("owner", "admin", "agent", "viewer", "reviewer", "technician")
+    )
+    parser.add_argument("--port", type=int)
     args = parser.parse_args()
     asyncio.run(main(args.role, args.port))

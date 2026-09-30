@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createRequire } from "node:module";
+import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 
 const require = createRequire(import.meta.url);
 if (!process.argv[2])
@@ -25,6 +27,52 @@ const results = [];
 const mode = process.argv[3] ?? "owner";
 const base = "http://127.0.0.1:3100";
 const tenantId = "10000000-0000-4000-8000-000000000001";
+const fixtureSuffix = randomUUID().slice(0, 8);
+const storeName = `North branch · סניף צפון ${fixtureSuffix}`;
+
+function setFixtureRole(role) {
+  const result = spawnSync(
+    "uv",
+    ["run", "python", "-m", "scripts.prepare_tenant_workflows_preview", role],
+    { cwd: root, encoding: "utf8" },
+  );
+  assert.equal(result.status, 0, result.stderr || result.error?.message);
+}
+
+async function openFixtureContext() {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  await page.goto("http://127.0.0.1:3101/fictional-preview", {
+    timeout: 120000,
+  });
+  await page.waitForURL(`${base}/**`, { timeout: 120000 });
+  await mutation(context, "/api/auth/tenant", { tenantId });
+  await page.goto(`${base}/settings/business`, { timeout: 120000 });
+  await page.getByRole("heading", { name: "Business configuration" }).waitFor();
+  return { context, page };
+}
+
+async function approvePending() {
+  setFixtureRole("reviewer");
+  const { context, page } = await openFixtureContext();
+  try {
+    const review = page.getByRole("button", { name: "Review submission" });
+    if (await review.isVisible()) await review.click();
+    else await page.getByRole("tab", { name: "Review & publish" }).click();
+    const approve = page.getByRole("button", { name: "Approve & publish" });
+    if (await approve.isVisible()) {
+      await approve.click();
+      await page
+        .getByText(
+          "Approved and published. The workspace now uses this configuration.",
+        )
+        .waitFor({ timeout: 30000 });
+    }
+  } finally {
+    await context.close();
+    setFixtureRole("owner");
+  }
+}
 
 async function mutation(context, pathname, body, method = "POST") {
   const csrf = (await context.cookies(base)).find(
@@ -43,27 +91,9 @@ async function mutation(context, pathname, body, method = "POST") {
 try {
   let caseId;
   if (mode === "owner" || mode === "leads") {
-    const setup = await browser.newContext();
-    const page = await setup.newPage();
-    await page.goto("http://127.0.0.1:3101/fictional-preview", {
-      timeout: 120000,
-    });
-    await page.waitForURL(`${base}/**`, { timeout: 120000 });
-    await mutation(setup, "/api/auth/tenant", { tenantId });
-    await page.goto(`${base}/settings/business`, { timeout: 120000 });
-    await page
-      .getByRole("heading", { name: "Business configuration" })
-      .waitFor();
-    // A resumed fixture may have been submitted by its normal-owner role.
-    const approve = page.getByRole("button", { name: "Approve & publish" });
-    if (await approve.isVisible()) {
-      await approve.click();
-      await page
-        .getByText(
-          "Approved and published. The workspace now uses this configuration.",
-        )
-        .waitFor();
-    }
+    // An interrupted earlier run can leave this disposable draft pending.
+    await approvePending();
+    const { context: setup, page } = await openFixtureContext();
     const template = page
       .getByRole("heading", {
         name: mode === "leads" ? "Leads only" : "Field Service",
@@ -76,13 +106,11 @@ try {
       .getByText("Draft saved. Continue configuring or submit it for review.")
       .waitFor({ timeout: 30000 });
     await page.getByRole("button", { name: "Submit for approval" }).click();
-    await page.getByRole("button", { name: "Approve & publish" }).waitFor();
-    await page.getByRole("button", { name: "Approve & publish" }).click();
     await page
-      .getByText(
-        "Approved and published. The workspace now uses this configuration.",
-      )
+      .getByText("Awaiting approval")
+      .first()
       .waitFor({ timeout: 30000 });
+    await approvePending();
     results.push({
       mode,
       name: "Real draft → submit → approve through UI",
@@ -98,11 +126,11 @@ try {
       assert.ok(contactId, "Preview needs a fictional contact");
       const chain = await mutation(setup, "/api/field-service/directory", {
         kind: "chain",
-        name: "Preview retail network",
+        name: `Preview retail network ${fixtureSuffix}`,
       });
       const store = await mutation(setup, "/api/field-service/directory", {
         kind: "store",
-        name: "North branch · סניף צפון",
+        name: storeName,
         chainId: chain.id,
         contactId,
         address: "18 Example Street · רחוב לדוגמה",
@@ -239,9 +267,7 @@ try {
           name: locale === "he" ? "רשתות וסניפים" : "Chains & stores",
         })
         .click();
-      await page
-        .getByText("North branch · סניף צפון", { exact: true })
-        .waitFor();
+      await page.getByText(storeName, { exact: true }).first().waitFor();
       await capture("directory");
       if (width === 1440 || width === 360) {
         await page.goto(`${base}/tickets`, { timeout: 120000 });
@@ -285,7 +311,7 @@ try {
         );
         await capture("report-actions");
       }
-    } else {
+    } else if (mode === "technician") {
       await page.goto(`${base}/field-service`, { timeout: 120000 });
       await page
         .getByRole("button", {
@@ -321,6 +347,38 @@ try {
           passed: true,
         });
       }
+    } else if (["admin", "agent", "viewer"].includes(mode)) {
+      await page.goto(`${base}/`, { timeout: 120000 });
+      await page.getByRole("main").waitFor();
+      await capture("overview");
+      await page.goto(`${base}/contacts`, { timeout: 120000 });
+      await page.getByRole("main").waitFor();
+      await capture("contacts");
+      const contacts = await context.request.get(
+        `${base}/api/crm/contacts?limit=5`,
+      );
+      assert.equal(contacts.status(), 200, `${mode} should read contacts`);
+      const configuration = await context.request.get(
+        `${base}/api/settings/business/configuration`,
+      );
+      assert.equal(
+        configuration.status(),
+        mode === "admin" ? 200 : 403,
+        `${mode} configuration permission`,
+      );
+      if (mode === "viewer") {
+        const csrf = (await context.cookies(base)).find(
+          (cookie) => cookie.name === "or_on_csrf",
+        )?.value;
+        const denied = await context.request.post(`${base}/api/crm/contacts`, {
+          data: { name: `Unauthorized fictional contact ${fixtureSuffix}` },
+          headers: { origin: base, "x-csrf-token": csrf ?? "" },
+        });
+        assert.equal(denied.status(), 403, "Viewer cannot create a contact");
+      }
+      results.push({ mode, name: "Role-scoped API permissions", passed: true });
+    } else {
+      throw new Error(`Unsupported fictional workflow mode: ${mode}`);
     }
     assert.deepEqual(errors, [], "Browser runtime errors");
     await context.close();

@@ -1,6 +1,9 @@
 .artifacts
+**/.artifacts
 .env
 .env.*
+**/.env
+**/.env.*
 **/*.env
 **/*.pem
 **/*.key
@@ -14,6 +17,7 @@ postgres-data
 .pytest_cache
 .ruff_cache
 .venv
+**/.venv
 **/.next
 **/dist
 **/node_modules

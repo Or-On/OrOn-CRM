@@ -235,9 +235,19 @@ def test_control_api_image_contains_the_opt_in_voice_evaluation_runtime() -> Non
     assert "COPY packages/py/oron-agent packages/py/oron-agent" in dockerfile
     assert "COPY packages/py/oron-hebrew packages/py/oron-hebrew" in dockerfile
     assert "--package or-on-control-api --extra voice" in dockerfile
-    assert "libpcre2-8-0=10.42-1+deb12u1 libsndfile1" in dockerfile
+    assert "libpcre2-8-0=10.42-1+deb12u1" in dockerfile
+    assert "libssl3=3.0.22-1~deb12u1" in dockerfile
+    assert "openssl=3.0.22-1~deb12u1" in dockerfile
+    assert "libsndfile1" in dockerfile
     assert "uv pip uninstall nltk" in dockerfile
     assert 'python -c "import control_api.app; import oron_agent.agent_evaluation"' in dockerfile
+
+
+def test_docker_context_excludes_nested_virtual_environments() -> None:
+    patterns = (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
+    assert "**/.venv" in patterns
+    assert "**/.env.*" in patterns
+    assert "**/.artifacts" in patterns
 
 
 def test_deploy_probes_local_edge_without_requiring_public_ip_hairpin() -> None:

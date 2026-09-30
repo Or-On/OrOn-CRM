@@ -90,6 +90,35 @@ const reportFields = [
 type ConfigurationSection =
   "setup" | "modules" | "service" | "processes" | "review" | "history";
 
+const hebrewFeatureCopy: Record<
+  TenantFeatureKey,
+  { readonly label: string; readonly purpose: string }
+> = {
+  contacts: { label: "אנשי קשר", purpose: "פרטי לקוחות והיסטוריית קשר" },
+  agents: { label: "סוכנים ותהליכים", purpose: "תהליכי שיחה שפורסמו" },
+  whatsapp: { label: "WhatsApp", purpose: "הודעות ללקוחות" },
+  voice: { label: "שיחות טלפון", purpose: "שיחות נכנסות ושיחות שהוקצו" },
+  leads: { label: "לידים", purpose: "התעניינות ומיון לקוחות פוטנציאליים" },
+  pipeline: { label: "תהליך מכירה", purpose: "עסקאות והתקדמות המכירה" },
+  tickets: { label: "פניות", purpose: "פניות שירות והעברה לטיפול" },
+  field_service: { label: "שירות שטח", purpose: "קריאות שירות ושיבוץ טכנאים" },
+  technicians: { label: "טכנאים", purpose: "צוות השטח וביקורים" },
+  documents: { label: "מסמכים", purpose: "קבצים ותיעוד של העסק" },
+  ocr: { label: "זיהוי טקסט", purpose: "חילוץ מידע ממסמכים ותמונות לבדיקה" },
+  reports: { label: "דוחות", purpose: "דוחות תפעוליים" },
+  appointments: { label: "פגישות", purpose: "תיאום פגישות ושירות" },
+  billing: { label: "חיוב", purpose: "ניהול תשלומים ויתרה" },
+};
+
+const hebrewTemplateLabels: Record<TenantTemplateKey, string> = {
+  field_service: "שירות שטח",
+  lead_generation: "יצירת לידים",
+  customer_support: "תמיכת לקוחות",
+  leads_support: "לידים ותמיכה",
+  leads_only: "לידים בלבד",
+  blank: "ריק / מותאם אישית",
+};
+
 function text(form: FormData, key: string): string {
   const value = form.get(key);
   return typeof value === "string" ? value : "";
@@ -124,6 +153,10 @@ export function BusinessConfiguration({
   const locale = useLocale();
   const he = locale.startsWith("he");
   const copy = (en: string, hebrew: string) => (he ? hebrew : en);
+  const featureLabel = (key: TenantFeatureKey) =>
+    he ? hebrewFeatureCopy[key].label : definitions[key].label;
+  const templateName = (key: TenantTemplateKey) =>
+    he ? hebrewTemplateLabels[key] : templates[key].label;
   const router = useRouter();
   const fallback: TenantConfiguration = {
     schemaVersion: 1,
@@ -458,9 +491,12 @@ export function BusinessConfiguration({
     id: `business-configuration-${id}-panel`,
     role: "tabpanel",
   });
-  const templateLabel =
-    Object.entries(templates).find(([key]) => key === draft.templateKey)?.[1]
-      .label ?? copy("Custom", "מותאם אישית");
+  const selectedTemplate = Object.keys(templates).find(
+    (key) => key === draft.templateKey,
+  );
+  const templateLabel = selectedTemplate
+    ? templateName(selectedTemplate as TenantTemplateKey)
+    : copy("Custom", "מותאם אישית");
 
   return (
     <div className="settings-workspace" dir={he ? "rtl" : "ltr"}>
@@ -670,11 +706,9 @@ export function BusinessConfiguration({
                   data-selected={draft.templateKey === key}
                   key={key}
                 >
-                  <h3>{template.label}</h3>
+                  <h3>{templateName(key as TenantTemplateKey)}</h3>
                   <p>
-                    {template.features
-                      .map((feature) => definitions[feature].label)
-                      .join(" · ") ||
+                    {template.features.map(featureLabel).join(" · ") ||
                       copy(
                         "Start with a minimal workspace",
                         "מתחילים עם סביבת עבודה בסיסית",
@@ -716,7 +750,7 @@ export function BusinessConfiguration({
               >
                 <div>
                   <div className={styles.moduleTitle}>
-                    <h3>{definition.label}</h3>
+                    <h3>{featureLabel(definition.key)}</h3>
                     {active.features.includes(definition.key) ? (
                       <Badge label={copy("Live", "פעיל כעת")} tone="positive" />
                     ) : null}
@@ -730,15 +764,19 @@ export function BusinessConfiguration({
                       />
                     ) : null}
                   </div>
-                  <p>{definition.purpose}</p>
+                  <p>
+                    {he
+                      ? hebrewFeatureCopy[definition.key].purpose
+                      : definition.purpose}
+                  </p>
                   <small>
                     {definition.dependencies.length
-                      ? `${copy("Requires", "דורש")} ${definition.dependencies.map((key) => definitions[key].label).join(", ")}`
+                      ? `${copy("Requires", "דורש")} ${definition.dependencies.map(featureLabel).join(", ")}`
                       : copy("No module dependencies", "ללא תלויות במודולים")}
                   </small>
                 </div>
                 <input
-                  aria-label={`${copy("Enable", "הפעלת")} ${definition.label}`}
+                  aria-label={`${copy("Enable", "הפעלת")} ${featureLabel(definition.key)}`}
                   checked={draft.features.includes(definition.key)}
                   disabled={
                     locked ||
@@ -1173,7 +1211,7 @@ export function BusinessConfiguration({
                 </h3>
                 <ul>
                   {draft.features.map((key) => (
-                    <li key={key}>{definitions[key].label}</li>
+                    <li key={key}>{featureLabel(key)}</li>
                   ))}
                 </ul>
               </div>
@@ -1210,7 +1248,7 @@ export function BusinessConfiguration({
                     ? changedFeatures
                         .map(
                           (key) =>
-                            `${draft.features.includes(key as TenantFeatureKey) ? "+" : "−"} ${definitions[key as TenantFeatureKey].label}`,
+                            `${draft.features.includes(key as TenantFeatureKey) ? "+" : "−"} ${featureLabel(key as TenantFeatureKey)}`,
                         )
                         .join(" · ")
                     : copy("No change", "ללא שינוי")}
@@ -1219,7 +1257,7 @@ export function BusinessConfiguration({
             </div>
             {unavailableFeatures.length ? (
               <InlineFeedback
-                description={`${copy("Platform access must be granted before this package can be published", "נדרשת הענקת גישה על ידי מנהל הפלטפורמה לפני פרסום החבילה")}: ${unavailableFeatures.map((key) => definitions[key].label).join(", ")}. ${copy("Contact the platform administrator; selecting a template does not grant module access.", "יש לפנות למנהל הפלטפורמה; בחירת תבנית אינה מעניקה גישה למודולים.")}`}
+                description={`${copy("Platform access must be granted before this package can be published", "נדרשת הענקת גישה על ידי מנהל הפלטפורמה לפני פרסום החבילה")}: ${unavailableFeatures.map(featureLabel).join(", ")}. ${copy("Contact the platform administrator; selecting a template does not grant module access.", "יש לפנות למנהל הפלטפורמה; בחירת תבנית אינה מעניקה גישה למודולים.")}`}
                 tone="warning"
               />
             ) : null}

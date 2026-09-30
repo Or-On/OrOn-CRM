@@ -3,7 +3,9 @@ FROM python:3.14.7-slim-bookworm@sha256:9ab8d9c8514b44f90cf0029dd42fdd7e9e211e63
 ARG ORON_SOURCE_REVISION=unknown
 LABEL org.opencontainers.image.revision="${ORON_SOURCE_REVISION}"
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends libpcre2-8-0=10.42-1+deb12u1 \
+    && apt-get install --yes --no-install-recommends \
+       libpcre2-8-0=10.42-1+deb12u1 libssl3=3.0.22-1~deb12u1 \
+       openssl=3.0.22-1~deb12u1 \
     && rm -rf /var/lib/apt/lists/*
 ENV PATH=/app/.venv/bin:$PATH
 ENV PYTHONDONTWRITEBYTECODE=1

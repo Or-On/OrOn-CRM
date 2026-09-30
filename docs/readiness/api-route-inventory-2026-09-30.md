@@ -1,6 +1,6 @@
 # API route inventory — 2026-09-30
 
-Source enumeration of Next.js API route files and exported HTTP methods. This is not a permission audit or an assertion that every integration works. Dynamic segment names are literal templates. All entries are retained; detailed per-handler trust-boundary review remains open. The production build independently listed these routes.
+Source enumeration of Next.js API route files and exported HTTP methods. Dynamic segment names are literal templates. All entries are retained. The production build independently listed these routes. The guard review below is source-level evidence, not proof of every object-ownership or integration path.
 
 | Endpoint                                         | Exported methods   |
 | ------------------------------------------------ | ------------------ |
@@ -143,3 +143,11 @@ Source enumeration of Next.js API route files and exported HTTP methods. This is
 | /api/webhooks/stripe                             | POST               |
 | /api/webhooks/whatsapp/[accountKey]              | GET, POST          |
 | /api/webhooks/whatsapp                           | GET, POST          |
+
+## Source-level trust boundary review
+
+The 139 route files above were searched for mutation methods and their server-side boundaries. All non-webhook mutation files contain an authentication/mutation helper, tenant context, API-key scope, or explicit session/CSRF handling. The three webhook mutation files delegate to the shared WhatsApp HMAC and size-bounded handler or the Stripe signature and billing-intent matcher. Public login and invitation acceptance are intentionally pre-session flows. This is a guard-presence review, not a claim that every downstream row or object permission has been proven.
+
+Ten files lacking the first-pass literal guard names were read individually. `/api/auth/session` projects the current public session; the two raw voice media routes delegate to `voiceRecordingResponse`/`voiceTranscriptResponse`, which issue a role-checked `voice:read` grant, while control API retrieval is tenant-scoped. The email OAuth start/callback routes use `withFreshCurrentTenant("tenant:manage")`, state and PKCE binding; `/api/voice/phone-numbers/reconcile`, `/api/voice/flows/validate` and `/api/voice/session-detail` use the common voice proxy. `/api/system/health` requires a workspace session. `/api/v1/contacts` uses scoped API keys, with credential, malformed-input and operation-failure regression tests. Representative browser negatives on the owned fictional tenant confirm a viewer cannot create a contact and an agent/viewer cannot read business configuration, while an admin can.
+
+Remaining review work for a release claim is per-object cross-tenant negative testing for attachments, exports, searches and voice artifacts; expired/revoked sessions; and real-provider failure/replay behavior. No finding in this source pass justifies removing an endpoint.
