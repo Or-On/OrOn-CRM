@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -21,12 +22,27 @@ def test_private_field_and_object_configuration_is_shared_without_printing_secre
 ) -> None:
     field_key = base64.b64encode(bytes(range(32))).decode("ascii")
     blind_index_key = base64.b64encode(bytes(reversed(range(32)))).decode("ascii")
+    additional_accounts = json.dumps(
+        [
+            {
+                "key": "fictional",
+                "phoneNumberId": "22990011",
+                "wabaId": "88110022",
+                "graphApiVersion": "v23.0",
+                "accessToken": "fixture-token",
+                "appSecret": "fictional-app-secret",
+                "webhookVerifyToken": "fictional-verify-token",
+            }
+        ],
+        separators=(",", ":"),
+    )
     source = tmp_path / "source.env"
     source.write_text(
         "\n".join(
             (
                 f"FIELD_CIPHER_LOCAL_KEY={field_key}",
                 f"BLIND_INDEX_KEY={blind_index_key}",
+                f"WHATSAPP_ADDITIONAL_ACCOUNTS_JSON={additional_accounts}",
             )
         )
         + "\n",
@@ -69,6 +85,7 @@ def test_private_field_and_object_configuration_is_shared_without_printing_secre
     emitted = result.stdout + result.stderr
     assert field_key not in emitted
     assert blind_index_key not in emitted
+    assert "fixture-token" not in emitted
     services = {
         name: _env(output / "config" / f"{name}.env")
         for name in ("web", "messaging-worker", "dispatcher")
@@ -78,6 +95,8 @@ def test_private_field_and_object_configuration_is_shared_without_printing_secre
         assert config["BLIND_INDEX_KEY"] == blind_index_key
         assert config["ARTIFACTS_BACKEND"] == "local"
         assert config["ARTIFACTS_LOCAL_ROOT"] == "/var/lib/oron/objects"
+    for service in ("web", "messaging-worker"):
+        assert services[service]["WHATSAPP_ADDITIONAL_ACCOUNTS_JSON"] == additional_accounts
 
 
 def test_manual_deployment_templates_keep_private_object_configuration_in_sync() -> None:

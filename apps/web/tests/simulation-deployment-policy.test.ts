@@ -22,6 +22,7 @@ vi.mock("@or-on/config", () => ({
       phoneNumberId: "fictional",
       wabaId: "fictional",
     },
+    whatsAppAdditionalAccounts: [],
   }),
 }));
 vi.mock("@or-on/api-client", () => ({ ControlApiClient: vi.fn() }));
@@ -75,7 +76,10 @@ describe("simulation is not a staging/production success path", () => {
       (
         _permission: string,
         work: (sql: unknown, session: unknown) => Promise<unknown>,
-      ) => work({}, { userId: "fictional-user" }),
+      ) =>
+        work(() => Promise.resolve([{ provider_account_id: "fictional" }]), {
+          userId: "fictional-user",
+        }),
     );
   });
   afterEach(() => vi.unstubAllEnvs());
@@ -135,7 +139,7 @@ describe("simulation is not a staging/production success path", () => {
     );
     expect(response.status).toBe(202);
     expect(dependencies.mutate).toHaveBeenCalledWith(
-      {},
+      expect.any(Function),
       expect.objectContaining({ provider: "meta", realProviderEnabled: true }),
       expect.any(Object),
     );

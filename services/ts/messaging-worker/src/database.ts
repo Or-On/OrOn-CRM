@@ -654,6 +654,7 @@ interface WhatsAppMediaWork {
   readonly conversationId: string;
   readonly messageId: string;
   readonly mediaId: string;
+  readonly senderPhoneNumberId: string;
   readonly contentType: "image" | "document";
   readonly expectedMimeType?: string;
   readonly expectedSha256?: string;
@@ -709,12 +710,14 @@ async function loadWhatsAppMediaWork(
         provider_media_id: string | null;
         expected_mime_type: string | null;
         expected_sha256: string | null;
+        sender_phone_number_id: string | null;
       }[]
     >`
       SELECT message.id, message.object_id, object.status AS object_status,
              message.structured_content->>'providerMediaId' AS provider_media_id,
              message.structured_content->>'mimeType' AS expected_mime_type,
-             message.structured_content->>'sha256' AS expected_sha256
+             message.structured_content->>'sha256' AS expected_sha256,
+             channel.provider_account_id AS sender_phone_number_id
       FROM messaging.messages message
       JOIN messaging.conversations conversation
         ON conversation.id=message.conversation_id
@@ -733,6 +736,8 @@ async function loadWhatsAppMediaWork(
     const row = rows[0];
     if (row === undefined)
       throw new WhatsAppProviderError("media_eligibility_changed", false);
+    if (row.sender_phone_number_id === null)
+      throw new WhatsAppProviderError("media_eligibility_changed", false);
     if (row.provider_media_id !== mediaId)
       throw new TypeError("WhatsApp media source is unavailable");
     if (row.object_id !== null) {
@@ -750,6 +755,7 @@ async function loadWhatsAppMediaWork(
         conversationId,
         messageId,
         mediaId,
+        senderPhoneNumberId: row.sender_phone_number_id,
         contentType,
         existingObjectId: row.object_id,
       };
@@ -766,6 +772,7 @@ async function loadWhatsAppMediaWork(
       conversationId,
       messageId,
       mediaId,
+      senderPhoneNumberId: row.sender_phone_number_id,
       contentType,
       ...(row.expected_mime_type === null
         ? {}
@@ -854,6 +861,7 @@ async function revalidateWhatsAppMediaAttempt(
         AND message.conversation_id=${work.conversationId}::uuid
         AND message.object_id IS NULL AND message.provider='meta'
         AND channel.provider='meta' AND channel.status='active'
+        AND channel.provider_account_id=${work.senderPhoneNumberId}
         AND channel.mirror_inbound_media
     `;
     if (rows[0] === undefined)
@@ -896,6 +904,7 @@ async function processWhatsAppMedia(
       throw new WhatsAppProviderError("media_provider_unavailable", false);
     const media = await metaProvider.downloadMedia({
       mediaId: work.mediaId,
+      senderPhoneNumberId: work.senderPhoneNumberId,
       ...(work.expectedMimeType === undefined
         ? {}
         : { expectedMimeType: work.expectedMimeType }),

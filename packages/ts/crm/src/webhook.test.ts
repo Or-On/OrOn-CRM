@@ -9,8 +9,49 @@ import {
   parseWhatsAppStatusEnvelopes,
   verifyWhatsAppSignature,
 } from "./webhook.js";
+import {
+  acceptWhatsAppWebhook,
+  InvalidWhatsAppPayloadError,
+} from "./webhook-store.js";
 
 describe("WhatsApp webhook boundary", () => {
+  it("rejects a validly signed event sent to another account endpoint before database access", async () => {
+    const secret = "fictional-app-secret-for-tests";
+    const body = Buffer.from(
+      JSON.stringify({
+        entry: [
+          {
+            id: "entry",
+            changes: [
+              {
+                value: {
+                  metadata: { phone_number_id: "111" },
+                  messages: [
+                    {
+                      id: "wamid.1",
+                      from: "972501234567",
+                      text: { body: "Hello" },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    const signature = `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`;
+    await expect(
+      acceptWhatsAppWebhook(
+        "postgresql://invalid.invalid/never-connect",
+        body,
+        signature,
+        secret,
+        "222",
+      ),
+    ).rejects.toBeInstanceOf(InvalidWhatsAppPayloadError);
+  });
+
   it("preserves provider time and does not invent one for legacy or invalid envelopes", () => {
     const payload = (timestamp: string | undefined) => ({
       entry: [

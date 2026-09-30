@@ -154,6 +154,7 @@ async function main(): Promise<void> {
     "WHATSAPP_PHONE_NUMBER_ID",
     "WHATSAPP_WABA_ID",
     "WHATSAPP_GRAPH_API_VERSION",
+    "WHATSAPP_ADDITIONAL_ACCOUNTS_JSON",
   ] as const;
   const llmNames = [
     "LLM_PROVIDER",
@@ -202,7 +203,8 @@ async function main(): Promise<void> {
   ] as const;
 
   if (flags.ENABLE_REAL_WHATSAPP === "true")
-    for (const name of whatsappNames) required(source, name);
+    for (const name of whatsappNames)
+      if (name !== "WHATSAPP_ADDITIONAL_ACCOUNTS_JSON") required(source, name);
   if (flags.ENABLE_WHATSAPP_AI === "true")
     for (const name of llmNames.slice(0, 4)) required(source, name);
   if (flags.ENABLE_REAL_VOICE_PROVIDERS === "true")

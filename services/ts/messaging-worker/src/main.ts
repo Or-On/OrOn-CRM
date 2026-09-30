@@ -11,7 +11,7 @@ import { randomUUID } from "node:crypto";
 import { createMessagingStore } from "./database.js";
 import { runWorker } from "./worker.js";
 import {
-  MetaWhatsAppProvider,
+  RoutedMetaWhatsAppProvider,
   SimulatorWhatsAppProvider,
 } from "./providers.js";
 import { OpenAiCompatibleChatProvider } from "./ai-provider.js";
@@ -56,12 +56,24 @@ async function main(): Promise<void> {
     `messaging-${randomUUID()}`,
     {
       simulator: new SimulatorWhatsAppProvider(),
-      meta: new MetaWhatsAppProvider({
-        enabled: config.enableRealWhatsApp,
-        accessToken: config.secrets.whatsappAccessToken,
-        graphApiVersion: config.whatsApp.graphApiVersion,
-        phoneNumberId: config.whatsApp.phoneNumberId,
-      }),
+      meta: new RoutedMetaWhatsAppProvider([
+        ...(config.whatsApp.phoneNumberId === undefined
+          ? []
+          : [
+              {
+                enabled: config.enableRealWhatsApp,
+                accessToken: config.secrets.whatsappAccessToken,
+                graphApiVersion: config.whatsApp.graphApiVersion,
+                phoneNumberId: config.whatsApp.phoneNumberId,
+              },
+            ]),
+        ...config.whatsAppAdditionalAccounts.map((account) => ({
+          enabled: config.enableRealWhatsApp,
+          accessToken: account.accessToken,
+          graphApiVersion: account.graphApiVersion,
+          phoneNumberId: account.phoneNumberId,
+        })),
+      ]),
     },
     (failure) => logger.warn({ ...failure }, "whatsapp_outbound_failed"),
     {

@@ -6,6 +6,7 @@ const state = vi.hoisted(() => ({
   queue: vi.fn(),
   page: vi.fn(),
   permission: vi.fn(),
+  channelPhone: "1312069101984418",
 }));
 
 vi.mock("@or-on/crm", () => ({
@@ -25,6 +26,17 @@ vi.mock("@or-on/config", () => ({
       phoneNumberId: "1312069101984418",
       wabaId: "1507601250680263",
     },
+    whatsAppAdditionalAccounts: [
+      {
+        key: "second-account",
+        phoneNumberId: "22990011",
+        wabaId: "88110022",
+        graphApiVersion: "v23.0",
+        accessToken: "fixture-access-token",
+        appSecret: "fictional-second-app-secret",
+        webhookVerifyToken: "fictional-second-verify-token",
+      },
+    ],
     secrets: {
       whatsappAppSecret: "fictional-app-secret",
       whatsappWebhookVerifyToken: "fictional-verify-token",
@@ -38,7 +50,10 @@ vi.mock("../src/features/auth", () => ({
     operation: (...args: unknown[]) => unknown,
   ) => {
     state.permission(_permission);
-    return operation({}, { userId: "20000000-0000-4000-8000-000000000001" });
+    return operation(
+      () => Promise.resolve([{ provider_account_id: state.channelPhone }]),
+      { userId: "20000000-0000-4000-8000-000000000001" },
+    );
   },
 }));
 vi.mock("../src/features/crm-route", () => ({
@@ -58,6 +73,10 @@ import {
   GET as verifyWebhook,
   POST as acceptWebhook,
 } from "../src/app/api/webhooks/whatsapp/route";
+import {
+  GET as verifyAdditionalWebhook,
+  POST as acceptAdditionalWebhook,
+} from "../src/app/api/webhooks/whatsapp/[accountKey]/route";
 
 const context = {
   params: Promise.resolve({ id: "30000000-0000-4000-8000-000000000001" }),
@@ -67,6 +86,7 @@ describe("WhatsApp outbound API", () => {
   beforeEach(() => {
     vi.stubEnv("PLATFORM_ENV", "development");
     state.enabled = false;
+    state.channelPhone = "1312069101984418";
     state.acceptWebhook.mockReset().mockResolvedValue({ envelopes: 1 });
     state.page.mockReset();
     state.permission.mockClear();
@@ -180,6 +200,29 @@ describe("WhatsApp outbound API", () => {
     );
   });
 
+  it("routes a real message through its bound additional account", async () => {
+    state.enabled = true;
+    state.channelPhone = "22990011";
+    const response = await POST(
+      new Request("http://localhost/api/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          provider: "meta",
+          text: "Confirmed",
+          confirmReal: true,
+        }),
+      }),
+      context,
+    );
+    expect(response.status).toBe(202);
+    expect(state.queue.mock.calls[0]?.[2]).toEqual({
+      graphApiVersion: "v23.0",
+      phoneNumberId: "22990011",
+      wabaId: "88110022",
+    });
+  });
+
   it("verifies Meta GET challenges only while explicitly enabled", () => {
     state.enabled = true;
     const response = verifyWebhook(
@@ -206,5 +249,32 @@ describe("WhatsApp outbound API", () => {
 
     expect(response.status).toBe(413);
     expect(state.acceptWebhook).not.toHaveBeenCalled();
+  });
+
+  it("uses a separate verify token and app secret for an additional webhook", async () => {
+    state.enabled = true;
+    const additionalContext = {
+      params: Promise.resolve({ accountKey: "second-account" }),
+    } as Parameters<typeof acceptAdditionalWebhook>[1];
+    const challenge = await verifyAdditionalWebhook(
+      new Request(
+        "http://localhost/api/webhooks/whatsapp/second-account?hub.mode=subscribe&hub.verify_token=fictional-second-verify-token&hub.challenge=ready",
+      ),
+      additionalContext,
+    );
+    expect(challenge.status).toBe(200);
+    expect(await challenge.text()).toBe("ready");
+    const accepted = await acceptAdditionalWebhook(
+      new Request("http://localhost/api/webhooks/whatsapp/second-account", {
+        method: "POST",
+        body: "{}",
+      }),
+      additionalContext,
+    );
+    expect(accepted.status).toBe(200);
+    expect(state.acceptWebhook.mock.calls[0]?.[3]).toBe(
+      "fictional-second-app-secret",
+    );
+    expect(state.acceptWebhook.mock.calls[0]?.[4]).toBe("22990011");
   });
 });

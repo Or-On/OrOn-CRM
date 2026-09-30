@@ -114,6 +114,7 @@ const sourceSchema = z.object({
   WHATSAPP_WEBHOOK_VERIFY_TOKEN: optionalSecret,
   WHATSAPP_PHONE_NUMBER_ID: optionalNumericIdentifier,
   WHATSAPP_WABA_ID: optionalNumericIdentifier,
+  WHATSAPP_ADDITIONAL_ACCOUNTS_JSON: optionalSecret,
   WHATSAPP_GRAPH_API_VERSION: z
     .string()
     .regex(/^v\d+\.0$/u)
@@ -155,6 +156,7 @@ export interface LoadConfigOptions {
 }
 
 export interface PlatformConfig {
+  readonly whatsAppAdditionalAccounts: readonly WhatsAppAccountConfig[];
   readonly sms: {
     readonly enabled: boolean;
     readonly otpPepper: string | undefined;
@@ -201,6 +203,61 @@ export interface PlatformConfig {
   };
 }
 
+export interface WhatsAppAccountConfig {
+  readonly key: string;
+  readonly phoneNumberId: string;
+  readonly wabaId: string;
+  readonly graphApiVersion: string;
+  readonly accessToken: string;
+  readonly appSecret: string;
+  readonly webhookVerifyToken: string;
+}
+
+const additionalAccountSchema = z.object({
+  key: z.string().regex(/^[a-z][a-z0-9-]{0,39}$/u),
+  phoneNumberId: z.string().regex(/^\d+$/u),
+  wabaId: z.string().regex(/^\d+$/u),
+  graphApiVersion: z.string().regex(/^v\d+\.0$/u),
+  accessToken: z.string().min(1),
+  appSecret: z.string().min(16),
+  webhookVerifyToken: z.string().min(16),
+});
+
+function parseAdditionalWhatsAppAccounts(
+  raw: string | undefined,
+  primaryPhoneNumberId: string | undefined,
+): readonly WhatsAppAccountConfig[] {
+  if (raw === undefined) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    throw new ConfigurationError(
+      "Invalid platform configuration: WHATSAPP_ADDITIONAL_ACCOUNTS_JSON is invalid",
+    );
+  }
+  const result = z.array(additionalAccountSchema).safeParse(parsed);
+  if (!result.success)
+    throw new ConfigurationError(
+      "Invalid platform configuration: WHATSAPP_ADDITIONAL_ACCOUNTS_JSON is invalid",
+    );
+  const keys = new Set<string>();
+  const phoneIds = new Set<string>();
+  for (const account of result.data) {
+    if (
+      keys.has(account.key) ||
+      phoneIds.has(account.phoneNumberId) ||
+      account.phoneNumberId === primaryPhoneNumberId
+    )
+      throw new ConfigurationError(
+        "Invalid platform configuration: duplicate WhatsApp account key or phone number ID",
+      );
+    keys.add(account.key);
+    phoneIds.add(account.phoneNumberId);
+  }
+  return result.data;
+}
+
 export function loadConfig(
   source: Readonly<Record<string, string | undefined>> = process.env,
   options: LoadConfigOptions = {},
@@ -214,6 +271,10 @@ export function loadConfig(
       .join("; ");
     throw new ConfigurationError(`Invalid platform configuration: ${details}`);
   }
+  const whatsAppAdditionalAccounts = parseAdditionalWhatsAppAccounts(
+    result.data.WHATSAPP_ADDITIONAL_ACCOUNTS_JSON,
+    result.data.WHATSAPP_PHONE_NUMBER_ID,
+  );
 
   if (
     options.requireDatabase === true &&
@@ -308,6 +369,7 @@ export function loadConfig(
     );
 
   return {
+    whatsAppAdditionalAccounts,
     sms: {
       enabled: result.data.ENABLE_REAL_SMS,
       otpPepper: result.data.SMS_OTP_PEPPER,

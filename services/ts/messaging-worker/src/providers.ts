@@ -25,6 +25,7 @@ export interface WhatsAppSendResult {
 
 export interface WhatsAppMediaDownloadRequest {
   readonly mediaId: string;
+  readonly senderPhoneNumberId?: string;
   readonly expectedMimeType?: string;
   readonly expectedSha256?: string;
   readonly beforeAttempt?: () => Promise<void>;
@@ -164,6 +165,11 @@ export class MetaWhatsAppProvider implements WhatsAppProvider {
     if (!this.#options.enabled)
       throw new WhatsAppProviderError("provider_disabled", false);
     const { accessToken, graphApiVersion: version } = this.#options;
+    if (
+      request.senderPhoneNumberId !== undefined &&
+      request.senderPhoneNumberId !== this.#options.phoneNumberId
+    )
+      throw new WhatsAppProviderError("sender_configuration_changed", false);
     if (
       accessToken === undefined ||
       version === undefined ||
@@ -384,5 +390,45 @@ export class MetaWhatsAppProvider implements WhatsAppProvider {
       )(delay);
     }
     throw new WhatsAppProviderError("retry_exhausted", true);
+  }
+}
+
+export class RoutedMetaWhatsAppProvider implements WhatsAppProvider {
+  public readonly name = "meta" as const;
+  readonly #byPhoneNumberId: ReadonlyMap<string, MetaWhatsAppProvider>;
+
+  public constructor(accounts: readonly MetaWhatsAppProviderOptions[]) {
+    const providers = new Map<string, MetaWhatsAppProvider>();
+    for (const account of accounts) {
+      if (
+        account.phoneNumberId === undefined ||
+        providers.has(account.phoneNumberId)
+      )
+        throw new TypeError("WhatsApp account phone number IDs must be unique");
+      providers.set(account.phoneNumberId, new MetaWhatsAppProvider(account));
+    }
+    this.#byPhoneNumberId = providers;
+  }
+
+  public async send(request: WhatsAppSendRequest): Promise<WhatsAppSendResult> {
+    const provider = this.#provider(request.senderPhoneNumberId);
+    return provider.send(request);
+  }
+
+  public async downloadMedia(
+    request: WhatsAppMediaDownloadRequest,
+  ): Promise<WhatsAppMediaDownloadResult> {
+    const provider = this.#provider(request.senderPhoneNumberId);
+    return provider.downloadMedia(request);
+  }
+
+  #provider(phoneNumberId: string | undefined): MetaWhatsAppProvider {
+    const provider =
+      phoneNumberId === undefined
+        ? undefined
+        : this.#byPhoneNumberId.get(phoneNumberId);
+    if (provider === undefined)
+      throw new WhatsAppProviderError("sender_configuration_changed", false);
+    return provider;
   }
 }

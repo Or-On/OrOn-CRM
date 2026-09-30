@@ -23,6 +23,7 @@ export async function acceptWhatsAppWebhook(
   rawBody: Uint8Array,
   signatureHeader: string | null,
   appSecret: string,
+  expectedProviderAccountId?: string,
 ): Promise<AcceptedWhatsAppWebhook> {
   if (!verifyWhatsAppSignature(rawBody, signatureHeader, appSecret)) {
     throw new InvalidWhatsAppSignatureError("Invalid WhatsApp signature");
@@ -37,6 +38,15 @@ export async function acceptWhatsAppWebhook(
   }
   const envelopes = parseWhatsAppMessageEnvelopes(payload);
   const statuses = parseWhatsAppStatusEnvelopes(payload);
+  if (
+    expectedProviderAccountId !== undefined &&
+    [...envelopes, ...statuses].some(
+      (event) => event.providerAccountId !== expectedProviderAccountId,
+    )
+  )
+    throw new InvalidWhatsAppPayloadError(
+      "WhatsApp account does not match webhook endpoint",
+    );
   const sql = postgres(databaseUrl, { max: 1, prepare: false });
   try {
     const eventIds = await sql.begin(async (transaction) => {

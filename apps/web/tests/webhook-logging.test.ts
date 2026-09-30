@@ -17,6 +17,11 @@ describe("webhook development logging", () => {
       ignored("/api/webhooks/whatsapp?hub.verify_token=fictional-fixture"),
     ).toBe(true);
     expect(ignored("/api/webhooks/whatsapp/")).toBe(true);
+    expect(
+      ignored(
+        "/api/webhooks/whatsapp/second-account?hub.verify_token=fictional-fixture",
+      ),
+    ).toBe(true);
     expect(ignored("/inbox")).toBe(false);
     expect(ignored("/api/webhooks/whatsapp-other")).toBe(false);
   });

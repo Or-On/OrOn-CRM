@@ -116,6 +116,38 @@ describe("loadConfig", () => {
     expect(config.whatsApp.phoneNumberId).toBe("1312069101984418");
   });
 
+  it("loads additional Meta accounts without changing the primary account", () => {
+    const account = {
+      key: "second-account",
+      phoneNumberId: "22990011",
+      wabaId: "88110022",
+      graphApiVersion: "v23.0",
+      accessToken: "fixture-token",
+      appSecret: "fictional-app-secret",
+      webhookVerifyToken: "fictional-verify-token",
+    };
+    const config = loadConfig({
+      WHATSAPP_PHONE_NUMBER_ID: "1312069101984418",
+      WHATSAPP_ADDITIONAL_ACCOUNTS_JSON: JSON.stringify([account]),
+    });
+    expect(config.whatsApp.phoneNumberId).toBe("1312069101984418");
+    expect(config.whatsAppAdditionalAccounts).toEqual([account]);
+    expect(JSON.stringify(configDiagnostics(config))).not.toContain(
+      "fixture-token",
+    );
+    expect(() =>
+      loadConfig({
+        WHATSAPP_PHONE_NUMBER_ID: account.phoneNumberId,
+        WHATSAPP_ADDITIONAL_ACCOUNTS_JSON: JSON.stringify([account]),
+      }),
+    ).toThrow("duplicate WhatsApp account");
+    expect(() =>
+      loadConfig({
+        WHATSAPP_ADDITIONAL_ACCOUNTS_JSON: "{invalid",
+      }),
+    ).toThrow("WHATSAPP_ADDITIONAL_ACCOUNTS_JSON is invalid");
+  });
+
   it("normalizes the shared Python-style log level", () => {
     expect(loadConfig({ LOG_LEVEL: "INFO" }).logLevel).toBe("info");
   });

@@ -69,7 +69,43 @@ export async function POST(
     });
     const result = await withCurrentTenant(
       "messaging:operate",
-      (sql, session) => {
+      async (sql, session) => {
+        const channel =
+          provider === "meta"
+            ? (
+                await sql<{ provider_account_id: string | null }[]>`
+              SELECT channel.provider_account_id
+              FROM messaging.conversations conversation
+              JOIN messaging.channels channel
+                ON channel.id=conversation.channel_id
+               AND channel.tenant_id=conversation.tenant_id
+              WHERE conversation.id=${id}::uuid
+                AND conversation.tenant_id=platform.current_tenant_id()
+                AND channel.provider='meta' AND channel.status='active'
+              LIMIT 1
+            `
+              )[0]
+            : undefined;
+        const additionalAccount = config.whatsAppAdditionalAccounts.find(
+          (account) => account.phoneNumberId === channel?.provider_account_id,
+        );
+        const channelConfiguration =
+          additionalAccount === undefined
+            ? config.whatsApp.phoneNumberId === channel?.provider_account_id &&
+              config.whatsApp.graphApiVersion !== undefined &&
+              config.whatsApp.phoneNumberId !== undefined &&
+              config.whatsApp.wabaId !== undefined
+              ? {
+                  graphApiVersion: config.whatsApp.graphApiVersion,
+                  phoneNumberId: config.whatsApp.phoneNumberId,
+                  wabaId: config.whatsApp.wabaId,
+                }
+              : undefined
+            : {
+                graphApiVersion: additionalAccount.graphApiVersion,
+                phoneNumberId: additionalAccount.phoneNumberId,
+                wabaId: additionalAccount.wabaId,
+              };
         const common = {
           conversationId: id,
           senderUserId: session.userId,
@@ -101,16 +137,7 @@ export async function POST(
                 kind,
                 text: typeof body.text === "string" ? body.text : "",
               },
-          provider === "meta" &&
-            config.whatsApp.graphApiVersion !== undefined &&
-            config.whatsApp.phoneNumberId !== undefined &&
-            config.whatsApp.wabaId !== undefined
-            ? {
-                graphApiVersion: config.whatsApp.graphApiVersion,
-                phoneNumberId: config.whatsApp.phoneNumberId,
-                wabaId: config.whatsApp.wabaId,
-              }
-            : undefined,
+          channelConfiguration,
         );
       },
     );

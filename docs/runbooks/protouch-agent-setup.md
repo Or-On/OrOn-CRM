@@ -12,36 +12,51 @@ secret manager, never in this file or an agent prompt.
    that Contacts, Agents & Flows, Tickets, Field Service, WhatsApp, and Voice
    are enabled. Review its existing field-service configuration before changing
    it; the separate `protouch.field-operations.json` is also a draft example.
-2. In **Agents & Flows**, create a profile using the `agent` object from
-   `protouch.agent.json`: Hebrew locale, Voice and WhatsApp channels, and only
-   `service.intake` and `ticket.open` permissions. Review and publish the
-   resulting version in this tenant. Check its default WhatsApp assignment
-   explicitly; publishing the first eligible profile can set the default.
-3. For voice, create and publish a ProTouch retained voice flow, then a
-   connected flow pinned to the published agent version and exact retained
-   voice-flow version. Copy the _reviewed settings_ of the Or-On voice flow
-   where appropriate. Tenant isolation prevents pointing at Or-On's flow IDs.
-   The draft sets no LLM, STT, or TTS override, so deployment runtime values
-   remain the source of provider configuration.
-4. Review the actual ProTouch DID, LiveKit inbound/outbound trunk and dispatch
+2. The ProTouch tenant on dev already has a published Hebrew service-intake
+   agent assigned as the default WhatsApp agent and a published telephone
+   intake flow (verified in the tenant admin session on 2026-09-30). Preserve
+   them. Use `protouch.agent.json` only as an offline reference, never as a
+   replacement for those live versions. The agent has no per-tenant LLM, STT,
+   or TTS override, so deployment runtime values remain authoritative.
+3. Review the actual ProTouch DID, LiveKit inbound/outbound trunk and dispatch
    bindings before enabling real calls. The caller ID, SIP domain, and username
    in the draft are references only; they do not provision a trunk, associate
    a DID, or authenticate a SIP connection. Keep the Twilio account SID and
    credentials solely in the deployment secret manager.
-5. Bind the Meta phone-number ID to the ProTouch WhatsApp channel after
-   checking that no other tenant owns it. The business ID, WABA ID, display
-   name, and Graph version are references only. The current web and messaging
-   worker use shared `WHATSAPP_*` environment values, so do not replace those
-   values with ProTouch's IDs or credentials while Or-On uses the deployment.
-   A tenant-aware credential and sender routing path must be reviewed before
-   both tenants can use distinct real WhatsApp accounts on one deployment.
+4. The dev tenant currently reports **WhatsApp channel** as incomplete. Keep
+   the existing primary `WHATSAPP_*` settings for Or-On. The web and worker
+   support a separate `WHATSAPP_ADDITIONAL_ACCOUNTS_JSON` private runtime
+   value containing an array of accounts with `key`, `phoneNumberId`,
+   `wabaId`, `graphApiVersion`, `accessToken`, `appSecret`, and
+   `webhookVerifyToken`. Use `key: "protouch"`, the supplied ProTouch Meta
+   identifiers and credentials, and a newly generated random verify token.
+   The dev deployment uses root-owned host-mounted service environment files
+   under `/opt/oron-dev/shared/config`; follow `docs/deployment/dev-gcp.md`
+   for rendering and deploying private configuration. Never print the JSON in
+   command output or put it in Git. Put the same value in the web and
+   messaging-worker environments, restart both, then confirm the new route is
+   reachable before asking the ProTouch Meta administrator to register it.
+5. The ProTouch Meta administrator should register callback
+   `https://dev.or-on.io/api/webhooks/whatsapp/protouch`, use the generated
+   verify token, and subscribe to WhatsApp message events. The app secret is
+   used by our server to verify signatures; it is not the verify token. Only
+   send these instructions once the new route and private runtime configuration
+   are deployed. The callback validates the account's phone-number ID as well
+   as its app signature.
+6. Bind the ProTouch phone-number ID to a `messaging.channels` row belonging to
+   the ProTouch tenant, after checking the unique provider/account binding is
+   unclaimed. The row must be `kind='whatsapp'`, `provider='meta'`,
+   `status='active'`, and its configuration must contain the same
+   `phoneNumberId`, `wabaId`, and `graphApiVersion`. Enable inbound media
+   mirroring for customer photos. Check this binding and runtime config
+   together; the account-specific webhook alone does not create a channel.
 
-The Meta access token and app secret are still unavailable. Do not activate
-the ProTouch WhatsApp channel until they are supplied through the secret
-manager, the display name is approved, and a tenant-scoped webhook and
-outbound sender are verified. Do not activate its real telephony path until
-tenant bindings and inbound/outbound tests pass. Leave the shared deployment
-provider settings and kill switches as they are for Or-On.
+The Meta token and app secret have been supplied outside Git, but have not yet
+been installed or tested against Meta. Do not activate the ProTouch WhatsApp
+channel until private runtime installation, Meta webhook registration, channel
+binding, and live inbound/outbound tests pass. The display name is still
+pending review. Do not activate real telephony until tenant bindings and
+inbound/outbound tests pass. Leave Or-On's shared provider settings intact.
 
 ## Local verification
 

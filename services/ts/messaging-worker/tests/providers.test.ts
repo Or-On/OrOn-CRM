@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 
 import {
   MetaWhatsAppProvider,
+  RoutedMetaWhatsAppProvider,
   SimulatorWhatsAppProvider,
   WhatsAppProviderError,
 } from "../src/providers.js";
@@ -32,6 +33,89 @@ function provider(
 }
 
 describe("WhatsApp providers", () => {
+  it("selects the bound Meta account and refuses an unknown sender before HTTP", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ messages: [{ id: "sent-1" }] }), {
+        status: 200,
+      }),
+    );
+    const routed = new RoutedMetaWhatsAppProvider([
+      {
+        enabled: true,
+        accessToken: "first-token",
+        graphApiVersion: "v26.0",
+        phoneNumberId: "111",
+        fetch: fetcher,
+      },
+      {
+        enabled: true,
+        accessToken: "second-token",
+        graphApiVersion: "v23.0",
+        phoneNumberId: "222",
+        fetch: fetcher,
+      },
+    ]);
+    await expect(
+      routed.send({ ...request, senderPhoneNumberId: "222" }),
+    ).resolves.toEqual({ messageId: "sent-1" });
+    expect(fetcher.mock.calls[0]?.[0]).toBe(
+      "https://graph.facebook.com/v23.0/222/messages",
+    );
+    expect(
+      new Headers(fetcher.mock.calls[0]?.[1]?.headers).get("authorization"),
+    ).toBe("Bearer second-token");
+    await expect(
+      routed.send({ ...request, senderPhoneNumberId: "333" }),
+    ).rejects.toMatchObject({ code: "sender_configuration_changed" });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("downloads inbound media with the bound account token", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((url) =>
+      Promise.resolve(
+        (typeof url === "string"
+          ? url
+          : url instanceof URL
+            ? url.href
+            : url.url
+        ).includes("/123")
+          ? Response.json({ url: "https://lookaside.fbsbx.com/fixture" })
+          : new Response(Buffer.from("fictional-image"), {
+              headers: { "content-type": "image/jpeg" },
+            }),
+      ),
+    );
+    const routed = new RoutedMetaWhatsAppProvider([
+      {
+        enabled: true,
+        accessToken: "first-token",
+        graphApiVersion: "v26.0",
+        phoneNumberId: "111",
+        fetch: fetcher,
+      },
+      {
+        enabled: true,
+        accessToken: "second-token",
+        graphApiVersion: "v23.0",
+        phoneNumberId: "222",
+        fetch: fetcher,
+      },
+    ]);
+    const media = await routed.downloadMedia({
+      mediaId: "123",
+      senderPhoneNumberId: "222",
+    });
+    expect(media.contentType).toBe("image/jpeg");
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher.mock.calls[0]?.[0]).toBe(
+      "https://graph.facebook.com/v23.0/123",
+    );
+    for (const [, init] of fetcher.mock.calls)
+      expect(new Headers(init?.headers).get("authorization")).toBe(
+        "Bearer second-token",
+      );
+  });
+
   it("rechecks ownership after a 429 delay before a second HTTP request", async () => {
     const fetcher = vi
       .fn<typeof fetch>()
