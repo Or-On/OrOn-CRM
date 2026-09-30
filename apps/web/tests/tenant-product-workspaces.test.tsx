@@ -751,8 +751,12 @@ describe("Email workspace", () => {
         { method: "DELETE" },
       ),
     );
-    expect(screen.getByRole("button", { name: "Connect Gmail" })).toBeTruthy();
-    expect(screen.queryByText("support@example.invalid")).toBeNull();
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Connect Gmail" }),
+      ).toBeTruthy();
+      expect(screen.queryByText("support@example.invalid")).toBeNull();
+    });
   });
 });
 
