@@ -23,26 +23,28 @@ secret manager, never in this file or an agent prompt.
    in the draft are references only; they do not provision a trunk, associate
    a DID, or authenticate a SIP connection. Keep the Twilio account SID and
    credentials solely in the deployment secret manager.
-4. The dev tenant currently reports **WhatsApp channel** as incomplete. Keep
-   the existing primary `WHATSAPP_*` settings for Or-On. The web and worker
+4. Keep the existing primary `WHATSAPP_*` settings for Or-On. The web and worker
    support a separate `WHATSAPP_ADDITIONAL_ACCOUNTS_JSON` private runtime
    value containing an array of accounts with `key`, `phoneNumberId`,
    `wabaId`, `graphApiVersion`, `accessToken`, `appSecret`, and
    `webhookVerifyToken`. Use `key: "protouch"`, the supplied ProTouch Meta
-   identifiers and credentials, and a newly generated random verify token.
+   identifiers and credentials, and the tenant-specific verify token.
    The dev deployment uses root-owned host-mounted service environment files
    under `/opt/oron-dev/shared/config`; follow `docs/deployment/dev-gcp.md`
    for rendering and deploying private configuration. Never print the JSON in
    command output or put it in Git. Put the same value in the web and
-   messaging-worker environments, restart both, then confirm the new route is
-   reachable before asking the ProTouch Meta administrator to register it.
+   messaging-worker environments, recreate both containers, then confirm the
+   new route is reachable before asking the ProTouch Meta administrator to
+   register it.
 5. The ProTouch Meta administrator should register callback
-   `https://dev.or-on.io/api/webhooks/whatsapp/protouch`, use the generated
+   `https://dev.or-on.io/api/webhooks/whatsapp/protouch`, use the tenant-specific
    verify token, and subscribe to WhatsApp message events. The app secret is
    used by our server to verify signatures; it is not the verify token. Only
    send these instructions once the new route and private runtime configuration
-   are deployed. The callback validates the account's phone-number ID as well
-   as its app signature.
+   are deployed. Separately subscribe the app to the ProTouch WABA through
+   Meta's `/{waba-id}/subscribed_apps` edge; selecting the `messages` field in
+   the app dashboard does not create the WABA subscription. The callback
+   validates the account's phone-number ID as well as its app signature.
 6. Bind the ProTouch phone-number ID to a `messaging.channels` row belonging to
    the ProTouch tenant, after checking the unique provider/account binding is
    unclaimed. The row must be `kind='whatsapp'`, `provider='meta'`,
@@ -51,12 +53,28 @@ secret manager, never in this file or an agent prompt.
    mirroring for customer photos. Check this binding and runtime config
    together; the account-specific webhook alone does not create a channel.
 
-The Meta token and app secret have been supplied outside Git, but have not yet
-been installed or tested against Meta. Do not activate the ProTouch WhatsApp
-channel until private runtime installation, Meta webhook registration, channel
-binding, and live inbound/outbound tests pass. The display name is still
-pending review. Do not activate real telephony until tenant bindings and
-inbound/outbound tests pass. Leave Or-On's shared provider settings intact.
+## Dev activation status (2026-09-30)
+
+The ProTouch Meta account is installed in the root-owned web and
+messaging-worker runtime files. The app named **Pro Touch Agent** is subscribed
+to the ProTouch WABA, and its `whatsapp_business_account` webhook uses the
+ProTouch callback with the `messages` field subscribed. Meta recognizes phone
+number ID `1284902841381185`; the access token has both WhatsApp management
+and messaging permissions. The callback passed verify-token challenge and
+signed POST checks; invalid tokens and signatures were rejected. The active
+ProTouch tenant owns one Meta channel for that phone number, with inbound media
+mirroring enabled, and the published WhatsApp agent is assigned. The channel
+was activated with an audit record after the operator explicitly chose to go
+live without a controlled inbound test. Or-On's primary provider settings were
+left intact.
+
+No live customer message or outbound reply has been verified yet. Arrange a
+controlled inbound text and photo from an approved number, confirm they appear
+under ProTouch with the right service-intake behavior, then verify an outbound
+reply and handoff. The phone name status reported by Meta is
+`AVAILABLE_WITHOUT_REVIEW`; this is not an end-to-end delivery test. Do not
+activate real telephony until its tenant bindings and inbound/outbound tests
+pass.
 
 ## Local verification
 
