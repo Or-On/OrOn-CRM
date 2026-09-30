@@ -4,7 +4,6 @@ import json
 import re
 from pathlib import Path
 
-
 MANIFEST = Path(__file__).resolve().parents[2] / "infra/tenant-configurations/protouch.agent.json"
 
 
