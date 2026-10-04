@@ -65,3 +65,20 @@ async def test_introspection_failure_never_ends_the_call():
     broken = SimpleNamespace()
 
     assert await wait_until_answered(broken, timeout_secs=0.2, poll_secs=0.05) is False
+
+
+async def test_disconnect_wakes_the_wait_without_waiting_for_the_poll_or_deadline():
+    closing = asyncio.Event()
+    task = asyncio.create_task(
+        wait_until_answered(_transport("dialing"), timeout_secs=30, poll_secs=10, closing=closing)
+    )
+    await asyncio.sleep(0)
+    closing.set()
+    async with asyncio.timeout(0.1):
+        assert await task is False
+
+
+async def test_closing_wins_over_a_stale_active_participant():
+    closing = asyncio.Event()
+    closing.set()
+    assert await wait_until_answered(_transport("active"), timeout_secs=5, closing=closing) is False

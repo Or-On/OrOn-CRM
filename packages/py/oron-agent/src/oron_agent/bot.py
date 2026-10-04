@@ -806,9 +806,10 @@ async def run_bot(
     usage = CallUsage(carrier=carrier_for(ctx))
     turn_taking = TurnTaking()
     call_clock: dict[str, float] = {}
-    # Outbound pick-up, once known. A dict for the same reason call_clock is one:
-    # the transport handlers stay free of `nonlocal`.
-    pickup: dict[str, bool] = {}
+    # An outbound attempt is unanswered until active is observed, including a
+    # disconnect during the pickup wait. Inbound keeps its existing unknown state.
+    pickup: dict[str, bool] = {"answered": False} if ctx.direction is Direction.OUTBOUND else {}
+    closing = asyncio.Event()
     finalize_lock = asyncio.Lock()
     drain_audio_lock = asyncio.Lock()
     drain_audio_attempted = False
@@ -1062,12 +1063,17 @@ async def run_bot(
         can all race. Shielding only ``runner.run()`` left callback-owned
         finalization cancellable before artifact pointers reached Postgres.
         """
+        # Wake a ringing join handler before artifact I/O, so teardown cannot
+        # race an answer timeout into a late greeting or restart its talk clock.
+        closing.set()
         return await finish_after_cancellation(lambda: finalize_once(status))
 
     # Canonical LiveKit handlers: start when the first human joins; tear down on disconnect.
     @transport.event_handler("on_first_participant_joined")
     async def on_first_participant_joined(transport, participant_id):
         logger.info(f"Participant joined {participant_id} (session={ctx.session_id})")
+        if closing.is_set():
+            return
         # Outbound only: joining the room means "dialling", not "answered", so
         # everything below would otherwise run at the phone's first ring — the
         # greeting into a dead line, and the ring counted as talk time.
@@ -1077,19 +1083,24 @@ async def run_bot(
             # out to nobody finalizes exactly like a conversation — and the
             # campaign reports the number as called.
             pickup["answered"] = await wait_until_answered(
-                transport, timeout_secs=st.answer_timeout_secs
+                transport, timeout_secs=st.answer_timeout_secs, closing=closing
             )
+        if closing.is_set():
+            return
         # Talk time is measured between these two handlers, not from the row's
         # created_at/ended_at: ended_at is stamped after the artifact upload.
         call_clock["joined"] = time.monotonic()
-        await recorder.start(room=room)
         recorder.start_usage_reporting(usage, started_at=call_clock["joined"])
         await audiobuffer.start_recording()
+        if closing.is_set():
+            return
         # Only now is there anyone to be silent: the pipeline has been running
         # since the bot joined the room, which outbound precedes the ring.
         user_idle.arm()
         if voice_control is not None:
             await voice_control.refresh()
+            if closing.is_set():
+                return
             worker.create_task(voice_control.run())
         action_guard = voice_control.action if voice_control else None
         runtime_factories = (
@@ -1144,7 +1155,11 @@ async def run_bot(
                     if hasattr(sessions, "send_caller_sms")
                     else None,
                 )
+        if closing.is_set():
+            return
         await flow_manager.initialize(entry)
+        if closing.is_set():
+            return
         max_session_seconds = quality.get("budgets", {}).get("maxSessionSeconds", 1800)
         if not isinstance(max_session_seconds, int) or isinstance(max_session_seconds, bool):
             max_session_seconds = 1800
@@ -1215,6 +1230,7 @@ async def run_bot(
     @worker.event_handler("on_pipeline_finished")
     async def on_pipeline_finished(worker, frame):
         logger.info(f"Pipeline finished, ending session={ctx.session_id}")
+        closing.set()
         await play_shutdown_once()
         await finalize(SessionStatus.FAILED if runtime_failure.failed else SessionStatus.ENDED)
         await hangup_room(
@@ -1230,6 +1246,11 @@ async def run_bot(
         worker, ready, on_failure=lambda: setattr(runtime_failure, "failed", True)
     )
     try:
+        # Establish/acknowledge the session before pipeline startup can admit a
+        # SIP leg. Joining outbound is only dialling: waiting for pickup first
+        # left early departures with no recorder row and unpersistable teardown.
+        # This does not start recording, report talk time, or imply an answer.
+        await recorder.start(room=room)
         await runner.run()
         if runtime_failure.failed:
             raise RuntimeError("voice pipeline lost a required processor")
@@ -1237,6 +1258,7 @@ async def run_bot(
         # A room-finished webhook can cancel this task before the transport's
         # participant-left callback completes. Preserve the call's private
         # artifacts and usage before propagating cancellation to the dispatcher.
+        closing.set()
         await finish_after_cancellation(finish_shutdown_attempt)
         await finalize(SessionStatus.ENDED)
         raise

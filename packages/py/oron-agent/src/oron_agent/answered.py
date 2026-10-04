@@ -40,19 +40,38 @@ def _statuses(transport) -> list[str]:
         return []
 
 
-async def wait_until_answered(transport, *, timeout_secs: float, poll_secs: float = 0.2) -> bool:
-    """Block until a participant reports `active`, or `timeout_secs` elapses.
+async def wait_until_answered(
+    transport,
+    *,
+    timeout_secs: float,
+    poll_secs: float = 0.2,
+    closing: asyncio.Event | None = None,
+) -> bool:
+    """Wait for `active`, the answer deadline, or call teardown.
 
     Returns True if the pick-up was observed. On timeout it returns False and
     the caller proceeds anyway: a bot that greets a few seconds early is a bad
     call, but a bot that never greets is a dead one — and a carrier that does
-    not report the attribute must not silence every outbound call.
+    not report the attribute must not silence every outbound call. Teardown
+    also returns False; callers must check `closing` before starting a greeting.
     """
     deadline = asyncio.get_running_loop().time() + timeout_secs
     while asyncio.get_running_loop().time() < deadline:
+        if closing is not None and closing.is_set():
+            return False
         if ANSWERED in _statuses(transport):
             return True
-        await asyncio.sleep(poll_secs)
+        if closing is None:
+            await asyncio.sleep(poll_secs)
+        else:
+            try:
+                async with asyncio.timeout(poll_secs):
+                    await closing.wait()
+                return False
+            except TimeoutError:
+                pass
+    if closing is not None and closing.is_set():
+        return False
     logger.warning(
         "no participant reported {}={} within {}s — greeting anyway, which may "
         "play into a ringing line",
