@@ -321,3 +321,13 @@ tenant, DID and flow were preserved. Carrier origination is still the previous
 `sip:34.165.22.57:5060`; no inbound cutover or actual inbound-call acceptance has
 yet occurred. A complete PSTN proof requires a controlled cutover and inbound
 test after the runtime repair, retaining the exact existing origination for rollback.
+
+The subsequent bounded source-rejection test **failed**: one actual SIP INVITE
+from the owned VM's verified non-Twilio IP was accepted with `200 OK` and created
+one failed application session. Signed provider events identify the exact new
+trunk/rule. Thus the retained allowlist is not evidence of enforcement in this
+project. The probe was immediately disconnected, the newly prepared rule removed,
+and the exact DID binding restored through an audited compensating CAS. No
+customer was dialed and carrier origination remained unchanged. Inbound cutover
+is blocked pending verified provider enforcement or a separately reviewed secure
+alternative. See [the source-test and containment evidence](PROTOUCH-INBOUND-ACL-FAILURE.md).
