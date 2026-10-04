@@ -552,8 +552,8 @@ describe.skipIf(!url)("owned Coexistence receipt and import pipeline", () => {
       // behind history's channel row lock.
       const racingCustomer = "15550003333",
         racingContact = randomUUID();
-      let releaseLive = () => {},
-        identityReady = () => {};
+      let releaseLive: () => void = () => undefined,
+        identityReady: () => void = () => undefined;
       const release = new Promise<void>((resolve) => {
         releaseLive = resolve;
       });
@@ -591,7 +591,7 @@ describe.skipIf(!url)("owned Coexistence receipt and import pipeline", () => {
           providerAccountId: phone,
           providerEventId: `race-live-${tenant}`,
           providerMessageId: `race-live-${tenant}`,
-          from: racingCustomer,
+          from: `+${racingCustomer}`,
           profileName: "Fictional first contact",
           text: "A fresh customer message",
           occurredAt: new Date().toISOString(),
@@ -620,8 +620,9 @@ describe.skipIf(!url)("owned Coexistence receipt and import pipeline", () => {
       } finally {
         releaseLive();
       }
-      expect(await liveResult).toEqual({ ok: true });
+      const completedLive = await liveResult;
       await processing;
+      expect(completedLive).toEqual({ ok: true });
       await admin`UPDATE ops.inbound_events SET available_at=clock_timestamp() WHERE id=${racingReceipt.eventIds[0] ?? ""}::uuid AND status='failed'`;
       await drain();
       expect(
@@ -658,8 +659,11 @@ describe.skipIf(!url)("owned Coexistence receipt and import pipeline", () => {
         await admin`SELECT id FROM ops.jobs WHERE tenant_id=${tenant}::uuid`,
       ).toHaveLength(0);
       expect(
-        await admin`SELECT message_id FROM messaging.inbound_message_origins WHERE tenant_id=${tenant}::uuid`,
+        await admin`SELECT origin.message_id FROM messaging.inbound_message_origins origin JOIN messaging.messages message ON message.tenant_id=origin.tenant_id AND message.id=origin.message_id WHERE origin.tenant_id=${tenant}::uuid AND message.provider_payload->>'origin' IN ('whatsapp_business_app_history','whatsapp_business_app')`,
       ).toHaveLength(0);
+      expect(
+        await admin`SELECT origin.message_id FROM messaging.inbound_message_origins origin JOIN messaging.messages message ON message.id=origin.message_id AND message.tenant_id=origin.tenant_id WHERE origin.tenant_id=${tenant}::uuid AND message.provider_message_id=${`race-live-${tenant}`}`,
+      ).toHaveLength(1);
       expect(
         await admin`SELECT id FROM ops.inbound_events WHERE tenant_id=${tenant}::uuid AND status<>'processed'`,
       ).toHaveLength(0);
