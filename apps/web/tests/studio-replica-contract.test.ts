@@ -16,7 +16,7 @@ describe("Studio Admin replica contract", () => {
     expect(css).toContain("--or-rail-width: 3rem");
     expect(css).toContain("--or-header-height: 3rem");
     expect(css).toContain("--or-radius-md: 0.625rem");
-    expect(layout).toContain("Geist_Mono");
+    expect(layout).toContain("GeistMono.ttf");
     expect(layout).toContain('import "./studio-replica.css"');
   });
 

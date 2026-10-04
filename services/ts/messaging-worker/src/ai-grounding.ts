@@ -672,9 +672,14 @@ export function enforceStandaloneCallbackConsent(
 
 /** Only durable server receipts may select these acknowledgements. */
 export function actionReceiptReply(
-  operation: "callback" | "handoff",
+  operation: "callback" | "handoff" | "ticket",
   locale: string,
 ): string {
+  if (operation === "ticket")
+    return localized(locale, [
+      "נפתחה פנייה לתמיכה. פתיחת הפנייה אינה אישור שהבעיה נפתרה.",
+      "A support ticket was opened. This does not confirm that the issue is resolved.",
+    ]);
   return operation === "callback"
     ? localized(locale, [
         "בקשת השיחה נוספה לתור. רישום הבקשה אינו אישור לחיבור השיחה.",

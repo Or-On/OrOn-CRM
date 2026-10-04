@@ -29,6 +29,12 @@ class DispatcherSettings(BaseSettings):
     port: int = Field(default=8082, ge=1, le=65535, validation_alias="DISPATCHER_PORT")
     room_prefix: str = Field(default="call-", validation_alias="ROOM_PREFIX")
     bot_identity: str = Field(default="oron-agent", validation_alias="BOT_IDENTITY")
+    max_active_calls: int = Field(
+        default=3, ge=1, le=100, validation_alias="DISPATCHER_MAX_ACTIVE_CALLS"
+    )
+    max_active_calls_per_tenant: int = Field(
+        default=3, ge=1, le=100, validation_alias="DISPATCHER_MAX_ACTIVE_CALLS_PER_TENANT"
+    )
 
     def diagnostics(self) -> dict[str, object]:
         return {

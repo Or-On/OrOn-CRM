@@ -18,6 +18,7 @@ vi.mock("@or-on/crm", () => ({
   queueWhatsAppOutbound: state.queue,
 }));
 vi.mock("@or-on/config", () => ({
+  loadWhatsAppMemoryVerifier: () => ({ enabled: false }),
   loadConfig: () => ({
     databaseUrl: "postgresql://fixture.invalid/fixture",
     enableRealWhatsApp: state.enabled,

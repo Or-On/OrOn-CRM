@@ -154,3 +154,52 @@ async def test_voice_agent_binding_is_immutable_and_session_serialized() -> None
         pytest.raises(ValueError, match="cannot change"),
     ):
         await runtime.pin_voice_agent(context, uuid4())
+
+
+@pytest.mark.asyncio
+async def test_exact_voice_flow_binding_records_only_server_loaded_version() -> None:
+    runtime, database, _ = _runtime()
+    context, agent_id = _context(), uuid4()
+    existing, identity, sequence = MagicMock(), MagicMock(), MagicMock()
+    existing.scalar_one_or_none.return_value = None
+    identity.scalar_one_or_none.return_value = None
+    sequence.scalar_one.return_value = 7
+    database.execute.side_effect = [existing, identity, sequence]
+    with patch("dispatcher_runtime.persistence.set_tenant", new=AsyncMock()):
+        await runtime.pin_voice_agent(context, agent_id, compiled_flow_version=3)
+    events = [call.args[0] for call in database.add.call_args_list]
+    assert [event.event_type for event in events] == [
+        "voice.agent.binding.v1",
+        "voice.flow.binding.v1",
+    ]
+    assert events[1].sequence == 8
+    assert events[1].payload == {
+        "compiled_flow_id": str(context.flow_id),
+        "compiled_flow_version": 3,
+        "agent_version_id": str(agent_id),
+    }
+
+
+@pytest.mark.asyncio
+async def test_retained_voice_flow_cannot_change_and_legacy_proof_is_never_backfilled() -> None:
+    runtime, database, _ = _runtime()
+    context, agent_id = _context(), uuid4()
+    existing, retained = MagicMock(), MagicMock()
+    existing.scalar_one_or_none.return_value = str(agent_id)
+    retained.scalar_one_or_none.return_value = {
+        "compiled_flow_id": str(context.flow_id),
+        "compiled_flow_version": 2,
+        "agent_version_id": str(agent_id),
+    }
+    database.execute.side_effect = [existing, retained]
+    with (
+        patch("dispatcher_runtime.persistence.set_tenant", new=AsyncMock()),
+        pytest.raises(ValueError, match="flow binding cannot change"),
+    ):
+        await runtime.pin_voice_agent(context, agent_id, compiled_flow_version=3)
+    database.add.assert_not_called()
+    retained.scalar_one_or_none.return_value = None
+    database.execute.side_effect = [existing, retained]
+    with patch("dispatcher_runtime.persistence.set_tenant", new=AsyncMock()):
+        await runtime.pin_voice_agent(context, agent_id, compiled_flow_version=3)
+    database.add.assert_not_called()

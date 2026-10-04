@@ -47,6 +47,10 @@ class UsageObserver(BaseObserver):
                 elif isinstance(metric, LLMUsageMetricsData):
                     self._usage.llm_model = metric.model or self._usage.llm_model
                     tokens = metric.value
+                    if tokens.prompt_tokens is not None and tokens.completion_tokens is not None:
+                        self._usage.record_model_event(
+                            tokens.prompt_tokens, tokens.completion_tokens
+                        )
                     self._usage.llm_prompt_tokens += tokens.prompt_tokens or 0
                     self._usage.llm_cached_prompt_tokens += tokens.cache_read_input_tokens or 0
                     self._usage.llm_completion_tokens += tokens.completion_tokens or 0

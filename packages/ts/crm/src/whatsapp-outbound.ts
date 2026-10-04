@@ -404,11 +404,14 @@ export async function queueWhatsAppOutbound(
   await sql`
     INSERT INTO ops.jobs
       (tenant_id, queue, job_type, reference_type, reference_id, payload,
-       idempotency_key, max_attempts)
+       idempotency_key, max_attempts, priority)
     VALUES (platform.current_tenant_id(), 'messaging', 'whatsapp.outbound.send',
             'outbound_request', ${requestId}::uuid,
             jsonb_build_object('requestId', ${requestId}::uuid),
-            ${`whatsapp-outbound:${input.idempotencyKey}`}, 5)
+            ${`whatsapp-outbound:${input.idempotencyKey}`}, 5,
+            CASE WHEN EXISTS(SELECT 1 FROM platform.tenant_remediation_flags
+              WHERE tenant_id=platform.current_tenant_id() AND flag_key='queue_priority' AND enabled)
+              THEN 100 ELSE 0 END)
     ON CONFLICT DO NOTHING
   `;
   await sql`

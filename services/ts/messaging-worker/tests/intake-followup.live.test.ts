@@ -224,14 +224,20 @@ describe.skipIf(sourceUrl === undefined)(
           conversation_id: string | null;
         }[]
       >`SELECT followup_status, followup_message_id, conversation_id FROM service.intake_drafts WHERE id=${intakeId}::uuid`;
-      expect(draft?.followup_status).toBe("admitted");
-      expect(draft?.conversation_id).not.toBeNull();
+      if (draft?.followup_status !== "admitted")
+        throw new Error(
+          JSON.stringify(
+            await admin`SELECT job_type,status,last_error_safe FROM ops.jobs WHERE tenant_id=${tenantId}::uuid`,
+          ),
+        );
+      expect(draft.followup_status).toBe("admitted");
+      expect(draft.conversation_id).not.toBeNull();
       expect(sent).toHaveLength(1);
       expect(sent[0]).toContain("תודה שפנית לFictional Cooling");
       expect(sent[0]).toContain("המקרר לא מקרר");
       expect(sent[0]).toContain("תמונה של התקלה");
       const [message] = await admin<{ status: string; sender_type: string }[]>`
-        SELECT status, sender_type FROM messaging.messages WHERE id=${draft?.followup_message_id ?? ""}::uuid
+        SELECT status, sender_type FROM messaging.messages WHERE id=${draft.followup_message_id ?? ""}::uuid
       `;
       expect(message?.sender_type).toBe("system");
       expect(["sent", "delivered"]).toContain(message?.status);

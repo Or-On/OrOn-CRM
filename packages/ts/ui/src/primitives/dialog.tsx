@@ -11,6 +11,8 @@ export interface DialogProps {
   readonly description?: string;
   readonly onClose: () => void;
   readonly open: boolean;
+  /** Preserve the initiating control when an async action opens the dialog. */
+  readonly returnFocusElement?: HTMLElement;
   readonly showCloseButton?: boolean;
   readonly title: string;
 }
@@ -22,6 +24,7 @@ export function Dialog({
   description,
   onClose,
   open,
+  returnFocusElement,
   showCloseButton = true,
   title,
 }: DialogProps) {
@@ -36,9 +39,10 @@ export function Dialog({
     if (dialog === null) return;
     if (open && !dialog.open) {
       returnFocus.current =
-        document.activeElement instanceof HTMLElement
+        returnFocusElement ??
+        (document.activeElement instanceof HTMLElement
           ? document.activeElement
-          : null;
+          : null);
       dialog.showModal();
       dialog.querySelector<HTMLElement>("[data-dialog-initial-focus]")?.focus();
     }
@@ -46,6 +50,45 @@ export function Dialog({
       dialog.close();
       if (returnFocus.current?.isConnected) returnFocus.current.focus();
     }
+  }, [open, returnFocusElement]);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (dialog === null || !open) return;
+    let lastFocused: HTMLElement | null = null;
+    let disabledFocus = false;
+    const rememberFocus = (event: FocusEvent) => {
+      // Base-select pickers can focus an option; its owning select is the
+      // control that becomes disabled while an asynchronous action runs.
+      const target =
+        event.target instanceof HTMLOptionElement
+          ? event.target.closest("select")
+          : event.target;
+      if (target instanceof HTMLElement) {
+        lastFocused = target;
+        disabledFocus = false;
+      }
+    };
+    const observer = new MutationObserver(() => {
+      if (lastFocused === null || !dialog.contains(lastFocused)) return;
+      if (lastFocused.matches(":disabled")) {
+        disabledFocus = true;
+      } else if (disabledFocus) {
+        disabledFocus = false;
+        if (dialog.open && document.activeElement === document.body)
+          lastFocused.focus();
+      }
+    });
+    dialog.addEventListener("focusin", rememberFocus);
+    observer.observe(dialog, {
+      attributes: true,
+      attributeFilter: ["disabled"],
+      subtree: true,
+    });
+    return () => {
+      observer.disconnect();
+      dialog.removeEventListener("focusin", rememberFocus);
+    };
   }, [open]);
 
   useEffect(() => {

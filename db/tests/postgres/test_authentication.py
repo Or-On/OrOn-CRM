@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
@@ -7,6 +8,65 @@ import asyncpg
 import pytest
 
 pytestmark = [pytest.mark.postgres, pytest.mark.integration, pytest.mark.rls]
+
+
+async def test_login_failure_does_not_extend_an_active_lock(pg: asyncpg.Connection) -> None:
+    user_id, _ = await _identity(pg)
+    deadline = datetime.now(UTC) + timedelta(minutes=5)
+    await pg.execute(
+        "INSERT INTO platform.auth_credentials "
+        "(user_id,password_hash,failed_attempts,locked_until) "
+        "VALUES ($1,'synthetic-test-hash',5,$2)",
+        user_id,
+        deadline,
+    )
+    await pg.execute("SELECT platform.auth_record_login_failure($1)", user_id)
+    record = await pg.fetchrow(
+        "SELECT failed_attempts,locked_until FROM platform.auth_credentials WHERE user_id=$1",
+        user_id,
+    )
+    assert record["locked_until"] == deadline
+    assert record["failed_attempts"] == 5
+
+
+async def test_concurrent_failures_cannot_renew_the_threshold_lock(postgres_url: str) -> None:
+    user_id = uuid4()
+    admin = await asyncpg.connect(postgres_url)
+    try:
+        await admin.execute(
+            "INSERT INTO users(id,email) VALUES($1,$2)",
+            user_id,
+            f"{user_id}@example.test",
+        )
+        await admin.execute(
+            "INSERT INTO platform.auth_credentials(user_id,password_hash,failed_attempts) "
+            "VALUES($1,'synthetic-test-hash',4)",
+            user_id,
+        )
+
+        async def fail():
+            conn = await asyncpg.connect(postgres_url)
+            try:
+                await conn.execute("SELECT platform.auth_record_login_failure($1)", user_id)
+            finally:
+                await conn.close()
+
+        await asyncio.gather(*(fail() for _ in range(8)))
+        first = await admin.fetchrow(
+            "SELECT failed_attempts,locked_until FROM platform.auth_credentials WHERE user_id=$1",
+            user_id,
+        )
+        assert first["failed_attempts"] == 5
+        assert first["locked_until"] is not None
+        await asyncio.gather(*(fail() for _ in range(8)))
+        second = await admin.fetchrow(
+            "SELECT failed_attempts,locked_until FROM platform.auth_credentials WHERE user_id=$1",
+            user_id,
+        )
+        assert second == first
+    finally:
+        await admin.execute("DELETE FROM users WHERE id=$1", user_id)
+        await admin.close()
 
 
 async def _identity(pg: asyncpg.Connection, role: str = "owner") -> tuple[UUID, UUID]:

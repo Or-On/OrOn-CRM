@@ -103,7 +103,12 @@ async def test_provider_neutral_identity_binding_is_unique_per_subject(
 
 
 def test_retained_membership_model_uses_canonical_roles() -> None:
-    assert [role.value for role in Role] == ["viewer", "agent", "admin", "owner"]
+    assert [role.value for role in Role] == ["viewer", "agent", "admin", "owner", "technician"]
+    # The runtime retains technician memberships, but their scoped service
+    # authority must not become generic tenant/CRM rank by enum position.
+    for generic in (Role.VIEWER, Role.AGENT, Role.ADMIN, Role.OWNER):
+        assert not Role.TECHNICIAN.at_least(generic)
+        assert not generic.at_least(Role.TECHNICIAN)
 
 
 async def _tenant(pg: asyncpg.Connection, label: str) -> tuple[UUID, UUID]:

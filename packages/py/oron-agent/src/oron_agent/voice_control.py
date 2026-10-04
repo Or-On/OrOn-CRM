@@ -1,7 +1,8 @@
-"""Per-call fail-closed AI ownership with bounded PostgreSQL polling.
+"""Per-call AI ownership with fresh authorization for actions.
 
 Pausing cancels local work and waits for processing barriers. It cannot recall
 already transmitted audio or prove a human connected to a telephone leg.
+Transient read failures preserve established media state but authorize no new action.
 """
 
 import asyncio
@@ -291,16 +292,41 @@ class VoiceController:
         if self._reset_utterance is not None:
             await self._reset_utterance()
 
-    async def refresh(self) -> None:
+    async def interrupt_reply(self) -> None:
+        """Discard current model/TTS/transport queues before fixed recovery audio.
+
+        The action guard provides fresh ownership; the barrier proves the SDK
+        processors consumed the interruption, rather than merely enqueuing it.
+        Ordinary caller capture and the durable ownership epoch remain intact.
+        """
+        async with self._lock:
+            if self.paused or self._barrier is None:
+                raise asyncio.CancelledError("voice recovery is not authorized")
+            await self._barrier()
+
+    async def suspend_for_failure(self) -> None:
+        """Close AI gates on an unknown/permanent failure without ending the SIP leg."""
+        async with self._lock:
+            self._blocked_epoch = max(self._blocked_epoch, self.epoch)
+            await self._stop()
+
+    async def refresh(self) -> bool:
         async with self._lock:
             try:
                 async with asyncio.timeout(1.5):
                     state = await self.read()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # A transient outage is not an explicit operator revocation.
+                # Initial unknown state stays paused; actions require a fresh read.
+                return False
+            try:
                 changed = state.epoch != self.epoch
                 permitted = state.active and state.resume_authorized
                 should_pause = state.mode == "paused" or not permitted
-                # Any loss of control needs a NEW explicit command, never an
-                # automatic reopen when the same old command becomes readable.
+                # Explicit revocation/capture failure needs a NEW command;
+                # transient read failure does not block the readable epoch.
                 resume = changed and state.epoch > self._blocked_epoch and not should_pause
                 if changed or (should_pause and not self.paused):
                     await self._stop()
@@ -317,17 +343,19 @@ class VoiceController:
                     acknowledged = await self.acknowledge(state.epoch, mode)
                 if not acknowledged:
                     await self._stop()
-                    return
+                    return False
                 if mode == "ai":
                     self.paused = False
                     if self._on_mode:
                         self._on_mode(False)
+                return True
             except asyncio.CancelledError:
                 raise
             except Exception:
                 self._blocked_epoch = max(self._blocked_epoch, self.epoch)
                 with suppress(Exception):
                     await self._stop()
+                return False
 
     async def run(self) -> None:
         while True:
@@ -337,9 +365,9 @@ class VoiceController:
     async def action(self, operation: Callable[..., Awaitable[Any]], *args: Any) -> Any:
         """Recheck durable ownership before existing flow work and invalidate its result."""
         owner = self._action_owner.get()
-        await self.refresh()
-        if self.paused or (owner is not None and owner != self.generation):
-            raise asyncio.CancelledError("voice AI is paused")
+        fresh = await self.refresh()
+        if not fresh or self.paused or (owner is not None and owner != self.generation):
+            raise asyncio.CancelledError("voice action is not authorized")
         generation = self.generation
 
         async def execute():

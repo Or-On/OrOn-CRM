@@ -1,6 +1,7 @@
+import { boundedMultipart } from "../uploads";
+import { validatePrivateImage } from "@or-on/crm";
 const MAX_IDENTITY_IMAGE_BYTES = 2 * 1024 * 1024;
-
-export const identityImageAccept = "image/png,image/jpeg,image/webp";
+const MAX_IDENTITY_MULTIPART_BYTES = MAX_IDENTITY_IMAGE_BYTES + 64 * 1024;
 
 function detectedContentType(
   bytes: Uint8Array,
@@ -37,7 +38,7 @@ export async function readIdentityImage(request: Request): Promise<{
   readonly contentType: "image/jpeg" | "image/png" | "image/webp";
   readonly data: Uint8Array;
 }> {
-  const form = await request.formData();
+  const form = await boundedMultipart(request, MAX_IDENTITY_MULTIPART_BYTES);
   const image = form.get("image");
   if (!(image instanceof File) || image.size === 0)
     throw new TypeError("Choose a PNG, JPEG or WebP image");
@@ -47,5 +48,6 @@ export async function readIdentityImage(request: Request): Promise<{
   const contentType = detectedContentType(data);
   if (contentType === undefined)
     throw new TypeError("Choose a valid PNG, JPEG or WebP image");
+  validatePrivateImage(data, contentType);
   return { contentType, data };
 }

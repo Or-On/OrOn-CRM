@@ -47,17 +47,26 @@ async def test_real_frame_stage_observations_are_private_and_do_not_claim_playba
     await push(BotStartedSpeakingFrame(), 340, source=transport)
     await push(InterruptionFrame(), 350)
     await push(audio, 360, source=tts)
+    # A second request with no completed stages must remain in the coverage
+    # denominator, rather than making the observed first response look complete.
+    await push(LLMContextFrame(LLMContext()), 400, destination=llm)
 
     result = observer.finalize()
     turn = result["turns"][0]
     assert turn["durations_ms"]["speech_end_to_accepted_ms"] == 20
     assert turn["durations_ms"]["model_first_token_ms"] == 60
     assert turn["durations_ms"]["validation_ms"] == 10
+    assert turn["durations_ms"]["speech_end_to_transport_submission_ms"] == 220
     assert turn["generated"] and turn["synthesized"] and turn["submitted_to_transport"]
     assert turn["exact_playback_confirmed"] is False
     assert turn["playback"] == "partial_or_unknown"
     assert result["summary_ms"]["validation_ms"] == {"samples": 1, "p50": 10, "p95": 10}
     assert result["stale_audio_frames"] == 1
+    assert result["sample_coverage"]["stages"]["speech_end_to_transport_submission_ms"] == {
+        "observed": 1,
+        "missing_or_invalid": 1,
+        "interrupted_observed": 1,
+    }
     serialized = json.dumps(result)
     assert (
         "secret" not in serialized and "private" not in serialized and "fixture" not in serialized
@@ -81,6 +90,12 @@ async def test_missing_stages_are_unknown_and_retention_is_bounded():
     result = observer.snapshot()
     assert result["retained_turns"] == 2
     assert result["total_turns"] == 5
+    assert result["sample_coverage"]["evicted_turns"] == 3
+    assert result["sample_coverage"]["stages"]["speech_end_to_transport_submission_ms"] == {
+        "observed": 0,
+        "missing_or_invalid": 2,
+        "interrupted_observed": 0,
+    }
     assert result["summary_ms"]["model_first_token_ms"] == {"samples": 0, "p50": None, "p95": None}
     assert all(not turn["exact_playback_confirmed"] for turn in result["turns"])
 
@@ -128,3 +143,23 @@ async def test_recognition_ready_before_vad_stop_is_observed_as_zero_wait():
         "p50": 0,
         "p95": 0,
     }
+
+
+@pytest.mark.asyncio
+async def test_measured_knowledge_read_slots_are_separate_bounded_and_optional():
+    llm, tts, transport = [FrameProcessor() for _ in range(3)]
+    observer = VoiceQualityObserver(llm=llm, tts=tts, transport_output=transport)
+    request = LLMContextFrame(LLMContext())
+    request.metadata["evidence_context_read_ms"] = 12.5
+    await observer.on_push_frame(FramePushed(tts, llm, request, FrameDirection.DOWNSTREAM, 100))
+    planned = AggregatedTextFrame("private", AggregationType.SENTENCE)
+    planned.metadata["evidence_validation_read_ms"] = 7.25
+    await observer.on_push_frame(FramePushed(llm, tts, planned, FrameDirection.DOWNSTREAM, 200))
+    poisoned = AggregatedTextFrame("private", AggregationType.SENTENCE)
+    poisoned.metadata["evidence_context_read_ms"] = float("nan")
+    poisoned.metadata["evidence_validation_read_ms"] = True
+    await observer.on_push_frame(FramePushed(llm, tts, poisoned, FrameDirection.DOWNSTREAM, 300))
+    durations = observer.snapshot()["turns"][0]["durations_ms"]
+    assert durations["evidence_context_read_ms"] == 12.5
+    assert durations["evidence_validation_read_ms"] == 7.25
+    assert durations["model_first_token_ms"] is None

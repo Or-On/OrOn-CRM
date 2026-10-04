@@ -69,11 +69,12 @@ class SessionRecorder:
             snapshot = usage.model_copy(deep=True)
             snapshot.call_seconds = max(0.0, time.monotonic() - started_at)
             try:
-                await self._client.checkpoint_usage(
-                    self._ctx.session_id,
-                    tenant_id=self._ctx.tenant_id,
-                    usage=snapshot,
-                )
+                async with asyncio.timeout(2.0):
+                    await self._client.checkpoint_usage(
+                        self._ctx.session_id,
+                        tenant_id=self._ctx.tenant_id,
+                        usage=snapshot,
+                    )
             except Exception:
                 logger.warning(
                     "live usage checkpoint failed for session %s",

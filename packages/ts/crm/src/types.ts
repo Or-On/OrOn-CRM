@@ -125,12 +125,19 @@ export interface ConversationPage {
 }
 
 export interface MessageMedia {
-  readonly kind: "image" | "document";
+  readonly kind: "image" | "document" | "audio" | "video";
   readonly status:
     "pending" | "processing" | "available" | "failed" | "unavailable";
   readonly mimeType: string | null;
   readonly fileName: string | null;
   readonly caption: string | null;
+  readonly transcriptionStatus?:
+    | "pending"
+    | "processing"
+    | "completed"
+    | "failed"
+    | "disabled"
+    | "unavailable";
 }
 
 export interface MessageLocation {
@@ -154,6 +161,9 @@ export interface Message {
   readonly deliveryEvents: readonly MessageDeliveryEvent[];
   readonly deliveryFailure?: MessageDeliveryFailure | null;
   readonly template?: TemplateSummary | null;
+  readonly openingMenu?: {
+    readonly outcome: "sending" | "sent" | "failed" | "unknown";
+  } | null;
   /** Sanitized customer-media metadata. Provider identifiers never leave CRM. */
   readonly media?: MessageMedia | null;
   readonly location?: MessageLocation | null;

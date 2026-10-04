@@ -1,3 +1,4 @@
+import shutil
 import tempfile
 import uuid
 from pathlib import Path
@@ -15,6 +16,8 @@ class SessionDir:
 
     def __init__(self, session_id: uuid.UUID, root: str | None = None):
         base = Path(root) if root else Path(tempfile.gettempdir()) / "oron-sessions"
+        self._base = base.resolve()
+        self._session_id = session_id
         self.path = base / str(session_id)
         for relative in (RECORDING_PATH, TRANSCRIPT_PATH):
             (self.path / relative).parent.mkdir(parents=True, exist_ok=True)
@@ -31,3 +34,23 @@ class SessionDir:
     @property
     def text_diagnostics(self) -> str:
         return str(self.path / "diagnostics/voice-turns.json")
+
+    def cleanup(self, *, artifacts_uploaded: bool, session_finalized: bool) -> bool:
+        """Release only this call's staging tree after canonical persistence.
+
+        Failed upload/finalization retains recovery evidence. Reject redirected
+        paths before recursive removal; a sibling session is never a target.
+        """
+        if not artifacts_uploaded or not session_finalized:
+            return False
+        target = self.path.resolve()
+        if (
+            self.path.is_symlink()
+            or target.parent != self._base
+            or target.name != str(self._session_id)
+        ):
+            raise ValueError("voice staging directory is outside its owned session root")
+        if not target.exists():
+            return True
+        shutil.rmtree(target)
+        return True

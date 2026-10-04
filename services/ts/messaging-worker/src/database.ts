@@ -1,4 +1,63 @@
+import {
+  createMemorySummaryModelProvider,
+  type SummaryModelProjection,
+} from "./memory-summary-model.js";
+import {
+  processMemorySummaryJob,
+  type MemorySummaryProvider,
+  type MemorySummaryWork,
+} from "./memory-summary-job.js";
 import postgres, { type Sql } from "postgres";
+import { randomUUID } from "node:crypto";
+import type { ModelAccountingSpool } from "./model-accounting-spool.js";
+import {
+  AiPrincipalDeniedError,
+  parsePrincipalAdmission,
+} from "./ai-principal.js";
+import type { ChannelCredentialEnvelope } from "./channel-credentials.js";
+import { authorizeMachineTool } from "./machine-tools.js";
+import {
+  createOpeningMenuStore,
+  openingMenuBusinessJobAllowed,
+  type StoredOpeningMenuDecision,
+} from "./opening-menu-database.js";
+import { processOpeningMenuJob } from "./opening-menu-job.js";
+import { createOpeningMenuProvider } from "./opening-menu-provider.js";
+import type {
+  ModelCredentialEnvelope,
+  ResolvedModelCredential,
+} from "./model-credentials.js";
+import {
+  resolveTrustedModelRoute,
+  type ModelRoutingPorts,
+  type PublishedModelBinding,
+  type ModelConfigurationRecord,
+  type TrustedModelRoute,
+} from "./trusted-model-routing.js";
+import { setTimeout as leaseDelay } from "node:timers/promises";
+import { messageContextText } from "./message-context.js";
+import {
+  queueDebouncedReply,
+  requireNoNewerPendingInbound,
+} from "./inbound-debounce.js";
+import { acknowledgeCommittedInbound } from "./inbound-typing.js";
+import {
+  unsupportedInboundMedia,
+  unsupportedMediaReply,
+} from "./unsupported-media.js";
+import { loadSessionMemoryContext } from "./session-memory-context.js";
+import { loadAiAuthoredContextIds } from "./ai-authored-context.js";
+import {
+  runAudioTranscriptionWork,
+  type AudioWorkBinding,
+} from "./audio-transcription-work.js";
+import { createAudioWorkTransaction } from "./audio-transcription-database.js";
+import type { AudioTranscriber } from "./audio-transcription.js";
+import {
+  remediationEnabled,
+  modelFailureReply,
+  type OperatorAlertProvider,
+} from "./remediation-policy.js";
 
 import {
   deliverSimulatorBroadcastRecipient,
@@ -10,6 +69,7 @@ import {
   parseStoredWhatsAppStatusEnvelope,
   messageDeliveryFailure,
   loadEligibleAgentKnowledge,
+  retrieveAgentKnowledge,
   applyCustomerConfirmation,
   applyPostCallOutcome,
   awaitingCustomerTicket,
@@ -85,6 +145,7 @@ import {
   type WhatsAppAiEscalationReason,
   type WhatsAppAiProvider,
   type WhatsAppAiRequest,
+  type WhatsAppAiAttempt,
 } from "./ai-provider.js";
 import {
   AutomaticCallProviderError,
@@ -141,6 +202,34 @@ interface JobRow {
   job_type: string;
   reference_id: string | null;
   payload: unknown;
+  claim_token: string;
+  claimLost?: boolean;
+}
+
+interface OpeningMenuRoute {
+  readonly intent: "services" | "support";
+  readonly language: "he" | "en";
+  readonly agentVersionId: string;
+  readonly allowedCapabilities: readonly string[];
+}
+
+function menuRoute(
+  decision: StoredOpeningMenuDecision,
+): OpeningMenuRoute | undefined {
+  if (decision.kind !== "route") return undefined;
+  if (
+    (decision.intent !== "services" && decision.intent !== "support") ||
+    (decision.language !== "he" && decision.language !== "en") ||
+    typeof decision.agentVersionId !== "string" ||
+    !Array.isArray(decision.allowedCapabilities)
+  )
+    throw new TypeError("Canonical opening menu route unavailable");
+  return {
+    intent: decision.intent,
+    language: decision.language,
+    agentVersionId: decision.agentVersionId,
+    allowedCapabilities: decision.allowedCapabilities,
+  };
 }
 
 interface OutboundWork {
@@ -158,9 +247,47 @@ export interface MessagingStore {
   readonly close: () => Promise<void>;
   readonly isReady: () => Promise<boolean>;
   readonly processAvailable: () => Promise<number>;
+  /** Finish currently admitted replies without admitting new work. */
+  readonly drainReplies: () => Promise<void>;
 }
 
 export interface MessagingAutomationOptions {
+  readonly memorySummaryProvider?: MemorySummaryProvider;
+  /** Trusted test/server transport; absent uses native HTTPS fetch. */
+  readonly memorySummaryFetch?: typeof fetch;
+  readonly resolveChannelCredential?: (
+    envelope: ChannelCredentialEnvelope,
+  ) => string;
+  /** Trusted server adapters; explicit bindings never inherit deployment keys. */
+  readonly modelRouting?: {
+    readonly resolveSealedCredential?: (
+      envelope: ModelCredentialEnvelope,
+    ) => ResolvedModelCredential;
+    readonly resolveCredential?: ModelRoutingPorts<{
+      readonly apiKey: string;
+    }>["resolveCredential"];
+    readonly reserveDailyAttempt?: ModelRoutingPorts<{
+      readonly apiKey: string;
+    }>["reserveDailyAttempt"];
+    readonly createProvider: (
+      route: Extract<
+        TrustedModelRoute<{ readonly apiKey: string }>,
+        { readonly status: "configured" }
+      >,
+    ) => WhatsAppAiProvider;
+  };
+  readonly audioTranscriber?: AudioTranscriber;
+  readonly modelAccountingSpool?: ModelAccountingSpool;
+  readonly beforeModelAttempt?: () => Promise<void>;
+  readonly modelAttemptRecorder?: (
+    context: {
+      readonly tenantId: string;
+      readonly jobId: string;
+      readonly agentVersionId: string;
+    },
+    attempt: WhatsAppAiAttempt,
+  ) => Promise<void>;
+  readonly operatorAlertProvider?: OperatorAlertProvider;
   readonly simulatorEnabled?: boolean;
   readonly aiProvider?: WhatsAppAiProvider;
   readonly automaticCallProvider?: AutomaticCallProvider;
@@ -224,7 +351,11 @@ async function processInbound(
   aiEnabled: boolean,
   realWhatsAppEnabled: boolean,
   fieldServiceAiAvailable: boolean,
+  acknowledgementProvider?: WhatsAppProvider,
+  resolveChannelCredential?: MessagingAutomationOptions["resolveChannelCredential"],
 ): Promise<void> {
+  let committedInbound:
+    { tenantId: string; conversationId: string; messageId: string } | undefined;
   try {
     await sql.begin(async (transaction) => {
       await setTenantContext(transaction, event.tenant_id);
@@ -239,12 +370,59 @@ async function processInbound(
           throw new TypeError("invalid inbound envelope");
         const result = await ingestWhatsAppInbound(transaction, envelope);
         if (result.inserted && result.messageId !== undefined) {
+          committedInbound = {
+            tenantId: event.tenant_id,
+            conversationId: result.conversationId,
+            messageId: result.messageId,
+          };
           await createInboundConversationNotifications(
             transaction,
             result.conversationId,
           );
+          if (envelope.contentType === "event") {
+            // Reactions and unknown provider events are durable UI data. They
+            // cannot trigger model spending, wrap-up decisions or business tools.
+            committedInbound = undefined;
+            await transaction`SELECT ops.complete_inbound_event(${event.id}::uuid,${workerId})`;
+            return;
+          }
           if (aiEnabled && realWhatsAppEnabled)
             await assignDefaultWhatsAppAi(transaction, result.conversationId);
+          if (aiEnabled && realWhatsAppEnabled)
+            await transaction`SELECT platform.enqueue_opening_menu_for_inbound(${result.messageId}::uuid)`;
+          const unsupportedStorage = unsupportedInboundMedia(envelope);
+          if (
+            (unsupportedStorage || envelope.contentType === "video") &&
+            (await remediationEnabled(transaction, "no_silence"))
+          ) {
+            await transaction`UPDATE messaging.messages SET structured_content=
+              coalesce(structured_content,'{}'::jsonb)||${transaction.json(
+                unsupportedStorage
+                  ? { retrievalStatus: "unsupported" }
+                  : { agentMediaStatus: "unsupported" },
+              )}::jsonb
+              WHERE id=${result.messageId}::uuid`;
+            if (aiEnabled && realWhatsAppEnabled)
+              await transaction`
+              INSERT INTO ops.jobs(tenant_id,queue,job_type,reference_type,reference_id,payload,
+                idempotency_key,max_attempts,priority)
+              SELECT platform.current_tenant_id(),'messaging','whatsapp.unsupported.reply','conversation',
+                c.id,jsonb_build_object('triggerMessageId',${result.messageId}::uuid,
+                  'ownershipEpoch',c.ownership_epoch::text,'agentVersionId',c.ai_agent_profile_version_id,
+                  'authorizedUserId',c.ai_enabled_by_user_id),
+                ${`whatsapp-unsupported:${result.messageId}`},3,100
+              FROM messaging.conversations c JOIN agents.agent_profile_versions a
+                ON a.id=c.ai_agent_profile_version_id AND a.tenant_id=c.tenant_id
+              WHERE c.id=${result.conversationId}::uuid AND c.ownership_mode='ai'
+                AND c.removed_from_inbox_at IS NULL AND a.published_at IS NOT NULL
+                AND a.validation_status='valid'
+                AND platform.messaging_ai_actor_authorized(c.ai_enabled_by_user_id)
+              ON CONFLICT DO NOTHING`;
+            if (unsupportedStorage) {
+              await transaction`SELECT ops.complete_inbound_event(${event.id}::uuid,${workerId})`;
+              return;
+            }
+          }
           if (envelope.media !== undefined)
             await transaction`
               INSERT INTO ops.jobs
@@ -306,7 +484,10 @@ async function processInbound(
                      'conversationId', ${result.conversationId}::uuid,
                      'contactId', ${result.contactId}::uuid,
                      'triggerMessageId', ${result.messageId}::uuid),
-                   ${`field-service:intake:${result.messageId}`}, 4, 20
+                   ${`field-service:intake:${result.messageId}`}, 4,
+                   CASE WHEN EXISTS(SELECT 1 FROM platform.tenant_remediation_flags
+                     WHERE tenant_id=platform.current_tenant_id() AND flag_key='queue_priority' AND enabled)
+                     THEN 10 ELSE 20 END
             FROM platform.tenant_feature_entitlements entitlement
             JOIN service.tenant_configuration configuration
               ON configuration.tenant_id=entitlement.tenant_id
@@ -314,7 +495,7 @@ async function processInbound(
               AND entitlement.feature_key='field_service'
               AND entitlement.available AND configuration.enabled
               AND configuration.whatsapp_intake_enabled
-              AND ${fieldServiceAiAvailable}
+              AND ${fieldServiceAiAvailable && envelope.contentType !== "audio" && envelope.contentType !== "video"}
               AND EXISTS(SELECT 1 FROM messaging.conversations c JOIN agents.agent_profile_versions a ON a.tenant_id=c.tenant_id AND a.id=c.ai_agent_profile_version_id
                 WHERE c.id=${result.conversationId}::uuid AND c.tenant_id=entitlement.tenant_id AND c.ownership_mode='ai'
                   AND a.published_at IS NOT NULL AND a.validation_status='valid' AND a.tool_permissions ? 'service.intake'
@@ -343,16 +524,30 @@ async function processInbound(
             )
             ON CONFLICT DO NOTHING
           `;
-          await transaction`
+          const debounced =
+            aiEnabled &&
+            envelope.contentType !== "audio" &&
+            envelope.contentType !== "video"
+              ? await queueDebouncedReply(transaction, {
+                  conversationId: result.conversationId,
+                  messageId: result.messageId,
+                  eventId: event.id,
+                })
+              : { handled: false };
+          if (!debounced.handled)
+            await transaction`
             INSERT INTO ops.jobs
               (tenant_id, queue, job_type, reference_type, reference_id, payload,
-               idempotency_key, max_attempts)
+               idempotency_key, max_attempts, priority)
             SELECT platform.current_tenant_id(), 'messaging', 'whatsapp.ai.reply',
                    'conversation', ${result.conversationId}::uuid,
                    jsonb_build_object('conversationId', ${result.conversationId}::uuid,
                      'triggerMessageId', ${result.messageId}::uuid),
-                   ${`whatsapp-ai:${event.id}`}, 3
-            WHERE ${aiEnabled} AND EXISTS (
+                   ${`whatsapp-ai:${event.id}`}, 3,
+                   CASE WHEN EXISTS(SELECT 1 FROM platform.tenant_remediation_flags
+                     WHERE tenant_id=platform.current_tenant_id() AND flag_key='queue_priority' AND enabled)
+                     THEN 100 ELSE 0 END
+            WHERE ${aiEnabled && envelope.contentType !== "audio" && envelope.contentType !== "video"} AND EXISTS (
               SELECT 1 FROM messaging.conversations conversation
               JOIN messaging.channels channel ON channel.id = conversation.channel_id
               WHERE conversation.id = ${result.conversationId}::uuid
@@ -374,10 +569,35 @@ async function processInbound(
     await sql`
       SELECT ops.fail_inbound_event(${event.id}::uuid, ${workerId}, ${reason}, 5)
     `;
+    // The failed ingress transaction above rolled back. Commit operator
+    // evidence separately so exhaustion is visible even when no AI job exists
+    // or a later agent transaction loses ownership and must roll back.
+    await sql.begin(async (transaction) => {
+      await setTenantContext(transaction, event.tenant_id);
+      await transaction`SELECT ops.surface_exhausted_inbound()`;
+    });
+    return;
+  }
+  if (
+    committedInbound !== undefined &&
+    realWhatsAppEnabled &&
+    acknowledgementProvider !== undefined
+  ) {
+    try {
+      await acknowledgeCommittedInbound(
+        sql,
+        acknowledgementProvider,
+        committedInbound,
+        resolveChannelCredential,
+      );
+    } catch {
+      /* Advisory typing failure never retries already committed ingress. */
+    }
   }
 }
 
 interface FieldServiceIntakeWork {
+  readonly machinePrincipalId?: string;
   readonly agentVersionId: string;
   readonly ownershipEpoch: string;
   readonly knownFields: ReturnType<typeof sanitizeIntakeProposal>;
@@ -400,29 +620,35 @@ interface FieldServiceIntakeWork {
 
 async function finishJob(
   transaction: postgres.TransactionSql,
-  jobId: string,
+  job: JobRow,
   workerId: string,
 ): Promise<void> {
-  await transaction`
+  const completed = await transaction`
     UPDATE ops.jobs SET status='succeeded', completed_at=CURRENT_TIMESTAMP,
-      locked_at=NULL, locked_by=NULL, last_error_safe=NULL,
+      locked_at=NULL, locked_by=NULL, lease_expires_at=NULL, last_error_safe=NULL,
       updated_at=CURRENT_TIMESTAMP
-    WHERE id=${jobId}::uuid AND status='running' AND locked_by=${workerId}
+    WHERE id=${job.id}::uuid AND status='running' AND locked_by=${workerId}
+      AND claim_token=${job.claim_token}::uuid AND lease_expires_at>clock_timestamp()
   `;
+  if (completed.count !== 1)
+    throw new WhatsAppProviderError("stale_worker_claim", false);
 }
 
 async function cancelJobForDisabledFeature(
   transaction: postgres.TransactionSql,
-  jobId: string,
+  job: JobRow,
   workerId: string,
   reason = "field_service_disabled",
 ): Promise<void> {
-  await transaction`
+  const cancelled = await transaction`
     UPDATE ops.jobs SET status='cancelled', completed_at=CURRENT_TIMESTAMP,
-      locked_at=NULL, locked_by=NULL,
+      locked_at=NULL, locked_by=NULL, lease_expires_at=NULL,
       last_error_safe=${reason}, updated_at=CURRENT_TIMESTAMP
-    WHERE id=${jobId}::uuid AND status='running' AND locked_by=${workerId}
+    WHERE id=${job.id}::uuid AND status='running' AND locked_by=${workerId}
+      AND claim_token=${job.claim_token}::uuid AND lease_expires_at>clock_timestamp()
   `;
+  if (cancelled.count !== 1)
+    throw new WhatsAppProviderError("stale_worker_claim", false);
 }
 
 async function loadFieldServiceIntakeWork(
@@ -441,13 +667,13 @@ async function loadFieldServiceIntakeWork(
     triggerMessageId !== job.reference_id
   )
     throw new TypeError("invalid field-service intake job payload");
-  return sql.begin(async (transaction) => {
+  return withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
     await setTenantContext(transaction, job.tenant_id);
-    await requireOwnedJob(transaction, workerId, job.id);
+    await requireOwnedJob(transaction, workerId, job);
     await requireTenantFeatures(transaction, ["field_service", "whatsapp"]);
     const feature = await getFieldServiceFeatureState(transaction);
     if (!feature.effective || !feature.whatsAppIntakeEnabled) {
-      await cancelJobForDisabledFeature(transaction, job.id, workerId);
+      await cancelJobForDisabledFeature(transaction, job, workerId);
       return undefined;
     }
     const context = await transaction<
@@ -460,15 +686,13 @@ async function loadFieldServiceIntakeWork(
         known_context: { knownFields: unknown; storeOptions: unknown[] };
       }[]
     >`
-      SELECT coalesce(settings.locale, 'en') AS locale,
+      SELECT coalesce(platform.current_voice_tenant_support_profile()->>'locale', 'en') AS locale,
              message.created_at AS occurred_at,
              conversation.contact_id,conversation.ai_agent_profile_version_id AS agent_version_id,conversation.ownership_epoch,service.contact_intake_context(conversation.contact_id) AS known_context
       FROM messaging.messages message
       JOIN messaging.conversations conversation
         ON conversation.id=message.conversation_id
        AND conversation.tenant_id=message.tenant_id
-      LEFT JOIN crm.tenant_settings settings
-        ON settings.tenant_id=message.tenant_id
       WHERE message.id=${triggerMessageId}::uuid
         AND message.conversation_id=${conversationId}::uuid
         AND conversation.contact_id=${contactId}::uuid
@@ -481,6 +705,19 @@ async function loadFieldServiceIntakeWork(
     const bound = context[0];
     if (bound === undefined)
       throw new TypeError("field-service intake trigger is unavailable");
+    const machine = await authorizeMachineTool(
+      transaction,
+      job,
+      workerId,
+      "service.intake",
+      {
+        agentVersionId: bound.agent_version_id,
+        conversationId,
+        contactId: bound.contact_id,
+        triggerMessageId,
+        ownershipEpoch: bound.ownership_epoch,
+      },
+    );
     const history = await transaction<
       {
         direction: "inbound" | "outbound";
@@ -497,6 +734,7 @@ async function loadFieldServiceIntakeWork(
       ORDER BY created_at DESC, updated_at DESC, id DESC LIMIT 50
     `;
     return {
+      ...(machine === null ? {} : { machinePrincipalId: machine.principalId }),
       conversationId,
       contactId: bound.contact_id,
       triggerMessageId,
@@ -527,6 +765,7 @@ async function processFieldServiceIntake(
   workerId: string,
   job: JobRow,
   automation: MessagingAutomationOptions,
+  openingMenuRoute?: OpeningMenuRoute,
 ): Promise<void> {
   try {
     const work = await loadFieldServiceIntakeWork(sql, workerId, job);
@@ -534,21 +773,41 @@ async function processFieldServiceIntake(
     const provider = automation.fieldServiceProvider;
     if (provider === undefined)
       throw new TypeError("field_service_ai_unavailable");
+    await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
+      const machine = await authorizeMachineTool(
+        transaction,
+        job,
+        workerId,
+        "service.intake",
+        work,
+      );
+      if (machine?.principalId !== work.machinePrincipalId)
+        throw new TypeError("machine tool execution principal changed");
+    });
     const extraction = await provider.extractIntake({
-      locale: work.locale,
+      locale: openingMenuRoute?.language ?? work.locale,
       workflowPolicy: work.existing?.workflowPolicy ?? work.workflowPolicy,
       existingFields: { ...work.knownFields, ...work.existing?.fields },
       storeOptions: work.storeOptions,
       intakeAlreadyOpen: work.existing !== undefined,
       messages: work.messages,
     });
-    await sql.begin(async (transaction) => {
+    await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
-      await requireOwnedJob(transaction, workerId, job.id);
+      await requireOwnedJob(transaction, workerId, job);
       await requireTenantFeatures(transaction, ["field_service", "whatsapp"]);
+      const machine = await authorizeMachineTool(
+        transaction,
+        job,
+        workerId,
+        "service.intake",
+        work,
+      );
+      if (machine?.principalId !== work.machinePrincipalId)
+        throw new TypeError("machine tool execution principal changed");
       const feature = await getFieldServiceFeatureState(transaction);
       if (!feature.effective || !feature.whatsAppIntakeEnabled) {
-        await cancelJobForDisabledFeature(transaction, job.id, workerId);
+        await cancelJobForDisabledFeature(transaction, job, workerId);
         return;
       }
       const ownership = await transaction<
@@ -560,7 +819,7 @@ async function processFieldServiceIntake(
           AND a.published_at IS NOT NULL AND a.validation_status='valid' AND a.tool_permissions ? 'service.intake'
           AND platform.messaging_ai_actor_authorized(c.ai_enabled_by_user_id) FOR UPDATE OF c`;
       if (ownership.length === 0) {
-        await finishJob(transaction, job.id, workerId);
+        await finishJob(transaction, job, workerId);
         return;
       }
       const current = await findOpenWhatsAppServiceIntake(
@@ -568,7 +827,7 @@ async function processFieldServiceIntake(
         work.conversationId,
       );
       if (!extraction.serviceIntent && current === undefined) {
-        await finishJob(transaction, job.id, workerId);
+        await finishJob(transaction, job, workerId);
         return;
       }
       const intake = await captureWhatsAppServiceIntakeMessage(transaction, {
@@ -605,6 +864,9 @@ async function processFieldServiceIntake(
         updated.missingFields.length === 0
           ? await confirmWhatsAppServiceIntake(transaction, updated.id)
           : undefined;
+      if (machine !== null)
+        await transaction`SELECT platform.commit_machine_intake_receipt(
+          ${job.id}::uuid,${workerId},${job.claim_token}::uuid,${updated.id}::uuid)`;
       await transaction`
         INSERT INTO audit.records(
           tenant_id, actor_service, action, target_type, target_id, metadata
@@ -624,7 +886,7 @@ async function processFieldServiceIntake(
           })}
         )
       `;
-      await finishJob(transaction, job.id, workerId);
+      await finishJob(transaction, job, workerId);
     });
   } catch (error) {
     const reason =
@@ -636,7 +898,7 @@ async function processFieldServiceIntake(
     const permanent =
       error instanceof TypeError ||
       (error instanceof FieldServiceAiProviderError && !error.retryable);
-    await sql.begin(async (transaction) => {
+    await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
       if (permanent)
         await transaction`
@@ -644,18 +906,19 @@ async function processFieldServiceIntake(
           WHERE id=${job.id}::uuid AND status='running' AND locked_by=${workerId}
         `;
       await transaction`
-        SELECT ops.fail_job(${job.id}::uuid, ${workerId}, ${reason}, 10)
+        SELECT ops.fail_messaging_job_claim(${job.id}::uuid, ${workerId}, ${job.claim_token}::uuid, ${reason}, 10)
       `;
     });
   }
 }
 
 interface WhatsAppMediaWork {
+  readonly ownershipEpoch: string;
   readonly conversationId: string;
   readonly messageId: string;
   readonly mediaId: string;
   readonly senderPhoneNumberId: string;
-  readonly contentType: "image" | "document";
+  readonly contentType: "image" | "document" | "audio" | "video";
   readonly expectedMimeType?: string;
   readonly expectedSha256?: string;
   readonly existingObjectId?: string;
@@ -679,16 +942,19 @@ async function loadWhatsAppMediaWork(
     typeof mediaId !== "string" ||
     mediaId.length < 1 ||
     mediaId.length > 500 ||
-    (contentType !== "image" && contentType !== "document")
+    (contentType !== "image" &&
+      contentType !== "document" &&
+      contentType !== "audio" &&
+      contentType !== "video")
   )
     throw new TypeError("invalid WhatsApp media job payload");
-  return sql.begin(async (transaction) => {
+  return withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
     await setTenantContext(transaction, job.tenant_id);
-    await requireOwnedJob(transaction, workerId, job.id);
+    await requireOwnedJob(transaction, workerId, job);
     if (!realWhatsAppEnabled) {
       await cancelJobForDisabledFeature(
         transaction,
-        job.id,
+        job,
         workerId,
         "whatsapp_provider_disabled",
       );
@@ -711,13 +977,15 @@ async function loadWhatsAppMediaWork(
         expected_mime_type: string | null;
         expected_sha256: string | null;
         sender_phone_number_id: string | null;
+        ownership_epoch: string;
       }[]
     >`
       SELECT message.id, message.object_id, object.status AS object_status,
              message.structured_content->>'providerMediaId' AS provider_media_id,
              message.structured_content->>'mimeType' AS expected_mime_type,
              message.structured_content->>'sha256' AS expected_sha256,
-             channel.provider_account_id AS sender_phone_number_id
+             channel.provider_account_id AS sender_phone_number_id,
+             conversation.ownership_epoch::text AS ownership_epoch
       FROM messaging.messages message
       JOIN messaging.conversations conversation
         ON conversation.id=message.conversation_id
@@ -758,6 +1026,7 @@ async function loadWhatsAppMediaWork(
         senderPhoneNumberId: row.sender_phone_number_id,
         contentType,
         existingObjectId: row.object_id,
+        ownershipEpoch: row.ownership_epoch,
       };
     }
     await transaction`
@@ -773,6 +1042,7 @@ async function loadWhatsAppMediaWork(
       messageId,
       mediaId,
       senderPhoneNumberId: row.sender_phone_number_id,
+      ownershipEpoch: row.ownership_epoch,
       contentType,
       ...(row.expected_mime_type === null
         ? {}
@@ -791,9 +1061,10 @@ async function linkWhatsAppMediaToFieldService(
   work: WhatsAppMediaWork,
   objectId: string,
 ): Promise<void> {
-  await sql.begin(async (transaction) => {
+  if (work.contentType === "audio" || work.contentType === "video") return;
+  await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
     await setTenantContext(transaction, job.tenant_id);
-    await requireOwnedJob(transaction, workerId, job.id);
+    await requireOwnedJob(transaction, workerId, job);
     if (!(await whatsappMediaFieldServiceProjectionEnabled(transaction)))
       return;
     await transaction`
@@ -831,10 +1102,182 @@ async function finishWhatsAppMediaJob(
   workerId: string,
   job: JobRow,
 ): Promise<void> {
-  await sql.begin(async (transaction) => {
+  await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
     await setTenantContext(transaction, job.tenant_id);
-    await requireOwnedJob(transaction, workerId, job.id);
-    await finishJob(transaction, job.id, workerId);
+    await requireOwnedJob(transaction, workerId, job);
+    await finishJob(transaction, job, workerId);
+  });
+}
+
+async function queueAudioTranscription(
+  sql: Sql,
+  workerId: string,
+  job: JobRow,
+  work: WhatsAppMediaWork,
+  objectId: string,
+): Promise<void> {
+  if (work.contentType !== "audio") return;
+  await withOwnedJobTransaction(sql, workerId, job, async (tx) => {
+    await setTenantContext(tx, job.tenant_id);
+    if (
+      !(await remediationEnabled(tx, "audio_transcription")) ||
+      !(await remediationEnabled(tx, "no_silence"))
+    ) {
+      await tx`UPDATE messaging.messages SET structured_content=coalesce(structured_content,'{}'::jsonb)||
+        '{"transcriptionStatus":"disabled"}'::jsonb WHERE id=${work.messageId}::uuid`;
+      return;
+    }
+    await tx`INSERT INTO ops.jobs(tenant_id,queue,job_type,reference_type,reference_id,payload,idempotency_key,max_attempts,priority)
+      SELECT platform.current_tenant_id(),'messaging','whatsapp.audio.transcribe','conversation',${work.conversationId}::uuid,
+        jsonb_build_object('operationId',${randomUUID()}::uuid,'messageId',${work.messageId}::uuid,
+          'triggerMessageId',${work.messageId}::uuid,'objectId',o.id,'sha256',o.checksum),
+        ${`whatsapp:audio:${work.messageId}`},20,100
+      FROM objects.object_metadata o WHERE o.id=${objectId}::uuid AND o.owner_type='message'
+        AND o.owner_id=${work.messageId}::uuid AND o.status='available'
+      ON CONFLICT DO NOTHING`;
+    await tx`UPDATE messaging.messages SET structured_content=coalesce(structured_content,'{}'::jsonb)||
+      '{"transcriptionStatus":"pending"}'::jsonb WHERE id=${work.messageId}::uuid AND EXISTS(
+        SELECT 1 FROM ops.jobs WHERE tenant_id=platform.current_tenant_id()
+          AND idempotency_key=${`whatsapp:audio:${work.messageId}`} AND status IN ('queued','running','retry'))`;
+  });
+}
+
+async function processAudioTranscription(
+  sql: Sql,
+  workerId: string,
+  job: JobRow,
+  automation: MessagingAutomationOptions,
+): Promise<void> {
+  const payload = record(job.payload);
+  if (
+    !uuid(payload.operationId) ||
+    !uuid(payload.messageId) ||
+    !uuid(payload.objectId) ||
+    typeof payload.sha256 !== "string" ||
+    !/^[a-f0-9]{64}$/u.test(payload.sha256)
+  )
+    throw new TypeError("invalid audio transcription job binding");
+  const binding: AudioWorkBinding = {
+    tenantId: job.tenant_id,
+    jobId: job.id,
+    claimToken: job.claim_token,
+    operationId: payload.operationId,
+    messageId: payload.messageId,
+    objectId: payload.objectId,
+    sha256: payload.sha256,
+  };
+  const work = await loadAiWork(sql, workerId, job);
+  const ownedTransaction = async <T>(
+    run: (tx: postgres.TransactionSql) => Promise<T>,
+  ): Promise<T> =>
+    withOwnedJobTransaction(sql, workerId, job, async (tx) => {
+      await setTenantContext(tx, job.tenant_id);
+      await requireTenantFeatures(tx, ["whatsapp"]);
+      await requireAiTurnOwnership(tx, work);
+      if (
+        !automation.realWhatsAppEnabled ||
+        !(await remediationEnabled(tx, "audio_transcription")) ||
+        !(await remediationEnabled(tx, "no_silence"))
+      )
+        throw new TypeError("audio transcription authorization changed");
+      return run(tx);
+    });
+  const outcome = await runAudioTranscriptionWork(binding, {
+    ...(automation.audioTranscriber === undefined
+      ? {}
+      : { transcriber: automation.audioTranscriber }),
+    ownedTransaction: async (_, run) =>
+      ownedTransaction((tx) =>
+        run(
+          createAudioWorkTransaction(tx, binding, {
+            publishTranscript: async (tx, _, text) => {
+              const changed =
+                await tx`UPDATE messaging.messages SET content_text=${text},
+          structured_content=coalesce(structured_content,'{}'::jsonb)||'{"transcriptionStatus":"completed"}'::jsonb,
+          updated_at=CURRENT_TIMESTAMP WHERE id=${binding.messageId}::uuid AND object_id=${binding.objectId}::uuid
+            AND conversation_id=${work.conversationId}::uuid AND direction='inbound' AND content_type='audio'`;
+              if (changed.count !== 1)
+                throw new TypeError("audio transcript message binding changed");
+              await tx`INSERT INTO ops.jobs(tenant_id,queue,job_type,reference_type,reference_id,payload,idempotency_key,max_attempts,priority)
+          VALUES(platform.current_tenant_id(),'messaging','whatsapp.ai.reply','conversation',${work.conversationId}::uuid,
+            jsonb_build_object('conversationId',${work.conversationId}::uuid,'triggerMessageId',${binding.messageId}::uuid),
+            ${`whatsapp-ai-audio:${binding.operationId}`},3,100) ON CONFLICT DO NOTHING`;
+              if (automation.fieldServiceProvider !== undefined)
+                await tx`
+          INSERT INTO ops.jobs(tenant_id,queue,job_type,reference_type,reference_id,payload,idempotency_key,max_attempts,priority)
+          SELECT platform.current_tenant_id(),'messaging','field_service.intake.extract','message',${binding.messageId}::uuid,
+            jsonb_build_object('conversationId',${work.conversationId}::uuid,'contactId',${work.contactId}::uuid,
+              'triggerMessageId',${binding.messageId}::uuid),${`field-service:intake:${binding.messageId}`},4,
+            CASE WHEN EXISTS(SELECT 1 FROM platform.tenant_remediation_flags
+              WHERE tenant_id=platform.current_tenant_id() AND flag_key='queue_priority' AND enabled)
+              THEN 10 ELSE 20 END
+          FROM platform.tenant_feature_entitlements e JOIN service.tenant_configuration c ON c.tenant_id=e.tenant_id
+          WHERE e.tenant_id=platform.current_tenant_id() AND e.feature_key='field_service' AND e.available
+            AND c.enabled AND c.whatsapp_intake_enabled
+            AND EXISTS(SELECT 1 FROM agents.agent_profile_versions a WHERE a.id=${work.agentVersionId}::uuid
+              AND a.tenant_id=e.tenant_id AND a.published_at IS NOT NULL AND a.validation_status='valid'
+              AND a.tool_permissions ? 'service.intake') ON CONFLICT DO NOTHING`;
+              await tx`INSERT INTO ops.jobs(tenant_id,queue,job_type,reference_type,reference_id,payload,idempotency_key,max_attempts,priority)
+          VALUES(platform.current_tenant_id(),'messaging','support.postcall.reply','conversation',${work.conversationId}::uuid,
+            jsonb_build_object('conversationId',${work.conversationId}::uuid,'messageId',${binding.messageId}::uuid),
+            ${`postcall:audio:${binding.operationId}`},4,40) ON CONFLICT DO NOTHING`;
+            },
+            ensureFallbackTaskAndAlert: async (tx, _, code) => {
+              if (
+                !(await queueModelFailureRecovery(
+                  sql,
+                  workerId,
+                  job,
+                  work,
+                  automation,
+                  { transaction: tx, finish: false },
+                ))
+              )
+                throw new Error("audio fallback recovery unavailable");
+              await tx`UPDATE messaging.messages SET structured_content=coalesce(structured_content,'{}'::jsonb)||
+          ${tx.json({ transcriptionStatus: "failed", transcriptionError: code })}::jsonb WHERE id=${binding.messageId}::uuid`;
+            },
+          }),
+        ),
+      ),
+    readPrivateAudio: async () => {
+      const object = await ownedTransaction(
+        (tx) => tx<
+          {
+            storage_key: string;
+            content_type: string;
+            byte_size: number | string;
+            checksum: string;
+          }[]
+        >`
+        SELECT storage_key,content_type,byte_size,checksum FROM objects.object_metadata
+        WHERE id=${binding.objectId}::uuid AND owner_type='message' AND owner_id=${binding.messageId}::uuid
+          AND checksum=${binding.sha256} AND status='available'`,
+      );
+      if (!object[0])
+        throw new TypeError("audio private object authorization changed");
+      return {
+        bytes: await readPrivateObject(
+          object[0].storage_key,
+          {
+            byteSize: Number(object[0].byte_size),
+            checksum: object[0].checksum,
+          },
+          automation.privateObjectStorage,
+        ),
+        mimeType: object[0].content_type,
+      };
+    },
+  });
+  await ownedTransaction(async (tx) => {
+    if (outcome.kind === "rescheduled") {
+      const updated =
+        await tx`UPDATE ops.jobs SET status='queued',available_at=${new Date(outcome.availableAt)},
+        locked_by=NULL,locked_at=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP
+        WHERE id=${job.id}::uuid AND claim_token=${job.claim_token}::uuid AND status='running'`;
+      if (updated.count !== 1)
+        throw new Error("audio transcription claim lost during reschedule");
+    } else await finishJob(tx, job, workerId);
   });
 }
 
@@ -845,9 +1288,9 @@ async function revalidateWhatsAppMediaAttempt(
   work: WhatsAppMediaWork,
   realWhatsAppEnabled: boolean,
 ): Promise<void> {
-  await sql.begin(async (transaction) => {
+  await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
     await setTenantContext(transaction, job.tenant_id);
-    await requireOwnedJob(transaction, workerId, job.id);
+    await requireOwnedJob(transaction, workerId, job);
     if (!realWhatsAppEnabled)
       throw new WhatsAppProviderError("provider_disabled", false);
     const rows = await transaction<{ id: string }[]>`
@@ -863,6 +1306,12 @@ async function revalidateWhatsAppMediaAttempt(
         AND channel.provider='meta' AND channel.status='active'
         AND channel.provider_account_id=${work.senderPhoneNumberId}
         AND channel.mirror_inbound_media
+        AND conversation.ownership_epoch=${work.ownershipEpoch}::bigint
+        AND conversation.removed_from_inbox_at IS NULL
+        AND message.status='received' AND message.content_type=${work.contentType}
+        AND message.structured_content->>'providerMediaId'=${work.mediaId}
+        AND platform.messaging_media_channel_credential(
+          ${job.id}::uuid,${workerId},${job.claim_token}::uuid,${work.ownershipEpoch}::bigint) IS NOT NULL
     `;
     if (rows[0] === undefined)
       throw new WhatsAppProviderError("media_eligibility_changed", false);
@@ -896,6 +1345,13 @@ async function processWhatsAppMedia(
         work,
         work.existingObjectId,
       );
+      await queueAudioTranscription(
+        sql,
+        workerId,
+        job,
+        work,
+        work.existingObjectId,
+      );
       await finishWhatsAppMediaJob(sql, workerId, job);
       return;
     }
@@ -903,6 +1359,50 @@ async function processWhatsAppMedia(
     if (metaProvider.downloadMedia === undefined)
       throw new WhatsAppProviderError("media_provider_unavailable", false);
     const media = await metaProvider.downloadMedia({
+      accessTokenForAttempt: async () => {
+        await revalidateWhatsAppMediaAttempt(
+          sql,
+          workerId,
+          job,
+          work,
+          realWhatsAppEnabled,
+        );
+        return withOwnedJobTransaction(
+          sql,
+          workerId,
+          job,
+          async (transaction) => {
+            await setTenantContext(transaction, job.tenant_id);
+            await requireOwnedJob(transaction, workerId, job);
+            const projected = await transaction<
+              {
+                envelope: ChannelCredentialEnvelope | { legacy: true } | null;
+              }[]
+            >`
+            SELECT platform.messaging_media_channel_credential(${job.id}::uuid,${workerId},${job.claim_token}::uuid,${work.ownershipEpoch}::bigint) AS envelope`;
+            const envelope = projected[0]?.envelope;
+            if (envelope === null || envelope === undefined)
+              throw new WhatsAppProviderError(
+                "channel_credential_unavailable",
+                false,
+              );
+            if ("legacy" in envelope) return undefined;
+            if (automation.resolveChannelCredential === undefined)
+              throw new WhatsAppProviderError(
+                "channel_credential_unavailable",
+                false,
+              );
+            try {
+              return automation.resolveChannelCredential(envelope);
+            } catch {
+              throw new WhatsAppProviderError(
+                "channel_credential_unavailable",
+                false,
+              );
+            }
+          },
+        );
+      },
       mediaId: work.mediaId,
       senderPhoneNumberId: work.senderPhoneNumberId,
       ...(work.expectedMimeType === undefined
@@ -920,6 +1420,16 @@ async function processWhatsAppMedia(
           realWhatsAppEnabled,
         ),
     });
+    const allowedMime: Readonly<
+      Record<WhatsAppMediaWork["contentType"], readonly string[]>
+    > = {
+      image: ["image/jpeg", "image/png", "image/webp"],
+      document: ["application/pdf"],
+      audio: ["audio/ogg", "audio/wav"],
+      video: ["video/mp4"],
+    };
+    if (!allowedMime[work.contentType].includes(media.contentType))
+      throw new WhatsAppProviderError("media_content_type_mismatch", false);
     staged = await stagePrivateObject(
       {
         tenantId: job.tenant_id,
@@ -935,10 +1445,14 @@ async function processWhatsAppMedia(
       throw new TypeError("WhatsApp media checksum changed");
     await commitPrivateObject(staged);
     committed = true;
-    const objectId = await sql.begin(async (transaction) => {
-      await setTenantContext(transaction, job.tenant_id);
-      await requireOwnedJob(transaction, workerId, job.id);
-      const eligible = await transaction<{ id: string }[]>`
+    const objectId = await withOwnedJobTransaction(
+      sql,
+      workerId,
+      job,
+      async (transaction) => {
+        await setTenantContext(transaction, job.tenant_id);
+        await requireOwnedJob(transaction, workerId, job);
+        const eligible = await transaction<{ id: string }[]>`
         SELECT message.id FROM messaging.messages message
         JOIN messaging.conversations conversation
           ON conversation.id=message.conversation_id
@@ -950,17 +1464,25 @@ async function processWhatsAppMedia(
           AND message.conversation_id=${work.conversationId}::uuid
           AND message.object_id IS NULL AND message.provider='meta'
           AND channel.provider='meta' AND channel.status='active'
+          AND channel.provider_account_id=${work.senderPhoneNumberId}
           AND channel.mirror_inbound_media
+          AND conversation.ownership_epoch=${work.ownershipEpoch}::bigint
+          AND conversation.removed_from_inbox_at IS NULL
+          AND message.status='received' AND message.content_type=${work.contentType}
+          AND message.structured_content->>'providerMediaId'=${work.mediaId}
+          AND platform.authorize_media_commit(
+            ${job.id}::uuid,${workerId},${job.claim_token}::uuid,
+            ${work.ownershipEpoch}::bigint,${work.senderPhoneNumberId})
         FOR UPDATE OF message
       `;
-      if (!realWhatsAppEnabled || eligible[0] === undefined) {
-        await cancelJobForDisabledFeature(
-          transaction,
-          job.id,
-          workerId,
-          "whatsapp_media_disabled",
-        );
-        await transaction`
+        if (!realWhatsAppEnabled || eligible[0] === undefined) {
+          await cancelJobForDisabledFeature(
+            transaction,
+            job,
+            workerId,
+            "whatsapp_media_disabled",
+          );
+          await transaction`
           UPDATE messaging.messages SET
             structured_content=jsonb_set(
               coalesce(structured_content, '{}'::jsonb) - 'retrievalError',
@@ -968,25 +1490,25 @@ async function processWhatsAppMedia(
             updated_at=CURRENT_TIMESTAMP
           WHERE id=${work.messageId}::uuid AND object_id IS NULL
         `;
-        return null;
-      }
-      const objects = await transaction<{ id: string }[]>`
+          return null;
+        }
+        const objects = await transaction<{ id: string }[]>`
         INSERT INTO objects.object_metadata(
           tenant_id, created_by_user_id, owner_type, owner_id, category,
           content_type, byte_size, checksum, storage_backend, storage_key, status
         ) VALUES (
           platform.current_tenant_id(), NULL, 'message', ${work.messageId}::uuid,
-          ${work.contentType === "image" ? "whatsapp_customer_image" : "whatsapp_customer_document"},
+          ${work.contentType === "image" ? "whatsapp_customer_image" : work.contentType === "audio" ? "whatsapp_customer_audio" : work.contentType === "video" ? "whatsapp_customer_video" : "whatsapp_customer_document"},
           ${staged?.contentType ?? media.contentType},
           ${staged?.byteSize ?? media.bytes.byteLength},
           ${staged?.checksum ?? media.sha256}, 'local',
           ${staged?.storageKey ?? ""}, 'available'
         ) RETURNING id
       `;
-      const objectId = objects[0]?.id;
-      if (objectId === undefined)
-        throw new Error("WhatsApp media object creation failed");
-      const updated = await transaction<{ id: string }[]>`
+        const objectId = objects[0]?.id;
+        if (objectId === undefined)
+          throw new Error("WhatsApp media object creation failed");
+        const updated = await transaction<{ id: string }[]>`
         UPDATE messaging.messages SET object_id=${objectId}::uuid,
           structured_content=jsonb_set(
             coalesce(structured_content, '{}'::jsonb) - 'retrievalError',
@@ -995,16 +1517,20 @@ async function processWhatsAppMedia(
         WHERE id=${work.messageId}::uuid AND object_id IS NULL
         RETURNING id
       `;
-      if (updated[0] === undefined)
-        throw new TypeError("WhatsApp media message changed during retrieval");
-      return objectId;
-    });
+        if (updated[0] === undefined)
+          throw new TypeError(
+            "WhatsApp media message changed during retrieval",
+          );
+        return objectId;
+      },
+    );
     if (objectId === null) {
       await discardPrivateObject(staged);
       return;
     }
     persisted = true;
     await linkWhatsAppMediaToFieldService(sql, workerId, job, work, objectId);
+    await queueAudioTranscription(sql, workerId, job, work, objectId);
     await finishWhatsAppMediaJob(sql, workerId, job);
   } catch (error) {
     if (staged !== undefined && !persisted)
@@ -1022,7 +1548,7 @@ async function processWhatsAppMedia(
           : committed
             ? "whatsapp_media_persistence_failed"
             : "whatsapp_media_retrieval_failed";
-    await sql.begin(async (transaction) => {
+    await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
       const owned = await transaction<{ id: string }[]>`
         SELECT id FROM ops.jobs WHERE id=${job.id}::uuid
@@ -1035,7 +1561,7 @@ async function processWhatsAppMedia(
       ) {
         await cancelJobForDisabledFeature(
           transaction,
-          job.id,
+          job,
           workerId,
           reason === "provider_disabled"
             ? "whatsapp_provider_disabled"
@@ -1060,7 +1586,7 @@ async function processWhatsAppMedia(
           WHERE id=${job.id}::uuid AND status='running' AND locked_by=${workerId}
         `;
       const failed = await transaction<{ status: string }[]>`
-        SELECT (ops.fail_job(${job.id}::uuid, ${workerId}, ${reason}, 15)).status
+        SELECT (ops.fail_messaging_job_claim(${job.id}::uuid, ${workerId}, ${job.claim_token}::uuid, ${reason}, 15)).status
       `;
       if (job.reference_id !== null) {
         const finalFailure = failed[0]?.status === "dead";
@@ -1069,9 +1595,9 @@ async function processWhatsAppMedia(
             structured_content=jsonb_set(
               jsonb_set(coalesce(structured_content, '{}'::jsonb),
                 '{retrievalStatus}',
-                ${finalFailure ? '"failed"' : '"pending"'}::jsonb, true),
+                ${finalFailure ? '"failed"' : '"pending"'}::text::jsonb, true),
               '{retrievalError}',
-              ${finalFailure ? JSON.stringify(reason) : "null"}::jsonb, true),
+              ${finalFailure ? JSON.stringify(reason) : "null"}::text::jsonb, true),
             updated_at=CURRENT_TIMESTAMP
           WHERE id=${job.reference_id}::uuid AND object_id IS NULL
         `;
@@ -1088,6 +1614,7 @@ interface FieldServiceOcrWork {
   readonly byteSize: number;
   readonly checksum: string;
   readonly storageKey: string;
+  readonly originatingActorId: string;
 }
 
 interface FieldServiceSummaryWork {
@@ -1195,9 +1722,9 @@ async function loadFieldServiceSummaryWork(
     (sourceKind !== "whatsapp" && sourceKind !== "call")
   )
     throw new TypeError("invalid field-service summary job payload");
-  return sql.begin(async (transaction) => {
+  return withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
     await setTenantContext(transaction, job.tenant_id);
-    await requireOwnedJob(transaction, workerId, job.id);
+    await requireOwnedJob(transaction, workerId, job);
     await requireTenantFeatures(transaction, ["field_service"]);
     const feature = await getFieldServiceFeatureState(transaction);
     if (!feature.effective) {
@@ -1206,7 +1733,7 @@ async function loadFieldServiceSummaryWork(
           error_safe='field_service_disabled', completed_at=CURRENT_TIMESTAMP
         WHERE id=${summaryId}::uuid AND status IN ('pending','processing')
       `;
-      await cancelJobForDisabledFeature(transaction, job.id, workerId);
+      await cancelJobForDisabledFeature(transaction, job, workerId);
       return undefined;
     }
     await transaction`
@@ -1227,7 +1754,7 @@ async function loadFieldServiceSummaryWork(
     if (summary[0] === undefined)
       throw new TypeError("field-service summary source is unavailable");
     if (summary[0].status === "completed") {
-      await finishJob(transaction, job.id, workerId);
+      await finishJob(transaction, job, workerId);
       return undefined;
     }
     const locale = await transaction<{ locale: string }[]>`
@@ -1248,7 +1775,7 @@ async function loadFieldServiceSummaryWork(
             error_safe='whatsapp_history_unavailable', completed_at=CURRENT_TIMESTAMP
           WHERE id=${summaryId}::uuid
         `;
-        await finishJob(transaction, job.id, workerId);
+        await finishJob(transaction, job, workerId);
         return undefined;
       }
       await transaction`
@@ -1292,7 +1819,7 @@ async function loadFieldServiceSummaryWork(
           error_safe='call_transcript_unavailable', completed_at=CURRENT_TIMESTAMP
         WHERE id=${summaryId}::uuid
       `;
-      await finishJob(transaction, job.id, workerId);
+      await finishJob(transaction, job, workerId);
       return undefined;
     }
     await transaction`
@@ -1343,32 +1870,65 @@ async function processFieldServiceSummary(
           .toString("utf8")
           .slice(0, 80_000),
       );
-    const mayCallProvider = await sql.begin(async (transaction) => {
-      await setTenantContext(transaction, job.tenant_id);
-      await requireOwnedJob(transaction, workerId, job.id);
-      await requireTenantFeatures(transaction, ["field_service"]);
-      const feature = await getFieldServiceFeatureState(transaction);
-      if (!feature.effective) {
-        await transaction`
+    const mayCallProvider = await withOwnedJobTransaction(
+      sql,
+      workerId,
+      job,
+      async (transaction) => {
+        await setTenantContext(transaction, job.tenant_id);
+        await requireOwnedJob(transaction, workerId, job);
+        await requireTenantFeatures(transaction, ["field_service"]);
+        const menuAuthorization = await transaction<{ allowed: boolean }[]>`
+          SELECT platform.opening_menu_business_job_allowed(${job.id}::uuid,${workerId},${job.claim_token}::uuid) AS allowed`;
+        if (menuAuthorization[0]?.allowed !== true) {
+          await transaction`UPDATE service.case_summaries SET status='failed',
+            error_safe='opening_menu_route_denied',completed_at=clock_timestamp()
+            WHERE id=${work.summaryId}::uuid AND status='processing'`;
+          await cancelJobForDisabledFeature(
+            transaction,
+            job,
+            workerId,
+            "opening_menu_route_denied",
+          );
+          return false;
+        }
+        const feature = await getFieldServiceFeatureState(transaction);
+        if (!feature.effective) {
+          await transaction`
           UPDATE service.case_summaries SET status='failed',
             error_safe='field_service_disabled', completed_at=CURRENT_TIMESTAMP
           WHERE id=${work.summaryId}::uuid AND status='processing'
         `;
-        await cancelJobForDisabledFeature(transaction, job.id, workerId);
-        return false;
-      }
-      return true;
-    });
+          await cancelJobForDisabledFeature(transaction, job, workerId);
+          return false;
+        }
+        return true;
+      },
+    );
     if (!mayCallProvider) return;
     const summary = await provider.summarizeEvidence({
       sourceKind: work.sourceKind,
       locale: work.locale,
       evidence,
     });
-    await sql.begin(async (transaction) => {
+    await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
-      await requireOwnedJob(transaction, workerId, job.id);
+      await requireOwnedJob(transaction, workerId, job);
       await requireTenantFeatures(transaction, ["field_service"]);
+      const menuAuthorization = await transaction<{ allowed: boolean }[]>`
+        SELECT platform.opening_menu_business_job_allowed(${job.id}::uuid,${workerId},${job.claim_token}::uuid) AS allowed`;
+      if (menuAuthorization[0]?.allowed !== true) {
+        await transaction`UPDATE service.case_summaries SET status='failed',
+          error_safe='opening_menu_route_denied',completed_at=clock_timestamp()
+          WHERE id=${work.summaryId}::uuid AND status='processing'`;
+        await cancelJobForDisabledFeature(
+          transaction,
+          job,
+          workerId,
+          "opening_menu_route_denied",
+        );
+        return;
+      }
       const feature = await getFieldServiceFeatureState(transaction);
       if (!feature.effective) {
         await transaction`
@@ -1376,7 +1936,7 @@ async function processFieldServiceSummary(
             error_safe='field_service_disabled', completed_at=CURRENT_TIMESTAMP
           WHERE id=${work.summaryId}::uuid AND status='processing'
         `;
-        await cancelJobForDisabledFeature(transaction, job.id, workerId);
+        await cancelJobForDisabledFeature(transaction, job, workerId);
         return;
       }
       const unchanged =
@@ -1394,7 +1954,7 @@ async function processFieldServiceSummary(
             model=NULL, error_safe=NULL, completed_at=NULL
           WHERE id=${work.summaryId}::uuid AND status='processing'
         `;
-        await finishJob(transaction, job.id, workerId);
+        await finishJob(transaction, job, workerId);
         return;
       }
       const completed = await transaction<{ id: string }[]>`
@@ -1407,7 +1967,7 @@ async function processFieldServiceSummary(
       `;
       if (completed[0] === undefined)
         throw new TypeError("field-service summary changed during processing");
-      await finishJob(transaction, job.id, workerId);
+      await finishJob(transaction, job, workerId);
     });
   } catch (error) {
     const reason =
@@ -1419,7 +1979,7 @@ async function processFieldServiceSummary(
     const permanent =
       error instanceof TypeError ||
       (error instanceof FieldServiceAiProviderError && !error.retryable);
-    await sql.begin(async (transaction) => {
+    await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
       if (permanent)
         await transaction`
@@ -1427,7 +1987,7 @@ async function processFieldServiceSummary(
           WHERE id=${job.id}::uuid AND status='running' AND locked_by=${workerId}
         `;
       const failed = await transaction<{ status: string }[]>`
-        SELECT (ops.fail_job(${job.id}::uuid, ${workerId}, ${reason}, 15)).status
+        SELECT (ops.fail_messaging_job_claim(${job.id}::uuid, ${workerId}, ${job.claim_token}::uuid, ${reason}, 15)).status
       `;
       if (job.reference_id !== null)
         await transaction`
@@ -1447,14 +2007,15 @@ async function cancelFieldServiceOcr(
   transaction: postgres.TransactionSql,
   job: JobRow,
   workerId: string,
+  reason = "field_service_disabled",
 ): Promise<void> {
   if (job.reference_id !== null)
     await transaction`
       UPDATE service.ocr_results SET status='failed',
-        error_safe='field_service_disabled', completed_at=CURRENT_TIMESTAMP
+        error_safe=${reason}, completed_at=CURRENT_TIMESTAMP
       WHERE id=${job.reference_id}::uuid AND status IN ('pending','processing')
     `;
-  await cancelJobForDisabledFeature(transaction, job.id, workerId);
+  await cancelJobForDisabledFeature(transaction, job, workerId, reason);
 }
 
 async function loadFieldServiceOcrWork(
@@ -1471,9 +2032,9 @@ async function loadFieldServiceOcrWork(
     ocrResultId !== job.reference_id
   )
     throw new TypeError("invalid field-service OCR job payload");
-  return sql.begin(async (transaction) => {
+  return withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
     await setTenantContext(transaction, job.tenant_id);
-    await requireOwnedJob(transaction, workerId, job.id);
+    await requireOwnedJob(transaction, workerId, job);
     await requireTenantFeatures(transaction, [
       "field_service",
       "documents",
@@ -1495,12 +2056,15 @@ async function loadFieldServiceOcrWork(
         storage_key: string;
         object_status: string;
         category: string;
+        actor_id: string | null;
+        source_checksum: string;
       }[]
     >`
       SELECT result.attachment_id, attachment.object_id, object.content_type,
              object.byte_size, object.checksum, object.storage_backend,
              object.storage_key, object.status AS object_status,
-             attachment.category
+             attachment.category, attachment.created_by_user_id AS actor_id,
+             result.source_checksum
       FROM service.ocr_results result
       JOIN service.report_attachments attachment
         ON attachment.id=result.attachment_id
@@ -1510,6 +2074,7 @@ async function loadFieldServiceOcrWork(
       WHERE result.id=${ocrResultId}::uuid
         AND result.attachment_id=${attachmentId}::uuid
         AND result.status IN ('pending','processing')
+        AND object.deleted_at IS NULL
       FOR UPDATE OF result
     `;
     const row = rows[0];
@@ -1522,6 +2087,14 @@ async function loadFieldServiceOcrWork(
       !["image/jpeg", "image/png", "image/webp"].includes(row.content_type)
     )
       throw new TypeError("field-service OCR source is unsupported");
+    if (!uuid(row.actor_id) || row.source_checksum !== row.checksum)
+      throw new TypeError(
+        "field-service OCR source authorization is unavailable",
+      );
+    const authority = await transaction<{ allowed: boolean }[]>`
+      SELECT service.ocr_origin_actor_authorized(${attachmentId}::uuid,${row.actor_id}::uuid) AS allowed`;
+    if (authority[0]?.allowed !== true)
+      throw new TypeError("field-service OCR originating actor unauthorized");
     await transaction`
       UPDATE service.ocr_results SET status='processing', error_safe=NULL
       WHERE id=${ocrResultId}::uuid
@@ -1534,8 +2107,32 @@ async function loadFieldServiceOcrWork(
       byteSize: Number(row.byte_size),
       checksum: row.checksum,
       storageKey: row.storage_key,
+      originatingActorId: row.actor_id,
     };
   });
+}
+
+async function requireCurrentOcrSource(
+  transaction: postgres.TransactionSql,
+  work: FieldServiceOcrWork,
+): Promise<void> {
+  const valid = await transaction<{ id: string }[]>`
+    SELECT result.id FROM service.ocr_results result
+    JOIN service.report_attachments attachment ON attachment.id=result.attachment_id AND attachment.tenant_id=result.tenant_id
+    JOIN objects.object_metadata object ON object.id=attachment.object_id AND object.tenant_id=attachment.tenant_id
+    WHERE result.id=${work.ocrResultId}::uuid AND result.status='processing'
+      AND attachment.id=${work.attachmentId}::uuid AND attachment.created_by_user_id=${work.originatingActorId}::uuid
+      AND attachment.category='product_label' AND object.id=${work.objectId}::uuid
+      AND object.status='available' AND object.deleted_at IS NULL AND object.storage_backend='local'
+      AND object.storage_key=${work.storageKey} AND object.content_type=${work.contentType}
+      AND object.byte_size=${work.byteSize} AND object.checksum=${work.checksum}
+      AND result.source_checksum=${work.checksum}
+      AND service.ocr_origin_actor_authorized(attachment.id,${work.originatingActorId}::uuid)
+    FOR SHARE OF result`;
+  if (valid.length !== 1)
+    throw new TypeError(
+      "field-service OCR source or originating actor changed",
+    );
 }
 
 async function processFieldServiceOcr(
@@ -1555,29 +2152,46 @@ async function processFieldServiceOcr(
       { byteSize: work.byteSize, checksum: work.checksum },
       automation.privateObjectStorage,
     );
-    const mayCallProvider = await sql.begin(async (transaction) => {
-      await setTenantContext(transaction, job.tenant_id);
-      await requireOwnedJob(transaction, workerId, job.id);
-      await requireTenantFeatures(transaction, [
-        "field_service",
-        "documents",
-        "ocr",
-      ]);
-      const feature = await getFieldServiceFeatureState(transaction);
-      if (!feature.effective || !feature.ocrEnabled) {
-        await cancelFieldServiceOcr(transaction, job, workerId);
-        return false;
-      }
-      return true;
-    });
+    const mayCallProvider = await withOwnedJobTransaction(
+      sql,
+      workerId,
+      job,
+      async (transaction) => {
+        await setTenantContext(transaction, job.tenant_id);
+        await requireOwnedJob(transaction, workerId, job);
+        await requireTenantFeatures(transaction, [
+          "field_service",
+          "documents",
+          "ocr",
+        ]);
+        const feature = await getFieldServiceFeatureState(transaction);
+        if (!feature.effective || !feature.ocrEnabled) {
+          await cancelFieldServiceOcr(transaction, job, workerId);
+          return false;
+        }
+        await requireCurrentOcrSource(transaction, work);
+        const menu = await transaction<{ allowed: boolean }[]>`
+          SELECT platform.opening_menu_business_job_allowed(${job.id}::uuid,${workerId},${job.claim_token}::uuid) AS allowed`;
+        if (menu[0]?.allowed !== true) {
+          await cancelFieldServiceOcr(
+            transaction,
+            job,
+            workerId,
+            "opening_menu_route_denied",
+          );
+          return false;
+        }
+        return true;
+      },
+    );
     if (!mayCallProvider) return;
     const extraction = await provider.extractProductLabel({
       bytes,
       contentType: work.contentType,
     });
-    await sql.begin(async (transaction) => {
+    await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
-      await requireOwnedJob(transaction, workerId, job.id);
+      await requireOwnedJob(transaction, workerId, job);
       await requireTenantFeatures(transaction, [
         "field_service",
         "documents",
@@ -1586,6 +2200,18 @@ async function processFieldServiceOcr(
       const feature = await getFieldServiceFeatureState(transaction);
       if (!feature.effective || !feature.ocrEnabled) {
         await cancelFieldServiceOcr(transaction, job, workerId);
+        return;
+      }
+      await requireCurrentOcrSource(transaction, work);
+      const menu = await transaction<{ allowed: boolean }[]>`
+        SELECT platform.opening_menu_business_job_allowed(${job.id}::uuid,${workerId},${job.claim_token}::uuid) AS allowed`;
+      if (menu[0]?.allowed !== true) {
+        await cancelFieldServiceOcr(
+          transaction,
+          job,
+          workerId,
+          "opening_menu_route_denied",
+        );
         return;
       }
       const updated = await transaction<{ id: string }[]>`
@@ -1608,7 +2234,7 @@ async function processFieldServiceOcr(
         throw new TypeError(
           "field-service OCR result changed during processing",
         );
-      await finishJob(transaction, job.id, workerId);
+      await finishJob(transaction, job, workerId);
     });
   } catch (error) {
     const reason =
@@ -1620,7 +2246,7 @@ async function processFieldServiceOcr(
     const permanent =
       error instanceof TypeError ||
       (error instanceof FieldServiceAiProviderError && !error.retryable);
-    await sql.begin(async (transaction) => {
+    await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
       if (permanent)
         await transaction`
@@ -1628,9 +2254,13 @@ async function processFieldServiceOcr(
           WHERE id=${job.id}::uuid AND status='running' AND locked_by=${workerId}
         `;
       const failed = await transaction<{ status: string }[]>`
-        SELECT (ops.fail_job(${job.id}::uuid, ${workerId}, ${reason}, 15)).status
+        SELECT (ops.fail_messaging_job_claim(${job.id}::uuid, ${workerId}, ${job.claim_token}::uuid, ${reason}, 15)).status
       `;
-      if (job.reference_id !== null)
+      const writable = await transaction<{ allowed: boolean }[]>`
+        SELECT platform.current_tenant_feature_enabled('field_service')
+          AND platform.current_tenant_feature_enabled('documents')
+          AND platform.current_tenant_feature_enabled('ocr') AS allowed`;
+      if (job.reference_id !== null && writable[0]?.allowed === true)
         await transaction`
           UPDATE service.ocr_results SET
             status=${failed[0]?.status === "dead" ? "failed" : "pending"},
@@ -1693,18 +2323,23 @@ async function processPostCall(
 ): Promise<void> {
   try {
     const attemptId = attemptReference(job);
-    const work = await sql.begin(async (transaction) => {
-      await setTenantContext(transaction, job.tenant_id);
-      await requireOwnedJob(transaction, workerId, job.id);
-      const loaded = await loadPostCallWork(transaction, attemptId);
-      if (loaded === undefined)
-        throw new TypeError("post_call_attempt_missing");
-      return loaded;
-    });
-    if (work.stage === "complete") {
-      await sql.begin(async (transaction) => {
+    const work = await withOwnedJobTransaction(
+      sql,
+      workerId,
+      job,
+      async (transaction) => {
         await setTenantContext(transaction, job.tenant_id);
-        await finishJob(transaction, job.id, workerId);
+        await requireOwnedJob(transaction, workerId, job);
+        const loaded = await loadPostCallWork(transaction, attemptId);
+        if (loaded === undefined)
+          throw new TypeError("post_call_attempt_missing");
+        return loaded;
+      },
+    );
+    if (work.stage === "complete") {
+      await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
+        await setTenantContext(transaction, job.tenant_id);
+        await finishJob(transaction, job, workerId);
       });
       return;
     }
@@ -1729,28 +2364,38 @@ async function processPostCall(
     if (work.stage === "artifacts_pending") {
       if (automation.artifactVerifier === undefined)
         throw new ArtifactVerifierError("artifact_verifier_unavailable", false);
-      const actorUserId = await sql.begin(async (transaction) => {
-        await setTenantContext(transaction, job.tenant_id);
-        return postCallActor(transaction);
-      });
+      const actorUserId = await withOwnedJobTransaction(
+        sql,
+        workerId,
+        job,
+        async (transaction) => {
+          await setTenantContext(transaction, job.tenant_id);
+          return postCallActor(transaction);
+        },
+      );
       const verified = await automation.artifactVerifier.verify({
         tenantId: job.tenant_id,
         sessionId,
         actorUserId: actorUserId ?? job.tenant_id,
         jobId: job.id,
       });
-      const outcome = await sql.begin(async (transaction) => {
-        await setTenantContext(transaction, job.tenant_id);
-        await requireOwnedJob(transaction, workerId, job.id);
-        return recordArtifactVerification(transaction, actorUserId, {
-          attemptId,
-          ticketId: work.ticketId,
-          sessionId,
-          callOutcome,
-          recording: verified.recording,
-          transcript: verified.transcript,
-        });
-      });
+      const outcome = await withOwnedJobTransaction(
+        sql,
+        workerId,
+        job,
+        async (transaction) => {
+          await setTenantContext(transaction, job.tenant_id);
+          await requireOwnedJob(transaction, workerId, job);
+          return recordArtifactVerification(transaction, actorUserId, {
+            attemptId,
+            ticketId: work.ticketId,
+            sessionId,
+            callOutcome,
+            recording: verified.recording,
+            transcript: verified.transcript,
+          });
+        },
+      );
       transcriptState = outcome.transcriptState;
       analysable = outcome.analysable;
     }
@@ -1777,7 +2422,7 @@ async function processPostCall(
       (automation.postCallProvider === undefined ||
         automation.artifactVerifier === undefined)
     ) {
-      await sql.begin(async (transaction) => {
+      await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
         await setTenantContext(transaction, job.tenant_id);
         await failPostCallAnalysis(transaction, {
           attemptId,
@@ -1790,18 +2435,23 @@ async function processPostCall(
       const verifier = automation.artifactVerifier;
       if (provider === undefined || verifier === undefined)
         throw new PostCallProviderError("analysis_provider_unavailable", false);
-      const started = await sql.begin(async (transaction) => {
-        await setTenantContext(transaction, job.tenant_id);
-        await requireOwnedJob(transaction, workerId, job.id);
-        const begun = await beginPostCallAnalysis(transaction, attemptId);
-        const actorUserId = await postCallActor(transaction);
-        const evidence = await loadCallEvidence(transaction, {
-          ticketId: work.ticketId,
-          conversationId: work.conversationId,
-          contactId: work.contactId,
-        });
-        return { begun, actorUserId, evidence };
-      });
+      const started = await withOwnedJobTransaction(
+        sql,
+        workerId,
+        job,
+        async (transaction) => {
+          await setTenantContext(transaction, job.tenant_id);
+          await requireOwnedJob(transaction, workerId, job);
+          const begun = await beginPostCallAnalysis(transaction, attemptId);
+          const actorUserId = await postCallActor(transaction);
+          const evidence = await loadCallEvidence(transaction, {
+            ticketId: work.ticketId,
+            conversationId: work.conversationId,
+            contactId: work.contactId,
+          });
+          return { begun, actorUserId, evidence };
+        },
+      );
       if (started.begun) {
         const turns = await verifier.transcript({
           tenantId: job.tenant_id,
@@ -1835,44 +2485,54 @@ async function processPostCall(
               operatorNoteIds: started.evidence.operatorNoteIds,
             },
           });
-          await sql.begin(async (transaction) => {
-            await setTenantContext(transaction, job.tenant_id);
-            await requireOwnedJob(transaction, workerId, job.id);
-            await recordPostCallAnalysis(transaction, {
-              attemptId,
-              analysis: produced,
-              modelSafe: automation.postCallModel ?? "configured-llm",
-            });
-          });
+          await withOwnedJobTransaction(
+            sql,
+            workerId,
+            job,
+            async (transaction) => {
+              await setTenantContext(transaction, job.tenant_id);
+              await requireOwnedJob(transaction, workerId, job);
+              await recordPostCallAnalysis(transaction, {
+                attemptId,
+                analysis: produced,
+                modelSafe: automation.postCallModel ?? "configured-llm",
+              });
+            },
+          );
           analysis = produced;
         } catch (error) {
           if (!(error instanceof PostCallProviderError)) throw error;
           // The ticket, the call and the artifacts all survive a provider
           // failure; only the summary is missing, and it says so.
-          await sql.begin(async (transaction) => {
-            await setTenantContext(transaction, job.tenant_id);
-            await failPostCallAnalysis(transaction, {
-              attemptId,
-              errorSafe: error.code,
-              permanent: !error.retryable,
-            });
-          });
+          await withOwnedJobTransaction(
+            sql,
+            workerId,
+            job,
+            async (transaction) => {
+              await setTenantContext(transaction, job.tenant_id);
+              await failPostCallAnalysis(transaction, {
+                attemptId,
+                errorSafe: error.code,
+                permanent: !error.retryable,
+              });
+            },
+          );
           if (error.retryable) throw error;
           analysis = null;
         }
       }
     } else if (!analysable) {
-      await sql.begin(async (transaction) => {
+      await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
         await setTenantContext(transaction, job.tenant_id);
-        await requireOwnedJob(transaction, workerId, job.id);
+        await requireOwnedJob(transaction, workerId, job);
         await skipPostCallAnalysis(transaction, attemptId);
       });
     }
 
     // --- The ticket, then the customer -----------------------------------
-    await sql.begin(async (transaction) => {
+    await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
-      await requireOwnedJob(transaction, workerId, job.id);
+      await requireOwnedJob(transaction, workerId, job);
       const actorUserId = await postCallActor(transaction);
       const applied = await applyPostCallOutcome(transaction, actorUserId, {
         attemptId,
@@ -1886,7 +2546,7 @@ async function processPostCall(
         attemptId,
         required: applied.followupRequired,
       });
-      await finishJob(transaction, job.id, workerId);
+      await finishJob(transaction, job, workerId);
     });
   } catch (error) {
     const reason =
@@ -1901,7 +2561,7 @@ async function processPostCall(
       ((error instanceof ArtifactVerifierError ||
         error instanceof PostCallProviderError) &&
         !error.retryable);
-    await sql.begin(async (transaction) => {
+    await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
       if (permanent)
         await transaction`
@@ -1909,7 +2569,7 @@ async function processPostCall(
           WHERE id = ${job.id}::uuid AND status = 'running' AND locked_by = ${workerId}
         `;
       await transaction`
-        SELECT ops.fail_job(${job.id}::uuid, ${workerId}, ${reason}, 15)
+        SELECT ops.fail_messaging_job_claim(${job.id}::uuid, ${workerId}, ${job.claim_token}::uuid, ${reason}, 15)
       `;
       // Visible to an operator rather than only in a log line: a pipeline that
       // gave up silently is indistinguishable from one still working.
@@ -1941,9 +2601,9 @@ async function processPostCallFollowup(
 ): Promise<void> {
   try {
     const attemptId = attemptReference(job);
-    await sql.begin(async (transaction) => {
+    await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
-      await requireOwnedJob(transaction, workerId, job.id);
+      await requireOwnedJob(transaction, workerId, job);
       const plan = await loadFollowupPlan(transaction, attemptId);
       if (plan === undefined) throw new TypeError("followup_target_missing");
       if (plan === "blocked_consent") {
@@ -1952,7 +2612,7 @@ async function processPostCallFollowup(
           state: "blocked_consent",
           errorSafe: "consent_withdrawn_before_sending",
         });
-        await finishJob(transaction, job.id, workerId);
+        await finishJob(transaction, job, workerId);
         return;
       }
       if (plan.provider === "simulator" && automation.simulatorEnabled !== true)
@@ -1984,7 +2644,7 @@ async function processPostCallFollowup(
             "The wrap-up message was not sent: the WhatsApp customer-service window has closed.",
           evidence: { attemptId, reason: "outside_customer_service_window" },
         });
-        await finishJob(transaction, job.id, workerId);
+        await finishJob(transaction, job, workerId);
         return;
       }
       // Model-written next-action prose passes the same guard every other
@@ -2031,13 +2691,13 @@ async function processPostCallFollowup(
         summarySafe: "Wrap-up message sent with the reply options.",
         evidence: { attemptId, messageId: outbound.messageId },
       });
-      await finishJob(transaction, job.id, workerId);
+      await finishJob(transaction, job, workerId);
     });
   } catch (error) {
     const reason =
       error instanceof TypeError ? error.message : "followup_failed";
     const permanent = error instanceof TypeError;
-    await sql.begin(async (transaction) => {
+    await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
       if (permanent)
         await transaction`
@@ -2045,7 +2705,7 @@ async function processPostCallFollowup(
           WHERE id = ${job.id}::uuid AND status = 'running' AND locked_by = ${workerId}
         `;
       await transaction`
-        SELECT ops.fail_job(${job.id}::uuid, ${workerId}, ${reason}, 20)
+        SELECT ops.fail_messaging_job_claim(${job.id}::uuid, ${workerId}, ${job.claim_token}::uuid, ${reason}, 20)
       `;
       const dead = await transaction<{ dead: boolean }[]>`
         SELECT status = 'dead' AS dead FROM ops.jobs WHERE id = ${job.id}::uuid
@@ -2080,12 +2740,12 @@ async function processPostCallReply(
     const messageId = payload.messageId;
     if (!uuid(conversationId) || !uuid(messageId) || job.reference_id === null)
       throw new TypeError("post_call_reply_reference_invalid");
-    await sql.begin(async (transaction) => {
+    await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
-      await requireOwnedJob(transaction, workerId, job.id);
+      await requireOwnedJob(transaction, workerId, job);
       const ticket = await awaitingCustomerTicket(transaction, conversationId);
       if (ticket === undefined) {
-        await finishJob(transaction, job.id, workerId);
+        await finishJob(transaction, job, workerId);
         return;
       }
       const message = await transaction<{ content_text: string | null }[]>`
@@ -2095,7 +2755,7 @@ async function processPostCallReply(
       `;
       const intent = classifyCustomerReply(message[0]?.content_text ?? "");
       if (intent === "unclear") {
-        await finishJob(transaction, job.id, workerId);
+        await finishJob(transaction, job, workerId);
         return;
       }
       const actorUserId = await postCallActor(transaction);
@@ -2104,12 +2764,12 @@ async function processPostCallReply(
         intent,
         messageId,
       });
-      await finishJob(transaction, job.id, workerId);
+      await finishJob(transaction, job, workerId);
     });
   } catch (error) {
     const reason =
       error instanceof TypeError ? error.message : "post_call_reply_failed";
-    await sql.begin(async (transaction) => {
+    await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
       if (error instanceof TypeError)
         await transaction`
@@ -2117,7 +2777,7 @@ async function processPostCallReply(
           WHERE id = ${job.id}::uuid AND status = 'running' AND locked_by = ${workerId}
         `;
       await transaction`
-        SELECT ops.fail_job(${job.id}::uuid, ${workerId}, ${reason}, 10)
+        SELECT ops.fail_messaging_job_claim(${job.id}::uuid, ${workerId}, ${job.claim_token}::uuid, ${reason}, 10)
       `;
     });
   }
@@ -2144,12 +2804,12 @@ async function processIntakeFollowup(
     error: string | null,
   ) => {
     await transaction`SELECT service.record_intake_followup(${intakeId}::uuid,${status},NULL,${error})`;
-    await finishJob(transaction, job.id, workerId);
+    await finishJob(transaction, job, workerId);
   };
   try {
-    await sql.begin(async (transaction) => {
+    await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
-      await requireOwnedJob(transaction, workerId, job.id);
+      await requireOwnedJob(transaction, workerId, job);
       try {
         await requireTenantFeatures(transaction, ["field_service", "whatsapp"]);
       } catch (error) {
@@ -2164,7 +2824,7 @@ async function processIntakeFollowup(
       if (plan === undefined)
         throw new TypeError("intake follow-up plan missing");
       if (plan.followupStatus === "admitted") {
-        await finishJob(transaction, job.id, workerId);
+        await finishJob(transaction, job, workerId);
         return;
       }
       if (plan.optedOut === true || plan.consent !== "granted") {
@@ -2273,13 +2933,13 @@ async function processIntakeFollowup(
       await transaction`
         SELECT service.record_intake_followup(${intakeId}::uuid,'admitted',${outbound.messageId}::uuid,NULL)
       `;
-      await finishJob(transaction, job.id, workerId);
+      await finishJob(transaction, job, workerId);
     });
   } catch (error) {
     // A refusal from the outbound boundary (consent, window, recipient) is a
     // business outcome; anything else is transient and retried.
     const refused = error instanceof TypeError;
-    await sql.begin(async (transaction) => {
+    await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
       if (refused) {
         await transaction`
@@ -2288,7 +2948,7 @@ async function processIntakeFollowup(
         `;
         await transaction`UPDATE ops.jobs SET max_attempts=attempts WHERE id=${job.id}::uuid AND status='running' AND locked_by=${workerId}`;
       }
-      await transaction`SELECT ops.fail_job(${job.id}::uuid,${workerId},${refused ? "intake_followup_refused" : "intake_followup_failed"},30)`;
+      await transaction`SELECT ops.fail_messaging_job_claim(${job.id}::uuid,${workerId},${job.claim_token}::uuid,${refused ? "intake_followup_refused" : "intake_followup_failed"},30)`;
       // Retries exhausted: the inquiry must say so rather than stay queued.
       if (!refused)
         await transaction`
@@ -2309,14 +2969,197 @@ async function processJob(
     | undefined,
   automation: MessagingAutomationOptions,
 ): Promise<void> {
+  let openingMenuRoute: OpeningMenuRoute | undefined;
+  if (
+    [
+      "field_service.ocr",
+      "field_service.photo_request",
+      "field_service.intake_followup",
+      "field_service.summary",
+      "whatsapp.outbound.send",
+      "whatsapp.ai.call",
+    ].includes(job.job_type) &&
+    !(await openingMenuBusinessJobAllowed(sql, workerId, job))
+  ) {
+    await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
+      await requireOwnedJob(transaction, workerId, job);
+      if (job.job_type === "field_service.ocr" && job.reference_id !== null)
+        await transaction`UPDATE service.ocr_results SET status='failed',
+          error_safe='opening_menu_route_denied',completed_at=clock_timestamp()
+          WHERE id=${job.reference_id}::uuid AND status IN ('pending','processing')`;
+      if (job.job_type === "field_service.summary" && job.reference_id !== null)
+        await transaction`UPDATE service.case_summaries SET status='failed',
+          error_safe='opening_menu_route_denied',completed_at=clock_timestamp()
+          WHERE id=${job.reference_id}::uuid AND status IN ('pending','processing')`;
+      if (
+        job.job_type === "whatsapp.outbound.send" &&
+        job.reference_id !== null
+      ) {
+        await transaction`UPDATE messaging.outbound_requests SET status='failed',
+          last_error_code='opening_menu_route_denied',completed_at=clock_timestamp(),updated_at=clock_timestamp()
+          WHERE id=${job.reference_id}::uuid AND status IN ('queued','sending')`;
+        await transaction`UPDATE messaging.messages SET status='failed',updated_at=clock_timestamp()
+          WHERE id=(SELECT message_id FROM messaging.outbound_requests WHERE id=${job.reference_id}::uuid)
+            AND status='queued'`;
+      }
+      await cancelJobForDisabledFeature(
+        transaction,
+        job,
+        workerId,
+        "opening_menu_route_denied",
+      );
+    });
+    return;
+  }
+  if (
+    (job.job_type === "whatsapp.ai.reply" ||
+      job.job_type === "whatsapp.opening_menu" ||
+      job.job_type === "field_service.intake.extract") &&
+    job.reference_id !== null
+  ) {
+    try {
+      const menuStore = createOpeningMenuStore(sql, workerId, job);
+      const result = await processOpeningMenuJob(
+        menuStore,
+        createOpeningMenuProvider(
+          menuStore,
+          providers.meta,
+          automation.resolveChannelCredential,
+        ),
+      );
+      openingMenuRoute = menuRoute(result.decision);
+      if (
+        result.handled ||
+        job.job_type === "whatsapp.opening_menu" ||
+        (job.job_type === "field_service.intake.extract" &&
+          openingMenuRoute !== undefined &&
+          !openingMenuRoute.allowedCapabilities.includes("service.intake"))
+      ) {
+        await withOwnedJobTransaction(
+          sql,
+          workerId,
+          job,
+          async (transaction) => {
+            await requireOwnedJob(transaction, workerId, job);
+            await transaction`
+            UPDATE ops.jobs SET status='succeeded', completed_at=CURRENT_TIMESTAMP,
+              locked_at=NULL, locked_by=NULL, last_error_safe=NULL, updated_at=CURRENT_TIMESTAMP
+            WHERE id=${job.id}::uuid AND locked_by=${workerId}
+          `;
+          },
+        );
+        return;
+      }
+    } catch (error) {
+      const providerError =
+        error instanceof WhatsAppProviderError
+          ? error
+          : error instanceof Error &&
+              error.cause instanceof WhatsAppProviderError
+            ? error.cause
+            : undefined;
+      const delay = providerError?.retryAfterMs;
+      const invalidDelay =
+        delay !== undefined &&
+        (!Number.isFinite(delay) || delay < 0 || delay > 86_400_000);
+      await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
+        if (invalidDelay)
+          await transaction`UPDATE ops.jobs SET max_attempts=attempts WHERE id=${job.id}::uuid`;
+        await transaction`SELECT ops.fail_messaging_job_claim(
+          ${job.id}::uuid,${workerId},${job.claim_token}::uuid,
+          ${invalidDelay ? "Opening menu rate limit quarantined" : "Opening menu work failed"},30)`;
+        if (!invalidDelay && delay !== undefined)
+          await transaction`UPDATE ops.jobs SET available_at=GREATEST(available_at,
+            clock_timestamp()+${delay}::double precision * interval '1 millisecond')
+            WHERE id=${job.id}::uuid AND tenant_id=platform.current_tenant_id() AND status='retry'`;
+      });
+      return;
+    }
+  }
+  if (job.job_type === "memory.summary") {
+    await processMemorySummaryJob(
+      {
+        load: () =>
+          withOwnedJobTransaction(sql, workerId, job, async (tx) => {
+            await setTenantContext(tx, job.tenant_id);
+            const rows = await tx<{ work: MemorySummaryWork }[]>`
+          SELECT platform.load_memory_summary_job(${job.id}::uuid,${workerId},${job.claim_token}::uuid) AS work`;
+            if (!rows[0]?.work) throw new TypeError("summary work unavailable");
+            return rows[0].work;
+          }),
+        persist: async (text) => {
+          await withOwnedJobTransaction(sql, workerId, job, async (tx) => {
+            await setTenantContext(tx, job.tenant_id);
+            await tx`SELECT platform.persist_memory_summary_job(${job.id}::uuid,${workerId},${job.claim_token}::uuid,${text})`;
+          });
+        },
+        fail: async (reason) => {
+          await withOwnedJobTransaction(sql, workerId, job, async (tx) => {
+            await setTenantContext(tx, job.tenant_id);
+            await tx`SELECT ops.fail_messaging_job_claim(${job.id}::uuid,${workerId},${job.claim_token}::uuid,${reason},30)`;
+          });
+        },
+      },
+      automation.memorySummaryProvider ??
+        (automation.modelRouting?.resolveSealedCredential === undefined
+          ? undefined
+          : createMemorySummaryModelProvider({
+              resolve: automation.modelRouting.resolveSealedCredential,
+              ...(automation.memorySummaryFetch === undefined
+                ? {}
+                : { fetch: automation.memorySummaryFetch }),
+              project: () =>
+                withOwnedJobTransaction(sql, workerId, job, async (tx) => {
+                  await setTenantContext(tx, job.tenant_id);
+                  const rows = await tx<
+                    { projection: SummaryModelProjection }[]
+                  >`SELECT platform.memory_summary_model_projection(${job.id}::uuid,${workerId},${job.claim_token}::uuid) AS projection`;
+                  if (!rows[0]?.projection)
+                    throw new TypeError("summary route unavailable");
+                  return rows[0].projection;
+                }),
+              reserve: (expected) =>
+                withOwnedJobTransaction(sql, workerId, job, async (tx) => {
+                  await setTenantContext(tx, job.tenant_id);
+                  const rows = await tx<
+                    { attempt: string }[]
+                  >`SELECT platform.reserve_memory_summary_attempt(${job.id}::uuid,${workerId},${job.claim_token}::uuid,${JSON.stringify(expected)}::text::jsonb) AS attempt`;
+                  if (!rows[0]?.attempt)
+                    throw new TypeError("summary reservation unavailable");
+                  return rows[0].attempt;
+                }),
+              settle: async (attempt, success, input, output) => {
+                await withOwnedJobTransaction(
+                  sql,
+                  workerId,
+                  job,
+                  async (tx) => {
+                    await setTenantContext(tx, job.tenant_id);
+                    await tx`SELECT platform.settle_memory_summary_attempt(${job.id}::uuid,${workerId},${job.claim_token}::uuid,${attempt}::uuid,${success},${input}::integer,${output}::integer)`;
+                  },
+                );
+              },
+            })),
+    );
+    return;
+  }
+  if (job.job_type === "whatsapp.operator.alert") {
+    await processOperatorAlert(
+      sql,
+      workerId,
+      job,
+      automation.operatorAlertProvider,
+    );
+    return;
+  }
   if (
     job.job_type === "field_service.photo_request" &&
     job.reference_id !== null
   ) {
     try {
-      await sql.begin(async (transaction) => {
+      await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
         await setTenantContext(transaction, job.tenant_id);
-        await requireOwnedJob(transaction, workerId, job.id);
+        await requireOwnedJob(transaction, workerId, job);
         await requireTenantFeatures(transaction, ["field_service", "whatsapp"]);
         const requestedText = record(job.payload).text;
         if (
@@ -2383,14 +3226,14 @@ async function processJob(
           },
           channelConfig,
         );
-        await finishJob(transaction, job.id, workerId);
+        await finishJob(transaction, job, workerId);
       });
     } catch (error) {
-      await sql.begin(async (transaction) => {
+      await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
         await setTenantContext(transaction, job.tenant_id);
         if (error instanceof TypeError)
           await transaction`UPDATE ops.jobs SET max_attempts=attempts WHERE id=${job.id}::uuid AND status='running' AND locked_by=${workerId}`;
-        await transaction`SELECT ops.fail_job(${job.id}::uuid,${workerId},'photo_request_admission_failed',10)`;
+        await transaction`SELECT ops.fail_messaging_job_claim(${job.id}::uuid,${workerId},${job.claim_token}::uuid,'photo_request_admission_failed',10)`;
       });
     }
     return;
@@ -2426,7 +3269,13 @@ async function processJob(
     job.job_type === "field_service.intake.extract" &&
     job.reference_id !== null
   ) {
-    await processFieldServiceIntake(sql, workerId, job, automation);
+    await processFieldServiceIntake(
+      sql,
+      workerId,
+      job,
+      automation,
+      openingMenuRoute,
+    );
     return;
   }
   if (job.job_type === "field_service.ocr" && job.reference_id !== null) {
@@ -2445,11 +3294,42 @@ async function processJob(
       providers,
       reportFailure,
       automation.simulatorEnabled === true,
+      automation.resolveChannelCredential,
     );
     return;
   }
+  if (
+    job.job_type === "whatsapp.audio.transcribe" &&
+    job.reference_id !== null
+  ) {
+    try {
+      await processAudioTranscription(sql, workerId, job, automation);
+    } catch (error) {
+      await withOwnedJobTransaction(sql, workerId, job, async (tx) => {
+        await setTenantContext(tx, job.tenant_id);
+        if (error instanceof TypeError)
+          await tx`UPDATE ops.jobs SET max_attempts=attempts WHERE id=${job.id}::uuid`;
+        await tx`SELECT ops.fail_messaging_job_claim(${job.id}::uuid,${workerId},${job.claim_token}::uuid,
+          ${error instanceof TypeError ? error.message : "audio transcription work failed"},10)`;
+      });
+    }
+    return;
+  }
   if (job.job_type === "whatsapp.ai.reply" && job.reference_id !== null) {
-    await processWhatsAppAiReply(sql, workerId, job, automation);
+    await processWhatsAppAiReply(
+      sql,
+      workerId,
+      job,
+      automation,
+      openingMenuRoute,
+    );
+    return;
+  }
+  if (
+    job.job_type === "whatsapp.unsupported.reply" &&
+    job.reference_id !== null
+  ) {
+    await processUnsupportedMediaReply(sql, workerId, job, automation);
     return;
   }
   if (job.job_type === "whatsapp.ai.call" && job.reference_id !== null) {
@@ -2457,7 +3337,7 @@ async function processJob(
     return;
   }
   try {
-    await sql.begin(async (transaction) => {
+    await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
       const owned = await transaction<{ id: string }[]>`
         SELECT id FROM ops.jobs WHERE id = ${job.id}::uuid
@@ -2517,7 +3397,7 @@ async function processJob(
         : error instanceof TypeError
           ? error.message
           : "messaging job failed";
-    await sql.begin(async (transaction) => {
+    await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
       if (error instanceof TypeError) {
         await transaction`
@@ -2526,7 +3406,7 @@ async function processJob(
         `;
       }
       await transaction`
-        SELECT ops.fail_job(${job.id}::uuid, ${workerId}, ${reason}, 5)
+        SELECT ops.fail_messaging_job_claim(${job.id}::uuid, ${workerId}, ${job.claim_token}::uuid, ${reason}, 5)
       `;
       if (
         job.job_type === "cross_channel.flow.simulated" &&
@@ -2585,6 +3465,8 @@ function tenantDisplayNameFrom(
 
 interface AiWork {
   readonly agentVersionId: string;
+  readonly modelConfigurationId: string | null;
+  readonly channelId: string;
   /** The resolved configuration this job runs under, pinned at admission. */
   readonly contract: AgentExecutionContract;
   readonly tenantDisplayName: string | null;
@@ -2605,6 +3487,12 @@ interface AiWork {
     readonly missingRequired: readonly string[];
   } | null;
   readonly knowledge: readonly EligibleKnowledgeFact[];
+  readonly contextBudgetEnabled: boolean;
+  readonly knowledgeChunks?: readonly {
+    readonly documentId: string;
+    readonly content: string;
+  }[];
+  readonly sessionMemory?: string;
   /**
    * Whether this version's escalations open or update a support ticket: it
    * holds `ticket.open`, or it was published before capabilities existed and
@@ -2612,6 +3500,7 @@ interface AiWork {
    * escalates to a person; it just does not turn that into a support issue.
    */
   readonly opensTickets: boolean;
+  readonly machineToolPrincipalId?: string;
   readonly ownershipEpoch: string;
   readonly authorizedUserId: string;
   readonly contactId: string;
@@ -2681,16 +3570,29 @@ async function requireCurrentTrigger(
   conversationId: string,
   triggerMessageId: string,
 ): Promise<void> {
-  // Meta's event time is only precise to one second. For equal provider times,
-  // updated_at preserves database ingestion order; a random UUID must never
-  // decide which customer turn is current.
+  // Provider seconds and later media updates cannot order customer turns.
+  // New Meta events use immutable database receipt sequence; legacy/simulator
+  // messages retain the older fallback because their receipt order is unknown.
   const latest = await transaction<{ id: string }[]>`
-    SELECT id FROM messaging.messages WHERE conversation_id=${conversationId}::uuid
-      AND direction='inbound'
-      ORDER BY created_at DESC, updated_at DESC, id DESC LIMIT 1
+    SELECT message.id FROM messaging.messages message
+    JOIN messaging.conversations conversation ON conversation.id=message.conversation_id AND conversation.tenant_id=message.tenant_id
+    JOIN messaging.channels channel ON channel.id=conversation.channel_id AND channel.tenant_id=conversation.tenant_id
+    LEFT JOIN ops.inbound_events event ON event.tenant_id=message.tenant_id AND event.provider=message.provider
+      AND event.provider_account_id=channel.provider_account_id AND event.payload->>'providerMessageId'=message.provider_message_id
+    WHERE message.conversation_id=${conversationId}::uuid AND message.direction='inbound' AND message.content_type<>'event'
+      ORDER BY COALESCE(event.received_at,message.created_at) DESC,event.receipt_sequence DESC NULLS LAST,
+        message.created_at DESC,message.updated_at DESC,message.id DESC LIMIT 1
   `;
   if (latest[0]?.id !== triggerMessageId)
     throw new TypeError("AI inbound trigger superseded");
+  // A verified webhook may arrive while the single worker awaits the model.
+  // It is already a newer customer turn even before inbox materialization.
+  // Match account and immutable sender origin, never mutable model metadata.
+  await requireNoNewerPendingInbound(
+    transaction,
+    conversationId,
+    triggerMessageId,
+  );
 }
 
 async function recentDeliveredReplies(
@@ -2715,11 +3617,22 @@ async function loadAiWork(
   sql: Sql,
   workerId: string,
   job: JobRow,
+  openingMenuRoute?: OpeningMenuRoute,
 ): Promise<AiWork> {
-  return sql.begin(async (transaction) => {
+  return withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
     await setTenantContext(transaction, job.tenant_id);
-    await requireOwnedJob(transaction, workerId, job.id);
+    await requireOwnedJob(transaction, workerId, job);
     const triggerMessageId = triggerFromJob(job);
+    // Capacity admission and session revision admission are distinct. Select
+    // before the Agent join so contracts, knowledge and model routing use one
+    // atomic server-derived version; preprocessing jobs retain their own path.
+    if (job.job_type === "whatsapp.ai.reply") {
+      await transaction`
+        SELECT platform.admit_messaging_session_agent(
+          ${job.id}::uuid, ${workerId}, ${job.claim_token}::uuid, 12
+        )
+      `;
+    }
     const rows = await transaction<
       {
         ai_enabled_by_user_id: string;
@@ -2731,6 +3644,8 @@ async function loadAiWork(
         ownership_epoch: string;
         agent_version_id: string;
         agent_profile_id: string;
+        model_configuration_id: string | null;
+        channel_id: string;
         agent_version: number;
         agent_channels: string[];
         agent_tool_permissions: unknown;
@@ -2750,6 +3665,7 @@ async function loadAiWork(
       SELECT conversation.id AS conversation_id,
              conversation.ai_enabled_by_user_id,
              agent.system_prompt, agent.locale, agent.id AS agent_version_id,
+             agent.model_configuration_id, channel.id AS channel_id,
              agent.agent_profile_id, agent.version AS agent_version,
              agent.channel_capabilities AS agent_channels,
              agent.tool_permissions AS agent_tool_permissions,
@@ -2816,7 +3732,7 @@ async function loadAiWork(
       validationStatus: row.agent_validation_status,
     };
     const pinnedSchemaId = pinnedLeadFieldSchemaId(versionRow);
-    const contract = buildAgentExecutionContract({
+    const originalContract = buildAgentExecutionContract({
       tenantId: job.tenant_id,
       contactId: row.contact_id,
       channel: "whatsapp",
@@ -2834,11 +3750,63 @@ async function loadAiWork(
           ? null
           : await loadLeadFieldSchema(transaction, pinnedSchemaId),
     });
+    if (
+      openingMenuRoute !== undefined &&
+      openingMenuRoute.agentVersionId !== row.agent_version_id
+    )
+      throw new TypeError("Opening menu Agent admission changed");
+    const contract: AgentExecutionContract =
+      openingMenuRoute === undefined
+        ? originalContract
+        : {
+            ...originalContract,
+            capabilities: originalContract.capabilities.filter((capability) =>
+              openingMenuRoute.allowedCapabilities.includes(capability),
+            ),
+            locale: openingMenuRoute.language,
+            agentPrompt: `${originalContract.agentPrompt}\nCustomer selected business route: ${openingMenuRoute.intent}. Respond in ${openingMenuRoute.language}. Use only the supplied allowed tools.`,
+            leadFieldSchema: openingMenuRoute.allowedCapabilities.some(
+              (capability) => capability.startsWith("lead."),
+            )
+              ? originalContract.leadFieldSchema
+              : null,
+          };
+    if (openingMenuRoute !== undefined && contract.capabilities.length === 0)
+      throw new TypeError(
+        "Opening menu route has no approved Agent capabilities",
+      );
     await requireTenantFeatures(transaction, [
       "whatsapp",
       ...contract.capabilities.map(capabilityRequiredFeature),
     ]);
+    const informationalOnly = job.job_type === "whatsapp.unsupported.reply";
+    // Transcription retains the Agent's configured capabilities so subsequent
+    // extraction can be queued, but it does not execute a business tool. That
+    // later job must independently obtain its own canonical tool admission.
+    const transcriptionOnly = job.job_type === "whatsapp.audio.transcribe";
+    const firstToolCapability =
+      informationalOnly || transcriptionOnly
+        ? undefined
+        : contract.capabilities[0];
+    const machine =
+      firstToolCapability === undefined
+        ? null
+        : await authorizeMachineTool(
+            transaction,
+            job,
+            workerId,
+            firstToolCapability,
+            {
+              agentVersionId: row.agent_version_id,
+              conversationId: row.conversation_id,
+              contactId: row.contact_id,
+              triggerMessageId,
+              ownershipEpoch: row.ownership_epoch,
+            },
+          );
     const lead =
+      informationalOnly ||
+      transcriptionOnly ||
       contract.leadFieldSchema === null ||
       !hasCapability(contract.capabilities, "lead.read")
         ? null
@@ -2846,7 +3814,15 @@ async function loadAiWork(
             contactId: contract.contactId,
             sourceChannel: "whatsapp",
             capabilities: contract.capabilities,
-            actorUserId: row.ai_enabled_by_user_id,
+            ...(machine === null
+              ? { actorUserId: row.ai_enabled_by_user_id }
+              : {
+                  executionClaim: {
+                    jobId: job.id,
+                    workerId,
+                    claimToken: job.claim_token,
+                  },
+                }),
             recordedBy: "agent",
             agentProfileVersionId: row.agent_version_id,
             conversationId: contract.interaction.id,
@@ -2867,24 +3843,26 @@ async function loadAiWork(
       identities[0]?.profile?.supportProfile,
     );
     const knowledge = await eligibleFacts(transaction, row.agent_version_id);
-    const history = await transaction<
+    const rawHistory = await transaction<
       {
         id: string;
         direction: "inbound" | "outbound";
-        content_text: string;
+        content_text: string | null;
+        content_type: string;
         created_at: Date;
         sender_address: string | null;
         sender_identity_id: string | null;
       }[]
     >`
-      SELECT message.id, message.direction, message.content_text,
+      SELECT message.id, message.direction, message.content_text, message.content_type,
              message.created_at, origin.contact_identity_id AS sender_identity_id,
              origin.sender_address
       FROM messaging.messages message
       LEFT JOIN messaging.inbound_message_origins origin
         ON origin.tenant_id=message.tenant_id AND origin.message_id=message.id
       WHERE message.conversation_id = ${row.conversation_id}::uuid
-        AND message.content_type = 'text' AND message.content_text IS NOT NULL
+        AND ((message.content_type IN ('text','template') AND message.content_text IS NOT NULL)
+          OR (message.direction='inbound' AND message.content_type IN ('image','document','location','audio','video','interactive')))
         AND ((message.direction='inbound' AND message.status='received') OR
              (message.direction='outbound' AND
               message.status IN ('sent','delivered','read')))
@@ -2899,6 +3877,14 @@ async function loadAiWork(
           ), '-infinity'::timestamptz))
       ORDER BY message.created_at DESC, message.updated_at DESC, message.id DESC LIMIT 50
     `;
+    const history = rawHistory.map((message) => ({
+      ...message,
+      original_content_text: message.content_text,
+      content_text: messageContextText(
+        message.content_type,
+        message.content_text,
+      ),
+    }));
     const config = row.configuration as Record<string, unknown> | null;
     const channelConfiguration =
       row.provider === "meta" &&
@@ -2916,6 +3902,28 @@ async function loadAiWork(
     );
     if (triggerMessage === undefined)
       throw new TypeError("AI conversation has no inbound trigger message");
+    const retrievalEnabled = await remediationEnabled(
+      transaction,
+      "retrieval_fts",
+    );
+    const knowledgeChunks = retrievalEnabled
+      ? await retrieveAgentKnowledge(transaction, {
+          tenantId: job.tenant_id,
+          agentVersionId: row.agent_version_id,
+          question: (triggerMessage.original_content_text ?? "").slice(0, 4096),
+        })
+      : [];
+    const memory = await loadSessionMemoryContext(
+      transaction,
+      {
+        tenantId: job.tenant_id,
+        conversationId: row.conversation_id,
+        agentVersionId: row.agent_version_id,
+        contactId: row.contact_id,
+        latestTriggerMessageId: triggerMessageId,
+      },
+      { preserveAdmission: job.job_type === "whatsapp.ai.reply" },
+    );
     const recipientIdentityId =
       typeof triggerMessage.sender_identity_id === "string" &&
       /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/iu.test(
@@ -2933,21 +3941,28 @@ async function loadAiWork(
       (recipientIdentityId === undefined || recipientAddress === undefined)
     )
       throw new TypeError("AI inbound trigger has no trusted sender identity");
-    const responseLocale = latestMessageLocale(
-      row.locale,
-      triggerMessage.content_text,
-      history
-        .filter(
-          (message) =>
-            message.direction === "inbound" && message.id !== triggerMessageId,
-        )
-        .map((message) => message.content_text),
-    );
-    const orderedHistory = history.toReversed();
-    const notes = await transaction<
-      { content_text: string; created_at: Date }[]
+    const responseLocale =
+      openingMenuRoute?.language ??
+      latestMessageLocale(
+        row.locale,
+        triggerMessage.original_content_text ?? "",
+        history
+          .filter(
+            (message) =>
+              message.direction === "inbound" &&
+              message.id !== triggerMessageId,
+          )
+          .map((message) => message.original_content_text ?? ""),
+      );
+    const orderedHistory = (
+      memory.correctionsPresent
+        ? history.filter((message) => message.id === triggerMessageId)
+        : history
+    ).toReversed();
+    const noteRows = await transaction<
+      { id: string; content_text: string; created_at: Date }[]
     >`
-      SELECT left(note.body, 1200) AS content_text, note.created_at
+      SELECT note.id, left(note.body, 1200) AS content_text, note.created_at
       FROM crm.notes note
       WHERE note.contact_id=${row.contact_id}::uuid
       ORDER BY note.created_at DESC, note.id DESC LIMIT 8
@@ -2979,7 +3994,7 @@ async function loadAiWork(
       WHERE contact_id=${row.contact_id}::uuid
       ORDER BY created_at DESC, session_id DESC LIMIT 8
     `;
-    const tickets = await transaction<
+    const ticketRows = await transaction<
       {
         id: string;
         title: string;
@@ -2995,6 +4010,20 @@ async function loadAiWork(
       WHERE contact_id=${row.contact_id}::uuid
       ORDER BY updated_at DESC, id DESC LIMIT 8
     `;
+    const aiAuthored = await loadAiAuthoredContextIds(
+      transaction,
+      job.tenant_id,
+      {
+        noteIds: noteRows.map((note) => note.id),
+        taskIds: ticketRows.map((ticket) => ticket.id),
+      },
+    );
+    const excludedNotes = new Set(aiAuthored.noteIds);
+    const excludedTasks = new Set(aiAuthored.taskIds);
+    const notes = noteRows.filter((note) => !excludedNotes.has(note.id));
+    const tickets = ticketRows.filter(
+      (ticket) => !excludedTasks.has(ticket.id),
+    );
     const intakes = await transaction<
       {
         status: NonNullable<AiWork["serviceIntake"]>["status"];
@@ -3078,6 +4107,8 @@ async function loadAiWork(
       voiceSessions.length > 0;
     return {
       agentVersionId: row.agent_version_id,
+      modelConfigurationId: row.model_configuration_id,
+      channelId: row.channel_id,
       contract,
       tenantDisplayName,
       ...(businessProfile === undefined ? {} : { businessProfile }),
@@ -3098,6 +4129,12 @@ async function loadAiWork(
               missingRequired: lead.completeness?.missing ?? [],
             },
       knowledge,
+      contextBudgetEnabled: retrievalEnabled,
+      ...(knowledgeChunks.length === 0 ? {} : { knowledgeChunks }),
+      ...(memory.context === "" ? {} : { sessionMemory: memory.context }),
+      ...(machine === null
+        ? {}
+        : { machineToolPrincipalId: machine.principalId }),
       opensTickets:
         hasCapability(contract.capabilities, "ticket.open") ||
         row.agent_implicit_ticketing,
@@ -3131,11 +4168,16 @@ async function loadAiWork(
           text: note.content_text,
           occurredAt: note.created_at.toISOString(),
         })),
-        previousConversations: previousConversations.reverse().map((item) => ({
-          summary: item.summary,
-          status: item.status,
-          occurredAt: item.occurred_at?.toISOString() ?? null,
-        })),
+        previousConversations: (memory.correctionsPresent
+          ? []
+          : previousConversations
+        )
+          .reverse()
+          .map((item) => ({
+            summary: item.summary,
+            status: item.status,
+            occurredAt: item.occurred_at?.toISOString() ?? null,
+          })),
         tickets: tickets.reverse().map((ticket) => ({
           id: ticket.id,
           title: ticket.title,
@@ -3196,7 +4238,12 @@ function aiRequestFor(
   return {
     systemPrompt: work.contract.agentPrompt,
     locale: work.locale,
-    capabilities: work.contract.capabilities,
+    capabilities:
+      work.machineToolPrincipalId === undefined
+        ? work.contract.capabilities.filter(
+            (capability) => capability !== "ticket.open",
+          )
+        : work.contract.capabilities,
     ...(work.tenantDisplayName === null
       ? {}
       : { tenantDisplayName: work.tenantDisplayName }),
@@ -3222,6 +4269,13 @@ function aiRequestFor(
       : { serviceIntake: work.serviceIntake }),
     contactContext: work.contactContext,
     knowledge: work.knowledge,
+    contextBudgetEnabled: work.contextBudgetEnabled,
+    ...(work.knowledgeChunks === undefined
+      ? {}
+      : { knowledgeChunks: work.knowledgeChunks }),
+    ...(work.sessionMemory === undefined
+      ? {}
+      : { sessionMemory: work.sessionMemory }),
     messages: work.messages,
   };
 }
@@ -3328,86 +4382,107 @@ async function runWhatsAppLeadAction(
   )
     throw new WhatsAppAiProviderError("lead_action_not_permitted", false);
   try {
-    return await sql.begin(async (transaction) => {
-      await setTenantContext(transaction, job.tenant_id);
-      await requireOwnedJob(transaction, workerId, job.id);
-      await transaction`
+    return await withOwnedJobTransaction(
+      sql,
+      workerId,
+      job,
+      async (transaction) => {
+        await setTenantContext(transaction, job.tenant_id);
+        await requireOwnedJob(transaction, workerId, job);
+        const machine = await authorizeMachineTool(
+          transaction,
+          job,
+          workerId,
+          capabilityForTool(tool),
+          work,
+        );
+        if (machine === null)
+          await transaction`
         SELECT set_config('app.current_user', ${work.authorizedUserId}, true)
       `;
-      const authorization = await transaction<{ authorized: boolean }[]>`
+        const authorization = await transaction<{ authorized: boolean }[]>`
         SELECT platform.messaging_ai_actor_authorized(
           ${work.authorizedUserId}::uuid
         ) AS authorized
       `;
-      if (authorization[0]?.authorized !== true)
-        throw new TypeError("AI authorizing operator is no longer active");
-      await requireCurrentTrigger(
-        transaction,
-        work.conversationId,
-        work.triggerMessageId,
-      );
-      const binding: LeadBinding = {
-        contactId: work.contactId,
-        sourceChannel: "whatsapp",
-        capabilities: work.contract.capabilities,
-        actorUserId: work.authorizedUserId,
-        recordedBy: "agent",
-        agentProfileVersionId: work.agentVersionId,
-        conversationId: work.conversationId,
-        conversationOwnershipEpoch: work.ownershipEpoch,
-      };
-      // The lead is created by the first real save, not by the greeting that
-      // opened the conversation, and the key is the job's — a retry after a
-      // lost commit reuses it rather than opening a second lead.
-      const leadId =
-        lead?.id ??
-        (
-          await ensureLeadForInteraction(transaction, binding, {
-            operationKey: `whatsapp-ai-lead:${job.id}`,
-            fieldSchemaId: pinned.id,
-            fieldSchemaVersion: pinned.version,
-            sourceMessageId: work.triggerMessageId,
-            ...(work.contract.roleTitle === null
-              ? {}
-              : { businessObjective: work.contract.roleTitle }),
-          })
-        ).lead.id;
-      const context: LeadToolContext = {
-        leadId,
-        // Stable across restarts and retries: the job and the customer turn it
-        // answers, never a freshly generated call identifier.
-        interactionKey: `whatsapp:${work.conversationId}`,
-        turnKey: `${job.id}:${work.triggerMessageId}`,
-        schema: pinned.schema,
-        // Provenance the runtime can stand behind: the accepted message this
-        // turn answers, and the messages of this conversation as the only
-        // earlier turns the model is allowed to cite.
-        sourceReferenceId: work.triggerMessageId,
-        acceptedReferences: work.messages.map((message) => message.id),
-      };
-      const result = await executeLeadTool(
-        transaction,
-        binding,
-        context,
-        tool,
-        leadToolInput(decision),
-      );
-      return {
-        receipt: {
-          action,
-          ok: true,
-          reference: result.receipt?.reference ?? null,
-          detail: leadActionSummary(result),
-        },
-        lead: {
-          id: leadId,
-          revision: result.receipt?.revision ?? lead?.revision ?? 0,
-          status: result.status,
-          collected: result.collected,
-          missingRequired: result.missingRequired,
-        },
-      };
-    });
+        if (authorization[0]?.authorized !== true)
+          throw new TypeError("AI authorizing operator is no longer active");
+        await requireCurrentTrigger(
+          transaction,
+          work.conversationId,
+          work.triggerMessageId,
+        );
+        const binding: LeadBinding = {
+          contactId: work.contactId,
+          sourceChannel: "whatsapp",
+          capabilities: work.contract.capabilities,
+          ...(machine === null
+            ? { actorUserId: work.authorizedUserId }
+            : {
+                executionClaim: {
+                  jobId: job.id,
+                  workerId,
+                  claimToken: job.claim_token,
+                },
+              }),
+          recordedBy: "agent",
+          agentProfileVersionId: work.agentVersionId,
+          conversationId: work.conversationId,
+          conversationOwnershipEpoch: work.ownershipEpoch,
+        };
+        // The lead is created by the first real save, not by the greeting that
+        // opened the conversation, and the key is the job's — a retry after a
+        // lost commit reuses it rather than opening a second lead.
+        const leadId =
+          lead?.id ??
+          (
+            await ensureLeadForInteraction(transaction, binding, {
+              operationKey: `whatsapp-ai-lead:${job.id}`,
+              fieldSchemaId: pinned.id,
+              fieldSchemaVersion: pinned.version,
+              sourceMessageId: work.triggerMessageId,
+              ...(work.contract.roleTitle === null
+                ? {}
+                : { businessObjective: work.contract.roleTitle }),
+            })
+          ).lead.id;
+        const context: LeadToolContext = {
+          leadId,
+          // Stable across restarts and retries: the job and the customer turn it
+          // answers, never a freshly generated call identifier.
+          interactionKey: `whatsapp:${work.conversationId}`,
+          turnKey: `${job.id}:${work.triggerMessageId}`,
+          schema: pinned.schema,
+          // Provenance the runtime can stand behind: the accepted message this
+          // turn answers, and the messages of this conversation as the only
+          // earlier turns the model is allowed to cite.
+          sourceReferenceId: work.triggerMessageId,
+          acceptedReferences: work.messages.map((message) => message.id),
+        };
+        const result = await executeLeadTool(
+          transaction,
+          binding,
+          context,
+          tool,
+          leadToolInput(decision),
+        );
+        return {
+          receipt: {
+            action,
+            ok: true,
+            reference: result.receipt?.reference ?? null,
+            detail: leadActionSummary(result),
+          },
+          lead: {
+            id: leadId,
+            revision: result.receipt?.revision ?? lead?.revision ?? 0,
+            status: result.status,
+            collected: result.collected,
+            missingRequired: result.missingRequired,
+          },
+        };
+      },
+    );
   } catch (error) {
     // A rejected write is reported truthfully rather than failing the turn: the
     // customer still gets an answer, and it is an answer that cannot claim a
@@ -3472,6 +4547,31 @@ async function ticketForAiAction(
   jobId: string,
   subjectSafe: string,
 ): Promise<string> {
+  const source = await transaction<
+    { id: string; locked_by: string; claim_token: string }[]
+  >`
+    SELECT id,locked_by,claim_token FROM ops.jobs
+    WHERE id=${jobId}::uuid AND tenant_id=platform.current_tenant_id()
+      AND reference_id=${work.conversationId}::uuid AND status='running'
+      AND lease_expires_at>clock_timestamp()`;
+  const owned = source[0];
+  if (owned === undefined)
+    throw new TypeError("ticket source claim unavailable");
+  const machine = await authorizeMachineTool(
+    transaction,
+    owned,
+    owned.locked_by,
+    "ticket.open",
+    work,
+  );
+  if (machine !== null) {
+    const ticket = await transaction<{ id: string }[]>`
+      SELECT platform.machine_ticket_open(${jobId}::uuid,${owned.locked_by},
+        ${owned.claim_token}::uuid,${subjectSafe}) AS id`;
+    if (ticket[0] === undefined)
+      throw new TypeError("machine ticket unavailable");
+    return ticket[0].id;
+  }
   const attached = await openOrAttachTicket(
     transaction,
     work.authorizedUserId,
@@ -3491,7 +4591,15 @@ async function createAiHandoff(
   work: AiWork,
   jobId: string,
   reasonCode: WhatsAppAiEscalationReason,
+  options: {
+    readonly callbackOnly?: boolean;
+    readonly sourceClaimToken: string;
+  },
 ): Promise<string> {
+  // Only the server's callback branches opt in; model reasons never grant it.
+  const preserveAiOwnership =
+    options.callbackOnly === true &&
+    (await remediationEnabled(transaction, "handoff_resume"));
   const safeReason = safeEscalationReasons[reasonCode];
   const receipt = await transaction<{ id: string }[]>`
     INSERT INTO automation.handoffs
@@ -3598,10 +4706,11 @@ async function createAiHandoff(
     RETURNING id
   `;
   if (ticket[0] !== undefined) {
-    await transaction`
+    const authoredNote = await transaction<{ id: string }[]>`
       INSERT INTO crm.notes (tenant_id, contact_id, author_user_id, body)
       VALUES (platform.current_tenant_id(), ${work.contactId}::uuid,
               ${work.authorizedUserId}::uuid, ${description})
+      RETURNING id
     `;
     await transaction`
       INSERT INTO messaging.notifications
@@ -3617,22 +4726,24 @@ async function createAiHandoff(
         (tenant_id, actor_user_id, action, target_type, target_id, metadata)
       VALUES (platform.current_tenant_id(), ${work.authorizedUserId}::uuid,
               'conversation.ai_handoff_ticket', 'handoff', ${receipt[0].id}::uuid,
-              ${transaction.json({ taskId: ticket[0].id })})
+              ${transaction.json({ taskId: ticket[0].id, noteId: authoredNote[0]?.id, sourceJobId: jobId, sourceClaimToken: options.sourceClaimToken })})
     `;
   }
-  await transaction`
-    UPDATE messaging.conversations
-    SET ownership_mode='human', ai_agent_profile_version_id=NULL,
-        ai_enabled_by_user_id=NULL, ai_enabled_at=NULL,
-        handoff_reason_safe=${safeReason}, updated_at=CURRENT_TIMESTAMP
-    WHERE id=${work.conversationId}::uuid
-  `;
+  if (!preserveAiOwnership) {
+    await transaction`
+      UPDATE messaging.conversations
+      SET ownership_mode='human', ai_agent_profile_version_id=NULL,
+          ai_enabled_by_user_id=NULL, ai_enabled_at=NULL,
+          handoff_reason_safe=${safeReason}, updated_at=CURRENT_TIMESTAMP
+      WHERE id=${work.conversationId}::uuid
+    `;
+  }
   await transaction`
     INSERT INTO audit.records
       (tenant_id, actor_user_id, action, target_type, target_id, metadata)
     VALUES (platform.current_tenant_id(), ${work.authorizedUserId}::uuid,
             'conversation.ai_handoff', 'conversation', ${work.conversationId}::uuid,
-            ${transaction.json({ reasonCode })})
+            ${transaction.json({ reasonCode, preserveAiOwnership })})
   `;
   // Only a ticketing agent turns its escalation into a support issue. The
   // handoff, the task and the human ownership above happen for every agent.
@@ -3675,9 +4786,53 @@ async function processWhatsAppAiReply(
   workerId: string,
   job: JobRow,
   automation: MessagingAutomationOptions,
+  openingMenuRoute?: OpeningMenuRoute,
 ): Promise<void> {
+  let admittedWork: AiWork | undefined;
+  const recordPrincipalDenial = () =>
+    withOwnedJobTransaction(sql, workerId, job, async (tx) => {
+      await tx`SELECT platform.admit_messaging_execution_principal(${job.id}::uuid,${workerId},${job.claim_token}::uuid)`;
+    });
   try {
-    const work = await loadAiWork(sql, workerId, job);
+    const work = await loadAiWork(sql, workerId, job, openingMenuRoute);
+    admittedWork = work;
+    await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
+      await requireAiTurnOwnership(transaction, work);
+      const anchored = await transaction`
+        UPDATE ops.jobs SET admitted_agent_version_id=${work.agentVersionId}::uuid
+        WHERE id=${job.id}::uuid AND
+          (admitted_agent_version_id IS NULL OR admitted_agent_version_id=${work.agentVersionId}::uuid)
+      `;
+      if (anchored.count !== 1)
+        throw new TypeError("AI job admission binding changed");
+    });
+    const requireExecutionPrincipal = async () => {
+      const projection = await withOwnedJobTransaction(
+        sql,
+        workerId,
+        job,
+        async (tx) => {
+          await requireAiTurnOwnership(tx, work);
+          const rows = await tx<{ admission: unknown }[]>`
+          SELECT platform.admit_messaging_execution_principal(${job.id}::uuid,${workerId},${job.claim_token}::uuid) AS admission`;
+          const admission = parsePrincipalAdmission(rows[0]?.admission ?? null);
+          const firstTool = work.contract.capabilities[0];
+          if (
+            (admission.mode === "principal" || admission.mode === "legacy") &&
+            firstTool !== undefined
+          )
+            await authorizeMachineTool(tx, job, workerId, firstTool, work);
+          return rows[0]?.admission ?? null;
+        },
+      );
+      // The transaction above committed content-free invalid-principal evidence.
+      // Throwing inside it would erase the operator alert.
+      const admission = parsePrincipalAdmission(projection);
+      if (admission.mode === "denied" || admission.mode === "stale")
+        throw new AiPrincipalDeniedError();
+      return admission;
+    };
+    await requireExecutionPrincipal();
     if (work.provider === "simulator" && automation.simulatorEnabled !== true)
       throw new TypeError("simulation_disabled");
     const triggerText =
@@ -3724,7 +4879,161 @@ async function processWhatsAppAiReply(
                 text: "",
               }
             : await (async () => {
-                const provider = automation.aiProvider;
+                let provider = automation.aiProvider;
+                let routedBeforeAttempt: (() => Promise<void>) | undefined;
+                if (work.modelConfigurationId !== null) {
+                  const readProjection = () =>
+                    withOwnedJobTransaction(sql, workerId, job, async (tx) => {
+                      await requireAiTurnOwnership(tx, work);
+                      const projections = await tx<
+                        {
+                          route: {
+                            binding: PublishedModelBinding;
+                            configuration: ModelConfigurationRecord | null;
+                          } | null;
+                        }[]
+                      >`
+                      SELECT platform.current_published_model_route(${work.agentVersionId}::uuid,${work.authorizedUserId}::uuid,${work.channelId}::uuid) AS route`;
+                      return projections[0]?.route ?? null;
+                    });
+                  const adapters = automation.modelRouting;
+                  let admittedConfiguration:
+                    ModelConfigurationRecord | undefined;
+                  let admittedCredential: ResolvedModelCredential | undefined;
+                  const readSealedCredential = async () => {
+                    const configuration = admittedConfiguration;
+                    const decrypt = adapters?.resolveSealedCredential;
+                    if (!configuration?.credentialId || !decrypt) return null;
+                    const envelope = await withOwnedJobTransaction(
+                      sql,
+                      workerId,
+                      job,
+                      async (tx) => {
+                        await requireAiTurnOwnership(tx, work);
+                        const projected = await tx<
+                          { envelope: ModelCredentialEnvelope | null }[]
+                        >`
+                          SELECT platform.messaging_model_credential(
+                            ${job.id}::uuid,${workerId},${job.claim_token}::uuid,
+                            ${work.agentVersionId}::uuid,${configuration.id}::uuid,
+                            ${configuration.credentialId}::uuid,${work.authorizedUserId}::uuid,
+                            ${work.ownershipEpoch}::bigint,${work.triggerMessageId}::uuid) AS envelope`;
+                        return projected[0]?.envelope ?? null;
+                      },
+                    );
+                    if (
+                      envelope?.tenantId !== job.tenant_id ||
+                      envelope.modelConfigurationId !== configuration.id ||
+                      envelope.credentialId !== configuration.credentialId ||
+                      envelope.provider !== configuration.provider
+                    )
+                      return null;
+                    return decrypt(envelope);
+                  };
+                  const resolveCredential =
+                    adapters?.resolveCredential ??
+                    (adapters?.resolveSealedCredential === undefined
+                      ? undefined
+                      : async (
+                          tenantId: string,
+                          credentialId: string,
+                          provider: "openai" | "gemini",
+                        ) => {
+                          const configuration = admittedConfiguration;
+                          if (
+                            tenantId !== job.tenant_id ||
+                            credentialId !== configuration?.credentialId ||
+                            provider !== configuration.provider
+                          )
+                            return null;
+                          const resolved = await readSealedCredential();
+                          if (resolved !== null)
+                            admittedCredential ??= resolved;
+                          return resolved;
+                        });
+                  const reserveDailyAttempt = async (
+                    tenantId: string,
+                    configurationId: string,
+                    limit: number,
+                  ): Promise<boolean> => {
+                    const snapshot = admittedConfiguration;
+                    if (
+                      !snapshot ||
+                      tenantId !== job.tenant_id ||
+                      snapshot.tenantId !== tenantId ||
+                      snapshot.id !== configurationId ||
+                      snapshot.dailyRequestLimit !== limit
+                    )
+                      return false;
+                    return withOwnedJobTransaction(
+                      sql,
+                      workerId,
+                      job,
+                      async (tx) => {
+                        await requireAiTurnOwnership(tx, work);
+                        const rows = await tx<{ reserved: boolean }[]>`
+                        SELECT agents.reserve_messaging_model_attempt(${job.id}::uuid,${workerId},${job.claim_token}::uuid,
+                          ${work.agentVersionId}::uuid,${configurationId}::uuid,${work.authorizedUserId}::uuid,
+                          ${work.ownershipEpoch}::bigint,${work.triggerMessageId}::uuid,${JSON.stringify(snapshot)}::text::jsonb) AS reserved`;
+                        return rows[0]?.reserved === true;
+                      },
+                    );
+                  };
+                  const route = await resolveTrustedModelRoute(
+                    {
+                      tenantId: job.tenant_id,
+                      agentVersionId: work.agentVersionId,
+                      actorUserId: work.authorizedUserId,
+                      channel: "whatsapp",
+                    },
+                    {
+                      readPublishedBinding: async () =>
+                        (await readProjection())?.binding ?? null,
+                      readConfiguration: async (tenantId, configurationId) => {
+                        const configuration = (await readProjection())
+                          ?.configuration;
+                        if (
+                          configuration?.tenantId !== tenantId ||
+                          configuration.id !== configurationId
+                        )
+                          return null;
+                        admittedConfiguration ??= configuration;
+                        return configuration;
+                      },
+                      ...(resolveCredential === undefined
+                        ? {}
+                        : { resolveCredential }),
+                      reserveDailyAttempt:
+                        adapters?.reserveDailyAttempt ?? reserveDailyAttempt,
+                    },
+                  );
+                  if (route.status !== "configured" || !adapters)
+                    throw new WhatsAppAiProviderError(
+                      "model_configuration_unavailable",
+                      false,
+                    );
+                  provider = adapters.createProvider(route);
+                  routedBeforeAttempt = async () => {
+                    if (
+                      adapters.resolveCredential === undefined &&
+                      adapters.resolveSealedCredential !== undefined
+                    ) {
+                      // Re-read canonical authority even on a decrypt-cache hit.
+                      // An admitted request fails closed on mid-turn key rotation.
+                      const fresh = await readSealedCredential();
+                      if (
+                        fresh === null ||
+                        fresh.fingerprint !== admittedCredential?.fingerprint
+                      )
+                        throw new WhatsAppAiProviderError(
+                          "model_credential_changed",
+                          false,
+                        );
+                    }
+                    // Rejected credential changes are not physical model attempts.
+                    await route.beforeAttempt();
+                  };
+                }
                 if (provider === undefined)
                   throw new TypeError("WhatsApp AI is disabled");
                 // A turn may take a few real actions and must still end in
@@ -3732,10 +5041,47 @@ async function processWhatsAppAiReply(
                 // the last pass is offered no further actions.
                 for (let round = 0; ; round += 1) {
                   const last = round >= maximumLeadActionsPerTurn;
+                  await automation.beforeModelAttempt?.();
                   const proposed = await provider.decide(
                     aiRequestFor(work, leadState, receipts, {
                       ...(last ? { replyOnly: true } : {}),
                     }),
+                    async (usage) => {
+                      if (provider.accountingMode === "attempts") return;
+                      const usageId = usage.eventId ?? randomUUID();
+                      // Accounting belongs to the trusted claimed tenant even
+                      // if ownership is lost while the provider bills a call.
+                      // It grants no permission to perform business actions.
+                      await sql.begin(async (transaction) => {
+                        await setTenantContext(transaction, job.tenant_id);
+                        await transaction`SELECT agents.record_messaging_usage(${usageId}::uuid, ${usage.inputTokens}, ${usage.outputTokens}, ${usage.latencyMs})`;
+                      });
+                    },
+                    async (attempt) => {
+                      if (automation.modelAttemptRecorder === undefined)
+                        throw new Error("model attempt recorder unavailable");
+                      await automation.modelAttemptRecorder(
+                        {
+                          tenantId: job.tenant_id,
+                          jobId: job.id,
+                          agentVersionId: work.agentVersionId,
+                        },
+                        attempt,
+                      );
+                    },
+                    async () => {
+                      await automation.beforeModelAttempt?.();
+                      await requireExecutionPrincipal();
+                      await withOwnedJobTransaction(
+                        sql,
+                        workerId,
+                        job,
+                        async (tx) => {
+                          await requireAiTurnOwnership(tx, work);
+                        },
+                      );
+                      await routedBeforeAttempt?.();
+                    },
                   );
                   const action = leadActionName(proposed);
                   if (action === undefined) return proposed;
@@ -3763,9 +5109,10 @@ async function processWhatsAppAiReply(
       classifiedDecision,
       explicitCallRequested,
     );
-    await sql.begin(async (transaction) => {
+    await requireExecutionPrincipal();
+    await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
-      await requireOwnedJob(transaction, workerId, job.id);
+      await requireOwnedJob(transaction, workerId, job);
       await transaction`
         SELECT set_config('app.current_user', ${work.authorizedUserId}, true)
       `;
@@ -3790,6 +5137,22 @@ async function processWhatsAppAiReply(
         work.conversationId,
         work.triggerMessageId,
       );
+      // Hold the canonical binding/principal SHARE locks through reply and
+      // outbound creation. An independent revocation cannot commit between
+      // this check and those writes.
+      const principalRows = await transaction<{ admission: unknown }[]>`
+        SELECT platform.admit_messaging_execution_principal(${job.id}::uuid,${workerId},${job.claim_token}::uuid) AS admission`;
+      const principalAdmission = parsePrincipalAdmission(
+        principalRows[0]?.admission ?? null,
+      );
+      if (
+        principalAdmission.mode === "denied" ||
+        principalAdmission.mode === "stale"
+      )
+        throw new AiPrincipalDeniedError();
+      const firstTool = work.contract.capabilities[0];
+      if (firstTool !== undefined)
+        await authorizeMachineTool(transaction, job, workerId, firstTool, work);
       const grounded = groundAiReply(
         decision,
         await eligibleFacts(transaction, work.agentVersionId),
@@ -3806,7 +5169,7 @@ async function processWhatsAppAiReply(
         | GroundedReply["evidence"]
         | {
             kind: "receipt";
-            operation: "handoff" | "callback";
+            operation: "handoff" | "callback" | "ticket";
             resourceId: string;
           }
         | {
@@ -3842,6 +5205,29 @@ async function processWhatsAppAiReply(
                     triggerMessageId: work.triggerMessageId,
                   })})
         `;
+      if (decision.action === "ticket_open") {
+        if (!work.opensTickets) throw new AiPrincipalDeniedError();
+        const machine = await authorizeMachineTool(
+          transaction,
+          job,
+          workerId,
+          "ticket.open",
+          work,
+        );
+        if (machine === null) throw new AiPrincipalDeniedError();
+        const ticketId = await ticketForAiAction(
+          transaction,
+          work,
+          job.id,
+          decision.subject,
+        );
+        evidence = {
+          kind: "receipt",
+          operation: "ticket",
+          resourceId: ticketId,
+        };
+        responseText = actionReceiptReply("ticket", work.locale);
+      }
       let automaticCallQueued = false;
       if (decision.action === "handoff" && !explicitCallRequested) {
         const resourceId = await createAiHandoff(
@@ -3849,6 +5235,7 @@ async function processWhatsAppAiReply(
           work,
           job.id,
           decision.reasonCode,
+          { sourceClaimToken: job.claim_token },
         );
         evidence = { kind: "receipt", operation: "handoff", resourceId };
         responseText = actionReceiptReply("handoff", work.locale);
@@ -3944,6 +5331,7 @@ async function processWhatsAppAiReply(
               decision.action === "request_call"
                 ? decision.reasonCode
                 : "call_requested",
+              { callbackOnly: true, sourceClaimToken: job.claim_token },
             );
             evidence = { kind: "receipt", operation: "handoff", resourceId };
             responseText = actionReceiptReply("handoff", work.locale);
@@ -3956,6 +5344,7 @@ async function processWhatsAppAiReply(
             decision.action === "request_call"
               ? decision.reasonCode
               : "call_requested",
+            { callbackOnly: true, sourceClaimToken: job.claim_token },
           );
           evidence = { kind: "receipt", operation: "handoff", resourceId };
           responseText = actionReceiptReply("handoff", work.locale);
@@ -3989,6 +5378,12 @@ async function processWhatsAppAiReply(
           },
           work.channelConfiguration,
         );
+        const captured = await transaction<{ authorized: boolean }[]>`
+          SELECT platform.capture_outbound_execution_authority(
+            ${job.id}::uuid,${workerId},${job.claim_token}::uuid,
+            ${outbound.requestId}::uuid) AS authorized`;
+        if (captured[0]?.authorized !== true)
+          throw new AiPrincipalDeniedError();
         await transaction`
           UPDATE messaging.messages SET provider_payload=COALESCE(provider_payload, '{}'::jsonb) ||
             ${transaction.json({
@@ -4023,16 +5418,49 @@ async function processWhatsAppAiReply(
       `;
     });
   } catch (error) {
+    let failure: unknown = error;
+    // A finalization-race denial rolled back its transaction-local alert.
+    // Re-admit in a separate freshly fenced transaction to retain evidence.
+    if (error instanceof AiPrincipalDeniedError) await recordPrincipalDenial();
+    if (
+      error instanceof WhatsAppAiProviderError &&
+      admittedWork !== undefined
+    ) {
+      try {
+        if (
+          await queueModelFailureRecovery(
+            sql,
+            workerId,
+            job,
+            admittedWork,
+            automation,
+          )
+        )
+          return;
+      } catch (recoveryError) {
+        if (
+          !(recoveryError instanceof TypeError) ||
+          ![
+            "AI conversation ownership changed",
+            "AI inbound trigger superseded",
+          ].includes(recoveryError.message)
+        )
+          throw recoveryError;
+        // A manual takeover is a terminal turn cancellation, not a failed
+        // recovery that should terminate the worker or produce a new reply.
+        failure = recoveryError;
+      }
+    }
     const reason =
-      error instanceof WhatsAppAiProviderError
-        ? error.code
-        : error instanceof TypeError
-          ? error.message
+      failure instanceof WhatsAppAiProviderError
+        ? failure.code
+        : failure instanceof TypeError
+          ? failure.message
           : "AI reply failed";
     const permanent =
-      error instanceof TypeError ||
-      (error instanceof WhatsAppAiProviderError && !error.retryable);
-    await sql.begin(async (transaction) => {
+      failure instanceof TypeError ||
+      (failure instanceof WhatsAppAiProviderError && !failure.retryable);
+    await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
       if (permanent) {
         await transaction`
@@ -4041,7 +5469,301 @@ async function processWhatsAppAiReply(
         `;
       }
       await transaction`
-        SELECT ops.fail_job(${job.id}::uuid, ${workerId}, ${reason}, 10)
+        SELECT ops.fail_messaging_job_claim(${job.id}::uuid, ${workerId}, ${job.claim_token}::uuid, ${reason}, 10)
+      `;
+    });
+  }
+}
+
+async function requireAiTurnOwnership(
+  transaction: postgres.TransactionSql,
+  work: AiWork,
+): Promise<void> {
+  await transaction`SELECT set_config('app.current_user',${work.authorizedUserId},true)`;
+  const owned = await transaction<{ id: string }[]>`
+    SELECT c.id FROM messaging.conversations c
+    JOIN messaging.channels channel ON channel.id=c.channel_id AND channel.tenant_id=c.tenant_id
+    JOIN agents.agent_profile_versions a ON a.id=c.ai_agent_profile_version_id AND a.tenant_id=c.tenant_id
+    WHERE c.id=${work.conversationId}::uuid AND c.ownership_mode='ai'
+      AND c.removed_from_inbox_at IS NULL AND c.ownership_epoch=${work.ownershipEpoch}::bigint
+      AND c.ai_enabled_by_user_id=${work.authorizedUserId}::uuid
+      AND a.id=${work.agentVersionId}::uuid AND a.published_at IS NOT NULL
+      AND a.validation_status='valid' AND channel.status='active'
+      AND platform.messaging_ai_actor_authorized(c.ai_enabled_by_user_id)
+    FOR UPDATE OF c
+  `;
+  if (owned.length !== 1)
+    throw new TypeError("AI conversation ownership changed");
+  await requireCurrentTrigger(
+    transaction,
+    work.conversationId,
+    work.triggerMessageId,
+  );
+}
+
+async function storedUnsupportedMedia(
+  transaction: postgres.TransactionSql,
+  conversationId: string,
+  messageId: string,
+): Promise<boolean> {
+  const rows = await transaction<{ payload: unknown }[]>`
+    SELECT event.payload FROM messaging.messages message
+    JOIN messaging.conversations c ON c.id=message.conversation_id AND c.tenant_id=message.tenant_id
+    JOIN messaging.channels channel ON channel.id=c.channel_id AND channel.tenant_id=c.tenant_id
+    JOIN ops.inbound_events event ON event.tenant_id=message.tenant_id AND event.provider=message.provider
+      AND event.provider_account_id=channel.provider_account_id
+      AND event.payload->>'providerMessageId'=message.provider_message_id
+    WHERE message.id=${messageId}::uuid AND c.id=${conversationId}::uuid
+      AND message.direction='inbound' AND message.status='received'
+      AND (message.structured_content->>'retrievalStatus'='unsupported'
+        OR (message.content_type='video' AND message.structured_content->>'agentMediaStatus'='unsupported'))
+      AND channel.provider='meta' AND channel.status='active'
+  `;
+  const envelope = parseStoredWhatsAppEnvelope(rows[0]?.payload);
+  return (
+    envelope !== undefined &&
+    (unsupportedInboundMedia(envelope) || envelope.contentType === "video")
+  );
+}
+
+async function processUnsupportedMediaReply(
+  sql: Sql,
+  workerId: string,
+  job: JobRow,
+  automation: MessagingAutomationOptions,
+): Promise<void> {
+  try {
+    const work = await loadAiWork(sql, workerId, job);
+    const pinned = record(job.payload);
+    if (
+      pinned.ownershipEpoch !== work.ownershipEpoch ||
+      pinned.agentVersionId !== work.agentVersionId ||
+      pinned.authorizedUserId !== work.authorizedUserId
+    )
+      throw new TypeError("unsupported media ownership changed");
+    await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
+      await requireTenantFeatures(transaction, ["whatsapp"]);
+      await requireAiTurnOwnership(transaction, work);
+      if (
+        !(await remediationEnabled(transaction, "no_silence")) ||
+        !(await storedUnsupportedMedia(
+          transaction,
+          work.conversationId,
+          work.triggerMessageId,
+        ))
+      )
+        throw new TypeError("unsupported media admission withdrawn");
+      const text = unsupportedMediaReply(work.locale);
+      const outbound = await queueWhatsAppOutbound(
+        transaction,
+        {
+          conversationId: work.conversationId,
+          explicitlyConfirmed: true,
+          idempotencyKey: `unsupported-media:${work.triggerMessageId}`,
+          kind: "text",
+          provider: work.provider,
+          realProviderEnabled: automation.realWhatsAppEnabled === true,
+          ...(work.recipientIdentityId === undefined ||
+          work.recipientAddress === undefined
+            ? {}
+            : {
+                recipientIdentityId: work.recipientIdentityId,
+                recipientAddress: work.recipientAddress,
+              }),
+          senderUserId: work.authorizedUserId,
+          senderType: "agent",
+          text,
+        },
+        work.channelConfiguration,
+      );
+      await transaction`UPDATE messaging.messages SET provider_payload=coalesce(provider_payload,'{}'::jsonb)||
+        ${transaction.json({ aiGrounding: { schemaVersion: "1.0", agentVersionId: work.agentVersionId, triggerMessageId: work.triggerMessageId, locale: work.locale, textSha256: factDigest(text), evidence: { kind: "unsupported_media" } } })}::jsonb
+        WHERE id=${outbound.messageId}::uuid`;
+      await finishJob(transaction, job, workerId);
+    });
+  } catch (error) {
+    await withOwnedJobTransaction(sql, workerId, job, async (tx) => {
+      await setTenantContext(tx, job.tenant_id);
+      if (error instanceof TypeError)
+        await tx`UPDATE ops.jobs SET max_attempts=attempts WHERE id=${job.id}::uuid`;
+      await tx`SELECT ops.fail_messaging_job_claim(${job.id}::uuid,${workerId},${job.claim_token}::uuid,
+        ${error instanceof TypeError ? error.message : "unsupported media reply failed"},10)`;
+    });
+  }
+}
+
+/** Atomically retain customer acknowledgement, operator work and alert outbox. */
+async function queueModelFailureRecovery(
+  sql: Sql,
+  workerId: string,
+  job: JobRow,
+  work: AiWork,
+  automation: MessagingAutomationOptions,
+  options: {
+    readonly transaction?: postgres.TransactionSql;
+    readonly finish?: boolean;
+  } = {},
+): Promise<boolean> {
+  const perform = async (
+    transaction: postgres.TransactionSql,
+  ): Promise<boolean> => {
+    if (!(await remediationEnabled(transaction, "no_silence"))) return false;
+    await requireTenantFeatures(transaction, ["whatsapp"]);
+    await requireAiTurnOwnership(transaction, work);
+    const existing = await transaction<{ task_id: string }[]>`
+      SELECT metadata->>'taskId' AS task_id FROM audit.records
+      WHERE action='conversation.ai_model_failure' AND target_type='job'
+        AND target_id=${job.id}::uuid
+    `;
+    let taskId = existing[0]?.task_id;
+    if (taskId === undefined) {
+      const tasks = await transaction<{ id: string }[]>`
+        INSERT INTO crm.tasks(tenant_id,contact_id,created_by_user_id,title,description,status,priority)
+        VALUES(platform.current_tenant_id(),${work.contactId}::uuid,${work.authorizedUserId}::uuid,
+          'AI reply needs operator follow-up',
+          ${`The AI could not produce a safe reply. Review conversation ${work.conversationId}. No business action is claimed.`},
+          'todo','high') RETURNING id
+      `;
+      taskId = tasks[0]?.id;
+      if (taskId === undefined)
+        throw new Error("AI failure task was not created");
+      await transaction`
+        INSERT INTO audit.records(tenant_id,actor_user_id,action,target_type,target_id,metadata)
+        VALUES(platform.current_tenant_id(),${work.authorizedUserId}::uuid,
+          'conversation.ai_model_failure','job',${job.id}::uuid,
+          ${transaction.json({ taskId, conversationId: work.conversationId, triggerMessageId: work.triggerMessageId, sourceJobId: job.id, sourceClaimToken: job.claim_token })})
+      `;
+      await transaction`
+        INSERT INTO messaging.notifications(tenant_id,user_id,type,title,body,reference_type,reference_id)
+        SELECT platform.current_tenant_id(),recipient.user_id,'whatsapp.ai.failure',
+          'AI reply needs operator follow-up','A customer turn needs a person to review it.',
+          'conversation',${work.conversationId}::uuid
+        FROM platform.current_tenant_notification_recipients() recipient
+      `;
+    }
+    await transaction`
+      INSERT INTO ops.jobs(tenant_id,queue,job_type,reference_type,reference_id,payload,
+        idempotency_key,max_attempts,priority)
+      VALUES(platform.current_tenant_id(),'messaging','whatsapp.operator.alert','task',${taskId}::uuid,
+        ${transaction.json({ taskId, conversationId: work.conversationId, sourceJobId: job.id, reasonCode: "ai_model_failure" })},
+        ${`ai-failure-alert:${job.id}`},5,100) ON CONFLICT DO NOTHING
+    `;
+    const text = modelFailureReply(work.locale);
+    const outbound = await queueWhatsAppOutbound(
+      transaction,
+      {
+        conversationId: work.conversationId,
+        explicitlyConfirmed: true,
+        idempotencyKey: `ai-fallback:${job.id}`,
+        kind: "text",
+        provider: work.provider,
+        realProviderEnabled: automation.realWhatsAppEnabled === true,
+        ...(work.recipientIdentityId === undefined ||
+        work.recipientAddress === undefined
+          ? {}
+          : {
+              recipientIdentityId: work.recipientIdentityId,
+              recipientAddress: work.recipientAddress,
+            }),
+        senderUserId: work.authorizedUserId,
+        senderType: "agent",
+        text,
+      },
+      work.channelConfiguration,
+    );
+    await transaction`
+      UPDATE messaging.messages SET provider_payload=coalesce(provider_payload,'{}'::jsonb) ||
+        ${transaction.json({
+          aiGrounding: {
+            schemaVersion: "1.0",
+            agentVersionId: work.agentVersionId,
+            triggerMessageId: work.triggerMessageId,
+            locale: work.locale,
+            textSha256: factDigest(text),
+            evidence: { kind: "failure_fallback", taskId, sourceJobId: job.id },
+          },
+        })}::jsonb
+      WHERE id=${outbound.messageId}::uuid
+    `;
+    if (options.finish !== false) await finishJob(transaction, job, workerId);
+    return true;
+  };
+  return options.transaction === undefined
+    ? withOwnedJobTransaction(sql, workerId, job, perform)
+    : perform(options.transaction);
+}
+
+async function processOperatorAlert(
+  sql: Sql,
+  workerId: string,
+  job: JobRow,
+  provider: OperatorAlertProvider | undefined,
+): Promise<void> {
+  const payload = record(job.payload);
+  if (
+    !uuid(payload.taskId) ||
+    !uuid(payload.conversationId) ||
+    !uuid(payload.sourceJobId) ||
+    payload.reasonCode !== "ai_model_failure"
+  )
+    throw new TypeError("invalid operator alert");
+  const taskId = payload.taskId,
+    conversationId = payload.conversationId,
+    sourceJobId = payload.sourceJobId;
+  const eligible = await withOwnedJobTransaction(
+    sql,
+    workerId,
+    job,
+    async (transaction) => {
+      const rows = await transaction<{ id: string }[]>`
+      SELECT task.id FROM crm.tasks task
+      JOIN audit.records a ON a.tenant_id=task.tenant_id
+        AND a.action='conversation.ai_model_failure' AND a.target_type='job'
+        AND a.target_id=${sourceJobId}::uuid
+        AND a.metadata->>'taskId'=task.id::text
+        AND a.metadata->>'conversationId'=${conversationId}
+      WHERE task.id=${taskId}::uuid AND task.status IN ('todo','in_progress')
+    `;
+      if (rows.length === 0) {
+        await finishJob(transaction, job, workerId);
+        return false;
+      }
+      if (provider === undefined) {
+        // An unconfigured operator destination is not a successful alert. Keep
+        // durable work pending without burning attempts or retriggering the LLM.
+        await transaction`
+        UPDATE ops.jobs SET status='queued',attempts=GREATEST(attempts-1,0),
+          available_at=clock_timestamp()+interval '60 seconds',locked_by=NULL,locked_at=NULL,
+          lease_expires_at=NULL,last_error_safe='operator_alert_route_unconfigured'
+        WHERE id=${job.id}::uuid
+      `;
+        return false;
+      }
+      return true;
+    },
+  );
+  if (!eligible || provider === undefined) return;
+  try {
+    const delivered = await provider.deliver({
+      idempotencyKey: `operator-alert:${job.id}`,
+      tenantId: job.tenant_id,
+      taskId,
+      conversationId,
+      reasonCode: "ai_model_failure",
+    });
+    await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
+      await transaction`
+        INSERT INTO audit.records(tenant_id,actor_service,action,target_type,target_id,metadata)
+        VALUES(platform.current_tenant_id(),'messaging-worker','operator.alert.delivered',
+          'job',${job.id}::uuid,${transaction.json({ providerReference: delivered.reference })})
+      `;
+      await finishJob(transaction, job, workerId);
+    });
+  } catch {
+    await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
+      await transaction`
+        SELECT ops.fail_messaging_job_claim(${job.id}::uuid,${workerId},${job.claim_token}::uuid,
+          'operator_alert_delivery_failed',5)
       `;
     });
   }
@@ -4111,10 +5833,10 @@ async function loadAutomaticCallWork(
     payload.conversationId === payload.contactId
   )
     throw new TypeError("automatic call job reference is invalid");
-  return sql.begin(async (transaction) => {
+  return withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
     await setTenantContext(transaction, job.tenant_id);
     await requireTenantFeatures(transaction, ["whatsapp", "voice"]);
-    await requireOwnedJob(transaction, workerId, job.id);
+    await requireOwnedJob(transaction, workerId, job);
     await requireCurrentTrigger(
       transaction,
       payload.conversationId,
@@ -4256,11 +5978,13 @@ async function processAutomaticCall(
       throw new TypeError("automatic calls are disabled");
     payload = parseAutomaticCallPayload(job.payload);
     const work = await loadAutomaticCallWork(sql, workerId, job);
+    if (!(await openingMenuBusinessJobAllowed(sql, workerId, job)))
+      throw new TypeError("opening_menu_route_denied");
     // The dispatcher/provider request is deliberately outside any DB transaction.
     const result = await automation.automaticCallProvider.place(work);
-    await sql.begin(async (transaction) => {
+    await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
-      await requireOwnedJob(transaction, workerId, job.id);
+      await requireOwnedJob(transaction, workerId, job);
       // Bind the canonical session to the issue's attempt. The unique index on
       // (tenant, session) is what stops a replayed acceptance attaching one
       // call to two attempts, and binding here is also the backstop for a call
@@ -4366,18 +6090,20 @@ async function processAutomaticCall(
     const permanent =
       error instanceof TypeError ||
       (error instanceof AutomaticCallProviderError && !error.retryable);
-    await sql.begin(async (transaction) => {
+    await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
       if (permanent)
         await transaction`
           UPDATE ops.jobs SET max_attempts=attempts
           WHERE id=${job.id}::uuid AND status='running' AND locked_by=${workerId}
         `;
-      await transaction`
-        SELECT ops.fail_job(${job.id}::uuid, ${workerId}, ${reason}, 10)
-      `;
+      const failClaim = async () => {
+        await transaction`
+          SELECT ops.fail_messaging_job_claim(${job.id}::uuid, ${workerId}, ${job.claim_token}::uuid, ${reason}, 10)
+        `;
+      };
       const dead = await transaction<{ dead: boolean }[]>`
-        SELECT status='dead' AS dead FROM ops.jobs WHERE id=${job.id}::uuid
+        SELECT attempts>=max_attempts AS dead FROM ops.jobs WHERE id=${job.id}::uuid
       `;
       if (dead[0]?.dead === true && payload !== undefined) {
         const stillOwned = await transaction<{ id: string }[]>`
@@ -4386,7 +6112,10 @@ async function processAutomaticCall(
             AND ownership_epoch=${payload.ownershipEpoch}::bigint FOR UPDATE
         `;
         // A failed old generation must not overwrite a later takeover/resume.
-        if (stillOwned[0] === undefined) return;
+        if (stillOwned[0] === undefined) {
+          await failClaim();
+          return;
+        }
         const fallbackReason = "Automatic telephone call could not be started";
         const handoff = await transaction<{ id: string }[]>`
           UPDATE automation.handoffs
@@ -4422,10 +6151,11 @@ async function processAutomaticCall(
             RETURNING id
           `;
           if (ticket[0] !== undefined) {
-            await transaction`
+            const authoredNote = await transaction<{ id: string }[]>`
               INSERT INTO crm.notes (tenant_id, contact_id, author_user_id, body)
               VALUES (platform.current_tenant_id(), ${payload.contactId}::uuid,
                       ${payload.actorUserId}::uuid, ${callFailureDescription})
+              RETURNING id
             `;
             await transaction`
               INSERT INTO messaging.notifications
@@ -4442,7 +6172,7 @@ async function processAutomaticCall(
               VALUES (platform.current_tenant_id(), ${payload.actorUserId}::uuid,
                       'conversation.ai_handoff_ticket', 'handoff',
                       ${handoff[0].id}::uuid,
-                      ${transaction.json({ taskId: ticket[0].id, callJobId: job.id })})
+                      ${transaction.json({ taskId: ticket[0].id, noteId: authoredNote[0]?.id, callJobId: job.id, sourceJobId: job.id, sourceClaimToken: job.claim_token })})
             `;
           }
         }
@@ -4462,6 +6192,9 @@ async function processAutomaticCall(
                   ${transaction.json({ errorCode: reason, jobId: job.id })})
         `;
       }
+      // Stamp server-authored fallback receipts while the original claim is
+      // fresh, then atomically transition the job to retry/dead in this txn.
+      await failClaim();
     });
   }
 }
@@ -4469,15 +6202,88 @@ async function processAutomaticCall(
 async function requireOwnedJob(
   transaction: postgres.TransactionSql,
   workerId: string,
-  jobId: string,
-): Promise<void> {
-  const owned = await transaction<{ id: string }[]>`
-    SELECT id FROM ops.jobs WHERE id=${jobId}::uuid AND status='running'
-      AND locked_by=${workerId} AND locked_at > CURRENT_TIMESTAMP-INTERVAL '60 seconds'
+  job: JobRow,
+): Promise<Date> {
+  if (job.claimLost)
+    throw new WhatsAppProviderError("stale_worker_claim", false);
+  const owned = await transaction<{ id: string; lease_expires_at: Date }[]>`
+    SELECT id, lease_expires_at FROM ops.jobs WHERE id=${job.id}::uuid AND status='running'
+      AND tenant_id=platform.current_tenant_id() AND locked_by=${workerId}
+      AND claim_token=${job.claim_token}::uuid AND lease_expires_at>clock_timestamp()
     FOR UPDATE
   `;
-  if (owned.length !== 1)
+  const current = owned[0];
+  if (owned.length !== 1 || current === undefined) {
+    job.claimLost = true;
     throw new WhatsAppProviderError("stale_worker_claim", false);
+  }
+  return current.lease_expires_at;
+}
+
+async function withOwnedJobTransaction<T>(
+  sql: Sql,
+  workerId: string,
+  job: JobRow,
+  operation: (transaction: postgres.TransactionSql) => Promise<T>,
+): Promise<T> {
+  const result = await sql.begin(async (transaction) => {
+    await setTenantContext(transaction, job.tenant_id);
+    const leaseDeadline = await requireOwnedJob(transaction, workerId, job);
+    const value = await operation(transaction);
+    // The locked job cannot be reclaimed or renewed while this transaction
+    // runs. Validate its captured deadline again before business writes commit,
+    // including paths that already cleared the lease on completion/failure.
+    const valid = await transaction<{ valid: boolean }[]>`
+      SELECT ${leaseDeadline.toISOString()}::timestamptz > clock_timestamp() AS valid
+    `;
+    if (job.claimLost || valid[0]?.valid !== true) {
+      job.claimLost = true;
+      throw new WhatsAppProviderError("stale_worker_claim", false);
+    }
+    return value;
+  });
+  return result as T;
+}
+
+async function withRenewedJobLease(
+  sql: Sql,
+  workerId: string,
+  job: JobRow,
+  operation: () => Promise<void>,
+): Promise<void> {
+  const stop = new AbortController();
+  const renewal = (async () => {
+    while (!stop.signal.aborted) {
+      try {
+        await leaseDelay(15000, undefined, { signal: stop.signal });
+      } catch {
+        return;
+      }
+      try {
+        const renewed = await sql.begin(async (transaction) => {
+          await setTenantContext(transaction, job.tenant_id);
+          return transaction<
+            { renewed: boolean }[]
+          >`SELECT ops.renew_messaging_job_claim(${job.id}::uuid,${workerId},${job.claim_token}::uuid) renewed`;
+        });
+        if (renewed[0]?.renewed !== true) {
+          job.claimLost = true;
+          return;
+        }
+      } catch {
+        job.claimLost = true;
+        return;
+      }
+    }
+  })();
+  try {
+    await operation();
+  } catch (error) {
+    if (!job.claimLost) throw error;
+  } finally {
+    stop.abort();
+    await renewal;
+  }
 }
 
 function record(value: unknown): Readonly<Record<string, unknown>> {
@@ -4553,15 +6359,45 @@ async function requireGroundedOutbound(
     row.conversation_id,
     row.message_id,
   );
-  const triggerMessages = await transaction<{ content_text: string | null }[]>`
-    SELECT content_text FROM messaging.messages
+  const triggerMessages = await transaction<
+    { content_text: string | null; content_type: string }[]
+  >`
+    SELECT content_text,content_type FROM messaging.messages
     WHERE id=${metadata.triggerMessageId}::uuid
       AND conversation_id=${row.conversation_id}::uuid
       AND direction='inbound'
   `;
-  const latestCustomerMessage = triggerMessages[0]?.content_text ?? "";
+  const latestCustomerMessage = messageContextText(
+    triggerMessages[0]?.content_type ?? "text",
+    triggerMessages[0]?.content_text ?? null,
+  );
   let expected: string | undefined;
-  if (
+  if (evidence.kind === "unsupported_media") {
+    if (
+      (await remediationEnabled(transaction, "no_silence")) &&
+      (await storedUnsupportedMedia(
+        transaction,
+        row.conversation_id,
+        metadata.triggerMessageId,
+      ))
+    )
+      expected = unsupportedMediaReply(metadata.locale);
+  } else if (
+    evidence.kind === "failure_fallback" &&
+    uuid(evidence.taskId) &&
+    uuid(evidence.sourceJobId)
+  ) {
+    const receipt = await transaction<{ id: string }[]>`
+      SELECT task.id FROM crm.tasks task
+      JOIN audit.records a ON a.tenant_id=task.tenant_id
+        AND a.action='conversation.ai_model_failure' AND a.target_type='job'
+        AND a.target_id=${evidence.sourceJobId}::uuid AND a.metadata->>'taskId'=task.id::text
+        AND a.metadata->>'conversationId'=${row.conversation_id}
+        AND a.metadata->>'triggerMessageId'=${metadata.triggerMessageId}
+      WHERE task.id=${evidence.taskId}::uuid AND task.status IN ('todo','in_progress')
+    `;
+    if (receipt.length === 1) expected = modelFailureReply(metadata.locale);
+  } else if (
     evidence.kind === "knowledge" &&
     typeof evidence.documentId === "string" &&
     typeof evidence.factKey === "string"
@@ -4623,7 +6459,13 @@ async function requireGroundedOutbound(
     )
       expected = approvedAgentResponse(route, metadata.locale, name);
   } else if (evidence.kind === "receipt" && uuid(evidence.resourceId)) {
-    if (evidence.operation === "handoff") {
+    if (evidence.operation === "ticket") {
+      const receipt = await transaction<
+        { allowed: boolean }[]
+      >`SELECT platform.machine_ticket_delivery_receipt(${row.message_id}::uuid,${evidence.resourceId}::uuid) AS allowed`;
+      if (receipt[0]?.allowed === true)
+        expected = actionReceiptReply("ticket", metadata.locale);
+    } else if (evidence.operation === "handoff") {
       const receipt = await transaction<{ id: string }[]>`
         SELECT id FROM automation.handoffs WHERE id=${evidence.resourceId}::uuid
           AND conversation_id=${row.conversation_id}::uuid
@@ -4665,10 +6507,17 @@ async function revalidateOutboundAttempt(
   job: JobRow,
   work: OutboundWork,
 ): Promise<void> {
-  await sql.begin(async (transaction) => {
+  await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
     await setTenantContext(transaction, job.tenant_id);
-    await requireOwnedJob(transaction, workerId, job.id);
+    await requireOwnedJob(transaction, workerId, job);
     await requireTenantFeatures(transaction, ["whatsapp"]);
+    const authority = await transaction<{ authorized: boolean }[]>`
+      SELECT platform.outbound_execution_authorized(
+        ${job.id}::uuid,${workerId},${job.claim_token}::uuid)
+        AND platform.opening_menu_business_job_allowed(
+        ${job.id}::uuid,${workerId},${job.claim_token}::uuid) AS authorized`;
+    if (authority[0]?.authorized !== true)
+      throw new WhatsAppProviderError("outbound_eligibility_changed", false);
     const rows = await transaction<
       {
         content_text: string | null;
@@ -4720,9 +6569,9 @@ async function loadOutboundWork(
   workerId: string,
   job: JobRow,
 ): Promise<OutboundWork> {
-  return sql.begin(async (transaction) => {
+  return withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
     await setTenantContext(transaction, job.tenant_id);
-    await requireOwnedJob(transaction, workerId, job.id);
+    await requireOwnedJob(transaction, workerId, job);
     await requireTenantFeatures(transaction, ["whatsapp"]);
     const previous = await transaction<{ status: string }[]>`
       SELECT status FROM messaging.outbound_requests WHERE id=${job.reference_id}::uuid FOR UPDATE
@@ -4818,6 +6667,7 @@ async function processWhatsAppOutbound(
     | ((failure: MessageDeliveryFailure & { readonly jobId: string }) => void)
     | undefined,
   simulatorEnabled: boolean,
+  resolveChannelCredential: MessagingAutomationOptions["resolveChannelCredential"],
 ): Promise<void> {
   let work: OutboundWork | undefined;
   try {
@@ -4834,13 +6684,56 @@ async function processWhatsAppOutbound(
       delivery: outboundWork.delivery,
       beforeAttempt: () =>
         revalidateOutboundAttempt(sql, workerId, job, outboundWork),
+      ...(providerName !== "meta"
+        ? {}
+        : {
+            accessTokenForAttempt: async () => {
+              await revalidateOutboundAttempt(sql, workerId, job, outboundWork);
+              return withOwnedJobTransaction(
+                sql,
+                workerId,
+                job,
+                async (transaction) => {
+                  await setTenantContext(transaction, job.tenant_id);
+                  await requireOwnedJob(transaction, workerId, job);
+                  const projected = await transaction<
+                    {
+                      envelope:
+                        ChannelCredentialEnvelope | { legacy: true } | null;
+                    }[]
+                  >`
+              SELECT platform.messaging_outbound_channel_credential(${job.id}::uuid,${workerId},${job.claim_token}::uuid) AS envelope`;
+                  const envelope = projected[0]?.envelope;
+                  if (envelope === undefined || envelope === null)
+                    throw new WhatsAppProviderError(
+                      "channel_credential_unavailable",
+                      false,
+                    );
+                  if ("legacy" in envelope) return undefined;
+                  if (resolveChannelCredential === undefined)
+                    throw new WhatsAppProviderError(
+                      "channel_credential_unavailable",
+                      false,
+                    );
+                  try {
+                    return resolveChannelCredential(envelope);
+                  } catch {
+                    throw new WhatsAppProviderError(
+                      "channel_credential_unavailable",
+                      false,
+                    );
+                  }
+                },
+              );
+            },
+          }),
       ...(outboundWork.senderPhoneNumberId === undefined
         ? {}
         : { senderPhoneNumberId: outboundWork.senderPhoneNumberId }),
     });
-    await sql.begin(async (transaction) => {
+    await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
       await setTenantContext(transaction, outboundWork.tenantId);
-      await requireOwnedJob(transaction, workerId, job.id);
+      await requireOwnedJob(transaction, workerId, job);
       const status = providerName === "simulator" ? "delivered" : "sent";
       await transaction`
         UPDATE messaging.outbound_requests
@@ -4879,7 +6772,19 @@ async function processWhatsAppOutbound(
       `;
     });
   } catch (error) {
-    const retryable = error instanceof WhatsAppProviderError && error.retryable;
+    const providerDelay =
+      error instanceof WhatsAppProviderError && error.status === 429
+        ? error.retryAfterMs
+        : undefined;
+    const invalidDelay =
+      providerDelay !== undefined &&
+      (!Number.isFinite(providerDelay) ||
+        providerDelay <= 0 ||
+        providerDelay > 86_400_000);
+    const retryable =
+      error instanceof WhatsAppProviderError &&
+      error.retryable &&
+      !invalidDelay;
     if (
       error instanceof WhatsAppProviderError &&
       error.code === "stale_worker_claim"
@@ -4895,8 +6800,8 @@ async function processWhatsAppOutbound(
             : "outbound_processing_failed",
       error instanceof WhatsAppProviderError ? error.diagnostic : null,
     ) ?? { code: "outbound_processing_failed", diagnostic: null };
-    const code = failure.code;
-    await sql.begin(async (transaction) => {
+    const code = invalidDelay ? "rate_limit_delay_quarantined" : failure.code;
+    await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
       const owned = await transaction<{ id: string }[]>`SELECT id FROM ops.jobs
         WHERE id=${job.id}::uuid AND status='running' AND locked_by=${workerId} FOR UPDATE`;
@@ -4907,8 +6812,15 @@ async function processWhatsAppOutbound(
         `;
       }
       await transaction`
-        SELECT ops.fail_job(${job.id}::uuid, ${workerId}, ${code}, 5)
+        SELECT ops.fail_messaging_job_claim(${job.id}::uuid, ${workerId}, ${job.claim_token}::uuid, ${code}, 5)
       `;
+      if (retryable && providerDelay !== undefined)
+        await transaction`
+          UPDATE ops.jobs SET available_at=GREATEST(available_at,
+            clock_timestamp()+${providerDelay}::double precision * interval '1 millisecond')
+          WHERE id=${job.id}::uuid AND tenant_id=platform.current_tenant_id()
+            AND status='retry' AND last_error_safe=${code}
+        `;
       if (job.reference_id !== null) {
         await transaction`
           UPDATE messaging.outbound_requests request
@@ -4954,60 +6866,272 @@ export function createMessagingStore(
     prepare: false,
     connection: { statement_timeout: 10000 },
   });
+  const activeReplies = new Map<string, Promise<void>>();
+  const activeSummaries = new Map<string, Promise<void>>();
+  const replyFailures: unknown[] = [];
+  let closing = false;
+  const drainReplies = async () => {
+    await Promise.all([...activeReplies.values(), ...activeSummaries.values()]);
+    if (replyFailures.length) throw replyFailures.shift();
+  };
+  const pendingAccounting = new Map<
+    string,
+    {
+      context: { tenantId: string; jobId: string; agentVersionId: string };
+      attempt: WhatsAppAiAttempt;
+    }
+  >();
+  const persistAttempt = async (
+    context: { tenantId: string; jobId: string; agentVersionId: string },
+    attempt: WhatsAppAiAttempt,
+  ) => {
+    await automation.modelAccountingSpool?.put({ ...attempt, ...context });
+    await sql.begin(async (transaction) => {
+      await setTenantContext(transaction, context.tenantId);
+      await transaction`
+        SELECT agents.record_messaging_model_attempt(${attempt.eventId}::uuid,
+          ${context.jobId}::uuid,${context.agentVersionId}::uuid,${attempt.model},
+          ${attempt.occurredAt}::timestamptz,${attempt.latencyMs},${attempt.inputTokens},
+          ${attempt.outputTokens},${attempt.status},${attempt.errorCode})
+      `;
+    });
+    await automation.modelAccountingSpool?.acknowledgeCommitted({
+      ...attempt,
+      ...context,
+    });
+    pendingAccounting.delete(attempt.eventId);
+    automation.aiProvider?.acknowledgeAttempt?.(attempt);
+  };
+  const runtimeAutomation: MessagingAutomationOptions = {
+    ...automation,
+    beforeModelAttempt: async () => {
+      await automation.modelAccountingSpool?.assertCapacity();
+      if (
+        automation.modelAccountingSpool !== undefined &&
+        (await automation.modelAccountingSpool.pending()).length > 998
+      )
+        throw new Error("accounting spool lacks capacity for bounded fallback");
+      await automation.beforeModelAttempt?.();
+    },
+    modelAttemptRecorder: async (context, attempt) => {
+      // Immutable provider event+server admission are the ONLY permitted
+      // post-loss write. This never enters a business transaction or sends.
+      pendingAccounting.set(attempt.eventId, { context, attempt });
+      await automation.modelAccountingSpool?.put({ ...attempt, ...context });
+      await persistAttempt(context, attempt);
+    },
+  };
   return {
+    drainReplies,
     async close() {
-      await sql.end({ timeout: 2 });
+      closing = true;
+      try {
+        await drainReplies();
+      } finally {
+        await sql.end({ timeout: 2 });
+      }
     },
     async isReady() {
       try {
-        await sql`SELECT 1`;
-        return true;
+        const rows = await sql<{ ready: boolean }[]>`
+          SELECT coalesce(bool_and(function.oid IS NOT NULL AND
+            has_function_privilege(current_user,function.oid,'EXECUTE')),false) AS ready
+          FROM unnest(ARRAY[
+            'ops.claim_fair_ai_reply(text)',
+            'ops.claim_jobs_all_tenants(text,text,integer,integer)',
+            'ops.renew_messaging_job_claim(uuid,text,uuid)',
+            'platform.current_field_service_whatsapp_agent_ready()',
+            'platform.current_published_model_route(uuid,uuid,uuid)',
+            'platform.admit_messaging_session_agent(uuid,text,uuid,integer)',
+            'platform.load_memory_summary_job(uuid,text,uuid)',
+ 'ops.claim_memory_summary(text)',
+ 'platform.memory_summary_model_projection(uuid,text,uuid)',
+ 'platform.reserve_memory_summary_attempt(uuid,text,uuid,jsonb)',
+ 'platform.settle_memory_summary_attempt(uuid,text,uuid,uuid,boolean,integer,integer)',
+            'platform.persist_memory_summary_job(uuid,text,uuid,text)',
+            'platform.admit_messaging_execution_principal(uuid,text,uuid)',
+            'platform.messaging_media_channel_credential(uuid,text,uuid,bigint)',
+            'platform.messaging_typing_channel_credential(uuid,bigint)',
+            'platform.prepare_opening_menu(uuid,text,uuid)',
+            'platform.begin_opening_menu_attempt(uuid,text,uuid)',
+            'platform.opening_menu_attempt_authorized(uuid,text,uuid)',
+            'platform.opening_menu_channel_credential(uuid,text,uuid)',
+            'platform.settle_opening_menu_attempt(uuid,text,uuid,text,text)',
+            'platform.opening_menu_business_job_allowed(uuid,text,uuid)',
+            'platform.enqueue_opening_menu_for_inbound(uuid)',
+            'platform.messaging_model_credential(uuid,text,uuid,uuid,uuid,uuid,uuid,bigint,uuid)',
+            'agents.reserve_messaging_model_attempt(uuid,text,uuid,uuid,uuid,uuid,bigint,uuid,jsonb)'
+          ]) AS required(signature)
+          LEFT JOIN pg_proc function ON function.oid=to_regprocedure(required.signature)
+        `;
+        return rows[0]?.ready === true;
       } catch {
         return false;
       }
     },
     async processAvailable() {
-      const events = await sql<InboundEventRow[]>`
+      if (closing) return 0;
+      if (replyFailures.length) throw replyFailures.shift();
+      if (automation.modelAccountingSpool !== undefined) {
+        for (const attempt of await automation.modelAccountingSpool.pending()) {
+          const { tenantId, jobId, agentVersionId } = attempt;
+          pendingAccounting.set(attempt.eventId, {
+            context: { tenantId, jobId, agentVersionId },
+            attempt,
+          });
+        }
+      }
+      for (const entry of [...pendingAccounting.values()].slice(0, 16)) {
+        try {
+          await persistAttempt(entry.context, entry.attempt);
+        } catch {
+          break;
+        }
+      }
+      // Keep accepted inbound events durable while accounting is unavailable;
+      // do not accumulate an unbounded number of newly billed calls.
+      const accountingBlocked = pendingAccounting.size >= 1000;
+      let processedEvents = 0;
+      // Ingest a bounded pending burst before spending on the agent. Claims
+      // remain one at a time and processing remains sequential, so ingress
+      // leases cannot age while earlier envelopes wait on a provider call.
+      for (let pass = 0; pass < 10; pass += 1) {
+        const events = await sql<InboundEventRow[]>`
         SELECT id, tenant_id, event_type, payload
         FROM ops.claim_inbound_events(${workerId}, 1, 60)
       `;
-      for (const event of events)
-        await processInbound(
-          sql,
-          workerId,
-          event,
-          automation.aiProvider !== undefined,
-          automation.realWhatsAppEnabled === true,
-          automation.fieldServiceProvider !== undefined,
-        );
+        if (events.length === 0) break;
+        for (const event of events)
+          await processInbound(
+            sql,
+            workerId,
+            event,
+            automation.aiProvider !== undefined,
+            automation.realWhatsAppEnabled === true,
+            automation.fieldServiceProvider !== undefined,
+            providers.meta,
+            automation.resolveChannelCredential,
+          );
+        processedEvents += events.length;
+      }
 
+      if (accountingBlocked) return processedEvents;
+      // Durable admission counts live claims across workers. Launch immediately:
+      // no claimed job waits in an in-process queue or ages its lease there.
+      // Provider I/O holds no DB transaction; ingress and sends keep polling.
+      let admittedReplies = 0;
+      while (activeReplies.size < 4) {
+        const replies = await sql<JobRow[]>`
+          SELECT id,tenant_id,job_type,reference_id,payload,claim_token
+          FROM ops.claim_fair_ai_reply(${workerId})
+        `;
+        const reply = replies[0];
+        if (reply === undefined) break;
+        const running = withRenewedJobLease(sql, workerId, reply, () =>
+          processJob(
+            sql,
+            workerId,
+            reply,
+            providers,
+            reportFailure,
+            runtimeAutomation,
+          ),
+        )
+          .catch((error: unknown) => {
+            // Keep the rejected promise observed. The next poll/drain surfaces an
+            // unexpected failure; fresh fences still protect every write/send.
+            replyFailures.push(error);
+          })
+          .finally(() => activeReplies.delete(reply.id));
+        activeReplies.set(reply.id, running);
+        admittedReplies += 1;
+      }
+      let admittedSummaries = 0;
+      if (activeSummaries.size < 1) {
+        const summaries = await sql<
+          JobRow[]
+        >`SELECT id,tenant_id,job_type,reference_id,payload,claim_token FROM ops.claim_memory_summary(${workerId})`;
+        const summary = summaries[0];
+        if (summary !== undefined) {
+          const running = withRenewedJobLease(sql, workerId, summary, () =>
+            processJob(
+              sql,
+              workerId,
+              summary,
+              providers,
+              reportFailure,
+              runtimeAutomation,
+            ),
+          )
+            .catch((error: unknown) => {
+              replyFailures.push(error);
+            })
+            .finally(() => activeSummaries.delete(summary.id));
+          activeSummaries.set(summary.id, running);
+          admittedSummaries = 1;
+        }
+      }
       const jobs = await sql<JobRow[]>`
-        SELECT id, tenant_id, job_type, reference_id, payload
-        FROM ops.claim_jobs_all_tenants(${workerId}, 'messaging', 1, 60)
+        SELECT id, tenant_id, job_type, reference_id, payload, claim_token
+        FROM ops.claim_jobs_all_tenants(${workerId}, 'messaging', 1, 120)
       `;
       for (const job of jobs)
-        await processJob(
-          sql,
-          workerId,
-          job,
-          providers,
-          reportFailure,
-          automation,
+        await withRenewedJobLease(sql, workerId, job, () =>
+          processJob(
+            sql,
+            workerId,
+            job,
+            providers,
+            reportFailure,
+            runtimeAutomation,
+          ),
         );
       const fieldServiceJobs = await sql<JobRow[]>`
-        SELECT id, tenant_id, job_type, reference_id, payload
-        FROM ops.claim_jobs_all_tenants(${workerId}, 'field_service', 1, 60)
+        SELECT id, tenant_id, job_type, reference_id, payload, claim_token
+        FROM ops.claim_jobs_all_tenants(${workerId}, 'field_service', 1, 120)
       `;
       for (const job of fieldServiceJobs)
-        await processJob(
-          sql,
-          workerId,
-          job,
-          providers,
-          reportFailure,
-          automation,
+        await withRenewedJobLease(sql, workerId, job, () =>
+          processJob(
+            sql,
+            workerId,
+            job,
+            providers,
+            reportFailure,
+            runtimeAutomation,
+          ),
         );
-      return events.length + jobs.length + fieldServiceJobs.length;
+      let completedRepliesDuringWait = 0;
+      if (
+        (activeReplies.size > 0 || activeSummaries.size > 0) &&
+        admittedReplies === 0 &&
+        admittedSummaries === 0 &&
+        jobs.length === 0 &&
+        fieldServiceJobs.length === 0 &&
+        processedEvents === 0
+      ) {
+        const repliesBeforeWait = activeReplies.size + activeSummaries.size;
+        await Promise.race([
+          ...activeReplies.values(),
+          ...activeSummaries.values(),
+          leaseDelay(50),
+        ]);
+        // A reply may commit its outbound after this poll's queue snapshot.
+        // Report that progress so the worker immediately scans again rather
+        // than sleeping for a second with a newly queued customer answer.
+        completedRepliesDuringWait =
+          repliesBeforeWait - activeReplies.size - activeSummaries.size;
+      }
+      return (
+        processedEvents +
+        jobs.length +
+        fieldServiceJobs.length +
+        admittedReplies +
+        admittedSummaries +
+        activeSummaries.size +
+        activeReplies.size +
+        completedRepliesDuringWait
+      );
     },
   };
 }

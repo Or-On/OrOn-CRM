@@ -221,6 +221,7 @@ export function EmailWorkspace({
     ReadonlySet<SetupProvider>
   >(new Set());
   const guideRef = useRef<HTMLElement>(null);
+  const credentialSubmitterRef = useRef<HTMLButtonElement | null>(null);
   const formatter = useMemo(
     () =>
       new Intl.DateTimeFormat(locale, {
@@ -252,6 +253,19 @@ export function EmailWorkspace({
     if (view === "setup" && setupProvider) guideRef.current?.focus();
   }, [setupProvider, view]);
 
+  useEffect(() => {
+    if (credentialPending) return;
+    const submitter = credentialSubmitterRef.current;
+    credentialSubmitterRef.current = null;
+    if (
+      submitter?.isConnected &&
+      !submitter.matches(":disabled") &&
+      document.activeElement === document.body
+    ) {
+      submitter.focus();
+    }
+  }, [credentialPending]);
+
   function openProviderSetup(provider: SetupProvider) {
     setSetupProvider(provider);
     setView("setup");
@@ -260,6 +274,12 @@ export function EmailWorkspace({
   async function saveAndConnect(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!setupProvider || credentialPending) return;
+    const submitter = (event.nativeEvent as SubmitEvent).submitter;
+    credentialSubmitterRef.current =
+      submitter instanceof HTMLButtonElement &&
+      document.activeElement === submitter
+        ? submitter
+        : null;
     setCredentialPending(true);
     setCredentialError(undefined);
     try {
@@ -356,8 +376,12 @@ export function EmailWorkspace({
           </div>
         ) : (
           <button
-            aria-controls="email-connection-guide"
-            aria-describedby="email-oauth-notice"
+            aria-controls={
+              view === "setup" ? "email-connection-guide" : undefined
+            }
+            aria-describedby={
+              view === "accounts" ? "email-oauth-notice" : undefined
+            }
             className={styles.setupButton}
             onClick={() => openProviderSetup(provider)}
             type="button"

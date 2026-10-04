@@ -3,6 +3,7 @@ import { cache } from "react";
 
 import {
   AuthService,
+  ForbiddenError,
   StaffSmsService,
   createTwilioSmsSender,
   assertTrustedUnsafeRequest,
@@ -45,6 +46,7 @@ function authConfig() {
     serviceSecret: config.secrets.authServiceSecret,
     tokenPepper: config.secrets.authTokenPepper,
     sms: config.sms,
+    maximumConcurrentLogins: config.maximumConcurrentLogins,
   };
 }
 
@@ -57,6 +59,7 @@ export async function withAuthService<T>(
     return await operation(
       new AuthService(repository, {
         dummyPasswordHash: config.dummyPasswordHash,
+        maximumConcurrentLogins: config.maximumConcurrentLogins,
         tokenPepper: config.tokenPepper,
         sms: {
           startLogin: (userId) => withStaffSms((sms) => sms.startLogin(userId)),
@@ -268,7 +271,7 @@ export async function issueDispatcherGrant(
 }
 
 export class UnauthenticatedError extends Error {}
-export class ForbiddenError extends Error {}
+export { ForbiddenError };
 
 export async function assertAuthenticatedMutation(
   request: Request,

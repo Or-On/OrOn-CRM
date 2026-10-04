@@ -11,7 +11,7 @@ import {
   assertCrmMutation,
   crmErrorResponse,
 } from "../../../../features/crm-route";
-import { readIdentityImage } from "../../../../features/identity";
+import { readIdentityImage } from "../../../../features/identity-upload-server";
 
 class TenantLogoContextError extends Error {}
 
@@ -66,9 +66,9 @@ export async function GET(request: Request) {
 export async function PATCH(request: Request) {
   try {
     await assertCrmMutation(request);
-    const image = await readIdentityImage(request);
-    await withCurrentTenant("tenant:manage", (sql, session) => {
+    await withCurrentTenant("tenant:manage", async (sql, session) => {
       assertLogoContext(request, session.tenant.tenantId, true);
+      const image = await readIdentityImage(request);
       return setCurrentTenantLogo(sql, image, requestId(request));
     });
     return NextResponse.json({ ok: true });

@@ -298,20 +298,20 @@ try {
           await page.keyboard.press("Escape");
           await page
             .getByRole("button", {
-              name: messages.premiumPrimary.viewPermissions,
+              name: messages.tenantPrimary.call,
               exact: true,
             })
             .click();
           const observed = await geometry(page);
           // Only inspect safeguards. Never check approvals or press a call action.
           const dialog = page.getByRole("dialog", {
-            name: messages.premiumPrimary.viewPermissions,
+            name: messages.tenantPrimary.call,
             exact: true,
           });
           assert(
             await dialog
               .getByRole("button", {
-                name: messages.contacts.realCall,
+                name: messages.tenantPrimary.call,
                 exact: true,
               })
               .isDisabled(),
@@ -443,7 +443,7 @@ try {
           await page.keyboard.press("Escape");
           await page
             .getByRole("tab", {
-              name: new RegExp(messages.operations.automations),
+              name: new RegExp(messages.tenantOperations.automations),
             })
             .click();
           await page
@@ -465,7 +465,7 @@ try {
           await page.keyboard.press("Escape");
           await page
             .getByRole("tab", {
-              name: new RegExp(messages.operations.campaigns),
+              name: new RegExp(messages.tenantOperations.campaigns),
             })
             .click();
           await page

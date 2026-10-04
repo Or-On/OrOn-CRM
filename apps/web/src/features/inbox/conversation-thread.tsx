@@ -1,6 +1,9 @@
 "use client";
 
+import { OpeningMenuContent } from "./opening-menu-content";
 import { DeliveryFailure } from "./delivery-failure";
+import { AudioMessageContent } from "./audio-message-content";
+import { VideoMessageContent } from "./video-message-content";
 
 import { errorMessage } from "../../i18n/error-message";
 import { useTranslations, useLocale, useTimeZone } from "next-intl";
@@ -93,14 +96,12 @@ function locationMapUrl(latitude: number, longitude: number): string {
 function InboundMessageContent({ message }: { readonly message: Message }) {
   const t = useTranslations();
   const media = message.media;
+  if (media?.kind === "audio") return <AudioMessageContent message={message} />;
+  if (media?.kind === "video") return <VideoMessageContent message={message} />;
   if (media !== null && media !== undefined) {
     const url = messageMediaUrl(message.id);
     const available = media.status === "available";
-    const label =
-      media.fileName ??
-      (media.kind === "image"
-        ? t("inbox.media.image")
-        : t("inbox.media.document"));
+    const label = media.fileName ?? t(`inbox.media.${media.kind}`);
     return (
       <div className={`message-media message-media--${media.kind}`}>
         {media.kind === "image" ? (
@@ -712,150 +713,165 @@ export function ConversationThread({
           </div>
         ) : null}
         {page.messages.length ? (
-          <ol
+          <div
             aria-live={history ? "off" : "polite"}
             aria-relevant="additions"
-            className="message-timeline"
             role="log"
           >
-            {page.messages.map((message, index) => {
-              const previous = page.messages[index - 1];
-              const startsDay =
-                previous === undefined ||
-                conversationDayKey(new Date(previous.createdAt), timeZone) !==
-                  conversationDayKey(new Date(message.createdAt), timeZone);
-              const grouped =
-                !startsDay &&
-                previous.direction === message.direction &&
-                previous.senderType === message.senderType &&
-                new Date(message.createdAt).getTime() -
-                  new Date(previous.createdAt).getTime() <
-                  300_000;
-              return (
-                <li className="message-timeline__item" key={message.id}>
-                  {startsDay ? (
-                    <div className="message-day-separator" role="separator">
-                      <time dateTime={message.createdAt}>
-                        {messageDay(message.createdAt, locale, timeZone)}
-                      </time>
-                    </div>
-                  ) : null}
-                  <div
-                    className={`message-cluster message-cluster--${message.direction} ${grouped ? "message-cluster--grouped" : ""}`}
-                  >
-                    <span className="message-author-avatar" aria-hidden="true">
-                      {grouped
-                        ? ""
-                        : message.senderType === "contact"
-                          ? conversation.contactName.slice(0, 1)
-                          : "O"}
-                    </span>
-                    <div className="message-content-stack">
-                      <article
-                        aria-label={`${t(`status.${message.direction}`)} ${t(`status.${message.status}`)}`}
-                        className={`message-bubble message-bubble--${message.direction} ${grouped ? "message-bubble--grouped" : ""}`}
+            <ol className="message-timeline">
+              {page.messages.map((message, index) => {
+                const previous = page.messages[index - 1];
+                const startsDay =
+                  previous === undefined ||
+                  conversationDayKey(new Date(previous.createdAt), timeZone) !==
+                    conversationDayKey(new Date(message.createdAt), timeZone);
+                const grouped =
+                  !startsDay &&
+                  previous.direction === message.direction &&
+                  previous.senderType === message.senderType &&
+                  new Date(message.createdAt).getTime() -
+                    new Date(previous.createdAt).getTime() <
+                    300_000;
+                return (
+                  <li className="message-timeline__item" key={message.id}>
+                    {startsDay ? (
+                      <div className="message-day-separator" role="separator">
+                        <time dateTime={message.createdAt}>
+                          {messageDay(message.createdAt, locale, timeZone)}
+                        </time>
+                      </div>
+                    ) : null}
+                    <div
+                      className={`message-cluster message-cluster--${message.direction} ${grouped ? "message-cluster--grouped" : ""}`}
+                    >
+                      <span
+                        className="message-author-avatar"
+                        aria-hidden="true"
                       >
-                        {!grouped ? (
-                          <small className="message-sender">
-                            <bdi>
-                              {message.senderType === "contact"
-                                ? conversation.contactName
-                                : t(
-                                    message.senderType === "agent"
-                                      ? "tenantPrimary.senderAgent"
-                                      : message.senderType === "system"
-                                        ? "tenantPrimary.senderSystem"
-                                        : "tenantPrimary.senderTeam",
-                                  )}
-                            </bdi>
-                          </small>
-                        ) : null}
-                        {message.template ? (
-                          <div className="template-message">
-                            <strong>
-                              {t("inbox.templatePrefix")}
-                              {message.template.name}
-                            </strong>
-                            <small>
-                              {t("inbox.language")}
-                              {message.template.language}
+                        {grouped
+                          ? ""
+                          : message.senderType === "contact"
+                            ? conversation.contactName.slice(0, 1)
+                            : "O"}
+                      </span>
+                      <div className="message-content-stack">
+                        <article
+                          aria-label={`${t(`status.${message.direction}`)} ${message.openingMenu && message.status !== "read" && message.status !== "delivered" ? t(`inbox.openingMenu.${message.openingMenu.outcome}`) : t(`status.${message.status}`)}`}
+                          className={`message-bubble message-bubble--${message.direction} ${grouped ? "message-bubble--grouped" : ""}`}
+                        >
+                          {!grouped ? (
+                            <small className="message-sender">
+                              <bdi>
+                                {message.senderType === "contact"
+                                  ? conversation.contactName
+                                  : t(
+                                      message.senderType === "agent"
+                                        ? "tenantPrimary.senderAgent"
+                                        : message.senderType === "system"
+                                          ? "tenantPrimary.senderSystem"
+                                          : "tenantPrimary.senderTeam",
+                                    )}
+                              </bdi>
                             </small>
-                            {message.template.parameters.length ? (
-                              <ol>
-                                {message.template.parameters.map(
-                                  (parameter, parameterIndex) => (
-                                    <li key={parameterIndex}>{parameter}</li>
+                          ) : null}
+                          {message.openingMenu ? (
+                            <OpeningMenuContent message={message} />
+                          ) : message.template ? (
+                            <div className="template-message">
+                              <strong>
+                                {t("inbox.templatePrefix")}
+                                {message.template.name}
+                              </strong>
+                              <small>
+                                {t("inbox.language")}
+                                {message.template.language}
+                              </small>
+                              {message.template.parameters.length ? (
+                                <ol>
+                                  {message.template.parameters.map(
+                                    (parameter, parameterIndex) => (
+                                      <li key={parameterIndex}>{parameter}</li>
+                                    ),
+                                  )}
+                                </ol>
+                              ) : (
+                                <p>{t("inbox.noParams")}</p>
+                              )}
+                              <small>{t("inbox.templateHint")}</small>
+                            </div>
+                          ) : (
+                            <InboundMessageContent message={message} />
+                          )}
+                          {!message.openingMenu &&
+                          (message.status === "failed" ||
+                            message.deliveryFailure) ? (
+                            <DeliveryFailure
+                              failure={message.deliveryFailure}
+                            />
+                          ) : null}
+                          {message.deliveryEvents.length ? (
+                            <details className="delivery-history">
+                              <summary>{t("inbox.deliveryHistory")}</summary>
+                              <ul>
+                                {message.deliveryEvents.map(
+                                  (event, eventIndex) => (
+                                    <li key={eventIndex}>
+                                      {t(`status.${event.status}`)} ·{" "}
+                                      <time dateTime={event.occurredAt}>
+                                        {new Date(
+                                          event.occurredAt,
+                                        ).toLocaleString(locale, {
+                                          timeZone,
+                                        })}
+                                      </time>
+                                    </li>
                                   ),
                                 )}
-                              </ol>
-                            ) : (
-                              <p>{t("inbox.noParams")}</p>
-                            )}
-                            <small>{t("inbox.templateHint")}</small>
-                          </div>
-                        ) : (
-                          <InboundMessageContent message={message} />
-                        )}
-                        {message.status === "failed" ||
-                        message.deliveryFailure ? (
-                          <DeliveryFailure failure={message.deliveryFailure} />
-                        ) : null}
-                        {message.deliveryEvents.length ? (
-                          <details className="delivery-history">
-                            <summary>{t("inbox.deliveryHistory")}</summary>
-                            <ul>
-                              {message.deliveryEvents.map(
-                                (event, eventIndex) => (
-                                  <li key={eventIndex}>
-                                    {t(`status.${event.status}`)} ·{" "}
-                                    <time dateTime={event.occurredAt}>
-                                      {new Date(
-                                        event.occurredAt,
-                                      ).toLocaleString(locale, {
-                                        timeZone,
-                                      })}
-                                    </time>
-                                  </li>
-                                ),
-                              )}
-                            </ul>
-                          </details>
-                        ) : null}
-                        {message.reactions.length || canOperate ? (
-                          <div className="reaction-row">
-                            {message.reactions.map((reaction) => (
-                              <span key={reaction}>{reaction}</span>
-                            ))}
-                            {canOperate ? (
-                              <IconButton
-                                disabled={pending}
-                                label={t("inbox.react")}
-                                onClick={() =>
-                                  void change({ emoji: "👍" }, message.id)
-                                }
-                              >
-                                <ThumbsUp aria-hidden="true" size={14} />
-                              </IconButton>
-                            ) : null}
-                          </div>
-                        ) : null}
-                      </article>
-                      <footer className="message-footer">
-                        <time dateTime={message.createdAt}>
-                          {messageTime(message.createdAt, locale, timeZone)}
-                        </time>
-                        <span>
-                          {message.direction === "outbound"
-                            ? t(`status.${message.status}`)
-                            : t("inbox.received")}
-                        </span>
-                      </footer>
+                              </ul>
+                            </details>
+                          ) : null}
+                          {message.reactions.length || canOperate ? (
+                            <div className="reaction-row">
+                              {message.reactions.map((reaction) => (
+                                <span key={reaction}>{reaction}</span>
+                              ))}
+                              {canOperate ? (
+                                <IconButton
+                                  disabled={pending}
+                                  label={t("inbox.react")}
+                                  onClick={() =>
+                                    void change({ emoji: "👍" }, message.id)
+                                  }
+                                >
+                                  <ThumbsUp aria-hidden="true" size={14} />
+                                </IconButton>
+                              ) : null}
+                            </div>
+                          ) : null}
+                        </article>
+                        <footer className="message-footer">
+                          <time dateTime={message.createdAt}>
+                            {messageTime(message.createdAt, locale, timeZone)}
+                          </time>
+                          <span>
+                            {message.direction === "outbound"
+                              ? message.openingMenu &&
+                                message.status !== "read" &&
+                                message.status !== "delivered"
+                                ? t(
+                                    `inbox.openingMenu.${message.openingMenu.outcome}`,
+                                  )
+                                : t(`status.${message.status}`)
+                              : t("inbox.received")}
+                          </span>
+                        </footer>
+                      </div>
                     </div>
-                  </div>
-                </li>
-              );
-            })}
-          </ol>
+                  </li>
+                );
+              })}
+            </ol>
+          </div>
         ) : null}
       </div>
       <form className="composer conversation-composer" onSubmit={submit}>

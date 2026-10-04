@@ -1130,7 +1130,11 @@
     box-shadow: var(--or-shadow-1);
   }
 
-  .field-service-directory tbody td {
+  .field-service-directory tbody td:nth-child(n) {
+    inline-size: auto;
+    max-inline-size: 100%;
+    overflow-wrap: anywhere;
+    white-space: normal;
     min-inline-size: 0;
     padding: 0;
     border: 0;
@@ -1939,6 +1943,10 @@
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 0.65rem;
+}
+
+.service-report-document__export-actions .or-button--danger {
+  color: color-mix(in srgb, var(--or-critical) 80%, var(--or-text));
 }
 
 .service-report-document {

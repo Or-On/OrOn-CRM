@@ -173,9 +173,9 @@ def validate_contract(sql: str) -> None:
         if not re.search(index_pattern, sql) and not re.search(constraint_pattern, sql):
             errors.append(f"expected query index missing from SQL: {index_name}")
 
-    security_definer_count = len(re.findall(r"\bSECURITY DEFINER\b", sql, re.IGNORECASE))
+    security_definer_count = len(re.findall(r"\bSECURITY\s+DEFINER\b", sql, re.IGNORECASE))
     secured_path_count = len(
-        re.findall(r"\bSECURITY DEFINER\s+SET search_path\s*=", sql, re.IGNORECASE)
+        re.findall(r"\bSECURITY\s+DEFINER\s+SET\s+search_path\s*=", sql, re.IGNORECASE)
     )
     if security_definer_count != secured_path_count:
         errors.append("every SECURITY DEFINER function must set an explicit search_path")

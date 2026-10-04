@@ -1,4 +1,7 @@
 import { once } from "node:events";
+import { resolve } from "node:path";
+import { createFilesystemAccountingSpool } from "./model-accounting-spool.js";
+import { SonioxAsyncAudioTranscriber } from "./audio-transcription.js";
 
 import { loadConfig } from "@or-on/config";
 import {
@@ -10,11 +13,20 @@ import { randomUUID } from "node:crypto";
 
 import { createMessagingStore } from "./database.js";
 import { runWorker } from "./worker.js";
+import { createJobWakeup } from "./job-wakeup.js";
+import {
+  channelCredentialKeys,
+  createChannelCredentialResolver,
+} from "./channel-credentials.js";
 import {
   RoutedMetaWhatsAppProvider,
   SimulatorWhatsAppProvider,
 } from "./providers.js";
 import { OpenAiCompatibleChatProvider } from "./ai-provider.js";
+import {
+  createModelCredentialResolver,
+  modelCredentialKeys,
+} from "./model-credentials.js";
 import { ControlApiArtifactVerifier } from "./artifact-verifier.js";
 import { OpenAiCompatiblePostCallProvider } from "./post-call-provider.js";
 import { DispatcherAutomaticCallProvider } from "./call-provider.js";
@@ -47,10 +59,41 @@ async function main(): Promise<void> {
           model: config.llm.model,
         }
       : undefined;
+  const credentialKeys = channelCredentialKeys(process.env);
+  const modelKeys = modelCredentialKeys(process.env);
+  const resolveSealedCredential =
+    modelKeys.size === 0 ? undefined : createModelCredentialResolver(modelKeys);
+  const resolveChannelCredential =
+    credentialKeys.size === 0
+      ? undefined
+      : createChannelCredentialResolver(credentialKeys);
   const protectedFieldKeys =
     process.env.FIELD_CIPHER_LOCAL_KEY && process.env.BLIND_INDEX_KEY
       ? protectedFieldKeysFromEnvironment(process.env)
       : undefined;
+  const privateObjectStorage = privateObjectStorageOptionsFromEnvironment(
+    process.env,
+  );
+  if (
+    config.audioTranscription.enabled &&
+    (!config.secrets.sonioxApiKey || !config.audioTranscription.model)
+  )
+    throw new Error(
+      "Enabled audio transcription requires explicit provider configuration",
+    );
+  // Accounting recovery must use an explicitly configured persistent volume.
+  // A process-relative default would silently lose billed attempts on replacement.
+  const accountingRoot = privateObjectStorage.localRoot?.trim();
+  if (llmOptions !== undefined && !accountingRoot)
+    throw new Error(
+      "LLM accounting requires an explicit private object storage root",
+    );
+  const modelAccountingSpool =
+    llmOptions === undefined || accountingRoot === undefined
+      ? undefined
+      : await createFilesystemAccountingSpool(
+          resolve(accountingRoot, "model-accounting"),
+        );
   const store = createMessagingStore(
     config.messagingDatabaseUrl,
     `messaging-${randomUUID()}`,
@@ -79,10 +122,36 @@ async function main(): Promise<void> {
     {
       simulatorEnabled: config.environment === "development",
       realWhatsAppEnabled: config.enableRealWhatsApp,
+      ...(resolveChannelCredential === undefined
+        ? {}
+        : { resolveChannelCredential }),
+      // Explicit bindings require tenant credential and atomic quota adapters.
+      // Without those adapters resolution closes; deployment keys are never used.
+      modelRouting: {
+        ...(resolveSealedCredential === undefined
+          ? {}
+          : { resolveSealedCredential }),
+        createProvider: (route) =>
+          new OpenAiCompatibleChatProvider({
+            apiKey: route.credential.apiKey,
+            baseUrl: route.baseUrl,
+            model: route.model,
+            ...route.settings,
+          }),
+      },
       automaticCallsEnabled: config.enableWhatsAppAutoCalls,
-      privateObjectStorage: privateObjectStorageOptionsFromEnvironment(
-        process.env,
-      ),
+      privateObjectStorage,
+      ...(config.audioTranscription.enabled &&
+      config.secrets.sonioxApiKey !== undefined &&
+      config.audioTranscription.model !== undefined
+        ? {
+            audioTranscriber: new SonioxAsyncAudioTranscriber({
+              apiKey: config.secrets.sonioxApiKey,
+              model: config.audioTranscription.model,
+            }),
+          }
+        : {}),
+      ...(modelAccountingSpool === undefined ? {} : { modelAccountingSpool }),
       automaticCallProvider: new DispatcherAutomaticCallProvider({
         dispatcherUrl: config.dispatcherUrl,
         enabled:
@@ -101,7 +170,12 @@ async function main(): Promise<void> {
       ...(llmOptions === undefined
         ? {}
         : {
-            aiProvider: new OpenAiCompatibleChatProvider(llmOptions),
+            aiProvider: new OpenAiCompatibleChatProvider({
+              ...llmOptions,
+              ...(config.llm.fallbackModel === undefined
+                ? {}
+                : { fallbackModel: config.llm.fallbackModel }),
+            }),
             fieldServiceProvider: new OpenAiCompatibleFieldServiceProvider(
               llmOptions,
             ),
@@ -128,13 +202,21 @@ async function main(): Promise<void> {
   ]).finally(() => abortController.abort());
 
   try {
+    const wakeup = createJobWakeup(config.messagingDatabaseUrl);
     await runWorker(
       {
-        closeDatabase: () => store.close(),
+        closeDatabase: async () => {
+          try {
+            await wakeup.close();
+          } finally {
+            await store.close();
+          }
+        },
         isDatabaseReady: () => store.isReady(),
         logger,
         processAvailable: () => store.processAvailable(),
         recordSuccessfulPoll: () => health.recordSuccessfulPoll(),
+        wait: (milliseconds) => wakeup.wait(milliseconds),
       },
       stop,
     );

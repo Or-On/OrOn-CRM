@@ -492,7 +492,7 @@
   align-items: center;
 }
 .pipeline-distribution a small {
-  color: var(--or-text-disabled);
+  color: var(--or-text-secondary);
   font-variant-numeric: tabular-nums;
 }
 .pipeline-distribution strong {

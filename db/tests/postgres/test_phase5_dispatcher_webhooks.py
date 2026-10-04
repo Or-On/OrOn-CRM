@@ -25,15 +25,16 @@ async def test_platform_voice_can_durably_deduplicate_livekit_webhooks(
     )
     try:
         assert await ledger.ready() is True
-        first = await ledger.claim(
+        first = await ledger.accept(
             provider_event_id=provider_event_id,
             event_type="room_finished",
             payload={"id": provider_event_id, "event": "room_finished"},
         )
         assert first.should_process is True
-        await ledger.complete(first.event_id)
+        delivery = (await ledger.claim_pending(1))[0]
+        assert await ledger.settle(delivery, "processed", None)
 
-        replay = await ledger.claim(
+        replay = await ledger.accept(
             provider_event_id=provider_event_id,
             event_type="room_finished",
             payload={"id": provider_event_id, "event": "room_finished"},
@@ -62,20 +63,22 @@ async def test_unroutable_inbound_calls_are_quarantined_not_dropped(postgres_url
     pool = await asyncpg.create_pool(postgres_url, min_size=1, max_size=2, init=assume_voice_role)
     ledger = PostgresWebhookLedger(postgres_url, provider_account_id="quarantine-test", pool=pool)
     try:
-        claim = await ledger.claim(
+        claim = await ledger.accept(
             provider_event_id=provider_event_id,
             event_type="participant_joined",
             payload={"id": provider_event_id, "event": "participant_joined"},
         )
-        await ledger.quarantine(claim.event_id, "unregistered_did")
-        replay = await ledger.claim(
+        delivery = (await ledger.claim_pending(1))[0]
+        assert delivery.event_id == claim.event_id
+        assert await ledger.settle(delivery, "quarantined", "unregistered_did")
+        replay = await ledger.accept(
             provider_event_id=provider_event_id,
             event_type="participant_joined",
             payload={"id": provider_event_id, "event": "participant_joined"},
         )
         assert replay.should_process is False
-        with pytest.raises(ValueError):
-            await ledger.quarantine(claim.event_id, "free text is never stored")
+        with pytest.raises(asyncpg.InvalidParameterValueError):
+            await ledger.settle(delivery, "quarantined", "free text is never stored")
     finally:
         await pool.close()
         admin = await asyncpg.connect(postgres_url)
@@ -99,7 +102,7 @@ async def test_unroutable_inbound_calls_are_quarantined_not_dropped(postgres_url
 async def test_platform_voice_has_only_required_webhook_ledger_privileges(
     pg: asyncpg.Connection,
 ) -> None:
-    assert await pg.fetchval(
+    assert not await pg.fetchval(
         "SELECT has_table_privilege('platform_voice', 'ops.inbound_events', 'SELECT,INSERT,UPDATE')"
     )
     assert not await pg.fetchval(

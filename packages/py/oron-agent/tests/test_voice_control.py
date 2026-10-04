@@ -47,22 +47,71 @@ async def test_pause_waits_for_local_cancellation_before_acknowledging():
     ack.assert_awaited_with(1, "paused")
 
 
-async def test_resume_requires_new_explicit_epoch_after_database_outage():
+async def test_transient_read_outage_preserves_media_and_recovers_same_epoch():
     control, read, ack = controller()
     await control.refresh()
     assert not control.paused
     old_generation = control.generation
     read.side_effect = RuntimeError("fixture outage")
     await control.refresh()
+    assert not control.paused
+    assert control.generation == old_generation
+    assert ack.await_count == 1
+    read.side_effect = None
+    await control.refresh()
+    assert not control.paused
+    assert control.generation == old_generation
+    ack.assert_awaited_with(0, "ai")
+
+
+async def test_transient_outage_never_authorizes_new_actions():
+    control, read, _ = controller()
+    await control.refresh()
+    read.side_effect = RuntimeError("fixture outage")
+    operation = AsyncMock()
+    with pytest.raises(asyncio.CancelledError):
+        await control.action(operation)
+    operation.assert_not_awaited()
+    assert not control.paused
+    read.side_effect = None
+    await control.action(operation)
+    operation.assert_awaited_once()
+
+
+async def test_initial_read_failure_keeps_unknown_control_paused():
+    control, read, ack = controller()
+    read.side_effect = RuntimeError("fixture outage")
+    await control.refresh()
+    assert control.paused
+    ack.assert_not_awaited()
+
+
+async def test_explicit_pause_remains_paused_through_read_outage():
+    control, read, _ = controller()
+    await control.refresh()
+    read.return_value = VoiceControlSnapshot(1, "paused")
+    await control.refresh()
+    read.side_effect = RuntimeError("fixture outage")
+    await control.refresh()
     assert control.paused
     read.side_effect = None
     await control.refresh()
     assert control.paused
-    ack.assert_awaited_with(0, "paused")
-    read.return_value = VoiceControlSnapshot(1, "ai")
+
+
+async def test_transient_read_timeout_keeps_established_media_state():
+    control, read, ack = controller()
+    await control.refresh()
+    generation = control.generation
+
+    async def stalled_read():
+        await asyncio.Event().wait()
+
+    read.side_effect = stalled_read
     await control.refresh()
     assert not control.paused
-    assert control.generation > old_generation
+    assert control.generation == generation
+    assert ack.await_count == 1
 
 
 async def test_revoked_resume_and_stale_ack_never_enable_ai():

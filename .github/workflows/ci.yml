@@ -2,6 +2,12 @@ name: CI
 
 on:
   workflow_dispatch:
+    inputs:
+      deploy_dev:
+        description: Publish images and deploy GCP DEV after all checks pass
+        required: false
+        default: false
+        type: boolean
   pull_request:
   push:
     branches:
@@ -281,7 +287,7 @@ jobs:
       - name: Authenticate to Google Cloud for immutable DEV images
         if: >-
           github.ref == 'refs/heads/main' &&
-          (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+          github.event_name == 'workflow_dispatch' && inputs.deploy_dev == true
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
           workload_identity_provider: projects/157867817612/locations/global/workloadIdentityPools/github-oron-dev/providers/oron-crm-main
@@ -289,12 +295,12 @@ jobs:
       - name: Configure the regional Artifact Registry
         if: >-
           github.ref == 'refs/heads/main' &&
-          (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+          github.event_name == 'workflow_dispatch' && inputs.deploy_dev == true
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
       - name: Publish immutable DEV images
         if: >-
           github.ref == 'refs/heads/main' &&
-          (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+          github.event_name == 'workflow_dispatch' && inputs.deploy_dev == true
         shell: bash
         env:
           REGISTRY: me-west1-docker.pkg.dev/website-478708/or-on-platform
@@ -310,7 +316,7 @@ jobs:
     name: Deploy GCP DEV
     if: >-
       github.ref == 'refs/heads/main' &&
-      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      github.event_name == 'workflow_dispatch' && inputs.deploy_dev == true
     needs:
       [
         typescript,
@@ -397,7 +403,7 @@ jobs:
             infra/deployment/systemd/oron-dev.service \
             infra/deployment/systemd/oron-dev-backup.service \
             infra/deployment/systemd/oron-dev-backup.timer \
-            scripts/deploy-dev.sh scripts/backup-dev.sh \
+            scripts/deploy-dev.sh scripts/backup-dev.sh scripts/restore-dev-backup.py \
             "${release_dir}"
           archive="${RUNNER_TEMP}/oron-dev-release-${GITHUB_SHA}.tar.gz"
           tar -czf "${archive}" -C "${release_dir}" .

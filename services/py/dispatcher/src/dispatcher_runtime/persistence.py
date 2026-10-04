@@ -479,6 +479,7 @@ class PostgresVoiceRuntime:
         # that write into explicit NULLs: doing so erased the recording,
         # transcript, answer state and outcome that the agent had just
         # committed successfully.
+        pending_usage = usage.pending_model_events() if usage is not None else ()
         update_values: dict[str, object] = {"status": status}
         for key, value in (
             ("answered", answered),
@@ -497,11 +498,27 @@ class PostgresVoiceRuntime:
                 session_in=SessionUpdate.model_validate(update_values),
             )
             if row is not None:
+                for event_id, input_tokens, output_tokens, occurred_at in pending_usage:
+                    await database.execute(
+                        text(
+                            "SELECT agents.record_voice_usage("
+                            ":id,:session,:input,:output,:occurred)"
+                        ),
+                        {
+                            "id": event_id,
+                            "session": session_id,
+                            "input": input_tokens,
+                            "output": output_tokens,
+                            "occurred": occurred_at,
+                        },
+                    )
                 await database.execute(
                     text("SELECT platform.write_voice_session_outcome(:session_id)"),
                     {"session_id": str(session_id)},
                 )
-            return row is not None
+        if row is not None and usage is not None:
+            usage.acknowledge_model_events({event[0] for event in pending_usage})
+        return row is not None
 
     async def checkpoint_usage(
         self,
@@ -510,6 +527,7 @@ class PostgresVoiceRuntime:
         *,
         usage: CallUsage,
     ) -> bool:
+        pending_usage = usage.pending_model_events()
         async with self._sessionmaker() as database, database.begin():
             await set_tenant(database, str(tenant_id))
             row = await session_crud.update_session(
@@ -517,7 +535,24 @@ class PostgresVoiceRuntime:
                 session_id=session_id,
                 session_in=SessionUpdate(usage=usage),
             )
-            return row is not None
+            if row is not None:
+                for event_id, input_tokens, output_tokens, occurred_at in pending_usage:
+                    await database.execute(
+                        text(
+                            "SELECT agents.record_voice_usage("
+                            ":id,:session,:input,:output,:occurred)"
+                        ),
+                        {
+                            "id": event_id,
+                            "session": session_id,
+                            "input": input_tokens,
+                            "output": output_tokens,
+                            "occurred": occurred_at,
+                        },
+                    )
+        if row is not None:
+            usage.acknowledge_model_events({event[0] for event in pending_usage})
+        return row is not None
 
     async def open_support_ticket(
         self, context: CallContext, *, subject: str, summary: str
@@ -539,8 +574,18 @@ class PostgresVoiceRuntime:
             ).scalar_one()
             return dict(receipt)
 
-    async def pin_voice_agent(self, context: CallContext, agent_version_id: UUID) -> None:
+    async def pin_voice_agent(
+        self,
+        context: CallContext,
+        agent_version_id: UUID,
+        *,
+        compiled_flow_version: int | None = None,
+    ) -> None:
         """Retain the server-resolved agent binding before exposing executable tools."""
+        if compiled_flow_version is not None and (
+            type(compiled_flow_version) is not int or compiled_flow_version < 1
+        ):
+            raise ValueError("compiled voice flow version is invalid")
         async with self._sessionmaker() as database, database.begin():
             await set_tenant(database, str(context.tenant_id))
             row = await database.get(Session, context.session_id, with_for_update=True)
@@ -560,6 +605,27 @@ class PostgresVoiceRuntime:
             if pinned is not None:
                 if str(pinned) != str(agent_version_id):
                     raise ValueError("voice session agent binding cannot change")
+                if compiled_flow_version is not None:
+                    retained = (
+                        await database.execute(
+                            text("""
+                        SELECT payload FROM session_events
+                        WHERE tenant_id=:tenant AND session_id=:session
+                          AND event_type='voice.flow.binding.v1' ORDER BY sequence LIMIT 1
+                    """),
+                            {
+                                "tenant": str(context.tenant_id),
+                                "session": str(context.session_id),
+                            },
+                        )
+                    ).scalar_one_or_none()
+                    if retained is not None and retained != {
+                        "compiled_flow_id": str(context.flow_id),
+                        "compiled_flow_version": compiled_flow_version,
+                        "agent_version_id": str(agent_version_id),
+                    }:
+                        raise ValueError("voice session flow binding cannot change")
+                    # Never backfill proof for a legacy already-pinned call.
                 return
             transport_phone = (
                 context.from_number if context.direction is Direction.INBOUND else context.to_number
@@ -597,6 +663,21 @@ class PostgresVoiceRuntime:
                     },
                 )
             )
+
+            if compiled_flow_version is not None:
+                database.add(
+                    SessionEvent(
+                        tenant_id=context.tenant_id,
+                        session_id=context.session_id,
+                        sequence=sequence + 1,
+                        event_type="voice.flow.binding.v1",
+                        payload={
+                            "compiled_flow_id": str(context.flow_id),
+                            "compiled_flow_version": compiled_flow_version,
+                            "agent_version_id": str(agent_version_id),
+                        },
+                    )
+                )
 
     async def get_service_intake_context(self, context: CallContext) -> dict:
         async with self._sessionmaker() as database, database.begin():
@@ -1195,12 +1276,39 @@ class PostgresVoiceRuntime:
             business_objective=business_objective,
         )
 
+    async def append_voice_memory_turn(
+        self, context: CallContext, ordinal: int, caller_text: str
+    ) -> None:
+        async with self._sessionmaker() as database, database.begin():
+            await set_tenant(database, str(context.tenant_id))
+            await database.execute(
+                text("SELECT platform.append_voice_memory_turn(:session,:ordinal,:caller_text)"),
+                {
+                    "session": str(context.session_id),
+                    "ordinal": ordinal,
+                    "caller_text": caller_text,
+                },
+            )
+
+    async def finish_voice_memory(self, context: CallContext) -> None:
+        async with self._sessionmaker() as database, database.begin():
+            await set_tenant(database, str(context.tenant_id))
+            await database.execute(
+                text("SELECT platform.finish_voice_memory(:session)"),
+                {"session": str(context.session_id)},
+            )
+
     async def get_voice_knowledge(self, agent_version_id: UUID, *, tenant_id: UUID) -> list[dict]:
         """RLS-scoped fresh eligibility. Expired/revoked latest versions never fall back."""
         statement = text("""
             SELECT source.id AS source_id, document.id AS document_id,
-                   document.version, document.metadata
+                   document.version, document.metadata,
+                   source.id::text || '/' || document.id::text || '/' ||
+                   document.version::text || '/' || md5(document.metadata::text)
+                   AS eligibility_revision
             FROM agents.agent_profile_versions agent
+            JOIN agents.agent_profiles profile ON profile.tenant_id=agent.tenant_id
+              AND profile.id=agent.agent_profile_id AND profile.archived_at IS NULL
             JOIN agents.knowledge_sources source ON source.tenant_id = agent.tenant_id
               AND (agent.knowledge_configuration->'sourceIds') ? source.id::text
             JOIN LATERAL (
@@ -1211,12 +1319,13 @@ class PostgresVoiceRuntime:
             ) document ON TRUE
             WHERE agent.id = :agent_id AND agent.tenant_id = :tenant_id
               AND platform.current_tenant_active()
+              AND platform.current_tenant_feature_enabled('voice')
               AND agent.knowledge_configuration->>'schemaVersion' = '1.0'
               AND jsonb_typeof(agent.knowledge_configuration->'sourceIds') = 'array'
               AND agent.published_at IS NOT NULL AND agent.validation_status = 'valid'
               AND source.status = 'published' AND document.revoked_at IS NULL
-              AND document.valid_from <= CURRENT_TIMESTAMP
-              AND (document.valid_until IS NULL OR document.valid_until > CURRENT_TIMESTAMP)
+              AND document.valid_from <= clock_timestamp()
+              AND (document.valid_until IS NULL OR document.valid_until > clock_timestamp())
             ORDER BY source.id
         """)
         async with self._sessionmaker() as database, database.begin():
@@ -1236,12 +1345,56 @@ class PostgresVoiceRuntime:
                 "sourceId": str(row["source_id"]),
                 "documentId": str(row["document_id"]),
                 "version": row["version"],
+                "eligibilityRevision": row["eligibility_revision"],
                 "facts": (row["metadata"] or {}).get("facts", [])
                 if (row["metadata"] or {}).get("schemaVersion") == "1.0"
                 else [],
             }
             for row in rows
         ]
+
+    async def get_voice_knowledge_revisions(
+        self, agent_version_id: UUID, *, tenant_id: UUID
+    ) -> list[str]:
+        """RLS-scoped fresh eligibility. Expired/revoked latest versions never fall back."""
+        statement = text("""
+            SELECT source.id::text || '/' || document.id::text || '/' ||
+                   document.version::text || '/' || md5(document.metadata::text)
+                   AS eligibility_revision
+            FROM agents.agent_profile_versions agent
+            JOIN agents.agent_profiles profile ON profile.tenant_id=agent.tenant_id
+              AND profile.id=agent.agent_profile_id AND profile.archived_at IS NULL
+            JOIN agents.knowledge_sources source ON source.tenant_id = agent.tenant_id
+              AND (agent.knowledge_configuration->'sourceIds') ? source.id::text
+            JOIN LATERAL (
+              SELECT d.* FROM agents.knowledge_documents d
+              WHERE d.source_id = source.id AND d.tenant_id = source.tenant_id
+                AND d.published_at IS NOT NULL
+              ORDER BY d.version DESC LIMIT 1
+            ) document ON TRUE
+            WHERE agent.id = :agent_id AND agent.tenant_id = :tenant_id
+              AND platform.current_tenant_active()
+              AND platform.current_tenant_feature_enabled('voice')
+              AND agent.knowledge_configuration->>'schemaVersion' = '1.0'
+              AND jsonb_typeof(agent.knowledge_configuration->'sourceIds') = 'array'
+              AND agent.published_at IS NOT NULL AND agent.validation_status = 'valid'
+              AND source.status = 'published' AND document.revoked_at IS NULL
+              AND document.valid_from <= clock_timestamp()
+              AND (document.valid_until IS NULL OR document.valid_until > clock_timestamp())
+            ORDER BY source.id
+        """)
+        async with self._sessionmaker() as database, database.begin():
+            await set_tenant(database, str(tenant_id))
+            rows = (
+                (
+                    await database.execute(
+                        statement, {"tenant_id": str(tenant_id), "agent_id": str(agent_version_id)}
+                    )
+                )
+                .mappings()
+                .all()
+            )
+        return [row["eligibility_revision"] for row in rows]
 
     async def record_voice_quality(
         self,
@@ -1255,7 +1408,7 @@ class PostgresVoiceRuntime:
             await set_tenant(database, str(context.tenant_id))
             row = await database.get(Session, context.session_id, with_for_update=True)
             if row is None:
-                return
+                raise ValueError("voice quality session is unavailable")
             existing = (
                 await database.execute(
                     text("""
@@ -1285,6 +1438,16 @@ class PostgresVoiceRuntime:
                     event_type="voice.quality.summary.v1",
                     payload={**summary, "agent_version_id": agent_version_id},
                 )
+            )
+
+    async def report_voice_quality_failure(self, context: CallContext, *, reason: str) -> None:
+        if reason not in {"summary_persistence_unavailable", "missing_session"}:
+            raise ValueError("unsupported voice quality failure")
+        async with self._sessionmaker() as database, database.begin():
+            await set_tenant(database, str(context.tenant_id))
+            await database.execute(
+                text("SELECT ops.report_voice_quality_failure(:session,:reason)"),
+                {"session": str(context.session_id), "reason": reason},
             )
 
     async def record_policy_event(
@@ -1635,8 +1798,6 @@ class AgentPostgresSessions:
             agent_version_id=context.agent_version_id,
             flow_version=context.flow_version,
         )
-        if configuration.get("agentVersionId"):
-            await self._backend.pin_voice_agent(context, UUID(configuration["agentVersionId"]))
         quality = configuration.get("quality", {})
         persona = {"feminine": "female", "masculine": "male", "neutral": "neutral"}.get(
             str(quality.get("agentGrammar", ""))
@@ -1661,6 +1822,12 @@ class AgentPostgresSessions:
                 else None
             ),
         )
+        if spec is not None and configuration.get("agentVersionId"):
+            if spec.id != context.flow_id:
+                raise ValueError("compiled voice flow identity is invalid")
+            await self._backend.pin_voice_agent(
+                context, UUID(configuration["agentVersionId"]), compiled_flow_version=spec.version
+            )
         return spec, configuration
 
     async def get_identity_verification_requirements(self, context: CallContext) -> dict:
@@ -1677,8 +1844,23 @@ class AgentPostgresSessions:
     async def get_verified_handoff_context(self, context: CallContext) -> dict:
         return await self._backend.get_verified_handoff_context(context)
 
+    async def append_voice_memory_turn(
+        self, context: CallContext, ordinal: int, caller_text: str
+    ) -> None:
+        await self._backend.append_voice_memory_turn(context, ordinal, caller_text)
+
+    async def finish_voice_memory(self, context: CallContext) -> None:
+        await self._backend.finish_voice_memory(context)
+
     async def get_voice_knowledge(self, agent_version_id: UUID, *, tenant_id: UUID) -> list[dict]:
         return await self._backend.get_voice_knowledge(agent_version_id, tenant_id=tenant_id)
+
+    async def get_voice_knowledge_revisions(
+        self, agent_version_id: UUID, *, tenant_id: UUID
+    ) -> list[str]:
+        return await self._backend.get_voice_knowledge_revisions(
+            agent_version_id, tenant_id=tenant_id
+        )
 
     async def get_lead_field_schema(self, schema_id: str, *, tenant_id: UUID) -> dict | None:
         return await self._backend.get_lead_field_schema(schema_id, tenant_id=tenant_id)
@@ -1714,6 +1896,9 @@ class AgentPostgresSessions:
         await self._backend.record_voice_quality(
             context, summary, agent_version_id=agent_version_id
         )
+
+    async def report_voice_quality_failure(self, context: CallContext, *, reason: str) -> None:
+        await self._backend.report_voice_quality_failure(context, reason=reason)
 
     async def record_policy_event(
         self, context: CallContext, *, stage: str, category: str, action: str

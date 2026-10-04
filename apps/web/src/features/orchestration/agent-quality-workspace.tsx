@@ -16,6 +16,7 @@ import { crmMutation, crmRead } from "../crm";
 import { qualityCopy } from "./quality-copy";
 import { AgentAudioPreview } from "./agent-audio-preview";
 import { AgentProviderEvaluation } from "./agent-provider-evaluation";
+import { AgentGoldenEvaluations } from "./agent-golden-evaluations";
 import styles from "./agent-quality-workspace.module.css";
 
 type Copy = ReturnType<typeof qualityCopy>;
@@ -278,6 +279,12 @@ export function AgentQualityWorkspace({
             endpoint={endpoint}
             versionId={selected.id}
             published={selected.publishedAt !== null}
+            locale={locale}
+          />
+          <AgentGoldenEvaluations
+            key={`golden-${selected.id}`}
+            endpoint={endpoint}
+            versionId={selected.id}
             locale={locale}
           />
           <AgentProviderEvaluation

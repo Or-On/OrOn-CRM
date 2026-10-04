@@ -1,5 +1,7 @@
 import type postgres from "postgres";
 import { describe, expect, it, vi } from "vitest";
+vi.mock("./tenant-features.js", () => ({ requireTenantFeature: vi.fn() }));
+
 import { attachStripeSession, createCampaignTopup } from "./billing.js";
 
 const actor = "20000000-0000-4000-8000-000000000001";

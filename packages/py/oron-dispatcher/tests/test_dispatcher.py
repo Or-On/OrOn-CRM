@@ -9,6 +9,7 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 import pytest
 from livekit.protocol.models import ParticipantInfo
 from oron_dispatcher.dispatcher import (
+    AdmissionUnavailable,
     AgentStartupUnavailable,
     Dispatcher,
     IdempotencyConflict,
@@ -78,6 +79,165 @@ def _participant_event(*, did: str | None = DID, room: str = "call-inbound"):
         room=SimpleNamespace(name=room),
         participant=SimpleNamespace(kind=ParticipantInfo.SIP, attributes=attributes),
     )
+
+
+async def test_pending_admission_counts_toward_cap_and_duplicate_does_not_hangup():
+    dispatcher, sessions, launch, hangup = _dispatcher()
+    dispatcher._settings.max_active_calls = 1
+    waiting, release = asyncio.Event(), asyncio.Event()
+    handle = launch.return_value
+
+    async def blocked_launch(*_args):
+        waiting.set()
+        await release.wait()
+        return handle
+
+    launch.side_effect = blocked_launch
+    first = asyncio.create_task(
+        dispatcher.handle_participant_joined(_participant_event(room="one"))
+    )
+    await waiting.wait()
+    duplicate = asyncio.create_task(
+        dispatcher.handle_participant_joined(_participant_event(room="one"))
+    )
+    with pytest.raises(AdmissionUnavailable, match="capacity"):
+        await dispatcher.handle_participant_joined(_participant_event(room="two"))
+    assert sessions.begin.await_count == 1
+    release.set()
+    await asyncio.gather(first, duplicate)
+    assert launch.await_count == 1
+    assert len(dispatcher.active_calls()) == 1
+    assert [call.args[0] for call in hangup.await_args_list] == ["two"]
+
+
+async def test_drain_cancels_pending_startup_and_denies_new_admission():
+    dispatcher, sessions, launch, hangup = _dispatcher()
+    waiting = asyncio.Event()
+
+    async def blocked_launch(*_args):
+        waiting.set()
+        await asyncio.Event().wait()
+
+    launch.side_effect = blocked_launch
+    first = asyncio.create_task(
+        dispatcher.handle_participant_joined(_participant_event(room="pending"))
+    )
+    await waiting.wait()
+    await dispatcher.drain()
+    assert first.cancelled()
+    hangup.assert_awaited_once_with("pending")
+    assert not dispatcher._pending
+    sessions.finalize.assert_awaited_once()
+    assert sessions.finalize.await_args.kwargs["status"] == SessionStatus.FAILED
+    with pytest.raises(AdmissionUnavailable, match="draining"):
+        await dispatcher.handle_participant_joined(_participant_event(room="new"))
+    assert (await dispatcher.health()).status == "not_ready"
+
+
+async def test_busy_audio_once_before_hangup_without_agent_or_db_admission():
+    dispatcher, sessions, launch, hangup = _dispatcher()
+    dispatcher._settings.max_active_calls = 1
+    await dispatcher.handle_participant_joined(_participant_event(room="active"))
+    played = []
+
+    async def play(room, kind):
+        assert hangup.await_count == 0
+        played.append((room, kind))
+
+    dispatcher._play_announcement = play
+    for _ in range(2):
+        with pytest.raises(AdmissionUnavailable):
+            await dispatcher.handle_participant_joined(_participant_event(room="busy"))
+    assert played == [("busy", "busy")]
+    assert hangup.await_count == 1
+    assert sessions.begin.await_count == 1
+    assert launch.await_count == 1
+
+
+async def test_drain_uses_engine_graceful_stop_before_hangup_and_finalize():
+    dispatcher, sessions, launch, hangup = _dispatcher()
+    order = []
+
+    async def graceful():
+        order.append("engine-goodbye")
+
+    launch.return_value = SimpleNamespace(graceful_stop=graceful, cancel=AsyncMock())
+    hangup.side_effect = lambda *_: order.append("hangup")
+    sessions.finalize.side_effect = lambda *_args, **_kwargs: order.append("finalize") or True
+    await dispatcher.handle_participant_joined(_participant_event(room="active"))
+    await dispatcher.drain()
+    assert order == ["engine-goodbye", "hangup", "finalize"]
+    launch.return_value.cancel.assert_not_awaited()
+
+
+async def test_drain_stops_active_calls_concurrently():
+    dispatcher, _sessions, launch, hangup = _dispatcher()
+    both_started, release = asyncio.Event(), asyncio.Event()
+    started = set()
+
+    async def launch_handle(room, *_args):
+        async def graceful():
+            started.add(room)
+            if len(started) == 2:
+                both_started.set()
+            await release.wait()
+
+        return SimpleNamespace(graceful_stop=graceful, cancel=AsyncMock())
+
+    launch.side_effect = launch_handle
+    await dispatcher.handle_participant_joined(_participant_event(room="one"))
+    await dispatcher.handle_participant_joined(_participant_event(room="two"))
+    draining = asyncio.create_task(dispatcher.drain())
+    try:
+        await asyncio.wait_for(both_started.wait(), timeout=1.0)
+    finally:
+        release.set()
+        await draining
+    assert hangup.await_count == 2
+    assert not dispatcher.active_calls()
+
+
+async def test_drain_deadline_cancels_blocked_handle_and_tears_down_room():
+    dispatcher, sessions, launch, hangup = _dispatcher()
+    dispatcher._settings.drain_timeout_seconds = 0.02
+    stopped = asyncio.Event()
+
+    async def graceful():
+        try:
+            await asyncio.Event().wait()
+        finally:
+            stopped.set()
+
+    launch.return_value = SimpleNamespace(graceful_stop=graceful, cancel=AsyncMock())
+    await dispatcher.handle_participant_joined(_participant_event(room="blocked"))
+    with pytest.raises(PersistenceUnavailable, match="deadline"):
+        await dispatcher.drain()
+    assert stopped.is_set()
+    hangup.assert_awaited_once_with("blocked")
+    sessions.finalize.assert_awaited_once()
+
+
+async def test_tenant_capacity_is_separate_from_global_capacity_and_released():
+    dispatcher, _sessions, _launch, _hangup = _dispatcher()
+    dispatcher._settings.max_active_calls = 2
+    dispatcher._settings.max_active_calls_per_tenant = 1
+    await dispatcher.handle_participant_joined(_participant_event(room="tenant-one"))
+    with pytest.raises(AdmissionUnavailable):
+        await dispatcher.handle_participant_joined(_participant_event(room="tenant-one-excess"))
+    foreign = uuid4()
+    dispatcher._resolve_phone = AsyncMock(
+        return_value=PhoneResolution(tenant_id=foreign, flow_id=FLOW_ID)
+    )
+    await dispatcher.handle_participant_joined(_participant_event(room="tenant-two"))
+    assert len(dispatcher.active_calls()) == 2
+    await dispatcher.hangup("tenant-one")
+    dispatcher._resolve_phone = AsyncMock(
+        return_value=PhoneResolution(tenant_id=TENANT_ID, flow_id=FLOW_ID)
+    )
+    await dispatcher.handle_participant_joined(_participant_event(room="tenant-one-replacement"))
+    assert len(dispatcher.active_calls()) == 2
+    await dispatcher.drain()
+    assert not dispatcher.active_calls()
 
 
 async def test_inbound_resolves_before_persisting_and_launches_once() -> None:
@@ -620,3 +780,27 @@ async def test_owed_writes_survive_repeated_failed_redeliveries_without_changing
     sessions.finalize = AsyncMock(return_value=True)
     await dispatcher.handle_room_finished(_room_finished())
     sessions.finalize.assert_not_awaited()
+
+
+async def test_unavailable_published_flow_plays_fixed_refusal_before_hangup():
+    dispatcher, sessions, launch, hangup = _dispatcher()
+    launch.side_effect = AgentStartupUnavailable("published tenant flow is unavailable")
+    order = []
+
+    async def announce(room, kind):
+        assert room == "call-inbound" and kind == "unavailable"
+        order.append("refusal")
+
+    async def disconnect(room):
+        assert room == "call-inbound"
+        order.append("hangup")
+
+    dispatcher._play_announcement = announce
+    hangup.side_effect = disconnect
+    with pytest.raises(UnroutableInboundCall) as refused:
+        await dispatcher.handle_participant_joined(_participant_event())
+    assert refused.value.reason == "voice_agent_unavailable"
+    assert order == ["refusal", "hangup"]
+    sessions.finalize.assert_awaited_once()
+    assert sessions.finalize.call_args.kwargs["status"] is SessionStatus.FAILED
+    assert dispatcher.active_calls() == []

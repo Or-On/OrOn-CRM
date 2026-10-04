@@ -1,0 +1,13 @@
+# Optional operator-reviewed overlay, not loaded by deploy-dev.sh.
+# Equal memory+swap limits prohibit container swap; this does not solve host
+# overcommit or certify the existing 3907 MiB host as suitable.
+services:
+  postgres: { memswap_limit: 2g }
+  migrator: { memswap_limit: 1g }
+  bootstrap-owner: { memswap_limit: 1g }
+  control-api: { memswap_limit: 1g }
+  dispatcher: { memswap_limit: 1g }
+  messaging-worker: { memswap_limit: 1g }
+  sweeper: { memswap_limit: 1g }
+  web: { memswap_limit: 1g }
+  caddy: { memswap_limit: 256m }

@@ -4,6 +4,7 @@ export { AgentQualityWorkspace } from "./agent-quality-workspace";
 export { qualityCopy } from "./quality-copy";
 export { AgentAudioPreview } from "./agent-audio-preview";
 export { AgentProviderEvaluation } from "./agent-provider-evaluation";
+export { AgentGoldenEvaluations } from "./agent-golden-evaluations";
 export { buildFlowElements } from "./flow-canvas";
 export {
   CanonicalFlowEditor,

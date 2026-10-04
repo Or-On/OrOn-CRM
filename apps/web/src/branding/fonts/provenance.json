@@ -1,0 +1,26 @@
+[
+  {
+    "family": "Heebo",
+    "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/heebo/Heebo%5Bwght%5D.ttf",
+    "bytes": 122012,
+    "sha256": "18f930b583fa8fe6b40b2f8263b7ac6afbac07adc91a12467874e7467d3ace30",
+    "weights": [100, 900],
+    "hebrewGlyphs": true
+  },
+  {
+    "family": "Geist",
+    "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/geist/Geist%5Bwght%5D.ttf",
+    "bytes": 169056,
+    "sha256": "73894e0448cae90a92b6c2f8732b7bb9acb7b94c418bff559dad4a18e1de9659",
+    "weights": [100, 900],
+    "hebrewGlyphs": false
+  },
+  {
+    "family": "Geist Mono",
+    "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/geistmono/GeistMono%5Bwght%5D.ttf",
+    "bytes": 171948,
+    "sha256": "d00e590b8eb3a59acc329b2d044fd143ae935090b7da33199ebee27cc7de8196",
+    "weights": [100, 900],
+    "hebrewGlyphs": false
+  }
+]

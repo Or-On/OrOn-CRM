@@ -43,6 +43,7 @@ import {
 } from "@or-on/ui";
 import { crmMutation, crmRead } from "../crm";
 import { IdentityImage } from "../identity";
+import { TemplateBrowser } from "../inbox-templates";
 import { ConversationThread } from "./conversation-thread";
 import { emptyReply, ReplyIntentKeys, type ReplyDraft } from "./reply-intent";
 import {
@@ -131,6 +132,7 @@ export function InboxWorkspace({
   conversations,
   initialMessages,
   initialConversationId,
+  initialThreadOpen = false,
   initialConversationNextCursor = null,
   initialNextCursor = null,
   quickReplies,
@@ -147,6 +149,7 @@ export function InboxWorkspace({
   readonly conversations: readonly ConversationSummary[];
   readonly initialMessages: readonly Message[];
   readonly initialConversationId?: string | undefined;
+  readonly initialThreadOpen?: boolean;
   readonly initialConversationNextCursor?: ConversationCursor | null;
   readonly initialNextCursor?: MessageCursor | null;
   readonly quickReplies: readonly QuickReply[];
@@ -172,7 +175,9 @@ export function InboxWorkspace({
   const [loadingMoreConversations, setLoadingMoreConversations] =
     useState(false);
   const [selectedId, setSelectedId] = useState(initialId);
-  const [mobileThread, setMobileThread] = useState(false);
+  const [mobileThread, setMobileThread] = useState(
+    initialThreadOpen && initialConversationId !== undefined,
+  );
   const [contextOpen, setContextOpen] = useState(false);
   const [channelsCollapsed, setChannelsCollapsed] = useState(false);
   const [channelsOpen, setChannelsOpen] = useState(false);
@@ -236,6 +241,12 @@ export function InboxWorkspace({
     setSearchInput(initialSearch);
   }, [initialSearch]);
   useEffect(() => setFilter(initialFilter), [initialFilter]);
+  useEffect(() => {
+    if (initialThreadOpen && initialConversationId !== undefined) {
+      setSelectedId(initialConversationId);
+      setMobileThread(true);
+    } else setMobileThread(false);
+  }, [initialThreadOpen, initialConversationId]);
   useEffect(() => {
     if (selected === undefined || selected.unreadCount === 0) return;
     const controller = new AbortController();
@@ -1144,6 +1155,15 @@ export function InboxWorkspace({
                 </p>
               </div>
             </details>
+            {contextOpen &&
+            selected.channelKind === "whatsapp" &&
+            selected.provider === "meta" ? (
+              <TemplateBrowser
+                key={selected.id}
+                conversationId={selected.id}
+                locale={locale}
+              />
+            ) : null}
           </div>
         </aside>
       )}

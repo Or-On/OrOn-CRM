@@ -1,3 +1,4 @@
+import { boundedMultipart } from "../../../../../../features/uploads";
 import { NextResponse } from "next/server";
 import {
   markCustomerDocumentAvailable,
@@ -51,7 +52,7 @@ export async function POST(
     await assertCrmMutation(request);
     const [{ id }, form] = await Promise.all([
       context.params,
-      request.formData(),
+      boundedMultipart(request, 20 * 1024 * 1024 + 64 * 1024),
     ]);
     const contactId = uuid(id, "Contact");
     const file = form.get("file");

@@ -1,3 +1,4 @@
+import { boundedMultipart } from "../../../../../../features/uploads";
 import { NextResponse } from "next/server";
 import {
   beginVisitAttendanceRequest,
@@ -71,7 +72,7 @@ export async function POST(request: Request, context: Context) {
       return NextResponse.json({ visit });
     }
 
-    const form = await request.formData();
+    const form = await boundedMultipart(request, 20 * 1024 * 1024 + 64 * 1024);
     const file = form.get("file");
     if (!(file instanceof File))
       throw new TypeError("Select a signature image");

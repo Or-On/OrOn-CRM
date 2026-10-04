@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type * as Crm from "@or-on/crm";
 
 const state = vi.hoisted(() => ({
   tenantId: "tenant-a",
@@ -11,7 +12,8 @@ const state = vi.hoisted(() => ({
   guard: vi.fn(),
   permission: vi.fn(),
 }));
-vi.mock("@or-on/crm", () => ({
+vi.mock("@or-on/crm", async (importOriginal) => ({
+  ...(await importOriginal<typeof Crm>()),
   getCurrentTenantLogo: state.read,
   setCurrentTenantLogo: state.write,
 }));
@@ -54,9 +56,12 @@ vi.mock("../src/features/crm-route", () => ({
 
 import { DELETE, GET, PATCH } from "../src/app/api/settings/logo/route";
 
-const logoA = new Uint8Array([
-  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1,
-]);
+const logoA = Uint8Array.from(
+  Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAG0lEQVR4nGNQSlv1nxLMMGrAqAGjBvwfJgYAAGE+MR8B/c+7AAAAAElFTkSuQmCC",
+    "base64",
+  ),
+);
 const logoB = new Uint8Array([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 2,
 ]);

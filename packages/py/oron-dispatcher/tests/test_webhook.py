@@ -20,7 +20,7 @@ from oron_dispatcher.dispatcher import (
 )
 from oron_dispatcher.sip_client import RealTelephonyDenied
 from oron_dispatcher.webhook import create_app
-from oron_dispatcher.webhook_ledger import WebhookClaim
+from oron_dispatcher.webhook_ledger import PostgresWebhookLedger, WebhookClaim
 
 LIVEKIT_KEY = "test-key"
 LIVEKIT_SECRET = "test-secret-test-secret-test-secret"
@@ -370,3 +370,191 @@ def test_unroutable_inbound_call_is_acknowledged_and_quarantined() -> None:
     assert response.status_code == 200
     assert ledger.quarantined == [("EV_unroutable", "unregistered_did")]
     assert ledger.completed == [] and ledger.failed == []
+
+
+class DurableFakeLedger(PostgresWebhookLedger):
+    def __init__(self):
+        self.pending = []
+        self.seen = {}
+        self.settled = []
+
+    async def accept(self, *, provider_event_id, event_type, payload):
+        from oron_dispatcher.webhook_pump import DurableDelivery
+
+        if provider_event_id in self.seen:
+            if self.seen[provider_event_id] != payload:
+                raise ValueError("collision")
+            return WebhookClaim(provider_event_id, False)
+        self.seen[provider_event_id] = payload
+        self.pending.append(DurableDelivery(provider_event_id, "fresh", payload))
+        return WebhookClaim(provider_event_id, True)
+
+    async def claim_pending(self, limit):
+        result, self.pending = self.pending[:limit], self.pending[limit:]
+        return result
+
+    async def renew(self, delivery):
+        return True
+
+    async def settle(self, delivery, outcome, reason):
+        self.settled.append((outcome, reason))
+        return True
+
+    async def ready(self):
+        return True
+
+    async def close(self):
+        pass
+
+
+def test_durable_signed_ack_does_not_wait_for_handler_and_shutdown_cleans_it():
+    import asyncio
+    import threading
+    import time
+
+    dispatcher = _dispatcher()
+    ledger = DurableFakeLedger()
+    started, cleaned = threading.Event(), threading.Event()
+
+    async def hold(event):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cleaned.set()
+
+    dispatcher.handle_room_finished.side_effect = hold
+    receiver = api.WebhookReceiver(api.TokenVerifier(LIVEKIT_KEY, LIVEKIT_SECRET))
+    app = create_app(
+        dispatcher=dispatcher,
+        receiver=receiver,
+        ledger=ledger,
+        assertion_verifier=None,
+        participant_is_current=AsyncMock(return_value=True),
+    )
+    body, token = _livekit_delivery("durable-fixture")
+    with TestClient(app) as client:
+        before = time.monotonic()
+        response = client.post("/livekit/webhook", content=body, headers={"Authorization": token})
+        assert response.status_code == 200
+        assert time.monotonic() - before < 1
+        assert started.wait(1)
+        assert not cleaned.is_set()
+        duplicate = client.post("/livekit/webhook", content=body, headers={"Authorization": token})
+        assert duplicate.json()["duplicate"]
+    assert cleaned.is_set()
+    assert not ledger.settled
+    dispatcher.drain.assert_awaited_once()
+
+
+def test_oversized_signed_ingress_is_rejected_before_verification():
+    with TestClient(_app(_dispatcher(), FakeLedger())) as client:
+        response = client.post("/livekit/webhook", content=b"x" * 262145)
+    assert response.status_code == 413
+
+
+@pytest.mark.parametrize("length", [None, "1"])
+async def test_stream_limit_stops_before_remainder_even_with_lying_length(length):
+    from unittest.mock import Mock
+
+    import httpx
+
+    receiver = Mock()
+    ledger = FakeLedger()
+    ledger.claim = AsyncMock(wraps=ledger.claim)
+    app = create_app(
+        dispatcher=_dispatcher(), receiver=receiver, ledger=ledger, assertion_verifier=None
+    )
+    yielded = []
+
+    async def body():
+        for size in (131072, 131072, 1):
+            yielded.append(size)
+            yield b"x" * size
+        raise AssertionError("oversized request remainder was consumed")
+
+    headers = {"content-length": length} if length is not None else {}
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://fixture"
+    ) as client:
+        response = await client.post("/livekit/webhook", content=body(), headers=headers)
+    assert response.status_code == 413
+    assert yielded == [131072, 131072, 1]
+    receiver.receive.assert_not_called()
+    ledger.claim.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "length,status", [("262145", 413), ("9" * 100, 413), ("-1", 400), ("abc", 400), ("١", 400)]
+)
+async def test_declared_length_rejected_without_consuming_body(length, status):
+    from unittest.mock import Mock
+
+    import httpx
+
+    receiver = Mock()
+    ledger = FakeLedger()
+    ledger.claim = AsyncMock(wraps=ledger.claim)
+    app = create_app(
+        dispatcher=_dispatcher(), receiver=receiver, ledger=ledger, assertion_verifier=None
+    )
+    consumed = False
+
+    async def body():
+        nonlocal consumed
+        consumed = True
+        yield b"body"
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://fixture"
+    ) as client:
+        # Raw ASGI scope permits the deliberately malformed non-ASCII header too.
+        headers = [(b"content-length", length.encode("utf-8"))]
+        response = await client.post("/livekit/webhook", content=body(), headers=headers)
+    assert response.status_code == status
+    assert not consumed
+    receiver.receive.assert_not_called()
+    ledger.claim.assert_not_awaited()
+
+
+async def test_signed_utf8_split_across_chunks_preserves_signature_and_duplicate():
+    from unittest.mock import Mock
+
+    import httpx
+
+    dispatcher, ledger = _dispatcher(), FakeLedger()
+    receiver = Mock(wraps=api.WebhookReceiver(api.TokenVerifier(LIVEKIT_KEY, LIVEKIT_SECRET)))
+    app = create_app(
+        dispatcher=dispatcher, receiver=receiver, ledger=ledger, assertion_verifier=None
+    )
+    body = json.dumps(
+        {"event": "room_finished", "id": "EV_chunked", "room": {"name": "שיחה-בדיקה"}},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    encoded = body.encode("utf-8")
+    # Deliberately split the first Hebrew character between its two UTF-8 bytes.
+    boundary = encoded.index("ש".encode()) + 1
+    token = (
+        api.AccessToken(LIVEKIT_KEY, LIVEKIT_SECRET)
+        .with_sha256(base64.b64encode(hashlib.sha256(encoded).digest()).decode())
+        .to_jwt()
+    )
+
+    async def chunks():
+        yield encoded[:boundary]
+        yield encoded[boundary:]
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://fixture"
+    ) as client:
+        first = await client.post(
+            "/livekit/webhook", content=chunks(), headers={"Authorization": token}
+        )
+        second = await client.post(
+            "/livekit/webhook", content=chunks(), headers={"Authorization": token}
+        )
+    assert first.status_code == second.status_code == 200
+    assert not first.json()["duplicate"] and second.json()["duplicate"]
+    assert receiver.receive.call_args_list[0].args[0] == body
+    dispatcher.handle_room_finished.assert_awaited_once()

@@ -18,6 +18,40 @@ def _context() -> CallContext:
     )
 
 
+async def test_cancel_before_readiness_cancels_and_awaits_owned_child() -> None:
+    settings = Settings(
+        _env_file=None,
+        ENABLE_REAL_VOICE_PROVIDERS=True,
+        LIVEKIT_URL="ws://127.0.0.1:7880",
+        LIVEKIT_API_KEY="fixture",
+        LIVEKIT_API_SECRET="fixture-secret",
+        SONIOX_API_KEY="fixture-soniox",
+        GOOGLE_CLOUD_PROJECT="fixture-project",
+    )
+    started, stopped = asyncio.Event(), asyncio.Event()
+
+    async def never_ready(*_args, **_kwargs) -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            stopped.set()
+
+    with patch("oron_agent.launcher.run_call", new=never_ready):
+        launch = asyncio.create_task(
+            make_launch_bot(settings, preflight=AsyncMock())("fixture", _context())
+        )
+        await started.wait()
+        launch.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await launch
+        assert stopped.is_set()
+        assert not any(
+            task.get_name().startswith("oron-agent:") and not task.done()
+            for task in asyncio.all_tasks()
+        )
+
+
 async def test_launcher_denies_before_creating_a_task_when_providers_are_disabled() -> None:
     preflight = AsyncMock()
     launch = make_launch_bot(

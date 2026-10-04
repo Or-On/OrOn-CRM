@@ -26,6 +26,16 @@
   font-weight: 700;
   background: var(--or-bg-raised);
 }
+.periodRange {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin-block: 0 1rem;
+  color: var(--or-text-muted);
+  font-size: 0.875rem;
+}
+
 .metrics {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -96,6 +106,52 @@
   max-width: 42rem;
 }
 @media (max-width: 720px) {
+  .register :global(.or-data-table) {
+    overflow: visible;
+  }
+  .register table {
+    display: block;
+    min-width: 0 !important;
+    width: 100%;
+  }
+  .register thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .register tbody {
+    display: grid;
+    gap: 1rem;
+  }
+  .register tbody tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+    padding: 1rem;
+    border-block-end: 1px solid var(--or-border);
+  }
+  .register tbody td {
+    display: block;
+    block-size: auto;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+  .register tbody td:first-child {
+    grid-column: 1 / -1;
+  }
+  .register tbody td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    margin-block-end: 0.35rem;
+    color: var(--or-text-muted);
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
   .metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

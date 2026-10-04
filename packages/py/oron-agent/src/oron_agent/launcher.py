@@ -22,6 +22,7 @@ class AgentTaskHandle(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     task: asyncio.Task[None]
+    drain_requested: asyncio.Event | None = None
 
     def observe_completion(self, callback: Callable[[BaseException | None], None]) -> None:
         """Report an unexpected runtime exit to the owning dispatcher.
@@ -48,6 +49,11 @@ class AgentTaskHandle(BaseModel):
         with suppress(asyncio.CancelledError):
             await self.task
 
+    async def graceful_stop(self) -> None:
+        if self.drain_requested is not None:
+            self.drain_requested.set()
+        await self.cancel()
+
 
 def make_launch_bot(
     settings: Settings,
@@ -55,6 +61,8 @@ def make_launch_bot(
     g2p: G2P | None = None,
     sessions: RuntimeSessions | None = None,
     preflight: Preflight = verify_llm_access,
+    play_goodbye: Callable[[str], Awaitable[None]] | None = None,
+    play_failure: Callable[[str], Awaitable[None]] | None = None,
 ):
     """Return the dispatcher port, preflighting providers before a paid call."""
 
@@ -80,6 +88,7 @@ def make_launch_bot(
         await ensure_preflight()
         parsed_overrides = AgentOverrides.model_validate(overrides) if overrides else None
         ready = asyncio.Event()
+        drain_requested = asyncio.Event()
         task = asyncio.create_task(
             run_call(
                 room,
@@ -89,6 +98,9 @@ def make_launch_bot(
                 overrides=parsed_overrides,
                 sessions=sessions,
                 ready=ready,
+                drain_requested=drain_requested,
+                on_drain=(lambda: play_goodbye(room)) if play_goodbye is not None else None,
+                on_failure=(lambda: play_failure(room)) if play_failure is not None else None,
             ),
             name=f"oron-agent:{context.session_id}",
         )
@@ -112,10 +124,17 @@ def make_launch_bot(
                 with suppress(asyncio.CancelledError):
                     await task
                 raise TimeoutError("voice agent readiness timed out")
+        except BaseException:
+            # Until readiness hands the handle to the dispatcher, this scope
+            # owns the child. Cancellation must not leave an untracked call.
+            task.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await task
+            raise
         finally:
             ready_wait.cancel()
             with suppress(asyncio.CancelledError):
                 await ready_wait
-        return AgentTaskHandle(task=task)
+        return AgentTaskHandle(task=task, drain_requested=drain_requested)
 
     return launch_bot

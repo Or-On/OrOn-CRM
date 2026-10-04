@@ -43,20 +43,24 @@ def test_private_field_and_object_configuration_is_shared_without_printing_secre
                 f"FIELD_CIPHER_LOCAL_KEY={field_key}",
                 f"BLIND_INDEX_KEY={blind_index_key}",
                 f"WHATSAPP_ADDITIONAL_ACCOUNTS_JSON={additional_accounts}",
+                "WHATSAPP_MEMORY_SIGNATURE_PROOF_ENABLED=true",
+                "WHATSAPP_MEMORY_VERIFIER_DATABASE_URL=postgresql://synthetic-verifier:private-verifier@db/dev_render_contract",
             )
         )
         + "\n",
         encoding="utf-8",
     )
     output = tmp_path / "rendered"
-    executable = shutil.which("pnpm")
+    # Exercise the cached repository renderer directly. The package-manager
+    # launcher may try an unavailable registry version switch; this is not an
+    # install or a signature-policy bypass.
+    executable = shutil.which("node")
     assert executable is not None
 
     result = subprocess.run(  # noqa: S603 - repository-owned script and synthetic input
         [
             executable,
-            "exec",
-            "tsx",
+            str(ROOT / "node_modules" / "tsx" / "dist" / "cli.mjs"),
             str(RENDERER),
             "--source",
             str(source),
@@ -98,6 +102,25 @@ def test_private_field_and_object_configuration_is_shared_without_printing_secre
     for service in ("web", "messaging-worker"):
         assert services[service]["WHATSAPP_ADDITIONAL_ACCOUNTS_JSON"] == additional_accounts
 
+    sweeper = _env(output / "config" / "sweeper.env")
+    assert sweeper["DATABASE_URL"] == services["dispatcher"]["VOICE_DATABASE_URL"]
+
+    verifier = "postgresql://synthetic-verifier:private-verifier@db/dev_render_contract"
+    assert services["web"]["WHATSAPP_MEMORY_VERIFIER_DATABASE_URL"] == verifier
+    assert services["web"]["WHATSAPP_MEMORY_SIGNATURE_PROOF_ENABLED"] == "true"
+    assert verifier not in emitted
+    for name in (
+        "messaging-worker",
+        "dispatcher",
+        "control-api",
+        "sweeper",
+        "migrator",
+        "bootstrap-owner",
+    ):
+        config = _env(output / "config" / f"{name}.env")
+        assert "WHATSAPP_MEMORY_VERIFIER_DATABASE_URL" not in config
+        assert "WHATSAPP_MEMORY_SIGNATURE_PROOF_ENABLED" not in config
+
 
 def test_manual_deployment_templates_keep_private_object_configuration_in_sync() -> None:
     required = {
@@ -111,3 +134,26 @@ def test_manual_deployment_templates_keep_private_object_configuration_in_sync()
         assert required <= config.keys()
         assert config["ARTIFACTS_BACKEND"] == "local"
         assert config["ARTIFACTS_LOCAL_ROOT"] == "/var/lib/oron/objects"
+
+
+def test_nonweb_compose_overrides_cannot_inherit_signature_verifier_secrets() -> None:
+    import re
+
+    document = (ROOT / "infra/compose/deployment.yaml").read_text(encoding="utf-8")
+    for service in (
+        "messaging-worker",
+        "control-api",
+        "dispatcher",
+        "sweeper",
+        "migrator",
+        "bootstrap-owner",
+    ):
+        block = re.search(
+            r"^  " + re.escape(service) + r":\n(.*?)(?=^  \S|\Z)", document, re.M | re.S
+        )
+        assert block is not None
+        assert 'WHATSAPP_MEMORY_VERIFIER_DATABASE_URL: ""' in block.group(1)
+        assert 'WHATSAPP_MEMORY_SIGNATURE_PROOF_ENABLED: "false"' in block.group(1)
+    web = re.search(r"^  web:\n(.*?)(?=^  \S|\Z)", document, re.M | re.S)
+    assert web is not None and "web.env" in web.group(1)
+    assert "WHATSAPP_MEMORY_VERIFIER_DATABASE_URL" not in web.group(1)

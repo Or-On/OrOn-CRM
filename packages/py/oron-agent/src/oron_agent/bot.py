@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -75,12 +76,16 @@ from oron_agent.identity_verification import (
     unlocked_handoff_entry,
 )
 from oron_agent.idle import UserIdlePoker
+from oron_agent.knowledge_turn import TurnKnowledgeReader
 from oron_agent.language import language_profile
 from oron_agent.lead_capture import AcceptedTurns, VoiceLeadTools, parse_lead_field_schema
 from oron_agent.llm import LlmProvider, build_llm, warm_prompt_cache
+from oron_agent.memory_cadence import VoiceMemoryCapture
 from oron_agent.ownership_stt import OwnershipSonioxSTTService
 from oron_agent.pipeline import build_agent_processors
 from oron_agent.quality_observer import VoiceQualityObserver, component_latency_observer
+from oron_agent.quality_persistence import persist_quality_summary, stage_quality_snapshot
+from oron_agent.readiness import bind_pipeline_readiness
 from oron_agent.recognition import RecognitionAcceptanceProcessor
 from oron_agent.runtime_sessions import RuntimeSessions
 from oron_agent.scope_guard import (
@@ -106,6 +111,7 @@ from oron_agent.tts_trim import TrimLeadingSilence
 from oron_agent.turn_planner import HebrewTurnPlanner
 from oron_agent.turn_taking import TurnTaking, TurnTakingObserver
 from oron_agent.voice_control import VoiceControlGate, VoiceController, VoiceControlSnapshot
+from oron_agent.voice_failure import VoiceFailurePolicy
 from oron_agent.voice_quality import (
     RecognitionContextProfile,
     VoiceQualityConfig,
@@ -249,6 +255,9 @@ async def run_bot(
     overrides: AgentOverrides | None = None,
     sessions: RuntimeSessions | None = None,
     ready: asyncio.Event | None = None,
+    drain_requested: asyncio.Event | None = None,
+    on_drain: Callable[[], Awaitable[None]] | None = None,
+    on_failure: Callable[[], Awaitable[None]] | None = None,
 ):
     # `room`, never `st.livekit_room`: the dispatcher runs every call in-process
     # against one shared Settings, so that field holds a deployment-wide default
@@ -301,6 +310,18 @@ async def run_bot(
     }
     # Final caller turns only; provisional recognition never gets an identifier.
     accepted_turns = AcceptedTurns()
+    memory_append = getattr(sessions, "append_voice_memory_turn", None)
+    memory_finish = getattr(sessions, "finish_voice_memory", None)
+    voice_memory = None
+    if memory_append is not None and memory_finish is not None:
+
+        async def append_memory(ordinal: int, caller_text: str) -> None:
+            await memory_append(ctx, ordinal, caller_text)
+
+        async def finish_memory() -> None:
+            await memory_finish(ctx)
+
+        voice_memory = VoiceMemoryCapture(append_memory, finish_memory)
     ticket_receipt_state: dict[str, Any] = {}
     lead_tools = await build_voice_lead_tools(sessions, ctx, configuration, accepted_turns)
     service_intake = await build_voice_service_intake(
@@ -368,6 +389,17 @@ async def run_bot(
         if knowledge_reader is None or not agent_version_id:
             return []
         return await knowledge_reader(UUID(agent_version_id), tenant_id=ctx.tenant_id)
+
+    revision_reader = getattr(sessions, "get_voice_knowledge_revisions", None)
+
+    async def load_knowledge_revisions() -> list[str]:
+        if revision_reader is None or not agent_version_id:
+            return []
+        return await revision_reader(UUID(agent_version_id), tenant_id=ctx.tenant_id)
+
+    turn_knowledge = TurnKnowledgeReader(
+        load_knowledge, load_knowledge_revisions if revision_reader is not None else None
+    )
 
     # Only the versioned database snapshot sets these values, never caller data.
     persona = {"feminine": "female", "masculine": "male", "neutral": "neutral"}.get(
@@ -697,7 +729,7 @@ async def run_bot(
     evidence_gate = VoiceEvidenceGate(
         tenant_id=str(ctx.tenant_id),
         language=lambda: conversation_language.current,
-        load_records=load_knowledge,
+        load_records=turn_knowledge.for_speech,
         save_claim_receipted=save_claim_receipted,
         allow_ticket_claim=lambda: bool(ticket_receipt_state.get("ticketId")),
     )
@@ -717,7 +749,7 @@ async def run_bot(
         evidence_context=VoiceEvidenceContext(
             tenant_id=str(ctx.tenant_id),
             language=lambda: conversation_language.current,
-            load_records=load_knowledge,
+            load_records=turn_knowledge.begin_turn,
             on_caller_text=evidence_gate.observe_caller_text,
             business_actions=business_actions,
         ),
@@ -755,12 +787,18 @@ async def run_bot(
         ),
     )
     if voice_control is not None:
+
+        async def resume_usable_capture(generation: int) -> None:
+            if not all(producer.is_usable for producer in (stt, llm, tts)):
+                raise RuntimeError("required voice processor is unavailable")
+            await stt.resume_capture(generation)
+
         voice_control.attach(
             processors[1:],
             on_mode=user_idle.set_ai_paused,
             pause_capture=stt.pause_capture,
             reset_utterance=context_aggregator.user().reset,
-            resume_capture=stt.resume_capture,
+            resume_capture=resume_usable_capture,
         )
     # Per-call dispatch (M4): the bot joins when a caller is present and should die
     # when the call ends. agent_idle_timeout_secs is the orphan safety net.
@@ -771,6 +809,28 @@ async def run_bot(
     # the transport handlers stay free of `nonlocal`.
     pickup: dict[str, bool] = {}
     finalize_lock = asyncio.Lock()
+    drain_audio_lock = asyncio.Lock()
+    drain_audio_attempted = False
+
+    async def play_shutdown_once() -> None:
+        nonlocal drain_audio_attempted
+        if drain_requested is None or not drain_requested.is_set() or on_drain is None:
+            return
+        async with drain_audio_lock:
+            if drain_audio_attempted:
+                return
+            drain_audio_attempted = True
+            try:
+                await on_drain()
+            except Exception as error:
+                logger.warning("Shutdown audio failed (error_type={})", type(error).__name__)
+
+    async def finish_shutdown_attempt() -> bool:
+        # The teardown helper retries false results. Completion means the fixed
+        # announcement attempt settled; audibility remains a separate live check.
+        await play_shutdown_once()
+        return True
+
     finalized = False
     # Bound, not inline: its open interruption needs settling at call end.
     turn_taking_observer = TurnTakingObserver(turn_taking)
@@ -824,6 +884,7 @@ async def run_bot(
         url=st.livekit_url,
         api_key=st.livekit_api_key.get_secret_value(),
         api_secret=st.livekit_api_secret.get_secret_value(),
+        on_failure=on_failure,
     )
 
     async def guarded_transfer(action, manager):
@@ -877,6 +938,12 @@ async def run_bot(
                     timestamp=getattr(message, "timestamp", None),
                 )
             )
+            if voice_memory is not None:
+                try:
+                    async with asyncio.timeout(1.0):
+                        await voice_memory.final_turn(message.content)
+                except Exception:
+                    logger.warning("canonical voice memory turn capture unavailable")
 
     # A turn VAD opened that no transcript ever closed. pipecat force-closes it
     # after `user_turn_stop_timeout` WITHOUT triggering inference, so the caller's
@@ -936,6 +1003,11 @@ async def run_bot(
             # call had a quality event but NULL artifact pointers because the
             # room-finished cancellation could land between these two writes.
             # Upload first so the database never advertises a missing object.
+            quality_summary = quality_observer.finalize()
+            try:
+                stage_quality_snapshot(session_dir.path, quality_summary)
+            except OSError, ValueError:
+                logger.warning("voice quality recovery artifact unavailable")
             if not await store.upload_dir(str(session_dir.path), ctx.session_id):
                 logger.error("canonical voice artifacts were not persisted")
                 return False
@@ -952,17 +1024,34 @@ async def run_bot(
             if not finalized:
                 logger.error("canonical voice session finalization was not persisted")
                 return False
+            if voice_memory is not None:
+                try:
+                    async with asyncio.timeout(1.0):
+                        await voice_memory.finish()
+                except Exception:
+                    logger.warning("canonical voice memory end checkpoint unavailable")
             # Quality is valuable but derived. It must never be able to win a
             # race while the canonical conversation record is still incomplete.
             quality_writer = getattr(sessions, "record_voice_quality", None)
-            if quality_writer is not None:
-                try:
-                    async with asyncio.timeout(2.0):
-                        await quality_writer(
-                            ctx, quality_observer.finalize(), agent_version_id=agent_version_id
-                        )
-                except Exception:
-                    logger.warning("voice quality summary persistence unavailable")
+            quality_alert = getattr(sessions, "report_voice_quality_failure", None)
+
+            async def write_quality() -> None:
+                if quality_writer is None:
+                    raise RuntimeError("voice quality writer is unavailable")
+                await quality_writer(ctx, quality_summary, agent_version_id=agent_version_id)
+
+            async def report_quality_failure() -> None:
+                if quality_alert is None:
+                    raise RuntimeError("voice quality failure reporter is unavailable")
+                await quality_alert(ctx, reason="summary_persistence_unavailable")
+
+            await persist_quality_summary(
+                write_quality, report_quality_failure if quality_alert is not None else None
+            )
+            try:
+                session_dir.cleanup(artifacts_uploaded=True, session_finalized=finalized)
+            except OSError, ValueError:
+                logger.warning("finalized voice staging cleanup unavailable")
             return finalized
 
     async def finalize(status: SessionStatus) -> bool:
@@ -1085,19 +1174,37 @@ async def run_bot(
 
     @transport.event_handler("on_participant_left")
     async def on_participant_left(transport, participant_id, reason):
-        # This ends the call for ANY departing remote participant, which is only
-        # correct while the SIP leg is the room's single remote identity. Every
-        # path that could add an observer/browser/console participant is
-        # currently unreachable (no production caller of the dispatcher's
-        # observer_token/start_browser_call, no token-minting HTTP route);
-        # test_nothing_in_production_mints_a_second_room_participant fails the
-        # build the moment one is wired up. Give this handler the departing
-        # identity before adding any second participant.
+        # These identities are minted only by the dispatcher for fixed local
+        # lifecycle audio. Their disconnect must not end the caller's session.
+        if participant_id in {"oron-busy", "oron-goodbye", "oron-failure", "oron-unavailable"}:
+            return
+        # Outside the two internal lifecycle identities, the SIP caller remains
+        # the only admitted remote participant. Observer/browser token issuance
+        # is still unreachable in production and guarded by the source canary.
         logger.info(
             f"Participant left {participant_id} ({reason}), ending session={ctx.session_id}"
         )
         await finalize(SessionStatus.ENDED)
         await worker.cancel()
+
+    async def announce_runtime_failure() -> None:
+        # Setup failure before a caller joined must not create a new room leg.
+        if "joined" in call_clock and on_failure is not None:
+            await on_failure()
+
+    runtime_failure = VoiceFailurePolicy(
+        voice_control,
+        worker.cancel,
+        announce_runtime_failure,
+        interrupt_reply=voice_control.interrupt_reply if voice_control is not None else None,
+        providers=(stt, llm, tts),
+    )
+
+    @worker.event_handler("on_pipeline_error")
+    async def on_pipeline_error(_worker, frame):
+        if frame.processor is not None:
+            logger.warning("voice pipeline error (session={})", ctx.session_id)
+            await runtime_failure.handle(frame)
 
     # The other way a call ends: the flow reached a terminal node and
     # end_conversation stopped the pipeline. on_participant_left never fires —
@@ -1107,7 +1214,8 @@ async def run_bot(
     @worker.event_handler("on_pipeline_finished")
     async def on_pipeline_finished(worker, frame):
         logger.info(f"Pipeline finished, ending session={ctx.session_id}")
-        await finalize(SessionStatus.ENDED)
+        await play_shutdown_once()
+        await finalize(SessionStatus.FAILED if runtime_failure.failed else SessionStatus.ENDED)
         await hangup_room(
             room,
             url=st.livekit_url,
@@ -1117,23 +1225,26 @@ async def run_bot(
 
     runner = WorkerRunner(handle_sigint=False)
     await runner.add_workers(worker)
-    # Signal only after every tenant flow, model, STT, TTS, processor and
-    # persistence dependency has been constructed.  The dispatcher waits for
-    # this boundary before creating a paid SIP participant.
-    if ready is not None:
-        ready.set()
+    bind_pipeline_readiness(
+        worker, ready, on_failure=lambda: setattr(runtime_failure, "failed", True)
+    )
     try:
         await runner.run()
+        if runtime_failure.failed:
+            raise RuntimeError("voice pipeline lost a required processor")
     except asyncio.CancelledError:
         # A room-finished webhook can cancel this task before the transport's
         # participant-left callback completes. Preserve the call's private
         # artifacts and usage before propagating cancellation to the dispatcher.
+        await finish_after_cancellation(finish_shutdown_attempt)
         await finalize(SessionStatus.ENDED)
         raise
-    except Exception:
+    except Exception as error:
         # The agent knows the call failed right now. Without this the row sits at
         # `started` until the sweeper ages it out, up to STALE_SESSION_MINUTES later.
-        logger.exception(f"agent run failed (session={ctx.session_id})")
+        logger.error(
+            "agent run failed (session={}, error_type={})", ctx.session_id, type(error).__name__
+        )
         # Still upload: a call that died may have produced a partial transcript
         # or recording, and that is exactly what you want when debugging it.
         await finalize(SessionStatus.FAILED)
@@ -1151,6 +1262,9 @@ async def run_call(
     overrides: AgentOverrides | None = None,
     sessions: RuntimeSessions | None = None,
     ready: asyncio.Event | None = None,
+    drain_requested: asyncio.Event | None = None,
+    on_drain: Callable[[], Awaitable[None]] | None = None,
+    on_failure: Callable[[], Awaitable[None]] | None = None,
 ) -> None:
     """Join `room_name` as the agent and run the pipeline for one call.
 
@@ -1184,6 +1298,9 @@ async def run_call(
         overrides=overrides,
         sessions=sessions,
         ready=ready,
+        drain_requested=drain_requested,
+        on_drain=on_drain,
+        on_failure=on_failure,
     )
 
 

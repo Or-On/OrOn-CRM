@@ -19,7 +19,8 @@ LABEL org.opencontainers.image.revision="${ORON_SOURCE_REVISION}"
 
 # Reviewed Debian security update; build tooling is unnecessary in the runtime.
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends libpcre2-8-0=10.42-1+deb12u1 \
+    && apt-get install --yes --no-install-recommends \
+       libpcre2-8-0=10.42-1+deb12u2 liblzma5=5.4.1-1+deb12u2 \
     && rm -rf /var/lib/apt/lists/* /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
     && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/pnpm /usr/local/bin/pnpx /usr/local/bin/yarn /usr/local/bin/yarnpkg
 

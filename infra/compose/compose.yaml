@@ -6,6 +6,8 @@ services:
     profiles: ["core"]
     restart: unless-stopped
     environment:
+      WHATSAPP_MEMORY_VERIFIER_DATABASE_URL: ""
+      WHATSAPP_MEMORY_SIGNATURE_PROOF_ENABLED: "false"
       POSTGRES_DB: ${POSTGRES_DB:-or_on_platform_dev}
       POSTGRES_USER: ${POSTGRES_USER:-platform_migrator}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-platform-dev-only}
@@ -34,6 +36,8 @@ services:
       dockerfile: services/py/control-api/Dockerfile
     restart: unless-stopped
     environment:
+      WHATSAPP_MEMORY_VERIFIER_DATABASE_URL: ""
+      WHATSAPP_MEMORY_SIGNATURE_PROOF_ENABLED: "false"
       PLATFORM_ENV: development
       PLATFORM_SERVICE: control-api
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
@@ -120,6 +124,8 @@ services:
     restart: unless-stopped
     command: ["--config", "/etc/livekit.yaml"]
     environment:
+      WHATSAPP_MEMORY_VERIFIER_DATABASE_URL: ""
+      WHATSAPP_MEMORY_SIGNATURE_PROOF_ENABLED: "false"
       LIVEKIT_KEYS: "${LIVEKIT_API_KEY:-}: ${LIVEKIT_API_SECRET:-}"
     volumes:
       - ./livekit/livekit.yaml:/etc/livekit.yaml:ro
@@ -142,6 +148,8 @@ services:
     profiles: ["voice"]
     restart: unless-stopped
     environment:
+      WHATSAPP_MEMORY_VERIFIER_DATABASE_URL: ""
+      WHATSAPP_MEMORY_SIGNATURE_PROOF_ENABLED: "false"
       LIVEKIT_API_KEY: "${LIVEKIT_API_KEY:-}"
       LIVEKIT_API_SECRET: "${LIVEKIT_API_SECRET:-}"
       LIVEKIT_WS_URL: ws://livekit:7880

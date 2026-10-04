@@ -7,7 +7,7 @@ import { useRef, useState, type ChangeEvent } from "react";
 import { errorMessage } from "../../i18n/error-message";
 import { imageMutation } from "../crm";
 import { announceIdentityImageUpdate, IdentityImage } from "./identity-image";
-import { identityImageAccept } from "./image-upload";
+import { identityImageAccept } from "./image-types";
 
 const MAX_BYTES = 2 * 1024 * 1024;
 

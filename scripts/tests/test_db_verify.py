@@ -28,7 +28,14 @@ def test_graph_has_preserved_oron_root_and_one_target_head() -> None:
     # 95 typed shared-technician identification (3f5c8b1d7e42). An unexplained
     # change here means a migration arrived that nobody reviewed. Revision 99
     # adds bound staff/customer SMS verification (9b2e7a4c6d18).
-    assert report.revision_count == 99
+    # 100 (a14d0c8e2b77) preserves active authentication lock deadlines;
+    # 101 (b672f9a6c310) adds scoped per-claim fencing and lease renewal.
+    # 102 (c830d71e2f49) records scoped provider-reported messaging usage.
+    # 103 (d53170e04c62) scopes provider voice usage to canonical sessions.
+    # 104–110 add default-off flags, bounded memory/model/audio work and receipt ordering.
+    # 111 adds durable fair admission;112 protects worker context provenance;
+    # 115 also preserves retained conversation evidence and trusted model routing.
+    assert report.revision_count == 136
 
 
 def test_lead_workflow_guard_is_present_in_the_final_configuration_validator() -> None:
@@ -136,3 +143,11 @@ def test_contract_guard_rejects_dangerous_target_sql(dangerous_sql: str) -> None
 def test_contract_guard_rejects_python_comments_in_rendered_sql() -> None:
     with pytest.raises(VerificationError, match="Python-style comment"):
         validate_contract(render_offline_sql() + "\n# noqa: invalid PostgreSQL\n")
+
+
+def test_contract_guard_rejects_unsecured_definer_with_sql_whitespace() -> None:
+    with pytest.raises(VerificationError, match="explicit search_path"):
+        validate_contract(
+            render_offline_sql() + "\nCREATE FUNCTION unsafe() RETURNS int "
+            "LANGUAGE sql SECURITY\nDEFINER AS $$ SELECT 1 $$;"
+        )

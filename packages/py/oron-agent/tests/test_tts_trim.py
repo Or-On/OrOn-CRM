@@ -306,3 +306,34 @@ async def test_each_cancelled_context_is_remembered_exactly_once(monkeypatch):
         if isinstance(call.args[0], TTSAudioRawFrame)
     ]
     assert late == []
+
+
+async def test_completed_flush_cannot_erase_a_new_response_started_during_delivery(monkeypatch):
+    trim = TrimLeadingSilence()
+    monkeypatch.setattr(trim, "_start_interruption", AsyncMock())
+    delivered = []
+    silent = _pcm(0.1, silent=True)
+
+    async def capture(frame, direction=FrameDirection.DOWNSTREAM):
+        delivered.append(frame)
+        if isinstance(frame, TTSAudioRawFrame) and frame.context_id == "old":
+            await trim.process_frame(InterruptionFrame(), direction)
+            await trim.process_frame(TTSStartedFrame(context_id="new"), direction)
+            await trim.process_frame(
+                TTSAudioRawFrame(audio=silent, sample_rate=SR, num_channels=1, context_id="new"),
+                direction,
+            )
+
+    trim.push_frame = capture
+    await trim.process_frame(TTSStartedFrame(context_id="old"), FrameDirection.DOWNSTREAM)
+    await trim.process_frame(
+        TTSAudioRawFrame(
+            audio=_pcm(0.3, silent=False), sample_rate=SR, num_channels=1, context_id="old"
+        ),
+        FrameDirection.DOWNSTREAM,
+    )
+    await trim.process_frame(TTSStoppedFrame(context_id="new"), FrameDirection.DOWNSTREAM)
+    assert (
+        _audio_bytes([frame for frame in delivered if getattr(frame, "context_id", None) == "new"])
+        == silent
+    )

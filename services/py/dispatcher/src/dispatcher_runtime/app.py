@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
@@ -13,6 +14,7 @@ from oron_dispatcher.dispatcher import (
     Dispatcher,
     HangupRoom,
     MintToken,
+    PlayAnnouncement,
     ResolvePhone,
     SessionPersistence,
 )
@@ -36,6 +38,7 @@ def compose_dispatcher(
     hangup_room: HangupRoom,
     mint_token: MintToken,
     runtime_sessions: RuntimeSessions | None = None,
+    play_announcement: PlayAnnouncement | None = None,
     g2p: G2P | None = None,
 ) -> Dispatcher:
     """Inject the retained agent launcher while keeping all I/O ports explicit."""
@@ -46,10 +49,21 @@ def compose_dispatcher(
         settings=dispatcher_settings,
         sessions=sessions,
         sip_client=sip_client,
-        launch_bot=make_launch_bot(agent_settings, g2p=g2p, sessions=runtime_sessions),
+        launch_bot=make_launch_bot(
+            agent_settings,
+            g2p=g2p,
+            sessions=runtime_sessions,
+            play_failure=(lambda room: play_announcement(room, "failure"))
+            if play_announcement is not None
+            else None,
+            play_goodbye=(lambda room: play_announcement(room, "goodbye"))
+            if play_announcement is not None
+            else None,
+        ),
         resolve_phone=resolve_phone,
         hangup_room=hangup_room,
         mint_token=mint_token,
+        play_announcement=play_announcement,
     )
 
 
@@ -87,7 +101,35 @@ def build(
         if livekit_key is not None and livekit_secret is not None
         else None
     )
+
+    async def participant_is_current(event) -> bool:
+        if configured.livekit_url is None or livekit_key is None or livekit_secret is None:
+            raise RuntimeError("LiveKit liveness read is not configured")
+        # Process-owned short-lived read client; fixed configured host, not webhook URL.
+        async with asyncio.timeout(5):
+            async with api.LiveKitAPI(
+                configured.livekit_url,
+                livekit_key.get_secret_value(),
+                livekit_secret.get_secret_value(),
+            ) as client:
+                try:
+                    participant = await client.room.get_participant(
+                        api.RoomParticipantIdentity(
+                            room=event.room.name, identity=event.participant.identity
+                        )
+                    )
+                except api.TwirpError as exc:
+                    if exc.code == "not_found":
+                        return False
+                    raise
+        return (
+            participant.sid == event.participant.sid and participant.kind == event.participant.kind
+        )
+
     return create_app(
+        participant_is_current=participant_is_current
+        if configured.livekit_url is not None
+        else None,
         dispatcher=dispatcher,
         receiver=receiver,
         ledger=ledger,

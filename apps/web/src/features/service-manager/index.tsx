@@ -69,6 +69,8 @@ export function ServiceManagerOverview({
 }) {
   const locale = useLocale();
   const he = locale.startsWith("he");
+  // These bounds are calendar dates, not instants in the tenant timezone.
+  const date = tenantDateFormatter(locale, "UTC", { dateStyle: "medium" });
   return (
     <main className="page">
       <PageHeader
@@ -96,8 +98,14 @@ export function ServiceManagerOverview({
           </Link>
         ))}
       </nav>
-      <p>
-        {metrics.since} — {metrics.until}
+      <p className={styles.periodRange}>
+        <time dateTime={metrics.since}>
+          <bdi>{date.format(new Date(metrics.since))}</bdi>
+        </time>
+        <span aria-hidden="true">–</span>
+        <time dateTime={metrics.until}>
+          <bdi>{date.format(new Date(metrics.until))}</bdi>
+        </time>
       </p>
       <div className={styles.metrics}>
         {(
@@ -253,7 +261,7 @@ export function ServiceInquiryRegister({
             : "Could not load inquiries. Try again."}
         </p>
       ) : null}
-      <Surface level="raised">
+      <Surface level="raised" className={styles.register}>
         <DataTable label={he ? "כל הפניות" : "All inquiries"} minWidth="46rem">
           <thead>
             <tr>
@@ -273,7 +281,7 @@ export function ServiceInquiryRegister({
           <tbody>
             {page.inquiries.map((item) => (
               <tr key={item.id}>
-                <td>
+                <td data-label={he ? "פנייה" : "Inquiry"}>
                   <Link href={`/tickets/${item.id}`}>
                     <bdi>{item.reference}</bdi>
                     <br />
@@ -286,8 +294,10 @@ export function ServiceInquiryRegister({
                     />
                   ) : null}
                 </td>
-                <td>{formatter.format(new Date(item.openedAt))}</td>
-                <td>
+                <td data-label={he ? "תאריך פתיחה" : "Opened"}>
+                  {formatter.format(new Date(item.openedAt))}
+                </td>
+                <td data-label={he ? "לקוח / אתר" : "Customer / site"}>
                   {item.customer}
                   {item.location ? (
                     <>
@@ -296,10 +306,10 @@ export function ServiceInquiryRegister({
                     </>
                   ) : null}
                 </td>
-                <td>
+                <td data-label={he ? "סטטוס" : "Status"}>
                   <Status value={item.status} he={he} />
                 </td>
-                <td>
+                <td data-label={he ? "תיאום טכנאי" : "Technician appointment"}>
                   {item.appointmentAt
                     ? formatter.format(new Date(item.appointmentAt))
                     : "—"}

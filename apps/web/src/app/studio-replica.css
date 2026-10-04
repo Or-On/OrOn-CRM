@@ -20,7 +20,7 @@
   --or-divider: oklch(0.922 0 0);
   --or-text: oklch(0.145 0 0);
   --or-text-secondary: oklch(0.269 0 0);
-  --or-text-muted: oklch(0.556 0 0);
+  --or-text-muted: oklch(0.53 0 0);
   --or-text-disabled: oklch(0.708 0 0);
   --or-text-inverse: oklch(0.985 0 0);
   --or-accent: oklch(0.205 0 0);
@@ -32,7 +32,7 @@
   --or-on-accent: oklch(0.985 0 0);
   --or-info: oklch(0.269 0 0);
   --or-positive: oklch(0.527 0.154 150.069);
-  --or-warning: oklch(0.666 0.179 58.318);
+  --or-warning: oklch(0.53 0.145 58.318);
   --or-critical: oklch(0.577 0.245 27.325);
   --or-focus: oklch(0.708 0 0);
   --or-signal: oklch(0.205 0 0);
@@ -76,6 +76,8 @@
 
 [data-theme="dark"] {
   color-scheme: dark;
+  /* Dark surfaces need a brighter critical text color for small error copy. */
+  --or-critical: #ff7c8e;
   --or-bg: oklch(0.145 0 0);
   --or-bg-raised: oklch(0.205 0 0);
   --or-surface: oklch(0.205 0 0);
@@ -4358,5 +4360,11 @@ textarea,
   .inbox-channel-sidebar__inner,
   .inbox-channel-scrim {
     transition: none !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .overview-chart-stage {
+    margin-inline: 0;
   }
 }

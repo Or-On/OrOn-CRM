@@ -69,6 +69,10 @@ export function parseWhatsAppSendDiagnostic(
 }
 
 const localErrorCodes = new Set([
+  "ai_execution_principal_unavailable",
+  "channel_credential_unavailable",
+  "rate_limit_deferred",
+  "rate_limit_delay_quarantined",
   "provider_disabled",
   "provider_not_configured",
   "meta_http_error",

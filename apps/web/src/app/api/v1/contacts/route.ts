@@ -7,6 +7,7 @@ import {
   withApiKeyTenant,
 } from "@or-on/crm";
 import { loadConfig } from "@or-on/config";
+import { jsonObject } from "../../../../features/auth";
 
 function apiConfiguration() {
   const config = loadConfig(process.env, {
@@ -31,11 +32,23 @@ function bearer(request: Request): string {
   return authorization.slice(7);
 }
 
+class InvalidRequestError extends Error {}
+
 function apiError(error: unknown): NextResponse {
   if (error instanceof InvalidApiKeyError)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (error instanceof SyntaxError)
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  if (error instanceof InvalidRequestError)
+    return NextResponse.json(
+      {
+        error:
+          error.message === "request body is too large"
+            ? "Payload too large"
+            : "Invalid request",
+      },
+      { status: error.message === "request body is too large" ? 413 : 400 },
+    );
   console.error("Public CRM API failed", {
     errorType: error instanceof Error ? error.name : "UnknownError",
   });
@@ -62,23 +75,26 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const config = apiConfiguration();
-    const body = (await request.json()) as unknown;
-    if (
-      body === null ||
-      typeof body !== "object" ||
-      !("name" in body) ||
-      typeof body.name !== "string"
-    )
-      return NextResponse.json({ error: "name is required" }, { status: 400 });
-    const name = body.name.trim();
-    if (name === "")
-      return NextResponse.json({ error: "name is required" }, { status: 400 });
     const contact = await withApiKeyTenant(
       config.databaseUrl,
       config.pepper,
       bearer(request),
       "crm:write",
-      (sql) => createContact(sql, null, { name }),
+      async (sql) => {
+        // Resolve the credential and its stored tenant before consuming any
+        // caller bytes. Scope and tenant never come from the request body.
+        const body = await jsonObject(request, { maximumBytes: 16_384 }).catch(
+          (error: unknown) => {
+            if (error instanceof TypeError)
+              throw new InvalidRequestError(error.message);
+            throw error;
+          },
+        );
+        if (typeof body.name !== "string" || body.name.trim() === "")
+          throw new InvalidRequestError("contact name is required");
+        const name = body.name.trim();
+        return createContact(sql, null, { name });
+      },
     );
     return NextResponse.json({ contact }, { status: 201 });
   } catch (error) {

@@ -11,6 +11,8 @@ from uuid import UUID
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from google.protobuf.json_format import ParseDict
+from livekit.protocol.webhook import WebhookEvent
 from or_on_platform.service_auth import (
     InvalidServiceAssertion,
     ServiceAssertionVerifier,
@@ -20,6 +22,7 @@ from oron_common import E164
 from pydantic import BaseModel, Field, model_validator
 
 from oron_dispatcher.dispatcher import (
+    AdmissionUnavailable,
     AgentStartupUnavailable,
     Dispatcher,
     DispatchResult,
@@ -29,9 +32,11 @@ from oron_dispatcher.dispatcher import (
     UnroutableInboundCall,
 )
 from oron_dispatcher.sip_client import RealTelephonyDenied
-from oron_dispatcher.webhook_ledger import WebhookLedger
+from oron_dispatcher.webhook_ledger import PostgresWebhookLedger, WebhookLedger
+from oron_dispatcher.webhook_pump import DurableDelivery, DurableWebhookPump
 
 logger = logging.getLogger(__name__)
+_MAX_WEBHOOK_BYTES = 262144
 
 
 class WebhookReceiver(Protocol):
@@ -82,21 +87,46 @@ def create_app(
     *,
     dispatcher: Dispatcher | None,
     receiver: WebhookReceiver | None,
-    ledger: WebhookLedger | None,
+    ledger: WebhookLedger | PostgresWebhookLedger | None,
     assertion_verifier: ServiceAssertionVerifier | None,
     shutdown: Callable[[], Awaitable[None]] | None = None,
+    participant_is_current: Callable[[Any], Awaitable[bool]] | None = None,
 ) -> FastAPI:
     """Build the dispatcher HTTP boundary with injected process-owned state."""
 
+    durable = ledger if isinstance(ledger, PostgresWebhookLedger) else None
+
+    async def handle_durable(delivery: DurableDelivery) -> None:
+        assert dispatcher is not None
+        event = ParseDict(delivery.payload, WebhookEvent())
+        if event.event == "participant_joined":
+            if participant_is_current is None:
+                raise RuntimeError("LiveKit participant liveness is not configured")
+            if not await participant_is_current(event):
+                return
+            await dispatcher.handle_participant_joined(event)
+        elif event.event == "room_finished":
+            await dispatcher.handle_room_finished(event)
+
+    pump = DurableWebhookPump(durable, handle_durable) if durable is not None else None
+
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        if pump is not None and dispatcher is not None:
+            pump.start()
         try:
             yield
         finally:
-            if ledger is not None:
-                await ledger.close()
-            if shutdown is not None:
-                await shutdown()
+            try:
+                if pump is not None:
+                    await pump.close()
+                if dispatcher is not None:
+                    await dispatcher.drain()
+            finally:
+                if ledger is not None:
+                    await ledger.close()
+                if shutdown is not None:
+                    await shutdown()
 
     app = FastAPI(title="Or-On Platform Dispatcher", version="0.1.0", lifespan=lifespan)
     bearer = HTTPBearer(auto_error=False)
@@ -126,7 +156,12 @@ def create_app(
     async def readiness() -> ReadyStatus:
         report = await dispatcher.health() if dispatcher is not None else None
         ledger_ready = await ledger.ready() if ledger is not None else False
-        ready = report is not None and report.persistence_ready and ledger_ready
+        ready = (
+            report is not None
+            and report.persistence_ready
+            and ledger_ready
+            and (durable is None or participant_is_current is not None)
+        )
         if not ready:
             raise HTTPException(
                 status_code=503,
@@ -142,7 +177,23 @@ def create_app(
     async def livekit_webhook(request: Request) -> WebhookAck:
         if dispatcher is None or receiver is None or ledger is None:
             raise HTTPException(status_code=503, detail="dispatcher webhook is not ready")
-        body = (await request.body()).decode("utf-8")
+        declared_length = request.headers.get("content-length")
+        if declared_length is not None:
+            if not declared_length.isascii() or not declared_length.isdecimal():
+                raise HTTPException(status_code=400, detail="invalid content length")
+            # Bound integer parsing as well as body buffering. Never trust a small
+            # declaration: enforce the byte limit on every actual streamed chunk.
+            if len(declared_length) > 20 or int(declared_length) > _MAX_WEBHOOK_BYTES:
+                raise HTTPException(status_code=413, detail="webhook body is too large")
+        raw = bytearray()
+        async for chunk in request.stream():
+            if len(chunk) > _MAX_WEBHOOK_BYTES - len(raw):
+                raise HTTPException(status_code=413, detail="webhook body is too large")
+            raw.extend(chunk)
+        try:
+            body = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            raise HTTPException(status_code=401, detail="invalid webhook body") from None
         try:
             event = receiver.receive(body, request.headers.get("authorization", ""))
             payload = json.loads(body)
@@ -156,6 +207,23 @@ def create_app(
                 status_code=401, detail="invalid webhook signature or body"
             ) from None
 
+        if durable is not None:
+            if pump is None or not pump.admitting or participant_is_current is None:
+                raise HTTPException(
+                    status_code=503, detail="durable webhook admission is not ready"
+                )
+            try:
+                accepted = await durable.accept(
+                    provider_event_id=provider_event_id, event_type=event_type, payload=payload
+                )
+            except Exception as exc:
+                logger.warning(
+                    "LiveKit durable accept failed", extra={"error_type": type(exc).__name__}
+                )
+                raise HTTPException(status_code=503, detail="webhook persistence failed") from None
+            return WebhookAck(duplicate=not accepted.should_process)
+
+        assert not isinstance(ledger, PostgresWebhookLedger)
         claim = await ledger.claim(
             provider_event_id=provider_event_id,
             event_type=event_type,
@@ -169,6 +237,9 @@ def create_app(
             elif event_type == "room_finished":
                 await dispatcher.handle_room_finished(event)
             await ledger.complete(claim.event_id)
+        except AdmissionUnavailable:
+            await ledger.quarantine(claim.event_id, "voice_admission_unavailable")
+            return WebhookAck()
         except UnroutableInboundCall as unroutable:
             # Acknowledged so the provider stops redelivering, and durably
             # quarantined with a safe reason for reconciliation.
@@ -213,6 +284,8 @@ def create_app(
         except RealTelephonyDenied as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from None
         except AgentStartupUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from None
+        except AdmissionUnavailable as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from None
         except PersistenceUnavailable:
             raise HTTPException(status_code=503, detail="call persistence is unavailable") from None

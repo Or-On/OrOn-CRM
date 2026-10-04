@@ -31,6 +31,35 @@ def test_session_dir_creates_parents(tmp_path):
     assert Path(d.transcript).parent.is_dir()
 
 
+async def test_staging_cleanup_waits_for_canonical_persistence_and_preserves_siblings(tmp_path):
+    staging = tmp_path / "staging"
+    directory = SessionDir(SID, root=str(staging))
+    sibling = SessionDir(uuid.uuid4(), root=str(staging))
+    Path(directory.transcript).write_text("Synthetic recovery transcript")
+    Path(sibling.transcript).write_text("Synthetic separate session")
+    assert not directory.cleanup(artifacts_uploaded=False, session_finalized=True)
+    assert not directory.cleanup(artifacts_uploaded=True, session_finalized=False)
+    assert Path(directory.transcript).exists()
+    store = LocalArtifactStore(root=str(tmp_path / "persisted"))
+    assert await store.upload_dir(str(directory.path), SID)
+    assert directory.cleanup(artifacts_uploaded=True, session_finalized=True)
+    assert not directory.path.exists()
+    assert Path(sibling.transcript).exists()
+    assert directory.cleanup(artifacts_uploaded=True, session_finalized=True)
+
+
+def test_cleanup_rejects_redirected_session_path(tmp_path):
+    directory = SessionDir(SID, root=str(tmp_path / "staging"))
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    directory.path = outside
+    import pytest
+
+    with pytest.raises(ValueError, match="owned session root"):
+        directory.cleanup(artifacts_uploaded=True, session_finalized=True)
+    assert outside.exists()
+
+
 async def test_transcript_appends_turns_in_order(tmp_path):
     out = tmp_path / "transcript.txt"
     h = TranscriptHandler(output_file=str(out))

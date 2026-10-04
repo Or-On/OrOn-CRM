@@ -71,6 +71,25 @@ async def test_llm_tokens_accumulate_across_turns():
 
     assert usage.llm_prompt_tokens == 250
     assert usage.llm_completion_tokens == 50
+    assert [(event[1], event[2]) for event in usage.pending_model_events()] == [
+        (100, 20),
+        (150, 30),
+    ]
+
+
+async def test_model_usage_events_deduplicate_hops_and_acknowledge_only_committed_snapshot():
+    usage = CallUsage()
+    observer = UsageObserver(usage)
+    frame = _metrics(_llm(100, 20))
+    await observer.on_push_frame(_pushed(frame))
+    await observer.on_push_frame(_pushed(frame))
+    snapshot = usage.pending_model_events()
+    assert len(snapshot) == 1
+    await observer.on_push_frame(_pushed(_metrics(_llm(30, 4))))
+    usage.acknowledge_model_events({snapshot[0][0]})
+    assert [(event[1], event[2]) for event in usage.pending_model_events()] == [(30, 4)]
+    assert "_model_events" not in usage.model_dump()
+    assert not CallUsage.model_validate({"_model_events": snapshot}).pending_model_events()
 
 
 async def test_tts_characters_accumulate():

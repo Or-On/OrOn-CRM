@@ -7,7 +7,7 @@ import {
   assertCrmMutation,
   crmErrorResponse,
 } from "../../../../features/crm-route";
-import { readIdentityImage } from "../../../../features/identity";
+import { readIdentityImage } from "../../../../features/identity-upload-server";
 
 export async function GET() {
   try {

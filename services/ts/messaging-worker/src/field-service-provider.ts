@@ -270,6 +270,7 @@ export class OpenAiCompatibleFieldServiceProvider implements FieldServiceAiProvi
               },
             },
             max_tokens: input.maxTokens,
+            reasoning_effort: "none",
             temperature: 0,
             stream: false,
           }),

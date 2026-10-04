@@ -363,7 +363,8 @@ async def test_prechange_tenant_upgrades_with_behavior_and_records_preserved(
     finally:
         await connection.close()
 
-    await run_alembic(isolated_postgres_url, "upgrade", "head")
+    # Rehearse this configuration successor, not later irreversible privacy gates.
+    await run_alembic(isolated_postgres_url, "upgrade", "f4c8a2d91e70")
     connection = await asyncpg.connect(isolated_postgres_url)
     try:
         states = {
@@ -391,3 +392,24 @@ async def test_prechange_tenant_upgrades_with_behavior_and_records_preserved(
 
     await run_alembic(isolated_postgres_url, "downgrade", "e3b9d7f1a2c6")
     await run_alembic(isolated_postgres_url, "upgrade", "head")
+
+    connection = await asyncpg.connect(isolated_postgres_url)
+    try:
+        assert (
+            await connection.fetchval(
+                "SELECT count(*) FROM crm.leads WHERE tenant_id=$1 AND reference='LD-PRESERVED'",
+                tenant,
+            )
+            == 1
+        )
+        assert (
+            await connection.fetchval(
+                "SELECT bool_and(enabled) FROM platform.tenant_feature_entitlements "
+                "WHERE tenant_id=$1 AND feature_key=ANY($2::text[])",
+                tenant,
+                ["leads", "tickets", "field_service", "technicians", "ocr"],
+            )
+            is True
+        )
+    finally:
+        await connection.close()

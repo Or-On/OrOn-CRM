@@ -250,6 +250,7 @@ export function ServiceCaseWorkspace({
     readonly key: string;
   }>();
   const [latestReport, setLatestReport] = useState<ReportRevision>();
+  const [reportTrigger, setReportTrigger] = useState<HTMLElement>();
   const [identifiedVisits, setIdentifiedVisits] = useState<ReadonlySet<string>>(
     new Set(),
   );
@@ -384,7 +385,8 @@ export function ServiceCaseWorkspace({
     });
   }
 
-  async function openReport(visit: ServiceVisit) {
+  async function openReport(visit: ServiceVisit, trigger: HTMLButtonElement) {
+    setReportTrigger(trigger);
     setLatestReport(undefined);
     setReportVisit(undefined);
     await run(`open-report:${visit.id}`, async () => {
@@ -419,8 +421,23 @@ export function ServiceCaseWorkspace({
 
   async function saveReport(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const reportForm = event.currentTarget;
+    const nativeEvent = event.nativeEvent;
+    const submitter =
+      nativeEvent instanceof SubmitEvent ? nativeEvent.submitter : null;
+    const form = new FormData(reportForm);
     await run("save-report", () => persistReport(form));
+    requestAnimationFrame(() => {
+      if (
+        reportForm.isConnected &&
+        submitter instanceof HTMLButtonElement &&
+        submitter.isConnected &&
+        !submitter.disabled &&
+        document.activeElement === document.body
+      ) {
+        submitter.focus();
+      }
+    });
   }
 
   async function finalizeReport(form: FormData) {
@@ -945,8 +962,8 @@ export function ServiceCaseWorkspace({
                           <Button
                             busy={pendingAction === `open-report:${visit.id}`}
                             disabled={pending}
-                            onClick={() => {
-                              void openReport(visit);
+                            onClick={(event) => {
+                              void openReport(visit, event.currentTarget);
                             }}
                             size="small"
                             variant="secondary"
@@ -1529,6 +1546,9 @@ export function ServiceCaseWorkspace({
             })}
         onClose={closeReportDialog}
         open={reportVisit !== undefined && latestReport !== undefined}
+        {...(reportTrigger === undefined
+          ? {}
+          : { returnFocusElement: reportTrigger })}
         title={he ? "דוח טכנאי" : "Technician report"}
       >
         {latestReport === undefined ? null : (

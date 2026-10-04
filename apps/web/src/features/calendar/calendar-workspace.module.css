@@ -107,6 +107,10 @@
   grid-template-columns: repeat(7, minmax(0, 1fr));
 }
 
+.weekRow {
+  display: contents;
+}
+
 .weekdays {
   background: var(--or-surface-subtle);
   border-block-end: 1px solid var(--or-divider);
@@ -170,7 +174,7 @@
 }
 
 .outside .dayNumber {
-  color: var(--or-text-disabled);
+  color: var(--or-text-muted);
 }
 
 .events {

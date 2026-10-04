@@ -147,6 +147,22 @@ async function main(): Promise<void> {
     if (value !== "true" && value !== "false")
       throw new Error(`${name} must be true or false`);
 
+  const memoryVerifierFlag =
+    source.get("WHATSAPP_MEMORY_SIGNATURE_PROOF_ENABLED") ?? "false";
+  if (memoryVerifierFlag !== "true" && memoryVerifierFlag !== "false")
+    throw new Error(
+      "WHATSAPP_MEMORY_SIGNATURE_PROOF_ENABLED must be true or false",
+    );
+  const memoryVerifier = inherited(source, [
+    "WHATSAPP_MEMORY_VERIFIER_DATABASE_URL",
+  ]);
+  if (
+    memoryVerifierFlag === "true" &&
+    !memoryVerifier.WHATSAPP_MEMORY_VERIFIER_DATABASE_URL
+  )
+    throw new Error(
+      "WHATSAPP_MEMORY_VERIFIER_DATABASE_URL requires separately approved verifier access",
+    );
   const whatsappNames = [
     "WHATSAPP_ACCESS_TOKEN",
     "WHATSAPP_APP_SECRET",
@@ -290,6 +306,8 @@ async function main(): Promise<void> {
       CREDENTIAL_ENCRYPTION_KEY: credentialEncryptionKey,
       FIELD_CIPHER_LOCAL_KEY: fieldCipherKey,
       BLIND_INDEX_KEY: blindIndexKey,
+      WHATSAPP_MEMORY_SIGNATURE_PROOF_ENABLED: memoryVerifierFlag,
+      ...memoryVerifier,
       ...whatsapp,
       ...llm,
       ARTIFACTS_BACKEND: "local",
@@ -323,6 +341,14 @@ async function main(): Promise<void> {
       ...llm,
       ARTIFACTS_BACKEND: "local",
       ARTIFACTS_LOCAL_ROOT: "/var/lib/oron/objects",
+    }),
+  );
+  await privateFile(
+    resolve(config, "sweeper.env"),
+    serialize({
+      DATABASE_URL: databaseUrl("platform_voice", passwords.voice),
+      STALE_SESSION_MINUTES: "120",
+      SWEEP_INTERVAL_SECONDS: "3600",
     }),
   );
   await privateFile(

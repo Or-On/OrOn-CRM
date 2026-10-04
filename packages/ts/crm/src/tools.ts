@@ -20,8 +20,6 @@ export const crmToolDescriptors = [
   },
 ] as const;
 
-type CrmToolName = (typeof crmToolDescriptors)[number]["name"];
-
 function stringArgument(
   input: Readonly<Record<string, unknown>>,
   name: string,
@@ -35,7 +33,7 @@ function stringArgument(
 export async function executeCrmTool(
   sql: postgres.TransactionSql,
   actorUserId: string,
-  name: CrmToolName,
+  name: string,
   input: Readonly<Record<string, unknown>>,
 ): Promise<unknown> {
   if (name === "crm_list_contacts") {
@@ -45,6 +43,7 @@ export async function executeCrmTool(
   if (name === "crm_get_contact") {
     return getContact(sql, stringArgument(input, "contactId"));
   }
+  if (name !== "crm_add_contact_note") throw new TypeError("unknown CRM tool");
   if (input.confirm !== true)
     throw new TypeError("mutating CRM tools require confirm=true");
   return addContactNote(

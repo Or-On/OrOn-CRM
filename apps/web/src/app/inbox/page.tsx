@@ -49,7 +49,7 @@ export default async function InboxPage({
     const requestedId =
       typeof requested === "string" &&
       /^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/iu.test(requested)
-        ? requested
+        ? requested.toLowerCase()
         : undefined;
     const data = await withCurrentTenant("crm:read", async (sql, session) => {
       await requireTenantFeature(sql, "whatsapp");
@@ -113,6 +113,9 @@ export default async function InboxPage({
           initialConversationNextCursor={data.conversationNextCursor}
           initialMessages={data.messages}
           initialConversationId={data.selectedId}
+          initialThreadOpen={
+            requestedId !== undefined && data.selectedId === requestedId
+          }
           initialNextCursor={data.nextCursor}
           canOperate={data.canOperate}
           currentUserId={data.currentUserId}

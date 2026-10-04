@@ -41,7 +41,13 @@ import {
 import Link from "next/link";
 import { useLocale, useTimeZone, useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, type SyntheticEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type SyntheticEvent,
+} from "react";
 
 import { errorMessage } from "../../i18n/error-message";
 import { LanguageControl } from "../../i18n/language-control";
@@ -120,6 +126,19 @@ export function ManagementPanel({
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   useEffect(() => setActiveTab(initialTab), [initialTab]);
   const [pending, setPending] = useState(false);
+  const settingsSubmitterRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    if (pending) return;
+    const submitter = settingsSubmitterRef.current;
+    settingsSubmitterRef.current = null;
+    if (
+      submitter?.isConnected &&
+      !submitter.matches(":disabled") &&
+      document.activeElement === document.body
+    ) {
+      submitter.focus();
+    }
+  }, [pending]);
   const [message, setMessage] = useState<string>();
   const [messageScope, setMessageScope] = useState<FeedbackScope>("account");
   const [messageTone, setMessageTone] = useState<"critical" | "positive">(
@@ -176,6 +195,13 @@ export function ManagementPanel({
 
   async function saveWorkspace(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (pending) return;
+    const submitter = (event.nativeEvent as SubmitEvent).submitter;
+    settingsSubmitterRef.current =
+      submitter instanceof HTMLButtonElement &&
+      document.activeElement === submitter
+        ? submitter
+        : null;
     const data = new FormData(event.currentTarget);
     const accentToken = data.get("accentToken");
     await execute("workspace", async () => {
@@ -204,6 +230,13 @@ export function ManagementPanel({
 
   async function saveProfile(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (pending) return;
+    const submitter = (event.nativeEvent as SubmitEvent).submitter;
+    settingsSubmitterRef.current =
+      submitter instanceof HTMLButtonElement &&
+      document.activeElement === submitter
+        ? submitter
+        : null;
     const data = new FormData(event.currentTarget);
     await execute("account", async () => {
       await crmMutation(

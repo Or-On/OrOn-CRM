@@ -1,5 +1,7 @@
 import type postgres from "postgres";
 
+import { requireTenantFeature } from "./tenant-features.js";
+
 export interface CampaignWallet {
   readonly currency: string;
   readonly availableMinor: number;
@@ -30,6 +32,7 @@ export interface StripeBillingProfile extends CampaignPaymentSource {
 export async function getCampaignWallet(
   sql: postgres.TransactionSql,
 ): Promise<CampaignWallet> {
+  await requireTenantFeature(sql, "billing");
   const rows = await sql<
     { currency: string; available_minor: string; held_minor: string }[]
   >`
@@ -52,6 +55,7 @@ export async function getCampaignWallet(
 export async function listCampaignTopups(
   sql: postgres.TransactionSql,
 ): Promise<readonly CampaignTopup[]> {
+  await requireTenantFeature(sql, "billing");
   const rows = await sql<
     {
       id: string;
@@ -78,6 +82,7 @@ export async function listCampaignTopups(
 export async function getStripeBillingProfile(
   sql: postgres.TransactionSql,
 ): Promise<StripeBillingProfile | null> {
+  await requireTenantFeature(sql, "billing");
   const rows = await sql<
     {
       stripe_customer_id: string;
@@ -128,6 +133,7 @@ export async function ensureStripeBillingProfile(
 ): Promise<void> {
   if (!/^cus_[A-Za-z0-9]+$/u.test(stripeCustomerId))
     throw new TypeError("Invalid Stripe customer identifier");
+  await requireTenantFeature(sql, "billing");
   await sql`
     INSERT INTO billing.payment_profiles(tenant_id, stripe_customer_id, status)
     VALUES (platform.current_tenant_id(), ${stripeCustomerId}, 'pending')
@@ -164,6 +170,7 @@ export async function createCampaignTopup(
     throw new TypeError("Idempotency key must contain 8 to 200 characters");
   if (!/^cus_[A-Za-z0-9]+$/u.test(expectedCustomerId))
     throw new TypeError("Invalid Stripe customer identifier");
+  await requireTenantFeature(sql, "billing");
   const rows = await sql<
     {
       id: string;
@@ -206,6 +213,7 @@ export async function attachStripeSession(
 ): Promise<void> {
   if (!/^cs_[A-Za-z0-9_]+$/u.test(sessionId))
     throw new TypeError("Invalid Stripe checkout identifier");
+  await requireTenantFeature(sql, "billing");
   const rows = await sql<{ id: string }[]>`
     UPDATE billing.topups SET provider_session_id=${sessionId}
     WHERE id=${id}::uuid AND provider='stripe'
