@@ -173,7 +173,7 @@ export function VoiceOverview({
             label={
               reconciliation.provider_enabled
                 ? t("premiumVoice.providerConfigured")
-                : t("voice.disabled")
+                : t("voice.providerComparisonUnavailable")
             }
             tone={reconciliation.provider_enabled ? "warning" : "neutral"}
           />

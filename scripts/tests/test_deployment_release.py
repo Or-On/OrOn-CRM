@@ -97,6 +97,46 @@ def test_release_validator_extracts_only_the_exact_regular_payload(tmp_path: Pat
         assert stat.S_IMODE(caddyfile.stat().st_mode) == 0o644
 
 
+def test_actual_ci_payload_includes_restore_helper_and_passes_preflight(tmp_path: Path) -> None:
+    workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    copy = re.search(r"cp --parents \\\n(.*?)\"\$\{release_dir\}\"", workflow, re.DOTALL)
+    assert copy is not None
+    paths = copy.group(1).replace("\\", "").split()
+    assert set(paths) == EXPECTED - {"images.env"}
+    archive = tmp_path / "actual-release.tar.gz"
+    with tarfile.open(archive, "w:gz") as output:
+        for name in paths:
+            item = tarfile.TarInfo(name)
+            item.mode = 0o644
+            content = (ROOT / name).read_bytes()
+            item.size = len(content)
+            output.addfile(item, io.BytesIO(content))
+        output.addfile(_member("images.env"), io.BytesIO(b"x"))
+    result = subprocess.run(  # noqa: S603 - fixed interpreter and owned local paths
+        [sys.executable, str(ROOT / "scripts/check-dev-release.py"), str(archive)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert 'python3 scripts/check-dev-release.py "${archive}"' in workflow
+
+
+def test_preflight_rejects_the_reported_missing_restore_helper(tmp_path: Path) -> None:
+    archive = tmp_path / "missing-restore.tar.gz"
+    with tarfile.open(archive, "w:gz") as output:
+        for name in sorted(EXPECTED - {"scripts/restore-dev-backup.py"}):
+            output.addfile(_member(name), io.BytesIO(b"x"))
+    result = subprocess.run(  # noqa: S603 - fixed interpreter and owned local paths
+        [sys.executable, str(ROOT / "scripts/check-dev-release.py"), str(archive)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "missing=['scripts/restore-dev-backup.py']" in result.stderr
+
+
 @pytest.mark.parametrize(
     "mutation",
     ["missing", "extra", "duplicate", "traversal", "symlink", "hardlink"],

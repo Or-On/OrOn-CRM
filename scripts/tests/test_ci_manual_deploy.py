@@ -24,6 +24,18 @@ def _condition(value: str) -> str:
     return " ".join(value.split())
 
 
+def test_database_acceptance_uses_owned_fixture_port_without_changing_readiness() -> None:
+    job = _workflow()["jobs"]["database"]
+    assert "55480:5432" in job["services"]["postgres"]["ports"]
+    for name in ("DATABASE_URL", "TEST_DATABASE_URL"):
+        assert "@127.0.0.1:55480/" in job["env"][name]
+    assert "@127.0.0.1:55439/" in job["env"]["READINESS_POSTGRES_URL"]
+    for step in job["steps"]:
+        for name, value in step.get("env", {}).items():
+            if name in ("CRM_TEST_DATABASE_URL", "CROSS_CHANNEL_TEST_DATABASE_URL"):
+                assert "@127.0.0.1:55480/" in value
+
+
 def test_main_push_keeps_ci_and_manual_deployment_defaults_off() -> None:
     workflow = _workflow()
     assert "main" in workflow["on"]["push"]["branches"]

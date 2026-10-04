@@ -40,3 +40,6 @@ Thumbs.db
 *.tfstate.*
 *.tfplan
 crash.log
+
+# Generated synthetic audio test fixture directories (never source)
+audio-worker-fixture-*/

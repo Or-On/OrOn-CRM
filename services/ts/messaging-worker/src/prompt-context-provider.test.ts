@@ -1,4 +1,6 @@
-import { writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { parseLeadFieldSchema } from "@or-on/crm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -174,30 +176,34 @@ describe("actual provider context budget serialization", () => {
         JSON.stringify(captureResult.body.response_format),
       ),
     });
-    await writeFile(
-      new URL(
-        "../../../../../evidence/prompt-provider-size-local.json",
-        import.meta.url,
-      ),
-      JSON.stringify(
-        {
-          measuredAt: new Date().toISOString(),
-          node: process.version,
-          synthetic: true,
-          before: measurements(before),
-          after: measurements(after),
-          projectedUntrustedCodePoints: promptContextCodePoints(projected),
-          retainedFacts: after.context.knowledge.length,
-          trustedStateAndSchemaUnchanged: true,
-          limitations: [
-            "One identical synthetic provider-request fixture, intercepted fetch; no actual provider traffic.",
-            "Different retained context; no semantic-parity, tokens, cost or LLM-latency claim.",
-            "4000codepoint cap applies projected untrusted JSON, not full request or verified state/system/schema.",
-          ],
-        },
-        null,
-        2,
-      ),
+    const evidenceDirectory = await mkdtemp(
+      join(tmpdir(), "oron-prompt-provider-"),
     );
+    try {
+      await writeFile(
+        join(evidenceDirectory, "prompt-provider-size-local.json"),
+        JSON.stringify(
+          {
+            measuredAt: new Date().toISOString(),
+            node: process.version,
+            synthetic: true,
+            before: measurements(before),
+            after: measurements(after),
+            projectedUntrustedCodePoints: promptContextCodePoints(projected),
+            retainedFacts: after.context.knowledge.length,
+            trustedStateAndSchemaUnchanged: true,
+            limitations: [
+              "One identical synthetic provider-request fixture, intercepted fetch; no actual provider traffic.",
+              "Different retained context; no semantic-parity, tokens, cost or LLM-latency claim.",
+              "4000codepoint cap applies projected untrusted JSON, not full request or verified state/system/schema.",
+            ],
+          },
+          null,
+          2,
+        ),
+      );
+    } finally {
+      await rm(evidenceDirectory, { recursive: true, force: true });
+    }
   });
 });

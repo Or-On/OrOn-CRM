@@ -1069,6 +1069,7 @@
     "campaignsLink": "Voice campaigns",
     "flowsLink": "Voice flow library",
     "disabled": "Real calls disabled",
+    "providerComparisonUnavailable": "Provider comparison not performed",
     "calls": "Calls",
     "completed": "Completed",
     "answered": "Answered",

@@ -1,6 +1,7 @@
 import { createHash, createHmac, randomUUID } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import postgres from "postgres";
 import { acceptWhatsAppWebhook } from "@or-on/crm";
 import { describe, it, expect, vi } from "vitest";
@@ -23,66 +24,98 @@ describe.skipIf(!url)(
       )
         throw new Error("owned synthetic fixture required");
       const db = postgres(url, { max: 1, prepare: false });
-      const [agent] = await db<
-        { id: string; tenant_id: string; user_id: string }[]
-      >`SELECT v.id,v.tenant_id,m.user_id FROM agents.agent_profile_versions v JOIN memberships m ON m.tenant_id=v.tenant_id AND m.role='owner' WHERE v.published_at IS NOT NULL LIMIT 1`;
-      if (!agent) throw new Error("fictional published agent required");
-      await db`SELECT set_config('app.current_tenant',${agent.tenant_id},false)`;
-      const contact = randomUUID(),
-        channel = randomUUID(),
-        conversation = randomUUID(),
-        message = randomUUID(),
-        object = randomUUID(),
-        operation = randomUUID();
-      const root = await mkdtemp(join(process.cwd(), "audio-worker-fixture-"));
-      const bytes = Buffer.from("synthetic private audio");
-      const sha = createHash("sha256").update(bytes).digest("hex");
-      await writeFile(join(root, `${object}.wav`), bytes);
-      await db`INSERT INTO crm.contacts(id,tenant_id,name,whatsapp_consent) VALUES(${contact}::uuid,${agent.tenant_id}::uuid,'Fictional audio contact','granted')`;
-      await db`INSERT INTO messaging.channels(id,tenant_id,kind,provider,provider_account_id,status,configuration) VALUES(${channel}::uuid,${agent.tenant_id}::uuid,'whatsapp','meta',${channel},'active',${db.json({ phoneNumberId: channel, wabaId: "fictional-audio-waba", graphApiVersion: "v26.0" })})`;
-      await db`INSERT INTO messaging.conversations(id,tenant_id,channel_id,contact_id,status,ownership_mode,ai_agent_profile_version_id,ai_enabled_by_user_id,ai_enabled_at,customer_service_window_expires_at) VALUES(${conversation}::uuid,${agent.tenant_id}::uuid,${channel}::uuid,${contact}::uuid,'open',${human ? "human" : "ai"},${agent.id}::uuid,${agent.user_id}::uuid,clock_timestamp(),clock_timestamp()+interval '24 hours')`;
-      await db`INSERT INTO objects.object_metadata(id,tenant_id,owner_type,owner_id,category,content_type,byte_size,checksum,storage_backend,storage_key,status) VALUES(${object}::uuid,${agent.tenant_id}::uuid,'message',${message}::uuid,'whatsapp_customer_audio','audio/wav',${bytes.length},${sha},'local',${`${object}.wav`},'available')`;
-      await db`INSERT INTO messaging.messages(id,tenant_id,conversation_id,direction,sender_type,content_type,provider,provider_message_id,status,object_id,structured_content) VALUES(${message}::uuid,${agent.tenant_id}::uuid,${conversation}::uuid,'inbound','contact','audio','meta',${message},'received',${object}::uuid,'{"transcriptionStatus":"pending"}')`;
-      const identity = randomUUID();
-      const [available] = await db<
-        { address: string }[]
-      >`SELECT '+120255501'||lpad(number::text,2,'0') address FROM generate_series(0,99) number WHERE NOT EXISTS(SELECT 1 FROM crm.contact_channel_identities identity WHERE identity.tenant_id=${agent.tenant_id}::uuid AND identity.normalized_value='+120255501'||lpad(number::text,2,'0')) ORDER BY number LIMIT 1`;
-      if (!available)
-        throw new Error("Synthetic reserved phone range exhausted");
-      const address = available.address;
-      await db`INSERT INTO crm.contact_channel_identities(id,tenant_id,contact_id,channel,normalized_value,display_value,provider,provider_identity_id,validation_status,is_primary) VALUES(${identity}::uuid,${agent.tenant_id}::uuid,${contact}::uuid,'whatsapp',${address},${address},'meta',${address},'valid',true)`;
-      await db`INSERT INTO messaging.inbound_message_origins(tenant_id,message_id,contact_identity_id,sender_address) VALUES(${agent.tenant_id}::uuid,${message}::uuid,${identity}::uuid,${address})`;
-      for (const flag of ["audio_transcription", "no_silence"])
-        await db`INSERT INTO platform.tenant_remediation_flags(tenant_id,flag_key,enabled) VALUES(${agent.tenant_id}::uuid,${flag},true) ON CONFLICT(tenant_id,flag_key) DO UPDATE SET enabled=true`;
-      const payload = {
-        operationId: operation,
-        messageId: message,
-        objectId: object,
-        sha256: sha,
-        conversationId: conversation,
-        triggerMessageId: message,
-      };
-      await db`INSERT INTO ops.jobs(tenant_id,queue,job_type,reference_type,reference_id,payload,idempotency_key,max_attempts,priority) VALUES(${agent.tenant_id}::uuid,'messaging','whatsapp.audio.transcribe','conversation',${conversation}::uuid,${db.json(payload)},${`audio:${operation}`},20,100)`;
-      const workerUrl = new URL(url);
-      workerUrl.searchParams.set("options", "-c role=platform_messaging");
-      return {
-        db,
-        root,
-        conversation,
-        message,
-        operation,
-        channel,
-        address,
-        workerUrl: workerUrl.toString(),
-        async close() {
-          // Admissions and outbound authority retain these canonical job IDs.
-          // Preserve completed/running history; only postpone our queued work so
-          // the following synthetic scenario cannot claim this fixture's jobs.
-          await db`UPDATE ops.jobs SET available_at=clock_timestamp()+interval '1 day' WHERE tenant_id=${agent.tenant_id}::uuid AND (reference_id=${conversation}::uuid OR payload->>'conversationId'=${conversation}) AND status='queued'`;
-          await db.end();
-          await rm(root, { recursive: true, force: true });
-        },
-      };
+      let fixtureRoot: string | undefined;
+      try {
+        const [agent] = await db<
+          { id: string; tenant_id: string; user_id: string }[]
+        >`SELECT v.id,v.tenant_id,m.user_id FROM agents.agent_profile_versions v JOIN memberships m ON m.tenant_id=v.tenant_id AND m.role='owner' WHERE v.published_at IS NOT NULL LIMIT 1`;
+        if (!agent) throw new Error("fictional published agent required");
+        await db`SELECT set_config('app.current_tenant',${agent.tenant_id},false)`;
+        const contact = randomUUID(),
+          channel = randomUUID(),
+          conversation = randomUUID(),
+          message = randomUUID(),
+          object = randomUUID(),
+          operation = randomUUID();
+        const root = await mkdtemp(join(tmpdir(), "audio-worker-fixture-"));
+        fixtureRoot = root;
+        const bytes = Buffer.from("synthetic private audio");
+        const sha = createHash("sha256").update(bytes).digest("hex");
+        await writeFile(join(root, `${object}.wav`), bytes);
+        await db`INSERT INTO crm.contacts(id,tenant_id,name,whatsapp_consent) VALUES(${contact}::uuid,${agent.tenant_id}::uuid,'Fictional audio contact','granted')`;
+        await db`INSERT INTO messaging.channels(id,tenant_id,kind,provider,provider_account_id,status,configuration) VALUES(${channel}::uuid,${agent.tenant_id}::uuid,'whatsapp','meta',${channel},'active',${db.json({ phoneNumberId: channel, wabaId: "fictional-audio-waba", graphApiVersion: "v26.0" })})`;
+        await db`INSERT INTO messaging.conversations(id,tenant_id,channel_id,contact_id,status,ownership_mode,ai_agent_profile_version_id,ai_enabled_by_user_id,ai_enabled_at,customer_service_window_expires_at) VALUES(${conversation}::uuid,${agent.tenant_id}::uuid,${channel}::uuid,${contact}::uuid,'open',${human ? "human" : "ai"},${agent.id}::uuid,${agent.user_id}::uuid,clock_timestamp(),clock_timestamp()+interval '24 hours')`;
+        await db`INSERT INTO objects.object_metadata(id,tenant_id,owner_type,owner_id,category,content_type,byte_size,checksum,storage_backend,storage_key,status) VALUES(${object}::uuid,${agent.tenant_id}::uuid,'message',${message}::uuid,'whatsapp_customer_audio','audio/wav',${bytes.length},${sha},'local',${`${object}.wav`},'available')`;
+        await db`INSERT INTO messaging.messages(id,tenant_id,conversation_id,direction,sender_type,content_type,provider,provider_message_id,status,object_id,structured_content) VALUES(${message}::uuid,${agent.tenant_id}::uuid,${conversation}::uuid,'inbound','contact','audio','meta',${message},'received',${object}::uuid,'{"transcriptionStatus":"pending"}')`;
+        const identity = randomUUID();
+        const [available] = await db<
+          { address: string }[]
+        >`SELECT '+120255501'||lpad(number::text,2,'0') address FROM generate_series(0,99) number WHERE NOT EXISTS(SELECT 1 FROM crm.contact_channel_identities identity WHERE identity.tenant_id=${agent.tenant_id}::uuid AND identity.normalized_value='+120255501'||lpad(number::text,2,'0')) ORDER BY number LIMIT 1`;
+        if (!available)
+          throw new Error("Synthetic reserved phone range exhausted");
+        const address = available.address;
+        await db`INSERT INTO crm.contact_channel_identities(id,tenant_id,contact_id,channel,normalized_value,display_value,provider,provider_identity_id,validation_status,is_primary) VALUES(${identity}::uuid,${agent.tenant_id}::uuid,${contact}::uuid,'whatsapp',${address},${address},'meta',${address},'valid',true)`;
+        await db`INSERT INTO messaging.inbound_message_origins(tenant_id,message_id,contact_identity_id,sender_address) VALUES(${agent.tenant_id}::uuid,${message}::uuid,${identity}::uuid,${address})`;
+        for (const flag of ["audio_transcription", "no_silence"])
+          await db`INSERT INTO platform.tenant_remediation_flags(tenant_id,flag_key,enabled) VALUES(${agent.tenant_id}::uuid,${flag},true) ON CONFLICT(tenant_id,flag_key) DO UPDATE SET enabled=true`;
+        const payload = {
+          operationId: operation,
+          messageId: message,
+          objectId: object,
+          sha256: sha,
+          conversationId: conversation,
+          triggerMessageId: message,
+        };
+        await db`INSERT INTO ops.jobs(tenant_id,queue,job_type,reference_type,reference_id,payload,idempotency_key,max_attempts,priority) VALUES(${agent.tenant_id}::uuid,'messaging','whatsapp.audio.transcribe','conversation',${conversation}::uuid,${db.json(payload)},${`audio:${operation}`},20,100)`;
+        const workerUrl = new URL(url);
+        workerUrl.searchParams.set("options", "-c role=platform_messaging");
+        return {
+          db,
+          root,
+          conversation,
+          message,
+          operation,
+          channel,
+          address,
+          workerUrl: workerUrl.toString(),
+          async close() {
+            // Admissions and outbound authority retain these canonical job IDs.
+            // Preserve completed/running history; only postpone our queued work so
+            // the following synthetic scenario cannot claim this fixture's jobs.
+            try {
+              await db`UPDATE ops.jobs SET available_at=clock_timestamp()+interval '1 day' WHERE tenant_id=${agent.tenant_id}::uuid AND (reference_id=${conversation}::uuid OR payload->>'conversationId'=${conversation}) AND status='queued'`;
+            } finally {
+              try {
+                await db.end();
+              } finally {
+                await rm(root, { recursive: true, force: true });
+              }
+            }
+          },
+        };
+      } catch (error) {
+        // Setup can fail before fixture() returns and before the test finally exists.
+        const results = await Promise.allSettled([
+          db.end(),
+          ...(fixtureRoot
+            ? [rm(fixtureRoot, { recursive: true, force: true })]
+            : []),
+        ]);
+        const cleanupErrors: unknown[] = [];
+        for (const result of results) {
+          if (result.status === "rejected") {
+            const reason: unknown = result.reason;
+            cleanupErrors.push(reason);
+          }
+        }
+        if (cleanupErrors.length)
+          throw new AggregateError(
+            [error, ...cleanupErrors],
+            "Synthetic fixture setup and cleanup failed",
+            { cause: error },
+          );
+        throw error;
+      }
     }
     const providers = {
       simulator: new SimulatorWhatsAppProvider(),
@@ -170,8 +203,11 @@ describe.skipIf(!url)(
         `;
         expect(retained?.n).toBeGreaterThan(0);
       } finally {
-        await store.close();
-        await f.close();
+        try {
+          await store.close();
+        } finally {
+          await f.close();
+        }
       }
     });
     it("human takeover prevents provider start and transcript writes", async () => {
@@ -195,8 +231,11 @@ describe.skipIf(!url)(
         >`SELECT content_text FROM messaging.messages WHERE id=${f.message}::uuid`;
         expect(row?.content_text).toBeNull();
       } finally {
-        await store.close();
-        await f.close();
+        try {
+          await store.close();
+        } finally {
+          await f.close();
+        }
       }
     });
     it("missing provider creates one fallback, task and operator alert job", async () => {
@@ -262,8 +301,11 @@ describe.skipIf(!url)(
         >`SELECT count(*)::int n FROM ops.jobs WHERE payload->>'conversationId'=${f.conversation} AND job_type='whatsapp.operator.alert'`;
         expect(alerts?.n).toBe(1);
       } finally {
-        await store.close();
-        await f.close();
+        try {
+          await store.close();
+        } finally {
+          await f.close();
+        }
       }
     });
 
@@ -334,8 +376,11 @@ describe.skipIf(!url)(
         >`SELECT count(*)::int n FROM ops.jobs WHERE reference_id=${f.conversation}::uuid AND job_type='whatsapp.ai.reply'`;
         expect(count?.n).toBe(1);
       } finally {
-        await store.close();
-        await f.close();
+        try {
+          await store.close();
+        } finally {
+          await f.close();
+        }
       }
     });
 
@@ -404,8 +449,11 @@ describe.skipIf(!url)(
         >`SELECT count(*)::int n FROM ops.jobs WHERE reference_id=${f.conversation}::uuid AND job_type='whatsapp.ai.reply'`;
         expect(count?.n).toBe(0);
       } finally {
-        await store.close();
-        await f.close();
+        try {
+          await store.close();
+        } finally {
+          await f.close();
+        }
       }
     });
   },
