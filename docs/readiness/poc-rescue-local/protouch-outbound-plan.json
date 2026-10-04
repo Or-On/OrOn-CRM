@@ -1,0 +1,10 @@
+{
+  "tenant_id": "633d9906-3866-4ddd-b85c-99c525bd3cb3",
+  "account_ref": "protouch-twilio",
+  "from_number": "+97293764553",
+  "twilio_trunk_id": "TK8063d67ba0b48332a7a49024dbb164aa",
+  "credential_list_id": "CL535451410b7642c6ee5ee3a5f58741c8",
+  "address": "protouch-oron-4553.pstn.twilio.com",
+  "sip_username": "Protouch",
+  "livekit_trunk_name": "protouch-twilio-outbound"
+}

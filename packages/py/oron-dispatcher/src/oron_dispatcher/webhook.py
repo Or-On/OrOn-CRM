@@ -158,6 +158,7 @@ def create_app(
         ledger_ready = await ledger.ready() if ledger is not None else False
         ready = (
             report is not None
+            and report.status == "ready"
             and report.persistence_ready
             and ledger_ready
             and (durable is None or participant_is_current is not None)

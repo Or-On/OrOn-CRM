@@ -114,6 +114,15 @@ def _app(dispatcher: AsyncMock, ledger: FakeLedger):
     )
 
 
+def test_draining_dispatcher_is_not_ready_even_while_database_is_healthy():
+    dispatcher = _dispatcher()
+    dispatcher.health.return_value.status = "not_ready"
+    with TestClient(_app(dispatcher, FakeLedger())) as client:
+        response = client.get("/health/ready")
+    assert response.status_code == 503
+    assert response.json()["detail"]["dispatcher"]["persistence_ready"] is True
+
+
 def test_signed_livekit_fixture_is_processed_once() -> None:
     dispatcher = _dispatcher()
     ledger = FakeLedger()

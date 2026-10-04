@@ -313,7 +313,7 @@ async def test_default_checkpoint_preserves_cadence_and_final_write_keeps_latest
     await recorder.start(room="fixture")
     recorder.start_usage_reporting(usage, started_at=time.monotonic())
     await asyncio.wait_for(waiting.wait(), 1)
-    assert delays == [1.0] and not client.checkpoints
+    assert delays == [15.0] and not client.checkpoints
     permit.set()
     await asyncio.wait_for(checkpointed.wait(), 1)
     assert client.checkpoints[-1].llm_prompt_tokens == 12

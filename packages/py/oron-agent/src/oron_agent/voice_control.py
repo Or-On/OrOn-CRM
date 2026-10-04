@@ -146,7 +146,7 @@ class VoiceController:
         read: Callable[[], Awaitable[VoiceControlSnapshot]],
         acknowledge: Callable[[int, Mode], Awaitable[bool]],
         *,
-        poll_seconds: float = 0.5,
+        poll_seconds: float = 2.0,
     ):
         self.read = read
         self.acknowledge = acknowledge
@@ -322,8 +322,9 @@ class VoiceController:
                 raise
             except Exception:
                 # A transient outage is not an explicit operator revocation.
-                # Keep the established media state for at most five seconds,
-                # never indefinitely. New actions always require a fresh read.
+                # Expire the established media lease once five seconds old,
+                # checked at failed reads (plus bounded poll/read latency).
+                # New actions always require a fresh successful read.
                 if (
                     not self.paused
                     and self._last_authorized_at is not None

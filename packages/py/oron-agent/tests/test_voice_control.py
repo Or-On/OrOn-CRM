@@ -23,6 +23,33 @@ def controller():
     return VoiceController(read, ack), read, ack
 
 
+async def test_default_poll_reduces_reads_and_observes_takeover_within_one_cycle():
+    """Real local scheduler timing; fake storage is not remote playback evidence."""
+    control, read, ack = controller()
+    started, stopped = asyncio.Event(), asyncio.Event()
+
+    async def acknowledged(_epoch, mode):
+        (started if mode == "ai" else stopped).set()
+        return True
+
+    ack.side_effect = acknowledged
+    task = asyncio.create_task(control.run())
+    try:
+        await asyncio.wait_for(started.wait(), 1)
+        start = asyncio.get_running_loop().time()
+        read.return_value = VoiceControlSnapshot(1, "paused")
+        await asyncio.wait_for(stopped.wait(), 3)
+        elapsed = asyncio.get_running_loop().time() - start
+        assert 1.9 <= elapsed < 3.0
+        assert read.await_count == 2
+        assert control.paused
+        ack.assert_awaited_with(1, "paused")
+    finally:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+
 async def test_pause_waits_for_local_cancellation_before_acknowledging():
     control, read, ack = controller()
     await control.refresh()

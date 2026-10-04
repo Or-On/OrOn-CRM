@@ -1,6 +1,10 @@
 # Voice verification — 2026-10-04 (Asia/Jerusalem)
 
-Base: `3582027b`, shared review branch `codex/poc-rescue-local-20261004`.
+Initial base: `3582027b`; checkpoint `86c3641`; newer authoritative
+`origin/main`/deployed source `42eebac2` subsequently merged into the shared
+review branch `codex/poc-rescue-local-20261004`. The per-requirement table below
+reflects that newer source, preserving its existing caps, drain, announcements,
+durable webhook pump, memory and knowledge protections.
 The changes below were tested locally. No deployment, SIP mutation, DID
 assignment, telephone call, or customer message was performed. Provider
 inventory and synthetic model inference are distinguished below.
@@ -32,10 +36,18 @@ Read-only provider inventory with existing local credentials succeeded:
 | Twilio account | Reference `***fba51d` owns voice numbers `***5689` and `***4553`; local caller-ID config matches `***5689` | Actual provider API read |
 | ProTouch draft | Its caller ID is also `***5689` and its endpoint matches Or-On. Only its SIP username differs; file explicitly is not loaded | Source/config evidence |
 | Local tenants | `default` and `or-on-workspace`; no ProTouch (parent inventory) | Actual local DB read |
+| Authoritative active ProTouch | `633d9906-3866-4ddd-b85c-99c525bd3cb3`; Or-On `00000000-0000-0000-0000-000000000001` | Actual remote DB read obtained by parent; deleted older ProTouch excluded |
 
-The second Twilio number is **not** evidence of ProTouch ownership. No number
-was assigned from its name, order, or availability. There is no verified
-ProTouch DID/outbound binding in this provider project. The reported wrong
+The user subsequently confirmed `***4553` as ProTouch's source number and
+approved test recipient `***7692`. Read-only carrier inspection then verified
+that sender belongs to separate trunk `TK8063d67ba0b48332a7a49024dbb164aa`,
+named `protouch`, whose termination endpoint is absent and whose credential
+list is not associated. The existing account credential list contains the
+ProTouch SIP username, with its password present in the ignored local bundle.
+ProTouch inbound origination targets a different server from Or-On; it was
+not changed. The concrete separately reviewed provider plan is
+[PROTOUCH-OUTBOUND-PLAN.md](PROTOUCH-OUTBOUND-PLAN.md). There is not yet an
+operational ProTouch LiveKit outbound binding. The reported wrong
 caller-ID mechanism is reproduced at the source/provider boundary; an actual
 ProTouch telephone call and recipient-observed caller ID remain unverified.
 
@@ -63,22 +75,30 @@ per-tenant carrier routes required. Route configuration is read at startup:
 review actual tenant ownership, configure each permitted route, restart the
 dispatcher, and inspect readiness before authorized calls. Editing a draft or
 setting `SIP_OUTBOUND_TRUNK_ID` does not activate a route. No production
-tenant mapping was guessed from the two local fixture-like tenant names.
+tenant mapping was guessed from the two local fixture-like tenant names; the
+reviewed plan now uses the authoritative active tenant from remote inventory.
 This means existing installations must supply explicit routes before real
 outbound calls can resume. The runbook and deployment env path were updated.
 
 ## Additional demonstrated fixes
 
 * PDF-064: the bot previously staged recordings under OS temp regardless of
-  `ARTIFACTS_LOCAL_ROOT` and retained successful staging copies. It now stages
+  `ARTIFACTS_LOCAL_ROOT`. Newer upstream already contains guarded successful
+  staging cleanup, which was retained. It now stages
   under the configured root's `.staging`, deleting only its owned UUID tree
   after both upload and durable session finalization. Failure paths retain
   recoverable files. The configured root still must be on a persistent volume.
-* PDF-067: a transient operator-control read error previously permanently
-  blocked the current epoch. The call now pauses during the outage and can
-  recover only after a fresh authorized snapshot and successful exact-epoch
-  acknowledgement. Explicit pause, revocation, takeover, stale acknowledgements
-  and local cancellation-barrier failures cannot reopen AI.
+* PDF-067: initial-base read errors permanently blocked the current epoch.
+  Newer upstream preserves media state and requires fresh reads for every
+  action, which was retained. Its otherwise unbounded stale media state now
+  expires on the first failed read after a five-second lease threshold (the
+  two-second poll and bounded 1.5-second read add detection latency); recovery requires a fresh authorized snapshot
+  and exact-epoch acknowledgement. Explicit pause, revocation, takeover, stale
+  acknowledgements and cancellation-barrier failures cannot reopen AI.
+* PDF-065: newer upstream already implements caps, fixed busy/goodbye audio
+  and bounded drain. A remaining defect kept `/health/ready` at 200 during
+  drain because it checked only database health. It now returns 503 when the
+  dispatcher reports `not_ready`; regression coverage uses healthy storage.
 * Real-model evaluation reproduced three failures. Tool descriptors concealed
   reviewed field types, so Gemini passed Hebrew number words to strict numeric
   fields; validation rejected the complete batch. Follow-up descriptions also
@@ -87,6 +107,20 @@ outbound calls can resume. The runbook and deployment env path were updated.
   finalizing a completed inquiry from requesting follow-up. Validation,
   permissions and durable receipt requirements are unchanged. These tools
   remain available only to agents with their published lead capabilities.
+* PDF-075: default control polling is now two seconds (previously 0.5),
+  and usage checkpoints are fifteen seconds (previously one). Every action
+  still obtains fresh authorization. Finalization stops the periodic task and
+  persists the newest usage counters. A real local scheduler test with fake
+  storage acknowledged pause within 1.9–3 seconds using two reads; this is
+  not remote audio or production query-rate evidence.
+* The real-model flow exit evaluator had drifted from production: it called
+  an obsolete renderer signature, omitted inherited persona, and did not fold
+  system instructions through the production serializer. Gemini therefore
+  discarded the authored objective. Correcting the harness exposed remaining
+  intermittent Hebrew exits. The evidence policy now makes clear that silent
+  authored flow transitions are permitted and are not business actions that
+  need receipts. Required exit and active-conversation expectations stayed
+  unchanged; all 18 outcomes across six scenarios passed after that change.
 
 ## Executed checks
 
@@ -102,6 +136,13 @@ outbound calls can resume. The runbook and deployment env path were updated.
 | Same real-model suite after fix | 20 passed, 0 skipped, 29.25 seconds | All 16 existing synthetic provider cases passed once; no customer/PSTN traffic |
 | Ruff over dispatcher, agent, runtime and changed DB test; pyrefly over owned runtime sources | Clean / 0 errors | Static checks; pyrefly reports 4 existing suppressions |
 | Final combined dispatcher + agent + runtime Python suite | 1,081 passed, 16 explicitly gated eval skips, 24.17 seconds | All 16 skipped model cases separately executed successfully above |
+| Rebaseline after merging authoritative `42eebac2` | 1,173 passed, 16 explicitly gated eval skips, 26.44 seconds | Includes newer caps, drain, announcements, pump, knowledge, memory and failure protections |
+| New draining readiness regression + provisioning-plan tests | 31 passed | 27 webhook tests and 4 mocked provisioning tests; actual provisioning dry-run additionally succeeded read-only |
+| Current dispatcher + runtime + agent + flows + provisioning tests | 1,293 passed, 17 explicitly gated provider skips, 27.14 seconds | Current merged source with cadence and evaluation fixes; `.artifacts/poc-rescue-local/voice-final-current.log` |
+| Disposable PostgreSQL `voice-merged-db`, six voice files listed above | 35 passed, 0 skipped, 102.99 seconds | Migrated head `7c91e5a2b640`; admission, isolation, control, verified handoff, intake and quality |
+| Disposable PostgreSQL `voice-merged-memory-db`, six memory/knowledge/webhook/usage files | 31 passed, 0 skipped, 31.96 seconds | `test_voice_memory_capture.py`, `test_voice_knowledge_turn.py`, `test_voice_knowledge_migration.py`, `test_phase5_dispatcher_webhooks.py`, `test_verified_channel_memory.py`, `test_voice_model_usage.py` |
+| Current exit-policy real-model eval | 5 passed, 0 skipped, 12.47 seconds | One gated test checks six scenarios three times each; four static checks. Prior failed runs retained in `voice-real-model-current.log` / `voice-real-model-folded.log`; passing result in `voice-exit-policy-after.log` |
+| Final current lead/support real-model regression | 20 passed, 0 skipped, 27.60 seconds | All16 synthetic model cases plus4 static checks on final policy; `voice-provider-final.log`. Together with exit suite, all17 gated provider test functions were executed; this is not live-call proof |
 
 Logs: `.artifacts/poc-rescue-local/voice-db*.log`,
 `voice-admission-db*.log`, `voice-real-model.log` (initial failures retained),
@@ -118,21 +159,30 @@ conversations per agent, human Hebrew scoring, or a measured accuracy SLI.
 
 | Requirement | Current state and next evidence required |
 |---|---|
-| ProTouch/Or-On caller ID and all real-call entry points | Local routing fix verified; actual tenant bindings/restart and recipient-observed calls remain BLOCKED pending correct ProTouch DID/account binding and approved test recipients |
-| Effective agent version / old v3 report | Source and DB tests pin exact versions and reject ambiguous bindings; actual ProTouch runtime version not measured because local tenant/runtime binding is absent |
-| PDF-061 inbound provisioning | BLOCKED: actual provider inventory contains no inbound trunks/rules. Provider mutation requires reviewed DID/account mapping and go-live gate |
-| PDF-062 public webhook | Parent owns Caddy/network fix. Signed provider callback over deployed ingress not verified by this work |
-| PDF-063 global/per-tenant caps with spoken busy | NOT_CHECKED at provider; current dispatcher has no demonstrated global/per-tenant cap or audible busy path |
-| PDF-064 recordings | Local staging/copy-cleanup verified; deployed persistent mount, actual recordings and failure recovery still need runtime evidence; whole-call audio buffering remains a capacity risk |
-| PDF-065 drain/goodbye | Not implemented/verified as an orderly spoken deployment drain; do not enable inbound |
-| PDF-066 stale sweeper | Existing DB/runtime tests cover persistence; deployed scheduling and live-call-safe deploy wait unverified |
-| PDF-067 read recovery | VERIFIED_LOCAL, explicit control barriers retained; live audible recovery not verified |
-| PDF-068 model/TTS fallback, PDF-071 unpublished-agent spoken fallback | No audible provider evidence; startup failure still blocks/hangs up safely, which is not the requested spoken fallback |
-| PDF-069 idle/VAD | Existing offline agent tests pass; long real Hebrew call listening not done |
-| PDF-070 quick webhook acknowledgement | Existing handler awaits agent startup; durable asynchronous startup/latency gate still open |
-| PDF-072–075 warmup/streaming/cache/polling performance | Not measured live; current control poll default 0.5s and usage checkpoint 1s remain, so target 2–5s/15s not met |
-| PDF-076 caller identity and PDF-077 continuity | Real DB isolation/verification tests passed; cross-channel live continuity and summaries not demonstrated |
-| PDF-123–126 voice activation/load/latency | BLOCKED: no 20 real inbound calls per DID, cap+1 audible busy, active-call deployment or end-of-speech timing. Inbound must remain disabled |
+| ProTouch/Or-On caller ID and all real-call entry points | VERIFIED_LOCAL route isolation; actual provider provisioning, config/restart and recipient-observed calls still pending. Source/recipient now human-confirmed; plan dry-run verified |
+| Effective agent version / old v3 report | Source and DB tests pin versions/reject ambiguity. Parent owns authoritative remote agent/version inventory; no call-derived effective version yet |
+| PDF-061 inbound provisioning | BLOCKED: actual LiveKit inventory has no inbound trunks/rules. `control_api.voice.register_phone_number` still creates `simulator:` rules; real provisioner exists in retained tenancy package but is not wired into deployed control API |
+| PDF-062 public webhook | Python signed/invalid/duplicate and durable-pump tests pass. Parent owns actual Caddy/Docker/deployed path evidence; no real carrier callback claimed |
+| PDF-063 caps/busy | VERIFIED_LOCAL: upstream `Dispatcher._start` reserves pending slots synchronously; default global/per-tenant cap3, tests cover cap+1, separate tenants, duplicate admission, busy playback port. Prerecorded Hebrew audio ships; recipient audibility and measured host capacity remain unverified |
+| PDF-064 recordings | VERIFIED_LOCAL staging root and20 disk-copy-cleanup lifecycles. Guarded upstream cleanup retained. Deployed volume/provider recording review and memory load unverified; whole-call buffering remains a capacity risk |
+| PDF-065 drain/goodbye | VERIFIED_LOCAL newer upstream concurrent drain, pending cancellation, bounded90s deadline, orderly engine callback/announcement/finalization. Draining HTTP readiness bug fixed here. Active real call deployment with audible goodbye remains unverified |
+| PDF-066 sweeper | Source contains scheduled least-privilege sweeper and pre-deploy sweep. DB stale-session tests exist; actual live-session-safe recovery/deploy timing is parent runtime gate |
+| PDF-067 read recovery | VERIFIED_LOCAL short outages retain media, new actions require fresh read; stale media expires at failed read after5s lease threshold, plus bounded polling/read detection latency. New tests prove recovery cannot override revoke/takeover. Live audible recovery unverified |
+| PDF-068 LLM/TTS fallback | VERIFIED_LOCAL `VoiceFailurePolicy` allows one bounded transient recovery, interrupts old reply, uses fixed audio independent of failed model/TTS, protects human takeover. SDK test passes; actual provider audio/failover listening unverified |
+| PDF-069 idle/VAD | VERIFIED_LOCAL `test_idle.py` in full suite; long Hebrew caller/VAD-only device listening not performed |
+| PDF-070 fast webhook ack | VERIFIED_LOCAL newer durable `accept`+`DurableWebhookPump`, lease heartbeat/recovery, readiness/liveness recheck. Source no longer waits for startup in HTTP request. Actual15s-startup/provider-redelivery latency unverified |
+| PDF-071 unavailable-agent audio | VERIFIED_LOCAL upstream test `test_unavailable_published_flow_plays_fixed_refusal_before_hangup` and bounded prerecorded `unavailable-he.wav`; actual listening unverified |
+| PDF-072 warmup/greeting | Present: model preflight, opt-in warmup only without active operator controller, low reasoning config, fixed lifecycle audio. Pre-recorded ordinary greeting/cold-turn improvement not demonstrated |
+| PDF-073 safe streaming | Present/tested in merged agent suite: `HebrewTurnPlanner` streams ordinary bounded chunks, preserves numeric/evidence-sensitive spans; fixed lifecycle audio exists. No accepted end-to-first-audio latency sample |
+| PDF-074 knowledge cache | VERIFIED_LOCAL upstream `TurnKnowledgeReader` loads once per inference, checks current eligibility revisions before speech, isolates calls/tenants and rejects revoked/stale generation. Full suite passes; live query-count/latency reduction unmeasured |
+| PDF-075 reduced polls/checkpoints | VERIFIED_LOCAL: default control poll2s and usage checkpoint15s; fresh action authorization and reliable final flush retained. Local scheduler pause1.9–3s with fake storage; actual DB load and audible stop latency still unmeasured |
+| PDF-076 unverified caller hint | VERIFIED_LOCAL real DB verification/isolation tests; no sensitive handoff content before authoritative unlock. Live spoof/shared-number case unperformed |
+| PDF-077 shared memory | Present/tested offline: upstream voice turn append/final memory checkpoint and identity-gated context. Actual verified WhatsApp→voice→WhatsApp continuity and supported summary review unverified |
+| PDF-078 natural grounded voice | Support-progress synthetic8/8 passed on merged source, authored exit18/18 outcomes passed after policy/eval repair; grounding tests pass. Human Hebrew30-case agent evaluation not done |
+| PDF-123 20 inbound calls/DID | BLOCKED: inbound not provisioned/activated; zero real inbound test-call evidence |
+| PDF-124 active-deploy+cap+1 | VERIFIED_LOCAL lifecycle ports only; audible real-call busy/goodbye and concurrent WhatsApp availability not measured |
+| PDF-125 speech latency | NOT_CHECKED live: no p50/p95 first/cold/warm end-of-speech→audible-response sample |
+| PDF-126 20-call load/leak | Partial:20 local artifact lifecycles, no staging leak; not20 full simulated/provider call pipelines or memory/disk stress under accepted concurrency |
 | PDF-110 canary/48h | No deployment or 48-hour observation occurred; local test success does not authorize broad live activation |
 
 Owned source areas: `packages/py/oron-dispatcher`, selected

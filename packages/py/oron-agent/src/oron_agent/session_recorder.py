@@ -37,7 +37,7 @@ class SessionRecorder:
         usage: CallUsage,
         *,
         started_at: float,
-        interval_seconds: float = 1.0,
+        interval_seconds: float = 15.0,
     ) -> None:
         """Checkpoint a live cost snapshot while preserving the final write.
 

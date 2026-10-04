@@ -6,7 +6,7 @@ import asyncio
 import logging
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, cast
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from livekit.protocol.models import ParticipantInfo
@@ -622,7 +622,7 @@ class Dispatcher:
             if callable(graceful_stop):
                 # The current engine plays before its artifact/finalization
                 # boundary; the dispatcher owns the final provider teardown.
-                await graceful_stop()
+                await cast(Callable[[], Awaitable[None]], graceful_stop)()
             else:
                 await active.handle.cancel()
                 if self._play_announcement is not None:

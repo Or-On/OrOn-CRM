@@ -161,8 +161,8 @@ def eligible_facts(records: list[dict[str, Any]], tenant_id: str) -> list[Knowle
 def _action_policy(business_actions: tuple[str, ...]) -> str:
     """How tools may be used, stated from what this published agent holds.
 
-    An agent without business actions keeps the original wording. One that was
-    published with them is told to use them for their purpose: telling a lead
+    An agent without business actions may still follow authored routing. One
+    published with business actions is told to use them for their purpose: telling a lead
     agent that "normal conversation must not invoke a tool" contradicts the
     incremental saving its own prompt asks for.
     """
@@ -171,7 +171,13 @@ def _action_policy(business_actions: tuple[str, ...]) -> str:
         return (
             "Never invent a lookup, booking, payment, ticket, technician status, or tool "
             "result. Conversation-routing tools remain available when the current flow "
-            "genuinely calls for them, but normal conversation must not invoke a tool. "
+            "calls for them: once the authored objective is accomplished, call its routing "
+            "function silently. An explicit caller request to stop or end the call satisfies "
+            "the authored goodbye condition; route silently without asking another question. "
+            "These transitions do not claim any business action succeeded and need no "
+            "business-action receipt. If the objective is still incomplete and no exit "
+            "condition applies, normal conversation must not invoke a tool merely because "
+            "the caller spoke. "
         )
     return (
         "This agent's published configuration enables these business actions: "

@@ -29,6 +29,7 @@ from dataclasses import dataclass
 import httpx
 import pytest
 from oron_agent.grounding import grounding_instruction, render_reply
+from oron_agent.provider_context import fold_instructions
 from oron_flows.compose import expand
 from oron_flows.node import FlowNode
 from oron_flows.seeds import EXAMPLE_EN, EXAMPLE_HE
@@ -41,7 +42,9 @@ def support_node(locale: str = "he") -> FlowNode:
     """Return the actual compiled conversational support node."""
 
     composition = EXAMPLE_HE if locale == "he" else EXAMPLE_EN
-    return next(node for node in expand(composition).nodes if node.name == "collect_reason")
+    spec = expand(composition)
+    node = next(node for node in spec.nodes if node.name == "collect_reason")
+    return node.model_copy(update={"role_message": node.role_message or spec.role_message})
 
 
 @dataclass(frozen=True)
@@ -66,6 +69,11 @@ def request(endpoint: Endpoint, case: ExitCase) -> dict:
     messages += [{"role": role, "content": text} for role, text in case.history]
     messages.append({"role": "user", "content": case.last_turn})
     messages.append({"role": "system", "content": grounding_instruction([], case.locale)})
+    # Use the production provider serializer: Gemini's compatibility endpoint
+    # otherwise discards every instruction except the final evidence policy,
+    # making this harness lose the authored objective and tenant identity.
+    instruction, conversation = fold_instructions(messages)
+    messages = [{"role": "system", "content": instruction}, *conversation]
 
     tools = [
         {
@@ -256,19 +264,14 @@ def test_neutral_support_flow_routes_completion_and_exit_but_not_an_active_calle
                         outcome.content or "",
                         [],
                         case.locale,
-                        latest_caller_text=case.last_turn,
-                        recent_spoken_texts=tuple(
-                            text for role, text in case.history if role == "assistant"
-                        ),
                     ).decision
                     in {
-                        "diagnostic_question",
-                        "acknowledged_question",
-                        # The production renderer replaces a provider's repeated
-                        # question before TTS; evaluate the caller-visible turn,
-                        # not only the raw selection.
-                        "duplicate_recovery",
+                        # Current production preserves safe natural speech;
+                        # it no longer classifies it into canned intent labels.
+                        "natural_conversation",
                     }
+                    and bool(outcome.content and outcome.content.strip())
+                    and outcome.content not in {"תודה על השיתוף.", "Thank you for sharing."}
                     for outcome in outcomes
                     if outcome.function is None and outcome.finish_reason == "stop"
                 )
@@ -325,6 +328,19 @@ def test_live_eval_inherits_production_quality_knobs(monkeypatch):
     assert endpoint.reasoning_effort == "none"
     assert endpoint.temperature == 0.25
     assert endpoint.max_tokens == 192
+
+
+def test_provider_eval_preserves_tenant_role_and_objective_in_one_instruction():
+    endpoint = Endpoint("https://example.invalid/v1", "fixture", "fixture", None, 0.4, 256)
+    payload = request(endpoint, CASES[3])
+    messages = payload["messages"]
+    instructions = [message for message in messages if message["role"] == "system"]
+
+    assert len(instructions) == 1
+    assert "the support line" in instructions[0]["content"]
+    assert "MUST call collect_reason_done" in instructions[0]["content"]
+    assert "VOICE EVIDENCE AND ACTION SAFETY POLICY" in instructions[0]["content"]
+    assert messages[-1] == {"role": "user", "content": CASES[3].last_turn}
 
 
 def test_provider_eval_ignores_config_without_explicit_opt_in(monkeypatch):
