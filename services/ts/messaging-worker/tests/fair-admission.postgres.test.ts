@@ -1,3 +1,4 @@
+import { createFairDatabaseFixture } from "./fair-database-fixture.js";
 import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { describe, expect, it } from "vitest";
@@ -6,14 +7,8 @@ const url = process.env.FAIR_TEST_DATABASE_URL;
 describe.skipIf(!url)("durable multi-worker AI admission", () => {
   it("enforces4global2tenant1conversation with concurrent role-limited claimers and preserves fencing", async () => {
     if (!url) throw new Error("Explicit owned fixture required");
-    const target = new URL(url);
-    if (
-      target.hostname !== "127.0.0.1" ||
-      target.port !== "55480" ||
-      !/^\/oron_fair_[a-f0-9]{32}$/u.test(target.pathname)
-    )
-      throw new Error("Independent owned fair fixture only");
-    const db = postgres(url, { max: 8, prepare: false });
+    const fixtureDatabase = await createFairDatabaseFixture(url);
+    const db = postgres(fixtureDatabase.url, { max: 8, prepare: false });
     const tenants = Array.from({ length: 3 }, () => randomUUID());
     const firstConversations: string[] = [];
     const malformedIds = [randomUUID(), randomUUID()];
@@ -137,7 +132,11 @@ describe.skipIf(!url)("durable multi-worker AI admission", () => {
       });
       expect(legacy[0]?.id).toBe(victim.id);
     } finally {
-      await db.end();
+      try {
+        await db.end();
+      } finally {
+        await fixtureDatabase.close();
+      }
     }
   }, 30000);
 });

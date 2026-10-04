@@ -1,3 +1,4 @@
+import { createFairDatabaseFixture } from "./fair-database-fixture.js";
 import {
   createModelCredentialResolver,
   sealModelCredential,
@@ -21,14 +22,8 @@ describe.skipIf(!url)(
       "selects latest eligible same-profile revision with both flags and summary %s",
       async (scenario) => {
         if (!url) throw new Error("Owned fair fixture required");
-        const target = new URL(url);
-        if (
-          target.hostname !== "127.0.0.1" ||
-          target.port !== "55480" ||
-          !/^\/oron_fair_[a-f0-9]{32}$/u.test(target.pathname)
-        )
-          throw new Error("Independent local fair fixture only");
-        const admin = postgres(url, { max: 2, prepare: false });
+        const fixtureDatabase = await createFairDatabaseFixture(url);
+        const admin = postgres(fixtureDatabase.url, { max: 2, prepare: false });
         const fixtures: {
           tenant: string;
           account: string;
@@ -55,7 +50,7 @@ describe.skipIf(!url)(
         });
         const summaryState = { held: false };
         let physicalSummaryRequests = 0;
-        const workerTarget = new URL(url);
+        const workerTarget = new URL(fixtureDatabase.url);
         workerTarget.searchParams.set("options", "-c role=platform_messaging");
         const model = {
           decide: async (request: WhatsAppAiRequest) => {
@@ -229,7 +224,9 @@ describe.skipIf(!url)(
           };
           await accept(0);
           await firstStore.processAvailable();
-          for (let pass = 0; pass < 20 && !state.aStarted; pass++) {
+          // The scheduler returns before asynchronous credential/route admission finishes.
+          const startDeadline = Date.now() + 5000;
+          while (!state.aStarted && Date.now() < startDeadline) {
             await new Promise((resolve) => setTimeout(resolve, 10));
           }
           expect(state.aStarted).toBe(true);
@@ -412,8 +409,13 @@ describe.skipIf(!url)(
           }
         } finally {
           releaseSlow();
-          await Promise.all(stores.map((store) => store.close()));
-          await admin.end();
+          releaseSummary();
+          try {
+            await Promise.all(stores.map((store) => store.close()));
+            await admin.end();
+          } finally {
+            await fixtureDatabase.close();
+          }
         }
       },
       30000,

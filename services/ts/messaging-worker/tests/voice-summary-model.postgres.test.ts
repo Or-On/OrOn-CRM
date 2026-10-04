@@ -1,3 +1,4 @@
+import { createFairDatabaseFixture } from "./fair-database-fixture.js";
 import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { describe, it, expect } from "vitest";
@@ -16,14 +17,8 @@ describe.skipIf(!url)(
       "10-turn and end checkpoints %s",
       async (scenario) => {
         if (!url) throw new TypeError("Owned fair fixture required");
-        const target = new URL(url);
-        if (
-          target.hostname !== "127.0.0.1" ||
-          target.port !== "55480" ||
-          !/^\/oron_fair_[a-f0-9]{32}$/u.test(target.pathname)
-        )
-          throw new TypeError("Owned loopback fixture only");
-        const admin = postgres(url, { max: 2, prepare: false });
+        const fixtureDatabase = await createFairDatabaseFixture(url);
+        const admin = postgres(fixtureDatabase.url, { max: 2, prepare: false });
         const tenant = randomUUID(),
           user = randomUUID(),
           contact = randomUUID(),
@@ -44,7 +39,7 @@ describe.skipIf(!url)(
         );
         let requests = 0;
         const sources: number[] = [];
-        const workerUrl = new URL(url);
+        const workerUrl = new URL(fixtureDatabase.url);
         workerUrl.searchParams.set("options", "-c role=platform_messaging");
         const store = createMessagingStore(
           workerUrl.toString(),
@@ -210,8 +205,12 @@ describe.skipIf(!url)(
           >`SELECT count(*)::text AS count FROM agents.messaging_memory_summaries WHERE tenant_id=${tenant}::uuid`;
           expect(Number(promoted[0]?.count)).toBe(0);
         } finally {
-          await store.close();
-          await admin.end({ timeout: 1 });
+          try {
+            await store.close();
+            await admin.end({ timeout: 1 });
+          } finally {
+            await fixtureDatabase.close();
+          }
         }
       },
       30000,

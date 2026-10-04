@@ -1,3 +1,4 @@
+import { createFairDatabaseFixture } from "./fair-database-fixture.js";
 import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { describe, expect, it, vi } from "vitest";
@@ -28,14 +29,8 @@ describe.skipIf(!url)("actual worker trusted model routing", () => {
     "explicit %s route never calls the deployment model",
     async (scenario) => {
       if (!url) throw new Error("Owned fair fixture required");
-      const target = new URL(url);
-      if (
-        target.hostname !== "127.0.0.1" ||
-        target.port !== "55480" ||
-        !/^\/oron_fair_[a-f0-9]{32}$/u.test(target.pathname)
-      )
-        throw new Error("Independent local fair fixture only");
-      const admin = postgres(url, { max: 2, prepare: false });
+      const fixtureDatabase = await createFairDatabaseFixture(url);
+      const admin = postgres(fixtureDatabase.url, { max: 2, prepare: false });
       const fixtures: {
         tenant: string;
         account: string;
@@ -95,7 +90,7 @@ describe.skipIf(!url)("actual worker trusted model routing", () => {
         else selectedModels.push(body.model);
         return Promise.resolve(response());
       });
-      const workerTarget = new URL(url);
+      const workerTarget = new URL(fixtureDatabase.url);
       workerTarget.searchParams.set("options", "-c role=platform_messaging");
       const meta = {
         name: "meta" as const,
@@ -314,8 +309,12 @@ describe.skipIf(!url)("actual worker trusted model routing", () => {
         });
       } finally {
         vi.unstubAllGlobals();
-        await Promise.all(stores.map((store) => store.close()));
-        await admin.end();
+        try {
+          await Promise.all(stores.map((store) => store.close()));
+          await admin.end();
+        } finally {
+          await fixtureDatabase.close();
+        }
       }
     },
     30000,
