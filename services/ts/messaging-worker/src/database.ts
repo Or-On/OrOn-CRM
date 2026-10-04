@@ -3041,6 +3041,21 @@ async function processJob(
           job,
           async (transaction) => {
             await requireOwnedJob(transaction, workerId, job);
+            if (result.decision.kind !== "offer") {
+              const reason =
+                result.decision.kind === "route"
+                  ? "opening_menu_route_denied"
+                  : `opening_menu_${result.decision.kind}_${result.decision.reason ?? "no_action"}`
+                      .replaceAll("-", "_")
+                      .slice(0, 180);
+              await cancelJobForDisabledFeature(
+                transaction,
+                job,
+                workerId,
+                reason,
+              );
+              return;
+            }
             await transaction`
             UPDATE ops.jobs SET status='succeeded', completed_at=CURRENT_TIMESTAMP,
               locked_at=NULL, locked_by=NULL, last_error_safe=NULL, updated_at=CURRENT_TIMESTAMP

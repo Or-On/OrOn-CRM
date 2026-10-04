@@ -5,13 +5,14 @@ import { describe, expect, it } from "vitest";
 import { openingMenuBusinessJobAllowed } from "../src/opening-menu-database.js";
 import type { WhatsAppAiRequest } from "../src/ai-provider.js";
 import { createMessagingStore } from "../src/database.js";
+import { seedOpeningMenuFixture } from "./opening-menu-fixture.js";
 import {
   WhatsAppProviderError,
   SimulatorWhatsAppProvider,
 } from "../src/providers.js";
 const url = process.env.OPENING_MENU_TEST_DATABASE_URL;
 describe.skipIf(!url)("owned canonical opening-menu worker", () => {
-  it.each(["success", "rateLimit", "firstVideo", "firstAudio"])(
+  it.each(["success", "rateLimit", "firstVideo", "firstAudio", "blocked"])(
     "%s canonical ingress fences menu, AI, service and physical retries",
     async (scenario) => {
       if (!url) throw new Error("Owned fixture required");
@@ -23,16 +24,7 @@ describe.skipIf(!url)("owned canonical opening-menu worker", () => {
       )
         throw new Error("Owned loopback fixture only");
       const admin = postgres(url, { max: 2, prepare: false });
-      const config = await admin<
-        {
-          tenant_id: string;
-          channel_id: string;
-          agent_version_id: string;
-          flow_version_id: string;
-        }[]
-      >`SELECT * FROM platform.whatsapp_opening_menu_configuration WHERE enabled LIMIT 1`;
-      const cfg = config[0];
-      if (!cfg) throw new Error("Prepared owned menu fixture required");
+      const cfg = await seedOpeningMenuFixture(admin);
       const caseId = randomUUID(),
         summaryId = randomUUID(),
         summaryJob = randomUUID();
@@ -125,6 +117,8 @@ describe.skipIf(!url)("owned canonical opening-menu worker", () => {
           await tx`INSERT INTO service.cases(id,tenant_id,reference,customer_contact_id,title,fault_description,source) VALUES(${caseId}::uuid,${cfg.tenant_id}::uuid,${caseId},${contact}::uuid,'Fictional menu case','Fictional','whatsapp')`;
           await tx`INSERT INTO service.case_summaries(id,tenant_id,case_id,source_kind,source_reference_id) VALUES(${summaryId}::uuid,${cfg.tenant_id}::uuid,${caseId}::uuid,'whatsapp',${conversation}::uuid)`;
           await tx`INSERT INTO ops.jobs(id,tenant_id,queue,job_type,reference_type,reference_id,payload,status,priority) VALUES(${summaryJob}::uuid,${cfg.tenant_id}::uuid,'messaging','field_service.summary','case_summary',${summaryId}::uuid,${tx.json({ summaryId, caseId, sourceKind: "whatsapp", sourceReferenceId: conversation })},'queued',10)`;
+          if (scenario === "blocked")
+            await tx`UPDATE platform.ai_execution_principals SET status='inactive' WHERE tenant_id=${cfg.tenant_id}::uuid`;
         });
         for (let n = 0; n < 2; n++) {
           const message = randomUUID();
@@ -159,7 +153,7 @@ describe.skipIf(!url)("owned canonical opening-menu worker", () => {
           await store.processAvailable();
           await store.drainReplies();
         }
-        expect(sends).toBe(1);
+        expect(sends).toBe(scenario === "blocked" ? 0 : 1);
         expect(modelCalls).toBe(0);
         expect(extractionCalls).toBe(0);
         expect(
@@ -170,8 +164,20 @@ describe.skipIf(!url)("owned canonical opening-menu worker", () => {
           )[0],
         ).toEqual({ status: "failed", summary: null });
         const jobs = await admin<
-          { job_type: string; status: string }[]
-        >`SELECT job_type,status FROM ops.jobs WHERE tenant_id=${cfg.tenant_id}::uuid AND (reference_id=${conversation}::uuid OR payload->>'conversationId'=${conversation})`;
+          { job_type: string; status: string; last_error_safe: string | null }[]
+        >`SELECT job_type,status,last_error_safe FROM ops.jobs WHERE tenant_id=${cfg.tenant_id}::uuid AND (reference_id=${conversation}::uuid OR payload->>'conversationId'=${conversation})`;
+        if (scenario === "blocked") {
+          expect(jobs.length).toBeGreaterThan(0);
+          expect(
+            jobs.every(
+              (job) =>
+                job.status === "cancelled" &&
+                job.last_error_safe ===
+                  "opening_menu_blocked_canonical_binding_unavailable",
+            ),
+          ).toBe(true);
+          return;
+        }
         if (scenario.startsWith("first")) {
           expect(
             jobs.some(
@@ -206,7 +212,22 @@ describe.skipIf(!url)("owned canonical opening-menu worker", () => {
           expect(sends).toBe(1);
           return;
         }
-        expect(jobs.every((j) => j.status === "succeeded")).toBe(true);
+        expect(jobs.some((j) => j.status === "succeeded")).toBe(true);
+        expect(
+          jobs.some(
+            (j) =>
+              j.status === "cancelled" &&
+              j.last_error_safe?.startsWith("opening_menu_handled_"),
+          ),
+        ).toBe(true);
+        expect(
+          jobs.every(
+            (j) =>
+              j.status === "succeeded" ||
+              (j.status === "cancelled" &&
+                j.last_error_safe?.startsWith("opening_menu_")),
+          ),
+        ).toBe(true);
         const history = await admin<
           { sender_type: string; provider_message_id: string }[]
         >`SELECT sender_type,provider_message_id FROM messaging.messages WHERE conversation_id=${conversation}::uuid AND direction='outbound'`;
