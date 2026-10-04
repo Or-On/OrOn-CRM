@@ -81,6 +81,7 @@ def test_cleanup_checks_exact_key_not_comment_or_fingerprint_format():
     spec = importlib.util.spec_from_file_location(
         "cleanup", ROOT / "scripts/check-oslogin-cleanup.py"
     )
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     module.verify("ssh-rsa synthetic-a comment", [{"key": "ssh-rsa synthetic-b comment"}])
@@ -114,6 +115,7 @@ def test_cleanup_supports_actual_gcloud_additional_properties_shape():
     spec = importlib.util.spec_from_file_location(
         "cleanup_actual", ROOT / "scripts/check-oslogin-cleanup.py"
     )
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     module.verify(
