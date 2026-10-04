@@ -8,18 +8,24 @@ Voice names are per-vendor namespaces — "Leda" means nothing to Soniox — so 
 default voice comes from the provider's own setting.
 """
 
-from collections.abc import Sequence
+import asyncio
+import json
+from collections.abc import AsyncGenerator, Sequence
 from typing import Any
 
 # Defined with the flow schema, because a flow now names the vendor it wants and
 # oron-flows cannot import this module. Re-exported here so every existing
 # caller keeps importing it from the package that builds the service.
 from oron_flows import TtsProvider
+from pipecat.frames.frames import CancelFrame, ErrorFrame, Frame, TTSStoppedFrame
 from pipecat.services.google.tts import GeminiTTSService
 from pipecat.services.soniox.tts import SonioxTTSService
 from pipecat.services.tts_service import TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.text.base_text_filter import BaseTextFilter
+from pipecat.utils.tracing.service_decorators import traced_tts
+from websockets.exceptions import ConnectionClosed
+from websockets.protocol import State
 
 from oron_agent.tts_clause import FirstClauseAggregator
 
@@ -55,6 +61,155 @@ class SonioxUnpointedContextTTSService(SonioxTTSService):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._push_text_frames = True
+        self._send_lock = asyncio.Lock()
+        self._stopping = False
+        self._submitted_contexts: set[str] = set()
+
+    async def _connect(self):
+        """Defer the setup-time connection until there is text to authenticate it.
+
+        Soniox closes a fresh socket without a stream config after about 10s.
+        Keepalives do not authenticate it, and an eagerly configured stream has
+        its own shorter text deadline. Neither may span ringing/LLM latency.
+        https://soniox.com/docs/tts/rt/connection-keepalive
+        """
+
+    async def on_turn_context_created(self, context_id: str):
+        """The config must immediately precede real text, not turn creation."""
+
+    async def _fail_pending_audio(self, *, report_error: bool = True):
+        pending = self._configured_contexts & self._submitted_contexts
+        for context_id in pending:
+            if self.audio_context_available(context_id):
+                await self.append_to_audio_context(
+                    context_id, TTSStoppedFrame(context_id=context_id)
+                )
+                await self.remove_audio_context(context_id)
+        if pending and report_error:
+            await self._report_error(ErrorFrame("Soniox connection closed during speech"))
+        self._configured_contexts.clear()
+
+    async def _receive_task_handler(self, report_error):
+        # Reconnecting in the background opens another unauthenticated socket
+        # and can discard the next turn's audio context. Reconnect on demand.
+        try:
+            await self._receive_messages()
+        except ConnectionClosed:
+            pass
+        except Exception:
+            await report_error(ErrorFrame("Soniox audio receive failed"))
+        finally:
+            if not self._disconnecting:
+                if self._websocket:
+                    await self._websocket.close()
+                await self._fail_pending_audio()
+
+    async def _retire_socket(self, *, report_error: bool = True):
+        # Transport reset is recoverable by a NEW context. Only terminal
+        # cancel/stop/cleanup sets _stopping; an ambiguous old context remains
+        # in _submitted_contexts so that it can never be replayed.
+        self._disconnecting = True
+        for name in ("_receive_task", "_keepalive_task"):
+            task = getattr(self, name)
+            if task is not None:
+                await self.cancel_task(task)
+                setattr(self, name, None)
+        await self._fail_pending_audio(report_error=report_error)
+        if self._websocket:
+            await self._websocket.close()
+            await self._call_event_handler("on_disconnected")
+        self._websocket = None
+        self._partials.clear()
+
+    async def _ensure_socket(self):
+        if self._websocket and self._websocket.state is State.OPEN:
+            return
+        # Do not use _disconnect_websocket here: it removes the active Pipecat
+        # audio context, including an unsent new turn waiting for this socket.
+        await self._retire_socket()
+        await super()._connect()
+        if not self._websocket or self._websocket.state is not State.OPEN:
+            raise ConnectionError("Soniox connection unavailable")
+
+    @traced_tts
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None]:
+        try:
+            async with self._send_lock:
+                if self._stopping:
+                    return
+                # Once text was submitted, reconnection cannot safely replay it:
+                # some of its audio may already have reached the caller.
+                if context_id in self._submitted_contexts and (
+                    context_id not in self._configured_contexts
+                    or not self._websocket
+                    or self._websocket.state is not State.OPEN
+                ):
+                    raise ConnectionError("Soniox speech stream was already closed")
+                for attempt in range(2):
+                    await self._ensure_socket()
+                    if self._stopping or not self.audio_context_available(context_id):
+                        return
+                    try:
+                        await self._send_config(context_id)
+                        break
+                    except ConnectionClosed:
+                        # Config contains no speech. One retry is safe only
+                        # before any text was attempted on this context.
+                        if attempt or context_id in self._submitted_contexts:
+                            raise
+                if self._stopping or not self.audio_context_available(context_id):
+                    await self._close_stream(context_id)
+                    return
+                self._submitted_contexts.add(context_id)
+                await self._get_websocket().send(
+                    json.dumps({"text": text, "text_end": False, "stream_id": context_id})
+                )
+                await self.start_tts_usage_metrics(text)
+            yield None
+        except Exception:
+            # No text replay after an ambiguous send. Keep credentials/provider
+            # exception payloads out of downstream error frames and logs.
+            async with self._send_lock:
+                pending = context_id in self._configured_contexts & self._submitted_contexts
+                await self._retire_socket(report_error=False)
+                if not pending and self.audio_context_available(context_id):
+                    await self.append_to_audio_context(
+                        context_id, TTSStoppedFrame(context_id=context_id)
+                    )
+                    await self.remove_audio_context(context_id)
+            # tts_process_generator queues yielded errors behind audio. The
+            # context now has an end sentinel, so that path would silently drop
+            # this failure after partial audio. Report it out of band instead.
+            await self._report_error(ErrorFrame("Soniox speech could not be sent"))
+            yield None
+
+    async def flush_audio(self, context_id: str | None = None):
+        async with self._send_lock:
+            flush_id = context_id or self.get_active_audio_context_id()
+            if (
+                not self._stopping
+                and flush_id in self._configured_contexts
+                and self._websocket
+                and self._websocket.state is State.OPEN
+            ):
+                await super().flush_audio(flush_id)
+
+    async def _disconnect(self):
+        # Set before waiting for a connection/send in progress. That operation
+        # must not start speech after cancellation requested teardown.
+        self._stopping = True
+        async with self._send_lock:
+            await super()._disconnect()
+
+    async def cancel(self, frame: CancelFrame):
+        # Pipecat first awaits its audio producer teardown. Fence new sends
+        # before that await, not only when _disconnect eventually runs.
+        self._stopping = True
+        await super().cancel(frame)
+
+    async def cleanup(self):
+        self._stopping = True
+        await super().cleanup()
 
     def _build_config_msg(self, context_id: str) -> dict[str, Any]:
         # Only `return_timestamps` is forced. `reduce_silence` is NOT sent
