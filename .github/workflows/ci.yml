@@ -107,7 +107,7 @@ jobs:
         ports:
           - 55480:5432
         options: >-
-          --health-cmd "pg_isready -U platform_migrator -d or_on_platform_ci"
+          --health-cmd "pg_isready -h 127.0.0.1 -U platform_migrator -d or_on_platform_ci"
           --health-interval 3s
           --health-timeout 5s
           --health-retries 20
@@ -120,7 +120,7 @@ jobs:
         ports:
           - 55439:5432
         options: >-
-          --health-cmd "pg_isready -U platform_migrator -d oron_readiness"
+          --health-cmd "pg_isready -h 127.0.0.1 -U platform_migrator -d oron_readiness"
           --health-interval 3s
           --health-timeout 5s
           --health-retries 20
@@ -434,6 +434,9 @@ jobs:
             infra/deployment/systemd/oron-dev.service \
             infra/deployment/systemd/oron-dev-backup.service \
             infra/deployment/systemd/oron-dev-backup.timer \
+            infra/deployment/systemd/oron-dev-recovery.service \
+            infra/deployment/systemd/oron-dev-recovery.timer \
+            scripts/recover_unhealthy.py db/contracts/schema-manifest.json \
             scripts/deploy-dev.sh scripts/backup-dev.sh scripts/restore-dev-backup.py \
             "${release_dir}"
           archive="${RUNNER_TEMP}/oron-dev-release-${GITHUB_SHA}.tar.gz"
