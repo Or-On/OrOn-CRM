@@ -1,7 +1,12 @@
 import type { Sql } from "postgres";
 
 export type MonitoringKind =
-  "inbound_age" | "dead_reply_job" | "webhook" | "worker" | "backup";
+  | "inbound_age"
+  | "dead_reply_job"
+  | "voice_summary_missing"
+  | "webhook"
+  | "worker"
+  | "backup";
 export interface OperatorMonitoringIntent {
   key: string;
   kind: MonitoringKind;
@@ -38,17 +43,17 @@ export async function probeRemediationHealth(
   await sql.begin(async (tx) => {
     await tx`set transaction read only`;
     await tx`set local statement_timeout = '5s'`;
-    const inbound = await tx<{ id: string; tenant_id: string }[]>`
+    const inbound = await tx<{ id: string; tenant_id: string | null }[]>`
       select id, tenant_id from ops.inbound_events
-      where status in ('pending', 'running')
+      where status in ('received', 'processing', 'failed', 'quarantined')
         and received_at < ${now}::timestamptz - interval '60 seconds'
       order by received_at, id limit 1000
     `;
     for (const row of inbound) {
       intents.push({
-        key: `inbound_age:${row.tenant_id}:${row.id}`,
+        key: `inbound_age:${row.tenant_id ?? "unrouted"}:${row.id}`,
         kind: "inbound_age",
-        tenantId: row.tenant_id,
+        ...(row.tenant_id === null ? {} : { tenantId: row.tenant_id }),
         resourceId: row.id,
         observedAt,
         reason: "Inbound processing age exceeded 60 seconds",
@@ -67,6 +72,30 @@ export async function probeRemediationHealth(
         resourceId: row.id,
         observedAt,
         reason: "WhatsApp reply or send job exhausted retries",
+      });
+    }
+    const sessions = await tx<{ id: string; tenant_id: string }[]>`
+      select session.session_id as id, session.tenant_id
+      from public.sessions session
+      where session.provider='livekit' and session.status in ('ended','failed')
+        and session.ended_at < ${now}::timestamptz - interval '60 seconds'
+        and not exists (
+          select 1 from public.session_events event
+          where event.tenant_id=session.tenant_id
+            and event.session_id=session.session_id
+            and event.event_type='voice.quality.summary.v1'
+        )
+      order by session.ended_at, session.session_id limit 1000
+    `;
+    for (const row of sessions) {
+      intents.push({
+        key: `voice_summary_missing:${row.tenant_id}:${row.id}`,
+        kind: "voice_summary_missing",
+        tenantId: row.tenant_id,
+        resourceId: row.id,
+        observedAt,
+        reason:
+          "Completed voice session has no quality summary after 60 seconds",
       });
     }
   });
