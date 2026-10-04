@@ -1,5 +1,6 @@
-import { fileURLToPath } from "node:url";
-import { writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { ConversationSummary, Message } from "@or-on/crm";
@@ -67,11 +68,13 @@ describe("customer and model content XSS boundary", () => {
     expect(html).not.toContain('<img src="x"');
     expect(html).not.toContain("<script>window.__xss");
     expect(html).not.toContain('href="javascript:');
-    writeFileSync(
-      fileURLToPath(
-        new URL("../../../../evidence/xss-inbox-render.html", import.meta.url),
-      ),
-      html,
-    );
+    const directory = mkdtempSync(join(tmpdir(), "oron-xss-render-"));
+    try {
+      const artifact = join(directory, "xss-inbox-render.html");
+      writeFileSync(artifact, html);
+      expect(readFileSync(artifact, "utf8")).toBe(html);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });

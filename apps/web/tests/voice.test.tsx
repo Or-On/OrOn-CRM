@@ -56,7 +56,8 @@ describe("voice operator surfaces", () => {
         sessions={[]}
       />,
     );
-    expect(markup).toContain("Real calls disabled");
+    expect(markup).toContain("Provider comparison not performed");
+    expect(markup).not.toContain("Real calls disabled");
     expect(markup).toContain('dir="ltr"');
     expect(markup).toContain("Restricted carrier CIDR");
   });
