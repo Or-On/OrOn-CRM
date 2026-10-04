@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { describe, expect, it } from "vitest";
 import { loadSessionMemoryContext } from "./session-memory-context.js";
+import { seedOpeningMenuFixture } from "../tests/opening-menu-fixture.js";
 
 function required<T>(value: T | undefined): T {
   if (value === undefined)
@@ -22,11 +23,12 @@ describe.skipIf(!url)("trusted session context PostgreSQL", () => {
       throw new Error("owned synthetic database required");
     const db = postgres(required(url), { max: 1, prepare: false });
     try {
+      const fixture = await seedOpeningMenuFixture(db);
       await expect(
         db.begin(async (sql) => {
           const agents = await sql<{ id: string; tenant_id: string }[]>`
           SELECT id,tenant_id FROM agents.agent_profile_versions
-          WHERE published_at IS NOT NULL AND validation_status='valid' LIMIT 1`;
+          WHERE id=${fixture.agent_version_id}::uuid AND published_at IS NOT NULL AND validation_status='valid'`;
           if (!agents[0]) throw new Error("fictional published agent required");
           const tenant = agents[0].tenant_id,
             agent = agents[0].id;

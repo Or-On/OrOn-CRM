@@ -167,7 +167,7 @@ export async function ingestWhatsAppCoexistence(
       ON channel.tenant_id=account.tenant_id AND channel.id=account.channel_id
     WHERE account.tenant_id=platform.current_tenant_id() AND account.waba_id=${string(stored.wabaId)}
       AND account.phone_number_id=${string(stored.providerAccountId)} AND channel.provider_account_id=account.phone_number_id
-    FOR UPDATE OF channel`;
+    FOR NO KEY UPDATE OF channel`;
   const firstBinding = rows[0];
   if (!firstBinding) throw new TypeError("coexistence binding unavailable");
   const binding = firstBinding;
@@ -315,7 +315,7 @@ export async function ingestWhatsAppCoexistence(
     await sql`INSERT INTO messaging.messages(tenant_id,conversation_id,direction,sender_type,sender_contact_id,content_type,content_text,structured_content,provider,provider_message_id,status,provider_payload,created_at) VALUES(platform.current_tenant_id(),${conversation}::uuid,${outbound ? "outbound" : "inbound"},${outbound ? "user" : "contact"},${outbound ? null : contactId}::uuid,${contentType},${text || null},${sql.json(content)},'meta',${id},${outbound ? "sent" : "received"},${sql.json({ origin, coexistenceReceiptId: string(stored.receiptId) })},${at})`;
     await sql`UPDATE messaging.conversations SET last_message_at=${at},last_message_preview=${text.slice(0, 200) || `[${rawType || "Message"}]`},updated_at=CURRENT_TIMESTAMP WHERE tenant_id=platform.current_tenant_id() AND id=${conversation}::uuid AND (last_message_at IS NULL OR last_message_at<${at})`;
     if (field === "smb_message_echoes")
-      await sql`UPDATE messaging.conversations SET ownership_mode='human',ownership_epoch=ownership_epoch+1,updated_at=CURRENT_TIMESTAMP WHERE tenant_id=platform.current_tenant_id() AND id=${conversation}::uuid AND ownership_mode<>'human'`;
+      await sql`UPDATE messaging.conversations SET ownership_mode='human',ownership_epoch=ownership_epoch+1,handoff_reason_safe=COALESCE(handoff_reason_safe,'whatsapp_business_app_human_reply'),updated_at=CURRENT_TIMESTAMP WHERE tenant_id=platform.current_tenant_id() AND id=${conversation}::uuid AND (ownership_mode<>'human' OR handoff_reason_safe IS NULL)`;
   }
   if (field === "smb_message_echoes") {
     for (const item of array(value.message_echoes)) await message(item);

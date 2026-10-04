@@ -145,9 +145,10 @@ def upgrade():
             customer:=regexp_replace(echo->>'to','^\\+','');
             IF regexp_replace(echo->>'from','^\\+','')=binding.business_phone_number
               AND customer ~ '^[1-9][0-9]{6,14}$' AND NULLIF(echo->>'id','') IS NOT NULL THEN
-              UPDATE messaging.conversations conversation SET ownership_mode='human',ownership_epoch=ownership_epoch+1,updated_at=CURRENT_TIMESTAMP
+              UPDATE messaging.conversations conversation SET ownership_mode='human',ownership_epoch=ownership_epoch+1,
+                  handoff_reason_safe=COALESCE(conversation.handoff_reason_safe,'whatsapp_business_app_human_reply'),updated_at=CURRENT_TIMESTAMP
                 WHERE conversation.tenant_id=binding.tenant_id AND conversation.channel_id=binding.channel_id
-                  AND conversation.ownership_mode<>'human'
+                  AND (conversation.ownership_mode<>'human' OR conversation.handoff_reason_safe IS NULL)
                   AND EXISTS(SELECT 1 FROM crm.contact_channel_identities identity WHERE identity.tenant_id=conversation.tenant_id
                     AND identity.contact_id=conversation.contact_id AND identity.channel='whatsapp' AND identity.normalized_value='+'||customer)
                   AND NOT EXISTS(SELECT 1 FROM messaging.messages message WHERE message.tenant_id=binding.tenant_id

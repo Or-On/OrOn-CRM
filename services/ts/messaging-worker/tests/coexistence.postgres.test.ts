@@ -1,6 +1,9 @@
 import { createHmac, randomUUID } from "node:crypto";
 import {
   acceptWhatsAppWebhook,
+  assignDefaultWhatsAppAi,
+  ingestWhatsAppInbound,
+  setConversationOwnership,
   InvalidWhatsAppPayloadError,
   InvalidWhatsAppSignatureError,
   parseWhatsAppCoexistenceEnvelopes,
@@ -357,11 +360,13 @@ describe.skipIf(!url)("owned Coexistence receipt and import pipeline", () => {
         profile = randomUUID(),
         version = randomUUID();
       await admin`INSERT INTO public.users(id,email,status) VALUES(${user}::uuid,${`${user}@example.invalid`},'active')`;
+      await admin`INSERT INTO public.memberships(tenant_id,user_id,role) VALUES(${tenant}::uuid,${user}::uuid,'owner')`;
       await admin`INSERT INTO agents.agent_profiles(id,tenant_id,name,created_by_user_id) VALUES(${profile}::uuid,${tenant}::uuid,'Fictional Coexistence',${user}::uuid)`;
       await admin`INSERT INTO agents.agent_profile_versions(id,tenant_id,agent_profile_id,version,system_prompt,locale,channel_capabilities,tool_permissions,channel_configuration,escalation_configuration,validation_status,created_by_user_id,published_at) VALUES(${version}::uuid,${tenant}::uuid,${profile}::uuid,1,'Fictional fixture','en',ARRAY['whatsapp'],'[]','{}','{}','valid',${user}::uuid,clock_timestamp())`;
+      await admin`INSERT INTO crm.tenant_settings(tenant_id,locale,timezone,whatsapp_ai_agent_profile_id,whatsapp_ai_enabled_by_user_id,whatsapp_ai_enabled_at) VALUES(${tenant}::uuid,'en','UTC',${profile}::uuid,${user}::uuid,clock_timestamp())`;
       await admin.begin(async (tx) => {
         await tx`SELECT set_config('app.current_tenant',${tenant},true)`;
-        await tx`UPDATE messaging.conversations SET ownership_mode='ai',ai_agent_profile_version_id=${version}::uuid,ai_enabled_by_user_id=${user}::uuid,ai_enabled_at=clock_timestamp() WHERE id=${conversation}::uuid`;
+        expect(await assignDefaultWhatsAppAi(tx, conversation)).toBe(true);
       });
       await admin`INSERT INTO messaging.messages(tenant_id,conversation_id,direction,sender_type,content_type,content_text,provider,provider_message_id,status) VALUES(${tenant}::uuid,${conversation}::uuid,'outbound','agent','text','Cloud send','meta',${`cloud-${tenant}`},'sent')`;
       await accept("smb_message_echoes", {
@@ -405,6 +410,10 @@ describe.skipIf(!url)("owned Coexistence receipt and import pipeline", () => {
           >`SELECT ownership_mode FROM messaging.conversations WHERE id=${conversation}::uuid`
         )[0]?.ownership_mode,
       ).toBe("human");
+      await admin.begin(async (tx) => {
+        await tx`SELECT set_config('app.current_tenant',${tenant},true)`;
+        expect(await assignDefaultWhatsAppAi(tx, conversation)).toBe(false);
+      });
       await Promise.all([
         accept("smb_message_echoes", echo),
         accept("smb_message_echoes", echo),
@@ -423,7 +432,9 @@ describe.skipIf(!url)("owned Coexistence receipt and import pipeline", () => {
       // Provider replay cannot re-take control after a later reviewed AI resume.
       await admin.begin(async (tx) => {
         await tx`SELECT set_config('app.current_tenant',${tenant},true)`;
-        await tx`UPDATE messaging.conversations SET ownership_mode='ai' WHERE id=${conversation}::uuid`;
+        expect(
+          await setConversationOwnership(tx, conversation, user, "ai", version),
+        ).toBe(true);
       });
       await accept("smb_message_echoes", echo);
       await drain();
@@ -535,6 +546,87 @@ describe.skipIf(!url)("owned Coexistence receipt and import pipeline", () => {
       expect(
         await admin`SELECT id FROM crm.contacts WHERE tenant_id=${tenant}::uuid`,
       ).toHaveLength(1);
+      // Exercise the real importer/ingress pair at the first-contact race.
+      // History waits on an uncommitted identity. Live ingress must still be
+      // able to acquire the channel FK KEY SHARE lock and commit, not deadlock
+      // behind history's channel row lock.
+      const racingCustomer = "15550003333",
+        racingContact = randomUUID();
+      let releaseLive = () => {},
+        identityReady = () => {};
+      const release = new Promise<void>((resolve) => {
+        releaseLive = resolve;
+      });
+      const ready = new Promise<void>((resolve) => {
+        identityReady = resolve;
+      });
+      const racingReceipt = await accept("history", {
+        history: [
+          {
+            threads: [
+              {
+                id: racingCustomer,
+                messages: [
+                  {
+                    id: `race-history-${tenant}`,
+                    from: racingCustomer,
+                    timestamp: at,
+                    type: "text",
+                    text: { body: "Fictional historical race" },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+      const live = admin.begin(async (tx) => {
+        await tx`SELECT set_config('app.current_tenant',${tenant},true)`;
+        await tx`INSERT INTO crm.contacts(id,tenant_id,name) VALUES(${racingContact}::uuid,${tenant}::uuid,'Fictional first contact')`;
+        await tx`INSERT INTO crm.contact_channel_identities(tenant_id,contact_id,channel,normalized_value,display_value,validation_status,is_primary) VALUES(${tenant}::uuid,${racingContact}::uuid,'whatsapp',${`+${racingCustomer}`},${racingCustomer},'valid',true)`;
+        identityReady();
+        await release;
+        await tx`SET LOCAL lock_timeout='300ms'`;
+        await ingestWhatsAppInbound(tx, {
+          providerAccountId: phone,
+          providerEventId: `race-live-${tenant}`,
+          providerMessageId: `race-live-${tenant}`,
+          from: racingCustomer,
+          profileName: "Fictional first contact",
+          text: "A fresh customer message",
+          occurredAt: new Date().toISOString(),
+        });
+      });
+      // Attach rejection handling immediately while coordinating two transactions.
+      const liveResult = live.then(
+        () => ({ ok: true as const }),
+        (error: unknown) => ({ ok: false as const, error }),
+      );
+      await ready;
+      const processing = store.processAvailable();
+      try {
+        let waiting = false;
+        for (let attempt = 0; attempt < 100; attempt++) {
+          waiting =
+            (
+              await admin<
+                { waiting: boolean }[]
+              >`SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE '%INSERT INTO crm.contact_channel_identities%') waiting`
+            )[0]?.waiting === true;
+          if (waiting) break;
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        expect(waiting).toBe(true);
+      } finally {
+        releaseLive();
+      }
+      expect(await liveResult).toEqual({ ok: true });
+      await processing;
+      await admin`UPDATE ops.inbound_events SET available_at=clock_timestamp() WHERE id=${racingReceipt.eventIds[0] ?? ""}::uuid AND status='failed'`;
+      await drain();
+      expect(
+        await admin`SELECT id FROM messaging.messages WHERE tenant_id=${tenant}::uuid AND provider_message_id IN (${`race-history-${tenant}`},${`race-live-${tenant}`})`,
+      ).toHaveLength(2);
       await accept("account_update", {
         event: "PARTNER_REMOVED",
         phone_number: `+${business}`,
