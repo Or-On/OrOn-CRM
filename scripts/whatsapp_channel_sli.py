@@ -23,11 +23,13 @@ WITH raw AS (
    + CASE WHEN NULLIF(e.payload->>'providerMessageId','') IS NOT NULL AND EXISTS(
      SELECT 1 FROM ops.inbound_events earlier WHERE earlier.provider=e.provider
        AND earlier.provider_account_id=e.provider_account_id
-       AND earlier.event_type LIKE 'whatsapp.message.%' AND earlier.received_at<$1
+       AND earlier.event_type LIKE 'whatsapp.message.%'
+       AND earlier.event_type<>'whatsapp.message.status' AND earlier.received_at<$1
        AND earlier.payload->>'providerMessageId'=e.payload->>'providerMessageId'
    ) THEN 1 ELSE 0 END AS duplicate_order
  FROM ops.inbound_events e
  WHERE e.provider='meta' AND e.event_type LIKE 'whatsapp.message.%'
+   AND e.event_type<>'whatsapp.message.status'
    AND e.received_at >= $1 AND e.received_at < $2
 ), receipts AS (
  SELECT r.*,c.tenant_id AS channel_tenant,
@@ -59,7 +61,7 @@ WITH raw AS (
    JOIN messaging.outbound_requests request ON request.tenant_id=o.tenant_id
      AND request.message_id=o.id AND request.provider='meta'
    JOIN ops.jobs j ON j.tenant_id=request.tenant_id AND j.reference_id=request.id
-     AND j.reference_type='outbound_request' AND j.job_type='whatsapp.send'
+     AND j.reference_type='outbound_request' AND j.job_type='whatsapp.outbound.send'
      AND j.status='succeeded' AND j.completed_at IS NOT NULL AND j.completed_at <= $3
    WHERE o.tenant_id=r.scoped_tenant AND o.conversation_id=i.conversation_id
      AND o.direction='outbound' AND o.provider='meta' AND o.provider_message_id IS NOT NULL

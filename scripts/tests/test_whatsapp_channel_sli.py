@@ -179,7 +179,7 @@ def test_actual_postgres_receipt_denominator_and_distinct_acceptance_delivery():
                     await connection.execute(
                         "INSERT INTO ops.jobs(tenant_id,queue,job_type,reference_type,reference_id,"
                         "payload,status,completed_at) "
-                        "VALUES($1,'messaging','whatsapp.send','outbound_request',$2,'{}',"
+                        "VALUES($1,'messaging','whatsapp.outbound.send','outbound_request',$2,'{}',"
                         "'succeeded',$3)",
                         tenant,
                         request,
@@ -225,6 +225,17 @@ def test_actual_postgres_receipt_denominator_and_distinct_acceptance_delivery():
                 await receipt(matched=False, at=base - timedelta(days=1), provider_id=outside_id)
                 await receipt(matched=False, provider_id=outside_id)  # Prior-window duplicate.
                 await receipt(matched=False, at=observed - timedelta(seconds=30))
+                # Delivery/read callbacks are not customer inbound messages. A
+                # status before the window also must not suppress a real receipt
+                # with the same provider ID as a supposed duplicate.
+                await receipt("status", matched=False)
+                await receipt("status", matched=False, provider_id=first_provider_id)
+                await receipt(
+                    "status",
+                    matched=False,
+                    at=base - timedelta(days=1),
+                    provider_id=first_provider_id,
+                )
                 await connection.execute(
                     "INSERT INTO ops.inbound_events(provider,provider_account_id,provider_event_id,"
                     "event_type,payload,received_at) VALUES('meta','unknown-synthetic',$1,"
