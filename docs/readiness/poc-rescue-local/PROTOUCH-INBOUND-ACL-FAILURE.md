@@ -22,6 +22,12 @@ LiveKit SDP**. The probe immediately sent ACK and BYE. The signed provider event
 The application created one failed ProTouch session,
 `f60c63b6-dec3-5dc9-b8cf-2b79e1ce6e30`, with no contact or recording/transcript
 artifacts. The join receipt was quarantined and the leave receipt processed.
+Later source review established that the failed session/quarantine came from
+agent startup failure: the then-current dispatcher resolved the called DID but
+did not compare the signed provider rule against the stored DID rule. The
+simulator marker alone was therefore not an admission barrier on that release.
+An authenticated positive probe must wait for the separately tested, deployed
+rule-binding guard; it cannot rely on the old marker behavior.
 No active call or probe room remained. Application quarantine does not make the
 carrier ACL test pass: the source had already been admitted into LiveKit.
 
