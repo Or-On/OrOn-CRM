@@ -1,5 +1,6 @@
-import postgres from "postgres";
+import postgres, { type Sql } from "postgres";
 import { createHash } from "node:crypto";
+import { parseWhatsAppCoexistenceEnvelopes } from "./whatsapp-coexistence.js";
 
 import {
   parseWhatsAppMessageEnvelopes,
@@ -27,6 +28,13 @@ export async function acceptWhatsAppWebhook(
   appSecret: string,
   expectedProviderAccountId?: string,
   verificationDatabaseUrl?: string,
+  expectedWabaId?: string,
+  options?: {
+    sql?: Sql;
+    withVerifier?: (
+      operation: (verifier: Sql) => Promise<void>,
+    ) => Promise<void>;
+  },
 ): Promise<AcceptedWhatsAppWebhook> {
   if (!verifyWhatsAppSignature(rawBody, signatureHeader, appSecret)) {
     throw new InvalidWhatsAppSignatureError("Invalid WhatsApp signature");
@@ -41,6 +49,28 @@ export async function acceptWhatsAppWebhook(
   }
   const envelopes = parseWhatsAppMessageEnvelopes(payload);
   const statuses = parseWhatsAppStatusEnvelopes(payload);
+  let coexistence;
+  try {
+    coexistence = parseWhatsAppCoexistenceEnvelopes(payload);
+  } catch (error) {
+    throw new InvalidWhatsAppPayloadError(
+      "Invalid WhatsApp coexistence payload",
+      { cause: error },
+    );
+  }
+  if (
+    coexistence.some(
+      (event) =>
+        !expectedWabaId ||
+        !expectedProviderAccountId ||
+        event.wabaId !== expectedWabaId ||
+        (event.providerAccountId !== undefined &&
+          event.providerAccountId !== expectedProviderAccountId),
+    )
+  )
+    throw new InvalidWhatsAppPayloadError(
+      "WhatsApp coexistence account does not match webhook endpoint",
+    );
   if (
     expectedProviderAccountId !== undefined &&
     [...envelopes, ...statuses].some(
@@ -50,7 +80,7 @@ export async function acceptWhatsAppWebhook(
     throw new InvalidWhatsAppPayloadError(
       "WhatsApp account does not match webhook endpoint",
     );
-  const sql = postgres(databaseUrl, { max: 1, prepare: false });
+  const sql = options?.sql ?? postgres(databaseUrl, { max: 1, prepare: false });
   try {
     let skippedUnknownAccounts = 0;
     const verifiedMessageEvents: {
@@ -59,6 +89,14 @@ export async function acceptWhatsAppWebhook(
     }[] = [];
     const eventIds = await sql.begin(async (transaction) => {
       const ids: string[] = [];
+      for (const envelope of coexistence) {
+        const rows = await transaction<
+          AcceptedEventRow[]
+        >`SELECT (ops.accept_whatsapp_coexistence(${envelope.wabaId},${expectedProviderAccountId ?? ""},${envelope.providerEventId},${envelope.field},${JSON.stringify(envelope.value)}::text::jsonb,${createHash("sha256").update(rawBody).digest("hex")})).id`;
+        const id = rows[0]?.id;
+        if (!id) throw new Error("coexistence receipt insert failed");
+        ids.push(id);
+      }
       for (const envelope of envelopes) {
         const contentType = envelope.contentType ?? "text";
         const expectedPayload = {
@@ -164,17 +202,13 @@ export async function acceptWhatsAppWebhook(
     ) {
       // This branch is reachable only after raw HMAC and server account binding.
       // The ordinary app/worker role has no signature attestation capability.
-      const verifier = postgres(verificationDatabaseUrl, {
-        max: 1,
-        prepare: false,
-        connect_timeout: 2,
-      });
       try {
-        const digest = createHash("sha256").update(rawBody).digest("hex");
-        await verifier.begin(async (transaction) => {
-          await transaction`SET LOCAL statement_timeout='2000ms'`;
-          await transaction`SET LOCAL ROLE platform_whatsapp_verifier`;
-          const contract = await transaction<{ valid: boolean }[]>`
+        const attest = async (verifier: Sql) => {
+          const digest = createHash("sha256").update(rawBody).digest("hex");
+          await verifier.begin(async (transaction) => {
+            await transaction`SET LOCAL statement_timeout='2000ms'`;
+            await transaction`SET LOCAL ROLE platform_whatsapp_verifier`;
+            const contract = await transaction<{ valid: boolean }[]>`
             SELECT current_user='platform_whatsapp_verifier'
               AND NOT (role.rolcanlogin OR role.rolsuper OR role.rolbypassrls OR role.rolinherit
                 OR role.rolcreaterole OR role.rolcreatedb OR role.rolreplication)
@@ -188,23 +222,35 @@ export async function acceptWhatsAppWebhook(
                 WHERE acl.grantee=role.oid AND (routine.oid::regprocedure::text<>'agents.attest_whatsapp_signature(uuid,text,jsonb)' OR acl.is_grantable)) valid
             FROM pg_roles role WHERE role.rolname=current_user
           `;
-          if (contract[0]?.valid !== true)
-            throw new TypeError("invalid WhatsApp verifier capability");
-          for (const proof of verifiedMessageEvents)
-            await transaction`SELECT agents.attest_whatsapp_signature(${proof.eventId}::uuid,${digest},${proof.expectedPayload}::text::jsonb)`;
-        });
+            if (contract[0]?.valid !== true)
+              throw new TypeError("invalid WhatsApp verifier capability");
+            for (const proof of verifiedMessageEvents)
+              await transaction`SELECT agents.attest_whatsapp_signature(${proof.eventId}::uuid,${digest},${proof.expectedPayload}::text::jsonb)`;
+          });
+        };
+        if (options?.withVerifier) await options.withVerifier(attest);
+        else {
+          const verifier = postgres(verificationDatabaseUrl, {
+            max: 1,
+            prepare: false,
+            connect_timeout: 2,
+          });
+          try {
+            await attest(verifier);
+          } finally {
+            await verifier.end({ timeout: 1 });
+          }
+        }
       } catch {
         // Normal ingress already committed. Missing proof prevents private
         // memory reuse; it cannot lose the accepted customer message.
         console.warn("WhatsApp memory signature evidence unavailable", {
           reason: "verification_persistence_failed",
         });
-      } finally {
-        await verifier.end({ timeout: 1 });
       }
     }
     return { eventIds, envelopes: eventIds.length, skippedUnknownAccounts };
   } finally {
-    await sql.end({ timeout: 2 });
+    if (!options?.sql) await sql.end({ timeout: 2 });
   }
 }

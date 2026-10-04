@@ -47,6 +47,7 @@ export * from "./tenants.js";
 export * from "./tools.js";
 export * from "./webhook.js";
 export * from "./webhook-store.js";
+export * from "./whatsapp-coexistence.js";
 export * from "./whatsapp-outbound.js";
 export * from "./whatsapp-diagnostics.js";
 export type * from "./types.js";

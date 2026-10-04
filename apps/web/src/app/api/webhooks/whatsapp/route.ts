@@ -27,5 +27,7 @@ export async function POST(request: Request) {
     memoryVerifierEnabled: memoryVerifier.enabled,
     memoryVerifierDatabaseUrl: memoryVerifier.databaseUrl,
     appSecret: config.secrets.whatsappAppSecret,
+    phoneNumberId: config.whatsApp.phoneNumberId,
+    wabaId: config.whatsApp.wabaId,
   });
 }

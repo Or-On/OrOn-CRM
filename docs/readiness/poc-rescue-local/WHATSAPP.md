@@ -95,3 +95,11 @@ Local ignored evidence in `.artifacts/poc-rescue-local/`: `remote-inventory.txt`
 
 No deployment, flag activation, outbound send or tenant reset was performed by this WhatsApp investigation. The parent's two user-approved registration attempts were rejected as recorded above. A newly created restricted PIN file is retained for a later explicitly approved operation; its value is not in these reports. Do not deregister or delete the existing WhatsApp account automatically.
 
+
+## Coexistence support added locally on October 5
+
+The user explicitly chose to preserve the WhatsApp Business phone app. Migration `8d32f4a91c70` and the new Coexistence importer provide default-off, exact WABA/phone/channel-bound receipts for account updates, history, contacts and phone-app echoes. Historical imports create useful CRM threads but never open a service window, grant consent, produce live memory attestation or enqueue automation. New human app replies immediately fence AI ownership; Cloud API message-ID matches and duplicate receipts preserve existing provenance and subsequent reviewed ownership changes. Account removal revokes only the affected channel.
+
+`wa-coexistence9.log` verifies the fresh compiled CRM package against real PostgreSQL with the runtime web/worker roles: three tests pass, including a 205-message history burst, disabled queued receipts, account mismatch rejection, media-before-history retry, contact tombstones, Cloud API echo deduplication, human ownership, replay after AI resume and zero jobs/model/provider sends. Typecheck, scoped ESLint and Ruff passed. Full worker and existing CRM webhook regressions are being recorded separately. Earlier focused runs before the explicit CRM rebuild are not final-source evidence.
+
+See [COEXISTENCE-GAP.md](COEXISTENCE-GAP.md) for boundaries and activation work. Pending provider asset IDs must be reverified against the actual Embedded Signup result and exchanged credential. No live subscription, deployment or Coexistence import was enabled by this implementation.

@@ -280,6 +280,8 @@ export function parseWhatsAppMessageEnvelopes(
     const entryId = boundedString(entry.id, 1_000) ?? "unknown";
 
     for (const changeValue of array(entry.changes)) {
+      const field = record(changeValue)?.field;
+      if (field !== undefined && field !== "messages") continue;
       const value = record(record(changeValue)?.value);
       const metadata = record(value?.metadata);
       const accountId = boundedString(metadata?.phone_number_id, 500);
@@ -477,6 +479,8 @@ export function parseWhatsAppStatusEnvelopes(
     if (entry === undefined) continue;
     const entryId = typeof entry.id === "string" ? entry.id : "unknown";
     for (const changeValue of array(entry.changes)) {
+      const field = record(changeValue)?.field;
+      if (field !== undefined && field !== "messages") continue;
       const value = record(record(changeValue)?.value);
       const metadata = record(value?.metadata);
       const accountId = boundedString(metadata?.phone_number_id, 500);

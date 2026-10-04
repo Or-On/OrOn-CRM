@@ -64,6 +64,7 @@ import {
   deliverSimulatedCallFollowup,
   advanceCanonicalSimulation,
   ingestWhatsAppInbound,
+  ingestWhatsAppCoexistence,
   ingestWhatsAppStatus,
   parseStoredWhatsAppEnvelope,
   parseStoredWhatsAppStatusEnvelope,
@@ -359,7 +360,9 @@ async function processInbound(
   try {
     await sql.begin(async (transaction) => {
       await setTenantContext(transaction, event.tenant_id);
-      if (event.event_type === "whatsapp.message.status") {
+      if (event.event_type.startsWith("whatsapp.coexistence.")) {
+        await ingestWhatsAppCoexistence(transaction, event.payload);
+      } else if (event.event_type === "whatsapp.message.status") {
         const envelope = parseStoredWhatsAppStatusEnvelope(event.payload);
         if (envelope === undefined)
           throw new TypeError("invalid status envelope");

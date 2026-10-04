@@ -42,5 +42,6 @@ export async function POST(
     memoryVerifierDatabaseUrl: memoryVerifier.databaseUrl,
     appSecret: account?.appSecret,
     phoneNumberId: account?.phoneNumberId,
+    wabaId: account?.wabaId,
   });
 }
