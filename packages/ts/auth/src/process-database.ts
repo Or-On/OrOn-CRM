@@ -146,15 +146,17 @@ function installShutdownHooks(state: Registry): void {
   if (state.hooksInstalled) return;
   state.hooksInstalled = true;
   const stop = (signal?: "SIGTERM" | "SIGINT") => {
-    state.stopping = true;
-    // A server such as Next already owns process termination. Standalone users
-    // of the shared pool retain normal signal termination after bounded drain.
+    // Next stops admitting HTTP requests and drains existing handlers before
+    // exiting. Those handlers may still acquire a second lease (auth -> tenant).
+    // Let its signal owner finish them; process exit closes the DB sockets.
     const serverOwnsSignal =
       signal !== undefined && process.listenerCount(signal) > 0;
+    if (serverOwnsSignal) return;
+    state.stopping = true;
     void closeProcessDatabasePools()
       .catch(() => undefined)
       .finally(() => {
-        if (signal && !serverOwnsSignal) process.kill(process.pid, signal);
+        if (signal) process.kill(process.pid, signal);
       });
   };
   process.once("beforeExit", () => stop());
