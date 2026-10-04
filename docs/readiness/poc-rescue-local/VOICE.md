@@ -331,3 +331,44 @@ and the exact DID binding restored through an audited compensating CAS. No
 customer was dialed and carrier origination remained unchanged. Inbound cutover
 is blocked pending verified provider enforcement or a separately reviewed secure
 alternative. See [the source-test and containment evidence](PROTOUCH-INBOUND-ACL-FAILURE.md).
+
+## Repaired release: actual outbound acceptance
+
+On `60f26bfe1775997da1fb5159ec9e09a08246068b` / schema `9e43a5b02d81`,
+exactly one further authorized call was submitted through normal CRM login,
+ProTouch tenant selection, consented-contact lookup and `/api/voice/real-calls`.
+Preflight confirmed no active sessions, healthy exact-revision web/dispatcher,
+and the dedicated ProTouch route. Session
+`0af0ed12-555f-5cc8-bc4e-47a033fe1be8` was created at
+2026-10-04T23:09:51.926846Z. Its admission records the intended published agent
+version `9a9bfdbf-4c46-4bd4-842f-2bfb8c4cb173` and outbound trunk
+`ST_Dc2P469Pn2ZU`.
+
+The user confirmed that the call arrived and the agent conversed in Hebrew.
+Twilio `CA6ed0c3249d2ce35f29e0baeb558232bb` independently reports completed,
+23 seconds, 23:10:03–23:10:26 UTC, correct ProTouch trunk and source `***4553`
+to the approved recipient `***7692`. The application finalized normally at
+23:10:28.328762Z with `answered=true`, status `ended`, and both artifacts.
+Bounded runtime logs show no TTS or finalization error for this call; later
+room cleanup returned 404 because the room had already disappeared.
+
+Normal authenticated CRM readback returned 200 for detail and
+[/voice/calls/0af0ed12-555f-5cc8-bc4e-47a033fe1be8](https://dev.or-on.io/voice/calls/0af0ed12-555f-5cc8-bc4e-47a033fe1be8),
+including the recording player. Protected artifact reads returned 200 with
+`private, no-store`; switching the same user to Or-On produced 404 for both,
+and anonymous requests produced 401. Readback retained metadata only:
+
+- Recording: 2,695,964-byte valid stereo WAV, 24 kHz, 28.0825 seconds,
+  non-silent PCM; SHA-256
+  `a5e9809860fd2c4c629c7911234da6c5220dc3a189614b7e2055cfa5fd1d114d`.
+- Transcript: 348 bytes, three nonempty lines containing Hebrew; SHA-256
+  `94ed816eec6bc358a30fa7f64eb576c5ee09d8d6f2808719b5293c7df3d88bf5`.
+- Usage includes real model/STT/TTS counters. Application telephony remains
+  explicitly `telephony:unknown`/unpriced; its partial total must not be called
+  the all-in call cost. Twilio separately reports a USD 0.06060 charge.
+
+Receipts: `.artifacts/poc-rescue-local/live-voice-60f26bf-{submission,result,provider,artifact-readback}.json`.
+At 23:13 UTC there were zero active application sessions and neither the
+acceptance room nor the earlier synthetic probe room remained. Provider
+readback still showed zero inbound dispatch rules and the original carrier
+origination; successful outbound acceptance does not resolve inbound routing.
