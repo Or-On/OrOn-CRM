@@ -508,8 +508,8 @@ if [[ -n ${previous_release} ]]; then
   fi
   # The periodic sweeper also writes the voice schema. Stop it before the
   # backup/migration boundary, after the one-shot repair and call drain.
-  compose_previous stop --timeout 120 dispatcher control-api sweeper
   compose_previous stop --timeout 120 messaging-worker web caddy
+  compose_previous stop --timeout 120 dispatcher control-api sweeper
   "${RELEASE_DIR}/scripts/backup-dev.sh" --database-only
 fi
 if [[ -n ${previous_release} ]]; then

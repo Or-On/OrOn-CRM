@@ -28,25 +28,30 @@ describe.skipIf(!url)("memory provenance PostgreSQL boundaries", () => {
     try {
       await expect(
         db.begin(async (sql) => {
-          const existing = await sql<{ tenant_id: string; id: string }[]>`
-          SELECT tenant_id,id FROM agents.agent_profile_versions
-          WHERE published_at IS NOT NULL AND validation_status='valid' LIMIT 1
-        `;
-          if (!existing[0])
-            throw new Error("published fictional agent required");
-          const tenant = existing[0].tenant_id,
-            agent = existing[0].id;
+          const tenant = randomUUID(),
+            owner = randomUUID(),
+            profile = randomUUID(),
+            agent = randomUUID();
+          await sql`INSERT INTO public.tenants(id,name,slug,status)
+            VALUES(${tenant}::uuid,'Fictional memory provenance',${tenant},'active')`;
+          await sql`INSERT INTO public.users(id,email,display_name,status)
+            VALUES(${owner}::uuid,${`${owner}@example.invalid`},'Fictional memory owner','active')`;
+          await sql`INSERT INTO public.memberships(tenant_id,user_id,role)
+            VALUES(${tenant}::uuid,${owner}::uuid,'owner')`;
           await sql`SELECT set_config('app.current_tenant',${tenant},true)`;
+          await sql`SELECT set_config('app.current_user',${owner},true)`;
+          await sql`INSERT INTO agents.agent_profiles(id,tenant_id,name,created_by_user_id)
+            VALUES(${profile}::uuid,${tenant}::uuid,'Fictional memory agent',${owner}::uuid)`;
+          await sql`INSERT INTO agents.agent_profile_versions(id,tenant_id,agent_profile_id,version,
+            system_prompt,locale,channel_capabilities,tool_permissions,channel_configuration,
+            escalation_configuration,validation_status,created_by_user_id,published_at)
+            VALUES(${agent}::uuid,${tenant}::uuid,${profile}::uuid,1,'Fictional memory agent','he',
+              ARRAY['whatsapp'],'[]','{}','{}','valid',${owner}::uuid,clock_timestamp())`;
           const contact = randomUUID(),
             channel = randomUUID(),
             conversation = randomUUID();
           const customer = randomUUID(),
             artificial = randomUUID();
-          const owners = await sql<
-            { user_id: string }[]
-          >`SELECT user_id FROM public.memberships WHERE tenant_id=${tenant}::uuid AND role='owner' LIMIT 1`;
-          const owner = required(owners[0]).user_id;
-          await sql`SELECT set_config('app.current_user',${owner},true)`;
           await sql`INSERT INTO crm.contacts(id,tenant_id,name) VALUES(${contact}::uuid,${tenant}::uuid,'Fictional memory')`;
           await sql`INSERT INTO messaging.channels(id,tenant_id,kind,provider,display_address,provider_account_id,status)
           VALUES(${channel}::uuid,${tenant}::uuid,'whatsapp','simulator','Fictional memory',${channel},'active')`;
