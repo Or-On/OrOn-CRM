@@ -553,7 +553,9 @@ it("uses the contact name returned on later pages instead of an initial director
   });
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () => ({ ok: true, json: async () => page([later]) })),
+    vi.fn(() =>
+      Promise.resolve({ ok: true, json: () => Promise.resolve(page([later])) }),
+    ),
   );
   render(
     localized(

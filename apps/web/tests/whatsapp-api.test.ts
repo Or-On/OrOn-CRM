@@ -1,13 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { closeProcessDatabasePools } from "@or-on/auth";
+import type { Sql } from "postgres";
 
 const state = vi.hoisted(() => ({
   enabled: false,
+  verifierEnabled: false,
   acceptWebhook: vi.fn(),
   queue: vi.fn(),
   page: vi.fn(),
   permission: vi.fn(),
   channelPhone: "1312069101984418",
+  database: Object.assign(vi.fn(), {
+    end: vi.fn().mockResolvedValue(undefined),
+  }),
+  factory: vi.fn(),
 }));
+
+vi.mock("postgres", () => ({ default: state.factory }));
 
 vi.mock("@or-on/crm", () => ({
   acceptWhatsAppWebhook: state.acceptWebhook,
@@ -18,7 +27,12 @@ vi.mock("@or-on/crm", () => ({
   queueWhatsAppOutbound: state.queue,
 }));
 vi.mock("@or-on/config", () => ({
-  loadWhatsAppMemoryVerifier: () => ({ enabled: false }),
+  loadWhatsAppMemoryVerifier: () => ({
+    enabled: state.verifierEnabled,
+    databaseUrl: state.verifierEnabled
+      ? "postgresql://verifier.invalid/fixture"
+      : undefined,
+  }),
   loadConfig: () => ({
     databaseUrl: "postgresql://fixture.invalid/fixture",
     enableRealWhatsApp: state.enabled,
@@ -87,6 +101,9 @@ describe("WhatsApp outbound API", () => {
   beforeEach(() => {
     vi.stubEnv("PLATFORM_ENV", "development");
     state.enabled = false;
+    state.verifierEnabled = false;
+    state.factory.mockReset().mockReturnValue(state.database);
+    state.database.end.mockClear();
     state.channelPhone = "1312069101984418";
     state.acceptWebhook.mockReset().mockResolvedValue({ envelopes: 1 });
     state.page.mockReset();
@@ -99,7 +116,10 @@ describe("WhatsApp outbound API", () => {
       requestId: "request",
     });
   });
-  afterEach(() => vi.unstubAllEnvs());
+  afterEach(async () => {
+    await closeProcessDatabasePools();
+    vi.unstubAllEnvs();
+  });
 
   it("returns projected diagnostics through the existing authenticated tenant read", async () => {
     const page = {
@@ -250,6 +270,7 @@ describe("WhatsApp outbound API", () => {
 
     expect(response.status).toBe(413);
     expect(state.acceptWebhook).not.toHaveBeenCalled();
+    expect(state.factory).not.toHaveBeenCalled();
   });
 
   it("uses a separate verify token and app secret for an additional webhook", async () => {
@@ -277,5 +298,71 @@ describe("WhatsApp outbound API", () => {
       "fictional-second-app-secret",
     );
     expect(state.acceptWebhook.mock.calls[0]?.[4]).toBe("22990011");
+    expect(state.acceptWebhook.mock.calls[0]?.[6]).toBe("88110022");
+    expect(state.acceptWebhook.mock.calls[0]?.[7]).toEqual({
+      sql: state.database,
+    });
+    expect(state.database.end).not.toHaveBeenCalled();
+  });
+
+  it("reuses the process pool across concurrent default-account webhook requests", async () => {
+    state.enabled = true;
+    const responses = await Promise.all(
+      Array.from({ length: 8 }, () =>
+        acceptWebhook(
+          new Request("http://localhost/api/webhooks/whatsapp", {
+            method: "POST",
+            body: "{}",
+          }),
+        ),
+      ),
+    );
+    expect(responses.every((response) => response.status === 200)).toBe(true);
+    expect(state.factory).toHaveBeenCalledTimes(1);
+    expect(state.factory).toHaveBeenCalledWith(
+      "postgresql://fixture.invalid/fixture",
+      expect.objectContaining({ max: 4, prepare: false }),
+    );
+    for (const call of state.acceptWebhook.mock.calls) {
+      expect(call[4]).toBe("1312069101984418");
+      expect(call[6]).toBe("1507601250680263");
+      expect(call[7]).toEqual({ sql: state.database });
+    }
+    expect(state.database.end).not.toHaveBeenCalled();
+  });
+
+  it("supplies a separate verifier pool lazily after ingress asks for attestation", async () => {
+    state.enabled = true;
+    state.verifierEnabled = true;
+    const verifier = Object.assign(vi.fn(), {
+      end: vi.fn().mockResolvedValue(undefined),
+    });
+    state.factory
+      .mockReturnValueOnce(state.database)
+      .mockReturnValueOnce(verifier);
+    const response = await acceptWebhook(
+      new Request("http://localhost/api/webhooks/whatsapp", {
+        method: "POST",
+        body: "{}",
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(state.factory).toHaveBeenCalledTimes(1);
+    const options = state.acceptWebhook.mock.calls[0]?.[7] as {
+      sql: Sql;
+      withVerifier(operation: (sql: Sql) => Promise<void>): Promise<void>;
+    };
+    expect(options.sql).toBe(state.database);
+    await options.withVerifier((sql) => {
+      expect(sql).toBe(verifier);
+      return Promise.resolve();
+    });
+    expect(state.factory).toHaveBeenNthCalledWith(
+      2,
+      "postgresql://verifier.invalid/fixture",
+      expect.objectContaining({ max: 1, connect_timeout: 2 }),
+    );
+    expect(verifier.end).not.toHaveBeenCalled();
+    expect(state.database.end).not.toHaveBeenCalled();
   });
 });

@@ -1,6 +1,10 @@
 import { Buffer } from "node:buffer";
 import { createHmac, randomInt, randomUUID } from "node:crypto";
 import postgres from "postgres";
+import {
+  acquireProcessDatabase,
+  type DatabaseLease,
+} from "./process-database.js";
 
 export type StaffSmsPurpose =
   "staff_login" | "staff_enrollment" | "staff_disable";
@@ -109,17 +113,24 @@ export function createTwilioSmsSender(
 
 export class StaffSmsService implements StaffSmsAuthentication {
   readonly #sql;
+  readonly #lease: DatabaseLease | undefined;
   public constructor(
     databaseUrl: string,
     private readonly sender: SmsSender | undefined,
     private readonly pepper: string | undefined,
+    options: { readonly sharedPool?: boolean } = {},
   ) {
-    this.#sql = postgres(databaseUrl, {
-      max: 2,
-      prepare: false,
-      connect_timeout: 3,
-      idle_timeout: 10,
-    });
+    this.#lease = options.sharedPool
+      ? acquireProcessDatabase(databaseUrl)
+      : undefined;
+    this.#sql =
+      this.#lease?.sql ??
+      postgres(databaseUrl, {
+        max: 2,
+        prepare: false,
+        connect_timeout: 3,
+        idle_timeout: 10,
+      });
   }
   public get available(): boolean {
     return this.sender !== undefined && this.pepper !== undefined;
@@ -200,6 +211,7 @@ export class StaffSmsService implements StaffSmsAuthentication {
     return rows[0]?.email ?? undefined;
   }
   public async close(): Promise<void> {
+    if (this.#lease) return this.#lease.release();
     await this.#sql.end({ timeout: 2 });
   }
 }

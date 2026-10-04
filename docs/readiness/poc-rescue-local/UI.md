@@ -61,7 +61,7 @@ Use the `final-*` viewport screenshots for review. Intermediate `merged-*full.jp
 - Workspace dependencies rebuilt successfully with `pnpm --filter "@or-on/web^..." build`.
 - Web `typecheck` passed after integration.
 - Focused current-source run: **10 files, 99 tests passed** (`tickets-workspace`, `inbox-interaction`, `inbox-templates`, `inbox-templates-server`, `tenant-settings`, `inbox-audio`, `inbox-video`, `inbox-opening-menu`). An initial sealed-catalog test attempt used stale auth dist; rebuilding dependencies resolved it, and the complete 99-test run then passed.
-- Full web/DB suite and production build are coordinated by the parent after this UI snapshot; their result is recorded in the main verification document.
+- Full current web/DB suite passed **157 files / 937 tests** on an owned fictional database (`web-current-final.log`). The old sender-hidden assertion was corrected to require the configured simulator/Meta sender label. Root lint passed; the subsequent pool integration and deployment build are recorded in the main verification document.
 
 ## Remaining acceptance work
 

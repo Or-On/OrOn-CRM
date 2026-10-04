@@ -1,5 +1,6 @@
 import { createHmac } from "node:crypto";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { closeProcessDatabasePools } from "@or-on/auth";
 
 const state = vi.hoisted(() => ({
   sql: vi.fn(),
@@ -63,6 +64,7 @@ function setup() {
 }
 
 describe("Stripe checkout webhook boundary", () => {
+  afterEach(() => closeProcessDatabasePools());
   beforeEach(() => {
     vi.resetAllMocks();
     state.config.enableRealBilling = true;
@@ -120,7 +122,7 @@ describe("Stripe checkout webhook boundary", () => {
       "USD",
     ]);
     expect(state.fetch).not.toHaveBeenCalled();
-    expect(state.end).toHaveBeenCalledOnce();
+    expect(state.end).not.toHaveBeenCalled();
   });
   it("requests retry on unmatched or failing storage without leaking errors", async () => {
     state.sql.mockResolvedValueOnce([{ complete: false }]);

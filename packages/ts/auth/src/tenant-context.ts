@@ -1,6 +1,7 @@
 import postgres from "postgres";
 
 import type { Role } from "./authorization.js";
+import { acquireProcessDatabase } from "./process-database.js";
 
 export type TenantTransaction = postgres.TransactionSql;
 
@@ -31,6 +32,7 @@ export async function withTenantTransaction<T>(
   databaseUrl: string,
   identity: TenantExecutionIdentity,
   operation: (transaction: TenantTransaction) => Promise<T>,
+  options: { readonly sharedPool?: boolean } = {},
 ): Promise<T> {
   if (!/^postgres(?:ql)?:\/\//u.test(databaseUrl))
     throw new TypeError("databaseUrl must use PostgreSQL");
@@ -43,7 +45,10 @@ export async function withTenantTransaction<T>(
       "tenant, user, and session context must use UUID identifiers",
     );
   }
-  const sql = postgres(databaseUrl, { max: 1, prepare: false });
+  const lease = options.sharedPool
+    ? acquireProcessDatabase(databaseUrl)
+    : undefined;
+  const sql = lease?.sql ?? postgres(databaseUrl, { max: 1, prepare: false });
   try {
     return (await sql.begin(async (transaction) => {
       await transaction`
@@ -55,6 +60,7 @@ export async function withTenantTransaction<T>(
       return operation(transaction);
     })) as T;
   } finally {
-    await sql.end({ timeout: 2 });
+    if (lease) await lease.release();
+    else await sql.end({ timeout: 2 });
   }
 }

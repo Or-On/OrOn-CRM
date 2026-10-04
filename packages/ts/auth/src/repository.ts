@@ -1,6 +1,7 @@
 import postgres, { type Sql } from "postgres";
 
 import { normalizeRole } from "./authorization.js";
+import { acquireProcessDatabase } from "./process-database.js";
 import type {
   AuthRepository,
   AuthSession,
@@ -48,16 +49,24 @@ interface InvitationRow {
   existing_account: boolean;
 }
 
-export function createAuthRepository(databaseUrl: string): AuthRepository {
+export function createAuthRepository(
+  databaseUrl: string,
+  options: { readonly sharedPool?: boolean } = {},
+): AuthRepository {
   if (!/^postgres(?:ql)?:\/\//u.test(databaseUrl)) {
     throw new TypeError("databaseUrl must use PostgreSQL");
   }
-  const sql: Sql = postgres(databaseUrl, {
-    connect_timeout: 3,
-    idle_timeout: 10,
-    max: 4,
-    prepare: false,
-  });
+  const lease = options.sharedPool
+    ? acquireProcessDatabase(databaseUrl)
+    : undefined;
+  const sql: Sql =
+    lease?.sql ??
+    postgres(databaseUrl, {
+      connect_timeout: 3,
+      idle_timeout: 10,
+      max: 4,
+      prepare: false,
+    });
 
   async function membershipsForUser(
     userId: string,
@@ -202,6 +211,7 @@ export function createAuthRepository(databaseUrl: string): AuthRepository {
       return rows[0]?.revoked === true;
     },
     async close(): Promise<void> {
+      if (lease) return lease.release();
       await sql.end({ timeout: 2 });
     },
   };

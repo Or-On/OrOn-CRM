@@ -54,7 +54,9 @@ export async function withAuthService<T>(
   operation: (service: AuthService) => Promise<T>,
 ): Promise<T> {
   const config = authConfig();
-  const repository = createAuthRepository(config.databaseUrl);
+  const repository = createAuthRepository(config.databaseUrl, {
+    sharedPool: true,
+  });
   try {
     return await operation(
       new AuthService(repository, {
@@ -92,6 +94,7 @@ function createStaffSmsService(): StaffSmsService {
         })
       : undefined,
     ready ? settings.otpPepper : undefined,
+    { sharedPool: true },
   );
 }
 
@@ -377,5 +380,6 @@ async function withResolvedTenant<T>(
       }
       return operation(transaction, resolved.session);
     },
+    { sharedPool: true },
   );
 }

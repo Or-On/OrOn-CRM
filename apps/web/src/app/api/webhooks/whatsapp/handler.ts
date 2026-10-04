@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { withProcessDatabase } from "@or-on/auth";
+import type { Sql } from "postgres";
 
 import {
   InvalidWhatsAppPayloadError,
@@ -64,6 +66,7 @@ export async function receiveWhatsAppWebhook(
     readonly databaseUrl: string | undefined;
     readonly appSecret: string | undefined;
     readonly phoneNumberId?: string | undefined;
+    readonly wabaId?: string | undefined;
     readonly memoryVerifierEnabled?: boolean;
     readonly memoryVerifierDatabaseUrl?: string | undefined;
   },
@@ -80,15 +83,35 @@ export async function receiveWhatsAppWebhook(
 
   try {
     const rawBody = await readWebhookBody(request);
-    const accepted = await acceptWhatsAppWebhook(
-      account.databaseUrl,
-      rawBody,
-      request.headers.get("x-hub-signature-256"),
-      account.appSecret,
-      account.phoneNumberId,
+    const appSecret = account.appSecret;
+    const databaseUrl = account.databaseUrl;
+    const verifierUrl =
       account.memoryVerifierEnabled === true
         ? account.memoryVerifierDatabaseUrl
-        : undefined,
+        : undefined;
+    const accepted = await withProcessDatabase(databaseUrl, (sql) =>
+      acceptWhatsAppWebhook(
+        databaseUrl,
+        rawBody,
+        request.headers.get("x-hub-signature-256"),
+        appSecret,
+        account.phoneNumberId,
+        verifierUrl,
+        account.wabaId,
+        {
+          sql,
+          ...(verifierUrl === undefined
+            ? {}
+            : {
+                withVerifier: (operation: (verifier: Sql) => Promise<void>) =>
+                  withProcessDatabase(
+                    verifierUrl,
+                    operation,
+                    "whatsapp-verifier",
+                  ),
+              }),
+        },
+      ),
     );
     if (
       account.memoryVerifierEnabled === true &&

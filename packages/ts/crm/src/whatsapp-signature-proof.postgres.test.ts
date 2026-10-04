@@ -1,5 +1,5 @@
 import { randomUUID, createHmac, createHash } from "node:crypto";
-import postgres from "postgres";
+import postgres, { type Sql } from "postgres";
 import { describe, expect, it, vi } from "vitest";
 import {
   acceptWhatsAppWebhook,
@@ -19,13 +19,9 @@ describe.skipIf(!url)("separate signed webhook memory proof PostgreSQL", () => {
       throw Error("owned loopback only");
     const db = postgres(url, { max: 1, prepare: false }),
       channel = randomUUID(),
+      tenant = randomUUID(),
       account = "910101" + String(Date.now());
-    const tenant = (
-      await db<
-        { tenant_id: string }[]
-      >`SELECT tenant_id FROM agents.agent_profile_versions WHERE published_at IS NOT NULL LIMIT 1`
-    )[0]?.tenant_id;
-    if (!tenant) throw Error("fictional tenant required");
+    await db`INSERT INTO tenants(id,name,slug,status) VALUES(${tenant}::uuid,'Fictional signature proof',${tenant},'active')`;
     await db`INSERT INTO messaging.channels(id,tenant_id,kind,provider,display_address,provider_account_id,status) VALUES(${channel}::uuid,${tenant}::uuid,'whatsapp','meta','Synthetic signature proof',${account},'active')`;
     const secret = "synthetic-hmac-secret-for-owned-test",
       events: string[] = [];
@@ -61,6 +57,12 @@ describe.skipIf(!url)("separate signed webhook memory proof PostgreSQL", () => {
     const sign = (raw: Buffer) =>
       "sha256=" + createHmac("sha256", secret).update(raw).digest("hex");
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const withVerifier = vi.fn((operation: (sql: Sql) => Promise<void>) =>
+      operation(db),
+    );
+    const originalRole = (
+      await db<{ role: string }[]>`SELECT current_user AS role`
+    )[0]?.role;
     try {
       const invalid = body("invalid-" + randomUUID());
       await expect(
@@ -71,8 +73,11 @@ describe.skipIf(!url)("separate signed webhook memory proof PostgreSQL", () => {
           secret,
           account,
           url,
+          undefined,
+          { sql: db, withVerifier },
         ),
       ).rejects.toBeInstanceOf(InvalidWhatsAppSignatureError);
+      expect(withVerifier).not.toHaveBeenCalled();
       expect(
         await db`SELECT * FROM agents.whatsapp_verified_receipts WHERE provider_account_id=${account}`,
       ).toHaveLength(0);
@@ -97,8 +102,14 @@ describe.skipIf(!url)("separate signed webhook memory proof PostgreSQL", () => {
         secret,
         account,
         url,
+        undefined,
+        { sql: db, withVerifier },
       );
       events.push(...verified.eventIds);
+      expect(withVerifier).toHaveBeenCalledTimes(1);
+      expect(
+        (await db<{ role: string }[]>`SELECT current_user AS role`)[0]?.role,
+      ).toBe(originalRole);
       const proof = await db<
         { raw_body_digest: string }[]
       >`SELECT raw_body_digest FROM agents.whatsapp_verified_receipts WHERE inbound_event_id=${verified.eventIds[0] ?? ""}::uuid`;
@@ -182,6 +193,29 @@ describe.skipIf(!url)("separate signed webhook memory proof PostgreSQL", () => {
       expect(
         await db`SELECT * FROM agents.whatsapp_verified_receipts WHERE inbound_event_id=${retained.eventIds[0] ?? ""}::uuid`,
       ).toHaveLength(0);
+      const noLease = body("lease-unavailable-" + randomUUID());
+      const afterFailedLease = await acceptWhatsAppWebhook(
+        url,
+        noLease,
+        sign(noLease),
+        secret,
+        account,
+        url,
+        undefined,
+        {
+          sql: db,
+          withVerifier: () =>
+            Promise.reject(new Error("fictional verifier pool unavailable")),
+        },
+      );
+      events.push(...afterFailedLease.eventIds);
+      expect(afterFailedLease.envelopes).toBe(1);
+      expect(
+        await db`SELECT id FROM ops.inbound_events WHERE id=${afterFailedLease.eventIds[0] ?? ""}::uuid`,
+      ).toHaveLength(1);
+      expect(
+        await db`SELECT * FROM agents.whatsapp_verified_receipts WHERE inbound_event_id=${afterFailedLease.eventIds[0] ?? ""}::uuid`,
+      ).toHaveLength(0);
     } finally {
       warn.mockRestore();
       for (const event of events) {
@@ -189,6 +223,7 @@ describe.skipIf(!url)("separate signed webhook memory proof PostgreSQL", () => {
         await db`DELETE FROM ops.inbound_events WHERE id=${event}::uuid`;
       }
       await db`DELETE FROM messaging.channels WHERE id=${channel}::uuid`;
+      await db`DELETE FROM tenants WHERE id=${tenant}::uuid`;
       await db.end();
     }
   });

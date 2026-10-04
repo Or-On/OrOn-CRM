@@ -310,7 +310,14 @@ export function InboxWorkspace({
 
   function backToConversations() {
     setMobileThread(false);
-    if (window.history.state?.inboxConversation) window.history.back();
+    const state: unknown = window.history.state;
+    if (
+      state !== null &&
+      typeof state === "object" &&
+      "inboxConversation" in state &&
+      state.inboxConversation === true
+    )
+      window.history.back();
     else replaceInboxParam("conversation");
   }
 
