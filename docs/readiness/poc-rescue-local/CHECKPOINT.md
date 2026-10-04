@@ -1,59 +1,33 @@
-# Local rescue checkpoint — 2026-10-04 Asia/Jerusalem
+# Rescue checkpoint — 2026-10-05
 
-Work is in progress; none of the three readiness gates is declared passed.
+Work continues. Local, live POC and production readiness are separate gates; none is declared complete.
 
-## Runtime alignment correction (authoritative)
+## Authoritative source and runtime
 
-Fetching origin revealed local `3582027b` was six commits behind current main.
-Live DEV actually runs `42eebac2d423bb70a0c69690e8d2899beab12249`, confirmed by
-all four application OCI image revisions and immutable digests. Its schema is
-`fc6e851f3ba0`. The previous local baseline results below are historical local
-evidence ONLY, not evidence of defects in the running release.
+- Branch `codex/poc-rescue-local-20261004`; initial local `3582027b` was stale. Snapshot `86c3641` preserves that work; merge `635d245` incorporates deployed `42eebac2d423bb70a0c69690e8d2899beab12249`, removing duplicate early repairs.
+- Read-only SSH through the existing deployment service account works. No IAM changes were needed. Four DEV application image revisions are `42eebac2`; schema `fc6e851f3ba0`. See [TENANT-ROUTING.md](TENANT-ROUTING.md) for digests.
+- Candidate schema `8d32f4a91c70`: 138 revisions, one head. Fresh migrations and offline contracts pass. Revision `7c91e5a2b640` resets the failure window after an expired auth lock; active locks remain unchanged. The new Coexistence migration and importer are tested in isolated PostgreSQL; final full worker and container acceptance remain separate gates.
+- Original developer PostgreSQL on5433 remains unchanged at `6f8b0d3e5a29`. Tests use owned UUID databases in a separate loopback PostgreSQL18.6 on55480. UI uses3100/3101/3102. Test harness removes only owned databases.
+- Pinned Node24.20.0, pnpm11.24.0, uv0.12.7 and Python3.14.7 are installed.
+- BOOST.md, original PDF/screenshots and historical patch were not found in repository, ancestors, attachments or Downloads. Coverage preserves the supplied127-item appendix plus121 user bullets and17 new defects. All status labels use the user's allowed vocabulary; partial evidence remains explicitly unverified.
 
-All local work was preserved in snapshot `86c3641`. A merge of origin/main into
-the rescue branch is being resolved with ownership by domain. Mature upstream
-media, model recovery, queue fencing, agent admission, memory, opening menus,
-auth lock preservation, manual deployment gates and rollback are retained;
-duplicate early repairs are removed. New tests will run on the integrated tree.
+## Confirmed current findings
 
-GCP SSH is available through the existing deployment service account and existing
-Token Creator permission; no IAM bindings were changed. The earlier personal
-account denial is not an ongoing access blocker. Read-only inventory is in
-ignored `.artifacts/poc-rescue-local/remote-inventory.txt`.
+1. Voice runtime used one global LiveKit trunk whose sole number is Or-On ***5689. Candidate requires immutable tenant/account/trunk/from bindings, rechecks provider ownership and fails closed. ProTouch's existing Twilio trunk lacks a termination domain and credential-list association; its LiveKit outbound trunk is absent. User confirmed sender ***4553 and recipient ***7692. The [three-change provider plan](PROTOUCH-OUTBOUND-PLAN.md) passed read-only preflight; requested provisioning approval is pending.
+2. ProTouch WhatsApp phone `1284902841381185` is VERIFIED but PENDING, platform NOT_APPLICABLE. Scoped credentials and flags are present; callback GET verification succeeds, but the user test produced zero durable ProTouch receipts. After explicit approval, registration was attempted and rejected with Meta code 100/subcode 2388001: the number is already registered with another WhatsApp account. One reconciled repeat using the same protected PIN captured that reason. The user confirmed WhatsApp Business on the phone and chose to preserve it through Coexistence. `is_on_biz_app=false` describes the Cloud API Coexistence state; our earlier inference that it proved no phone app existed was incorrect. Ordinary registration is now disabled in the local helper. The protected PIN remains on the server; no outbound message, deregistration or deletion occurred. See [registration history](PROTOUCH-REGISTRATION-PLAN.md).
+3. UI candidate moves templates to composer, restores pagination, joins tenant-scoped ticket contact names beyond500 and fixes settings grid. Real local browser verified55-ticket pagination, saved settings, draft/back/deep-link behavior and cross-tenant denial; all-role/device acceptance remains incomplete.
+4. Caddy candidate adds only /livekit/webhook and private dispatcher network access. Upstream EXIT rollback retained; signals use it; messaging remains running during voice drain wait. This is not proof of zero-downtime migration.
+5. WIF condition and federation binding still name Abssel-AI/OrOn-CRM rather than Or-On/OrOn-CRM. No trust mutation, image publication or live deployment occurred.
+6. Authenticated Meta documentation requires a Tech Provider/Solution Partner for Embedded Signup Coexistence. The visible ProTouch app is not onboarded as a Tech Provider. The user explicitly declined provider registration and wants a separate app like Or-On. No provider terms were accepted. Read-only comparison proves Or-On is CONNECTED/CLOUD_API with is_on_biz_app=false, so it is not a demonstrated Coexistence example. App-specific credentials remain separate. Local durable history/echo/contact/disconnection support is implemented behind default-off configuration; final regression and build work continues.
+7. Web paths created PostgreSQL pools per request. Shared bounded pools now pass actual concurrent PostgreSQL tenant/session isolation, rollback cleanup, service-role separation and drain tests, including webhook/verifier integration. Actual Linux Next shutdown reproduced503 for an in-flight request; preserving the server's drain lifecycle corrected it to200 and left zero backend connections. An independent first-boot PostgreSQL race was reproduced: Unix-socket readiness was true during initdb while TCP was unavailable. Deployment and CI probes now require TCP.
+8. Email provider changes retained the previous provider's secret draft, and stale tenant forms could overwrite a newly active tenant's credentials. Commit `b5eb108` resets drafts, remounts per tenant and validates expected tenant against fresh authorization for save/OAuth start. Six focused files/46 tests passed, including actual PostgreSQL ciphertext preservation and cross-tenant rejection. See [CREDENTIAL-FORMS.md](CREDENTIAL-FORMS.md).
 
-Active production-shaped DEV tenants are `or-on-dev`
-(`00000000-0000-0000-0000-000000000001`) and `protouch`
-(`633d9906-3866-4ddd-b85c-99c525bd3cb3`). A deleted ProTouch tenant with a different
-UUID still exists and must not be mistaken for the active tenant. Both active
-Meta channels are configured; ProTouch additional credentials exist in BOTH
-remote web and worker environments. Local developer configuration differs.
+## Verification and next work
 
-The user confirmed ProTouch's source ending **4553** and a separate authorized
-test recipient ending **7692**. ProTouch has a distinct existing Twilio trunk
-with no termination domain or attached credential list. The existing carrier
-credential named Protouch and ignored local secret bundle were found. No
-provider provisioning, live call or message has been performed yet.
+Current web: 937 tests in 157 files passed before final webhook pooling integration. Auth: 91 tests in 18 files passed including five actual PostgreSQL pool tests. Worker: 660 passed and one Windows POSIX-permissions skip before new Coexistence changes. Python agent/dispatcher: 1293 passed, with all 17 model-gated cases separately exercised in real-provider runs; details in [VOICE.md](VOICE.md). Earlier merged full Python had 2295 passes and three harness/count failures, all corrected in the 21-test rerun. CRM had 740 passes and one externally dependent fixture, corrected with a self-contained passing test. See [VERIFICATION.md](VERIFICATION.md).
 
-- Repository: Or-On/OrOn-CRM, local directory OrOn-Platform.
-- Branch: `codex/poc-rescue-local-20261004`; initial clean HEAD `3582027b`.
-- Referenced `BOOST.md` absent in repo, parent directories, attachments and Downloads.
-- Historical `76ac719` patch not found; current source differs from that description.
-- Docker PostgreSQL 18.6 healthy on loopback 5433. Existing developer DB schema `6f8b0d3e5a29`; left unchanged.
-- Existing local tenants: `00000000-0000-0000-0000-000000000001` (`default`) and `10000000-0000-4000-8000-000000000001` (`or-on-workspace`). No ProTouch tenant in this local developer DB.
-- Isolated preview uses owned UUID database, web 3100, fictional login helper 3101 and simulator voice API 3102. No live workers launched.
-- Node 24.20.0 and pnpm 11.24.0 are bundled under `.artifacts/toolchains`; uv 0.12.7 is installed.
-- Disposable DB harness `.artifacts/poc_rescue_verify.py` creates/migrates a fresh DB per suite, sanitizes output, then drops only that owned DB. Auth: 14 files / 66 tests passed, zero skips.
-- Python baseline and WhatsApp regression work are running. UI, voice, WhatsApp agents have nonoverlapping ownership.
+Python candidate images from exact committed source `525be698cf2bcbedf0a008b94809e5d69c9a12a6` run in the owned isolated Compose stack. Dispatcher/control API are healthy, UID 100, with restricted DB roles and real-provider flags false. Twenty synthetic WAV/transcript lifecycles, failed-upload preservation, cross-service read-only access and zero leftover staging passed. These are artifact lifecycle probes, not full voice-call load. Web/worker images and Caddy/fault/recovery acceptance await the current source checkpoint.
 
-## Confirmed findings
+Next: finish Coexistence regressions, checkpoint exact source, rebuild all five images, exercise Caddy/dispatcher/DB failure/restart/restore and previous-image compatibility, then prepare release review. Provider provisioning approval and Meta Coexistence account prerequisites remain unresolved; independent local work continues.
 
-1. Source dispatcher passes a global outbound trunk without a tenant sender; actual configured LiveKit project has one Or-On outbound trunk and zero inbound trunks/dispatch rules. Tenant routing fix under test; ProTouch provider setup is absent in this project.
-2. WhatsApp media creates an AI job but history loads text only, causing missing inbound trigger. Regression and fix in progress.
-3. Ticket name lookup is limited to first 500 contacts; settings grids misplace children; templates are in customer details. UI fixes in progress.
-4. Caddy has no LiveKit webhook route; deployment rollback uses ERR trap and misses explicit exit; voice drain stops messaging/web before waiting. Infrastructure fixes in progress.
-5. GCP read access works. `oron-dev` is RUNNING on e2-medium. WIF condition still requires `Abssel-AI/OrOn-CRM` main, not actual Or-On repository. No IAM change performed.
-6. GCP SSH failed on missing `compute.osLoginExternalUser` for the current account in the external organization. Runtime image/SHA/schema and private remote provider configuration remain unverified. No live deployment performed.
-
-## Next exact work
-
-Finish scoped fixes and regression suites; inspect all failures/skips; run real browser acceptance with isolated data; verify Docker Caddy/dispatcher wiring and deployment failure handling; inventory current local tenant/channel/agent settings and document remote gaps. Update each coverage row with evidence, never infer live success from source/tests. Live sends/calls require a configured approved test destination; no customer messaging has been performed.
+No live caller-ID or AI-reply proof, real-device keyboard acceptance,30-day causal SLI,48-hour canary, human-scored Hebrew golden set or independent off-host restore is claimed. Existing upstream media/queue/memory/caps protections remain; initial stale-source findings are not attributed to newer runtime.
