@@ -914,11 +914,33 @@ export function ConversationThread({
           </div>
         ) : null}
       </div>
-      <Dialog className="inbox-template-dialog" open={templatesOpen} onClose={() => setTemplatesOpen(false)} title={locale.startsWith("he") ? "תבניות WhatsApp" : "WhatsApp templates"} closeLabel={t("common.close")}>
-        {templatesOpen ? <TemplateBrowser conversationId={conversation.id} locale={locale} expanded onSelect={(template) => {
-          updateDraft({ kind: "template", templateName: template.name, language: template.language, parameters: Array(template.draft?.parameterCount ?? 0).fill("").join(" | ") });
-          setTemplatesOpen(false);
-        }} /> : null}
+      <Dialog
+        className="inbox-template-dialog"
+        open={templatesOpen}
+        onClose={() => setTemplatesOpen(false)}
+        title={
+          locale.startsWith("he") ? "תבניות WhatsApp" : "WhatsApp templates"
+        }
+        closeLabel={t("common.close")}
+      >
+        {templatesOpen ? (
+          <TemplateBrowser
+            conversationId={conversation.id}
+            locale={locale}
+            expanded
+            onSelect={(template) => {
+              updateDraft({
+                kind: "template",
+                templateName: template.name,
+                language: template.language,
+                parameters: Array(template.draft?.parameterCount ?? 0)
+                  .fill("")
+                  .join(" | "),
+              });
+              setTemplatesOpen(false);
+            }}
+          />
+        ) : null}
       </Dialog>
       <form className="composer conversation-composer" onSubmit={submit}>
         {receipt ? (

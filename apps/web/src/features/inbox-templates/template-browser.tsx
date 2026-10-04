@@ -16,7 +16,15 @@ export function TemplateBrowser({
   readonly expanded?: boolean;
   readonly onSelect?: (template: WhatsAppTemplate) => void;
 }) {
-  if (expanded) return <ConversationTemplateBrowser key={conversationId} conversationId={conversationId} locale={locale} onSelect={onSelect} />;
+  if (expanded)
+    return (
+      <ConversationTemplateBrowser
+        key={conversationId}
+        conversationId={conversationId}
+        locale={locale}
+        onSelect={onSelect}
+      />
+    );
   return (
     <TemplateBrowserToggle
       key={conversationId}
@@ -122,9 +130,13 @@ function ConversationTemplateBrowser({
     >
       <h3>{he ? "תבניות WhatsApp קיימות" : "Existing WhatsApp templates"}</h3>
       <p>
-        {he
-          ? "תצוגה מקדימה בלבד. בחירה כאן אינה שולחת הודעה."
-          : "Preview only. Selecting a template does not send a message."}
+        {onSelect
+          ? he
+            ? "בחרו תבנית מאושרת למילוי הטיוטה. השליחה מתבצעת בנפרד."
+            : "Choose an approved template to fill the draft. Send it separately."
+          : he
+            ? "תצוגה מקדימה בלבד. בחירה כאן אינה שולחת הודעה."
+            : "Preview only. Selecting a template does not send a message."}
       </p>
       <div className={styles.filters}>
         <label>
@@ -158,14 +170,10 @@ function ConversationTemplateBrowser({
       {error && (
         <div role="alert">
           <p>
-            {onSelect ? (he ? "בחירה ממלאת טיוטה. השליחה מתבצעת בנפרד, לאחר מילוי המשתנים." : "Choosing fills a draft. Sending is a separate action after filling its parameters.") : he
+            {he
               ? "לא ניתן לטעון תבניות כעת."
               : "Templates are currently unavailable."}
           </p>
-          {onSelect ? <>
-            {!selected.draft ? <p>{he ? "העורך אינו תומך ברכיבי תבנית זו." : "This composer does not support this template’s components."}</p> : null}
-            <button type="button" disabled={selected.status !== "APPROVED" || !selected.draft} onClick={() => onSelect(selected)}>{he ? "מילוי טיוטה" : "Use in draft"}</button>
-          </> : null}
           <button
             type="button"
             onClick={() => {
@@ -224,10 +232,32 @@ function ConversationTemplateBrowser({
             </span>
           ))}
           <p>
-            {he
-              ? "משתנים מוצגים כפי שהוגדרו בתבנית; אין החלפת נתונים או שליחה."
-              : "Placeholders are shown as defined; no substitution or delivery occurs."}
+            {onSelect
+              ? he
+                ? "בחירה ממלאת טיוטה. השליחה מתבצעת בנפרד, לאחר מילוי המשתנים."
+                : "Choosing fills a draft. Sending is a separate action after filling its parameters."
+              : he
+                ? "משתנים מוצגים כפי שהוגדרו בתבנית; אין החלפת נתונים או שליחה."
+                : "Placeholders are shown as defined; no substitution or delivery occurs."}
           </p>
+          {onSelect ? (
+            <>
+              {!selected.draft ? (
+                <p>
+                  {he
+                    ? "העורך אינו תומך ברכיבי תבנית זו."
+                    : "This composer does not support this template’s components."}
+                </p>
+              ) : null}
+              <button
+                type="button"
+                disabled={selected.status !== "APPROVED" || !selected.draft}
+                onClick={() => onSelect(selected)}
+              >
+                {he ? "מילוי טיוטה" : "Use in draft"}
+              </button>
+            </>
+          ) : null}
         </article>
       )}
     </section>

@@ -46,9 +46,16 @@ export function parseTemplatePage(
         continue;
       }
       const part = component as Record<string, unknown>;
-      if (part.type === "BODY" && typeof part.text === "string") body = part.text;
-      if (!(part.type === "BODY" || part.type === "FOOTER" ||
-        (part.type === "HEADER" && part.format === "TEXT" && !String(part.text).includes("{{")))) supported = false;
+      if (part.type === "BODY" && typeof part.text === "string")
+        body = part.text;
+      if (!(
+        part.type === "BODY" ||
+        part.type === "FOOTER" ||
+        (part.type === "HEADER" &&
+          part.format === "TEXT" &&
+          !String(part.text).includes("{{"))
+      ))
+        supported = false;
       if (
         ["HEADER", "BODY", "FOOTER"].includes(String(part.type)) &&
         typeof part.text === "string"
@@ -70,11 +77,19 @@ export function parseTemplatePage(
             });
         }
     }
-    const positions = [...body.matchAll(/\{\{(\d+)\}\}/gu)].map((match) => Number(match[1]));
+    const positions = [...body.matchAll(/\{\{(\d+)\}\}/gu)].map((match) =>
+      Number(match[1]),
+    );
     const parameterCount = Math.max(0, ...positions);
-    supported = supported && body.length > 0 && parameterCount <= 20 &&
-      positions.every((position) => position >= 1) && !/\{\{[^\d}][^}]*\}\}/u.test(body) &&
-      Array.from({ length: parameterCount }, (_, index) => index + 1).every((position) => positions.includes(position));
+    supported =
+      supported &&
+      body.length > 0 &&
+      parameterCount <= 20 &&
+      positions.every((position) => position >= 1) &&
+      !/\{\{[^\d}][^}]*\}\}/u.test(body) &&
+      Array.from({ length: parameterCount }, (_, index) => index + 1).every(
+        (position) => positions.includes(position),
+      );
     return {
       id: String(row.id),
       name: String(row.name),

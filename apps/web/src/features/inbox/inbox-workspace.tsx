@@ -1192,7 +1192,6 @@ export function InboxWorkspace({
                 </p>
               </div>
             </details>
-
           </div>
         </aside>
       )}

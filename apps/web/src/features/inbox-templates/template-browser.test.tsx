@@ -96,3 +96,46 @@ it("shows recoverable error and clears previous conversation preview on switch",
     expect(screen.getByRole("button", { name: /approved_he/u })).toBeTruthy(),
   );
 });
+
+it("fills only an approved supported draft and never submits delivery", async () => {
+  const onSelect = vi.fn();
+  const fetcher = vi.fn(() =>
+    Promise.resolve(
+      new Response(
+        JSON.stringify({
+          ...page,
+          templates: page.templates.map((item) => ({
+            ...item,
+            draft: { parameterCount: 1 },
+          })),
+        }),
+      ),
+    ),
+  );
+  vi.stubGlobal("fetch", fetcher);
+  render(
+    <TemplateBrowser
+      conversationId="conversation-a"
+      locale="en"
+      expanded
+      onSelect={onSelect}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: /approved_he/u }));
+  fireEvent.click(screen.getByRole("button", { name: "Use in draft" }));
+  expect(onSelect).toHaveBeenCalledWith(
+    expect.objectContaining({
+      name: "approved_he",
+      language: "he",
+      draft: { parameterCount: 1 },
+    }),
+  );
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole("checkbox"));
+  fireEvent.click(screen.getByRole("button", { name: /pending_en/u }));
+  expect(
+    screen
+      .getByRole("button", { name: "Use in draft" })
+      .hasAttribute("disabled"),
+  ).toBe(true);
+});

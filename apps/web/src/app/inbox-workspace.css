@@ -1340,32 +1340,6 @@
 .inbox-template-dialog {
   inline-size: min(42rem, calc(100vw - 2rem));
 }
-.inbox-template-list {
-  display: grid;
-  gap: 0.75rem;
-}
-.inbox-template-list article {
-  display: grid;
-  gap: 0.6rem;
-  padding: 1rem;
-  border: 1px solid var(--or-border);
-  border-radius: var(--or-radius-sm);
-  min-inline-size: 0;
-}
-.inbox-template-list header {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  justify-content: space-between;
-}
-.inbox-template-list p {
-  margin: 0;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.inbox-template-list article > button {
-  justify-self: start;
-}
 .conversation-composer .composer-footer__tools {
   flex-wrap: wrap;
 }
