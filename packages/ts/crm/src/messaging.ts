@@ -713,9 +713,11 @@ export async function ingestWhatsAppInbound(
   )
     throw new TypeError("invalid inbound provider timestamp");
   const channelRows = await sql<
-    { id: string; mirror_inbound_media: boolean }[]
+    { id: string; mirror_inbound_media: boolean; reliability_enabled: boolean }[]
   >`
-    SELECT id, mirror_inbound_media FROM messaging.channels
+    SELECT id, mirror_inbound_media,
+      configuration->'aiReliabilityV2Enabled' = 'true'::jsonb AS reliability_enabled
+    FROM messaging.channels
     WHERE provider = 'meta' AND provider_account_id = ${input.providerAccountId}
       AND status = 'active'
     LIMIT 1
@@ -753,7 +755,9 @@ export async function ingestWhatsAppInbound(
     senderIdentityId = insertedIdentities[0]?.id;
   } else {
     await sql`
-      UPDATE crm.contacts SET name = ${input.profileName.trim() || phone},
+      UPDATE crm.contacts SET name = CASE
+               WHEN NOT COALESCE(${channel.reliability_enabled}, false) OR NULLIF(btrim(name), '') IS NULL THEN ${input.profileName.trim() || phone}
+               ELSE name END,
              last_activity_at = CURRENT_TIMESTAMP,
              updated_at = CURRENT_TIMESTAMP
       WHERE id = ${contactId}::uuid

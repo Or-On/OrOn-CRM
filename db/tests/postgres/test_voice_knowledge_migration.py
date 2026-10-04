@@ -1,6 +1,7 @@
 """Final knowledge migration compatibility and rollback against an owned fixture."""
 
 import os
+import re
 from collections.abc import AsyncIterator
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
@@ -31,8 +32,11 @@ async def knowledge_database() -> AsyncIterator[str]:
         pytest.skip("owned readiness migration proof requires explicit READINESS_POSTGRES_URL")
     target = urlsplit(readiness_url)
     if (
-        target.hostname != "127.0.0.1"
-        or target.port != 55439
+        target.hostname not in {"127.0.0.1", "localhost"}
+        or not (
+            (target.port == 55439 and target.path == "/oron_readiness")
+            or re.fullmatch(r"/oron_ui_preview_[a-f0-9]{32}", target.path)
+        )
         or target.username != "platform_migrator"
     ):
         pytest.fail("knowledge migration verification requires the owned readiness PostgreSQL")

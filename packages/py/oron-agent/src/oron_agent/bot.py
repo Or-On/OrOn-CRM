@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -347,7 +348,7 @@ async def run_bot(
         + (service_intake.tool_names if service_intake else ())
         + (("open_support_ticket",) if ticket_enabled else ())
     )
-    session_dir = SessionDir(ctx.session_id)
+    session_dir = SessionDir(ctx.session_id, root=str(Path(st.artifacts_local_root) / ".staging"))
     text_diagnostics = (
         VoiceTextDiagnostics(
             session_dir.text_diagnostics,
@@ -952,6 +953,13 @@ async def run_bot(
             if not finalized:
                 logger.error("canonical voice session finalization was not persisted")
                 return False
+            # Upload and its durable DB pointers both exist. Failed uploads or
+            # finalizations retain their staging tree for recovery on the
+            # configured volume rather than leaking successful call copies.
+            try:
+                await asyncio.to_thread(session_dir.cleanup)
+            except OSError, ValueError:
+                logger.warning("voice artifact staging cleanup requires retry")
             # Quality is valuable but derived. It must never be able to win a
             # race while the canonical conversation record is still incomplete.
             quality_writer = getattr(sessions, "record_voice_quality", None)

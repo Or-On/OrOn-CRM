@@ -3828,10 +3828,6 @@ textarea,
   padding-inline: 0.5rem;
 }
 
-.shell--inbox .inbox-list__footer {
-  display: none;
-}
-
 .shell--inbox .conversation-header {
   display: grid;
   grid-template-areas: "avatar contact state context actions";
@@ -4018,10 +4014,10 @@ textarea,
 .conversation-composer .composer-footer .composer-send {
   display: grid;
   place-items: center;
-  inline-size: 2rem;
-  min-inline-size: 2rem;
-  block-size: 2rem;
-  min-block-size: 2rem;
+  inline-size: 2.75rem;
+  min-inline-size: 2.75rem;
+  block-size: 2.75rem;
+  min-block-size: 2.75rem;
   padding: 0;
 }
 

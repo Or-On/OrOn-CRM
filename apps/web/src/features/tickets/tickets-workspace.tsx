@@ -15,7 +15,7 @@ import { Badge, Button, DataTable, Input, Select, Surface } from "@or-on/ui";
 import { ChevronRight } from "lucide-react";
 import { useLocale } from "next-intl";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { tenantDateFormatter } from "../../i18n/tenant-date-time";
 import { attentionTone, inquiryCopy, nextActionLabel } from "./inquiry-copy";
@@ -30,6 +30,9 @@ const COPY = {
     closed: "Closed",
     all: "All",
     allStages: "All stages",
+    moreFilters: "More filters",
+    resetFilters: "Reset filters",
+    unknownContact: "Unnamed contact",
     search: "Search reference, subject, contact or phone…",
     reference: "Reference",
     subject: "Subject",
@@ -108,6 +111,9 @@ const COPY = {
     closed: "סגורות",
     all: "הכול",
     allStages: "כל השלבים",
+    moreFilters: "מסננים נוספים",
+    resetFilters: "איפוס מסננים",
+    unknownContact: "איש קשר ללא שם",
     search: "חיפוש לפי מספר פנייה, נושא, איש קשר או טלפון…",
     reference: "מספר פנייה",
     subject: "נושא",
@@ -331,7 +337,7 @@ function OutcomeMetrics({
 
 export function TicketsWorkspace({
   initialPage,
-  contactNames,
+  contactNames = {},
   tenantTimeZone,
   metrics,
   emergencyLabel = null,
@@ -340,7 +346,7 @@ export function TicketsWorkspace({
   readonly emergencyLabel?: string | null;
   readonly initialPage: TicketPage;
   /** Resolved server-side; the browser never receives the contact table. */
-  readonly contactNames: Readonly<Record<string, string>>;
+  readonly contactNames?: Readonly<Record<string, string>>;
   readonly tenantTimeZone: string;
   readonly metrics?: TicketOutcomeMetrics;
 }) {
@@ -366,9 +372,11 @@ export function TicketsWorkspace({
   const [emergencyOnly, setEmergencyOnly] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
+  const requestRevision = useRef(0);
 
   const load = useCallback(
     async (append: Cursor | null, signal?: AbortSignal) => {
+      const revision = ++requestRevision.current;
       setBusy(true);
       setFailed(false);
       try {
@@ -396,15 +404,16 @@ export function TicketsWorkspace({
         });
         if (!response.ok) throw new Error("tickets request failed");
         const page = (await response.json()) as TicketPage;
+        if (signal?.aborted || revision !== requestRevision.current) return;
         setTickets((current) =>
           append === null ? page.tickets : [...current, ...page.tickets],
         );
         setCursor(page.nextCursor);
       } catch (error) {
         if ((error as Error).name === "AbortError") return;
-        setFailed(true);
+        if (revision === requestRevision.current) setFailed(true);
       } finally {
-        setBusy(false);
+        if (revision === requestRevision.current) setBusy(false);
       }
     },
     [
@@ -463,102 +472,6 @@ export function TicketsWorkspace({
               </button>
             ))}
           </div>
-          <Select
-            id="ticket-stage"
-            label={t.stage}
-            onChange={(event) => {
-              setStage(event.target.value as TicketStage | "");
-            }}
-            value={stage}
-          >
-            <option value="">{t.allStages}</option>
-            {STAGES.map((value) => (
-              <option key={value} value={value}>
-                {t.stages[value]}
-              </option>
-            ))}
-          </Select>
-          <Select
-            id="ticket-priority"
-            label={t.priority}
-            onChange={(event) => {
-              setPriority(event.target.value as TicketPriority | "");
-            }}
-            value={priority}
-          >
-            <option value="">{t.allPriorities}</option>
-            {PRIORITIES.map((value) => (
-              <option key={value} value={value}>
-                {t.priorities[value]}
-              </option>
-            ))}
-          </Select>
-          <Select
-            id="ticket-channel"
-            label={t.channel}
-            onChange={(event) => {
-              setChannel(event.target.value as TicketSourceChannel | "");
-            }}
-            value={channel}
-          >
-            <option value="">{t.allChannels}</option>
-            {CHANNELS.map((value) => (
-              <option key={value} value={value}>
-                {t.channels[value]}
-              </option>
-            ))}
-          </Select>
-          <Select
-            id="ticket-handling"
-            label={t.handling}
-            onChange={(event) => {
-              setHandling(event.target.value as TicketHandlingMode | "");
-            }}
-            value={handling}
-          >
-            <option value="">{t.allHandling}</option>
-            {HANDLING.map((value) => (
-              <option key={value} value={value}>
-                {t.handlingModes[value]}
-              </option>
-            ))}
-          </Select>
-          <Select
-            id="ticket-resolution"
-            label={t.resolution}
-            onChange={(event) => {
-              setResolution(event.target.value as TicketResolution | "");
-            }}
-            value={resolution}
-          >
-            <option value="">{t.allResolutions}</option>
-            {RESOLUTIONS.map((value) => (
-              <option key={value} value={value}>
-                {t.resolutions[value]}
-              </option>
-            ))}
-          </Select>
-          <Input
-            id="ticket-active-since"
-            label={t.lastActivity}
-            onChange={(event) => {
-              setActiveSince(event.target.value);
-            }}
-            type="date"
-            value={activeSince}
-          />
-          {emergencyLabel === null ? null : (
-            <label className={styles.emergencyToggle ?? ""}>
-              <input
-                checked={emergencyOnly}
-                onChange={(event) => {
-                  setEmergencyOnly(event.target.checked);
-                }}
-                type="checkbox"
-              />
-              {emergencyLabel} · {shared.emergencyOnly}
-            </label>
-          )}
           <Input
             id="ticket-search"
             label={t.search}
@@ -570,9 +483,130 @@ export function TicketsWorkspace({
             value={query}
           />
         </div>
+        <details className={styles.secondaryFilters ?? ""}>
+          <summary>{t.moreFilters}</summary>
+          <div className={styles.secondaryFilterGrid ?? ""}>
+            <Select
+              id="ticket-stage"
+              label={t.stage}
+              onChange={(event) => {
+                setStage(event.target.value as TicketStage | "");
+              }}
+              value={stage}
+            >
+              <option value="">{t.allStages}</option>
+              {STAGES.map((value) => (
+                <option key={value} value={value}>
+                  {t.stages[value]}
+                </option>
+              ))}
+            </Select>
+            <Select
+              id="ticket-priority"
+              label={t.priority}
+              onChange={(event) => {
+                setPriority(event.target.value as TicketPriority | "");
+              }}
+              value={priority}
+            >
+              <option value="">{t.allPriorities}</option>
+              {PRIORITIES.map((value) => (
+                <option key={value} value={value}>
+                  {t.priorities[value]}
+                </option>
+              ))}
+            </Select>
+            <Select
+              id="ticket-channel"
+              label={t.channel}
+              onChange={(event) => {
+                setChannel(event.target.value as TicketSourceChannel | "");
+              }}
+              value={channel}
+            >
+              <option value="">{t.allChannels}</option>
+              {CHANNELS.map((value) => (
+                <option key={value} value={value}>
+                  {t.channels[value]}
+                </option>
+              ))}
+            </Select>
+            <Select
+              id="ticket-handling"
+              label={t.handling}
+              onChange={(event) => {
+                setHandling(event.target.value as TicketHandlingMode | "");
+              }}
+              value={handling}
+            >
+              <option value="">{t.allHandling}</option>
+              {HANDLING.map((value) => (
+                <option key={value} value={value}>
+                  {t.handlingModes[value]}
+                </option>
+              ))}
+            </Select>
+            <Select
+              id="ticket-resolution"
+              label={t.resolution}
+              onChange={(event) => {
+                setResolution(event.target.value as TicketResolution | "");
+              }}
+              value={resolution}
+            >
+              <option value="">{t.allResolutions}</option>
+              {RESOLUTIONS.map((value) => (
+                <option key={value} value={value}>
+                  {t.resolutions[value]}
+                </option>
+              ))}
+            </Select>
+            <Input
+              id="ticket-active-since"
+              label={t.lastActivity}
+              onChange={(event) => {
+                setActiveSince(event.target.value);
+              }}
+              type="date"
+              value={activeSince}
+            />
+            {emergencyLabel === null ? null : (
+              <label className={styles.emergencyToggle ?? ""}>
+                <input
+                  checked={emergencyOnly}
+                  onChange={(event) => {
+                    setEmergencyOnly(event.target.checked);
+                  }}
+                  type="checkbox"
+                />
+                {emergencyLabel} · {shared.emergencyOnly}
+              </label>
+            )}
+
+            <Button
+              variant="secondary"
+              type="button"
+              onClick={() => {
+                setStage("");
+                setPriority("");
+                setChannel("");
+                setHandling("");
+                setResolution("");
+                setActiveSince("");
+                setEmergencyOnly(false);
+                setQuery("");
+              }}
+            >
+              {t.resetFilters}
+            </Button>
+          </div>
+        </details>
 
         {metrics === undefined ? null : (
-          <OutcomeMetrics metrics={metrics} t={t} />
+          <details className={styles.metricsDisclosure ?? ""}>
+            <summary>{t.metricsTitle}</summary>
+            <OutcomeMetrics metrics={metrics} t={t} />
+          </details>
         )}
 
         {failed ? (
@@ -628,21 +662,23 @@ export function TicketsWorkspace({
                         </span>
                       )}
                     </td>
-                    <td>
+                    <td data-label={t.contact}>
                       <strong dir="auto">
-                        {contactNames[ticket.contactId] ?? ticket.contactId}
+                        {ticket.contactName ??
+                          contactNames[ticket.contactId] ??
+                          t.unknownContact}
                       </strong>
                       <small>
                         {formatter.format(new Date(ticket.lastActivityAt))}
                       </small>
                     </td>
-                    <td>
+                    <td data-label={t.subject}>
                       <strong dir="auto">{ticket.subject}</strong>
                       <small>
                         {t.resolutions[ticket.resolutionClassification]}
                       </small>
                     </td>
-                    <td>
+                    <td data-label={t.stage}>
                       <Badge
                         label={t.stages[ticket.stage]}
                         tone={stageTone(ticket.stage)}
@@ -669,8 +705,10 @@ export function TicketsWorkspace({
                         </span>
                       )}
                     </td>
-                    <td>{t.handlingModes[ticket.handlingMode]}</td>
-                    <td>
+                    <td data-label={t.handling}>
+                      {t.handlingModes[ticket.handlingMode]}
+                    </td>
+                    <td data-label={t.nextAction}>
                       {nextActionLabel(shared, ticket.nextAction) ??
                         t.noNextAction}
                     </td>

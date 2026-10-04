@@ -15,6 +15,7 @@ from oron_dispatcher.dispatcher import (
     PersistenceUnavailable,
     UnroutableInboundCall,
 )
+from oron_dispatcher.outbound_routing import OutboundRoute
 from oron_dispatcher.sip_client import RealTelephonyDenied, SipClient
 from oron_dispatcher.tenancy_client import PhoneResolution
 from oron_sessions import SessionStatus
@@ -29,7 +30,17 @@ def _sip(*, enabled: bool, trunk_id: str | None = "ST_test", dial: AsyncMock | N
         url="ws://127.0.0.1:7880",
         api_key="test-key",
         api_secret="test-secret-test-secret-test-secret",
-        trunk_id=trunk_id,
+        routes=(
+            OutboundRoute(
+                tenant_id=TENANT_ID,
+                account_ref="test-account",
+                trunk_id=trunk_id,
+                from_number=DID,
+                address="test.pstn.invalid",
+            ),
+        )
+        if trunk_id
+        else (),
         enabled=enabled,
     )
     if dial is not None:

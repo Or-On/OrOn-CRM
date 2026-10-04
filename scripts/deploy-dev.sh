@@ -341,21 +341,34 @@ compose_previous() {
 
 native_caddy_was_active=false
 previous_optional_services=()
+deployment_succeeded=false
 rollback() {
-  exit_code=$?
-  trap - ERR
+  local exit_code=$?
+  trap - EXIT
+  if [[ ${deployment_succeeded} == true ]]; then
+    return
+  fi
+  # Explicit exit, a failed command, and a trapped termination all reach EXIT.
+  # Never report an unfinished deployment as successful.
+  [[ ${exit_code} -ne 0 ]] || exit_code=1
+  set +e
   echo "Deployment of ${COMMIT_SHA} failed; attempting application rollback" >&2
   if [[ -n ${previous_release} && -d ${previous_release} ]]; then
-    compose_previous up --detach --remove-orphans --wait --wait-timeout 180 \
-      postgres control-api web caddy "${previous_optional_services[@]}" || true
-    ln -sfn "${previous_release}" "${CURRENT_LINK}.rollback"
-    mv -Tf "${CURRENT_LINK}.rollback" "${CURRENT_LINK}"
+    if compose_previous up --detach --remove-orphans --wait --wait-timeout 100 \
+      postgres control-api web caddy "${previous_optional_services[@]}"; then
+      ln -sfn "${previous_release}" "${CURRENT_LINK}.rollback"
+      mv -Tf "${CURRENT_LINK}.rollback" "${CURRENT_LINK}"
+    else
+      echo "Application rollback failed its health gate; operator action required" >&2
+    fi
   elif [[ ${native_caddy_was_active} == true ]]; then
     systemctl start caddy || true
   fi
   exit "${exit_code}"
 }
-trap rollback ERR
+trap rollback EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # shellcheck disable=SC1091
 source "${SHARED_DIR}/deployment.env"
@@ -399,9 +412,8 @@ for image in "${release_images[@]}"; do
 done
 compose up --detach postgres
 if [[ -n ${previous_release} ]]; then
-  # Stop request admission first. The messaging worker drains its current effect
-  # under its 90-second grace period; the dispatcher remains up for active calls.
-  compose_previous stop --timeout 120 messaging-worker web caddy
+  # Keep webhook ingestion and replies available while voice drains. A failed
+  # voice wait must leave the healthy messaging release serving customers.
   active_calls=0
   for _ in {1..36}; do
     active_calls="$(compose_previous exec --no-TTY postgres psql \
@@ -499,7 +511,8 @@ systemctl daemon-reload
 systemctl enable oron-dev.service oron-dev-backup.timer >/dev/null
 systemctl disable caddy >/dev/null 2>&1 || true
 systemctl start oron-dev-backup.timer
-trap - ERR
+deployment_succeeded=true
+trap - EXIT INT TERM
 
 # Keep the active release and the four newest predecessors. Never touch shared data.
 mapfile -t old_releases < <(find "${RELEASES_DIR}" -mindepth 1 -maxdepth 1 -type d \

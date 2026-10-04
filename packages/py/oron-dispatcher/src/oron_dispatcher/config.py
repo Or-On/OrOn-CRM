@@ -2,8 +2,10 @@
 
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from oron_dispatcher.outbound_routing import OutboundRoute, validate_routes
 
 
 class DispatcherSettings(BaseSettings):
@@ -22,6 +24,17 @@ class DispatcherSettings(BaseSettings):
     sip_outbound_trunk_id: str | None = Field(
         default=None, validation_alias="SIP_OUTBOUND_TRUNK_ID"
     )
+    # The old global trunk remains recognizable for diagnostics only. It must
+    # never become a fallback for a tenant whose reviewed route is absent.
+    outbound_routes: tuple[OutboundRoute, ...] = Field(
+        default=(), validation_alias="VOICE_OUTBOUND_ROUTES_JSON"
+    )
+
+    @field_validator("outbound_routes")
+    @classmethod
+    def _validate_outbound_routes(cls, routes: tuple[OutboundRoute, ...]):
+        return validate_routes(routes)
+
     enable_real_telephony: bool = Field(default=False, validation_alias="ENABLE_REAL_TELEPHONY")
     bind_host: Literal["127.0.0.1", "0.0.0.0"] = Field(  # noqa: S104
         default="127.0.0.1", validation_alias="DISPATCHER_BIND_HOST"
@@ -39,6 +52,7 @@ class DispatcherSettings(BaseSettings):
                 "unset" if self.sip_outbound_trunk_id is None else "[CONFIGURED]"
             ),
             "enable_real_telephony": self.enable_real_telephony,
+            "outbound_route_count": len(self.outbound_routes),
             "bind_host": self.bind_host,
             "port": self.port,
             "room_prefix": self.room_prefix,

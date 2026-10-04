@@ -105,6 +105,19 @@ not create or modify those provider resources.
 2. Apply current migrations with `uv run python scripts/dev.py migrate`.
 3. Set both `ENABLE_REAL_TELEPHONY=true` and
    `ENABLE_REAL_VOICE_PROVIDERS=true` in the ignored `.env`. They must match.
+   Configure `VOICE_OUTBOUND_ROUTES_JSON` with reviewed bindings for each
+   authorized tenant. Each object requires `tenant_id`, `account_ref`,
+   `trunk_id`, `from_number` (E.164), and `address` (the carrier endpoint on
+   that LiveKit outbound trunk). `account_ref` is a non-secret operational
+   reference; carrier passwords remain in the provider-managed trunk. Do not
+   copy a tenant draft's caller ID without confirming ownership. The legacy
+   `SIP_OUTBOUND_TRUNK_ID` is diagnostic only and never authorizes a tenant.
+   Missing routes, duplicate tenant/sender assignments, a mismatched provider
+   endpoint, or a sender absent from the provider's allowed numbers block
+   dialing. The provider trunk is read again for every call; its default
+   caller ID is never used. Restart the dispatcher after editing route or
+   LiveKit credential configuration. A trunk shared intentionally by tenants
+   requires a distinct explicitly owned sender per tenant.
 4. Restart with `uv run python scripts/dev.py dev`. The dispatcher starts on
    loopback and reports readiness only when PostgreSQL and its durable webhook
    ledger are available.

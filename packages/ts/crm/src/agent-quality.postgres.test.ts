@@ -39,8 +39,10 @@ async function isolated(
   const target = new URL(databaseUrl);
   if (
     target.hostname !== "127.0.0.1" ||
-    target.port !== "55439" ||
-    target.pathname !== "/oron_readiness" ||
+    !(
+      (target.port === "55439" && target.pathname === "/oron_readiness") ||
+      /^\/oron_ui_preview_[a-f0-9]{32}$/.test(target.pathname)
+    ) ||
     target.username !== "platform_migrator"
   )
     throw new Error("only the owned readiness fixture is permitted");

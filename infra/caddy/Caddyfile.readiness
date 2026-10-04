@@ -13,5 +13,14 @@
 		X-Frame-Options DENY
 		Referrer-Policy no-referrer
 	}
-	reverse_proxy web:3000
+	handle /livekit/webhook {
+		reverse_proxy dispatcher:8082
+	}
+	handle {
+		reverse_proxy web:3000
+	}
+}
+
+http://127.0.0.1:8080 {
+	respond /healthz "ok" 200
 }

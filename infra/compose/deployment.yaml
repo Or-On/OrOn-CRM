@@ -177,7 +177,6 @@ services:
       DISPATCHER_URL: http://dispatcher:8082
     depends_on:
       postgres: { condition: service_healthy }
-      control-api: { condition: service_healthy }
     healthcheck:
       test: ["CMD", "node", "dist/healthcheck.js"]
       interval: 10s
@@ -240,7 +239,7 @@ services:
       CONTROL_API_URL: http://control-api:8000
       DISPATCHER_URL: http://dispatcher:8082
       PUBLIC_SITE_URL: ${PLATFORM_ORIGIN:?Set the canonical HTTPS origin}
-    depends_on: { control-api: { condition: service_healthy } }
+    depends_on: { postgres: { condition: service_healthy } }
     healthcheck:
       test:
         [
@@ -278,7 +277,21 @@ services:
     tmpfs: [/config, /tmp]
     read_only: true
     depends_on: { web: { condition: service_healthy } }
-    networks: [edge]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "-q",
+          "-O",
+          "/dev/null",
+          "http://127.0.0.1:8080/healthz",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks: [edge, application]
 
 networks:
   database: { internal: true }

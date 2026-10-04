@@ -328,6 +328,14 @@ class PostgresVoiceRuntime:
                         if context.source_conversation_id
                         else None,
                         "handoff": str(context.handoff_id) if context.handoff_id else None,
+                        **(
+                            {
+                                "from": context.from_number,
+                                "outbound_route": context.raw_metadata["outbound_route"],
+                            }
+                            if "outbound_route" in context.raw_metadata
+                            else {}
+                        ),
                     },
                     sort_keys=True,
                     separators=(",", ":"),
@@ -447,6 +455,7 @@ class PostgresVoiceRuntime:
                             if context.agent_version_id
                             else None,
                             "flow_version": context.flow_version,
+                            "outbound_route": context.raw_metadata.get("outbound_route"),
                             "contact_id": str(resolved_contact_id) if resolved_contact_id else None,
                             "source_conversation_id": str(context.source_conversation_id)
                             if context.source_conversation_id

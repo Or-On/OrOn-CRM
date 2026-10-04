@@ -146,3 +146,31 @@ async def test_local_store_copies_the_tree(tmp_path):
     dest = tmp_path / "store" / "conversations" / str(SID)
     assert (dest / TRANSCRIPT_PATH).read_text() == "hello"
     assert (dest / RECORDING_PATH).read_bytes() == b"audio"
+
+
+async def test_twenty_local_lifecycles_retain_durable_files_without_staging_leak(tmp_path):
+    staging = tmp_path / "persistent-volume" / ".staging"
+    store_root = tmp_path / "persistent-volume"
+    store = LocalArtifactStore(root=str(store_root))
+    for _ in range(20):
+        session_id = uuid.uuid4()
+        directory = SessionDir(session_id, root=str(staging))
+        Path(directory.transcript).write_text("fictional test transcript")
+        await save_audio_file(b"\x00\x01" * 8000, directory.recording, 16000, 1)
+        assert await store.upload_dir(str(directory.path), session_id)
+        directory.cleanup()
+        durable = store_root / "conversations" / str(session_id)
+        assert (durable / RECORDING_PATH).stat().st_size > 16000
+        assert (durable / TRANSCRIPT_PATH).read_text() == "fictional test transcript"
+    assert list(staging.iterdir()) == []
+
+
+def test_staging_cleanup_cannot_delete_sibling_session(tmp_path):
+    import pytest
+
+    owned = SessionDir(uuid.uuid4(), root=str(tmp_path))
+    other = SessionDir(uuid.uuid4(), root=str(tmp_path))
+    owned.path = other.path
+    with pytest.raises(ValueError, match="unowned"):
+        owned.cleanup()
+    assert other.path.exists()

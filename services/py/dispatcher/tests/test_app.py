@@ -62,7 +62,7 @@ async def test_composition_injects_provider_safe_retained_agent_launcher() -> No
             url="http://127.0.0.1:7880",
             api_key="fixture",
             api_secret="fixture",
-            trunk_id=None,
+            routes=(),
             enabled=False,
         ),
         resolve_phone=AsyncMock(return_value=None),

@@ -45,11 +45,14 @@ describe.skipIf(source === undefined)(
       if (source === undefined)
         throw new Error("explicit readiness PostgreSQL URL is required");
       const url = new URL(source);
-      if (
-        url.hostname !== "127.0.0.1" ||
-        url.port !== "55439" ||
-        url.pathname !== "/oron_readiness"
-      )
+      const dedicatedReadiness =
+        url.hostname === "127.0.0.1" &&
+        url.port === "55439" &&
+        url.pathname === "/oron_readiness";
+      const ownedLocalDatabase =
+        ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) &&
+        /^\/oron_ui_preview_[a-f0-9]{32}$/u.test(url.pathname);
+      if (!dedicatedReadiness && !ownedLocalDatabase)
         throw new Error(
           "readiness tests require the dedicated isolated PostgreSQL project",
         );

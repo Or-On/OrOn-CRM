@@ -22,6 +22,8 @@ import {
 } from "./tenant-business-context.js";
 
 export interface WhatsAppAiRequest {
+  /** Explicit channel canary; descriptive extras never grant authority. */
+  readonly tolerateDescriptiveExtras?: boolean;
   /** The published agent version's own prompt, verbatim. */
   readonly systemPrompt: string;
   readonly locale: string;
@@ -673,7 +675,12 @@ export class OpenAiCompatibleChatProvider implements WhatsAppAiProvider {
                 schema: decisionSchema,
               },
             },
-            max_tokens: request.lead === undefined ? 300 : 700,
+            max_tokens:
+              request.tolerateDescriptiveExtras === true
+                ? 800
+                : request.lead === undefined
+                  ? 300
+                  : 700,
             reasoning_effort: "none",
             temperature: 0.2,
             stream: false,
@@ -730,7 +737,15 @@ export class OpenAiCompatibleChatProvider implements WhatsAppAiProvider {
       const parsed = parseJsonObject(raw);
       if (
         parsed === undefined ||
-        Object.keys(parsed).some((key) => !decisionKeys.includes(key))
+        // Ignore descriptive provider extras, but never accept a model-made
+        // authority or action receipt. Action/capability validation below is
+        // unchanged and only the validated fields leave this boundary.
+        Object.keys(parsed).some(
+          (key) =>
+            !decisionKeys.includes(key) &&
+            (request.tolerateDescriptiveExtras !== true ||
+              /receipt|permission|authorization|tool|action/iu.test(key)),
+        )
       ) {
         throw new WhatsAppAiProviderError("ai_invalid_output", false);
       }

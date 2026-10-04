@@ -25,7 +25,7 @@
 
 .filters {
   display: grid;
-  grid-template-columns: auto minmax(10rem, 0.55fr) minmax(16rem, 1fr);
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: end;
   gap: 0.75rem;
   padding: 1rem;
@@ -44,7 +44,8 @@
   border: 0;
   background: transparent;
   color: inherit;
-  padding: 0.35rem 0.85rem;
+  padding: 0.6rem 0.85rem;
+  min-block-size: 2.75rem;
   border-radius: 0.45rem;
   cursor: pointer;
   font: inherit;
@@ -70,22 +71,25 @@
 }
 
 .directory :global(td:nth-child(1)) {
-  inline-size: 11rem;
+  inline-size: 14%;
 }
 .directory :global(td:nth-child(2)) {
-  inline-size: 15rem;
+  inline-size: 17%;
 }
 .directory :global(td:nth-child(3)) {
-  inline-size: 24rem;
+  inline-size: 26%;
 }
 .directory :global(td:nth-child(4)) {
-  inline-size: 11rem;
+  inline-size: 13%;
 }
 .directory :global(td:nth-child(5)) {
-  inline-size: 10rem;
+  inline-size: 12%;
+}
+.directory :global(td:nth-child(6)) {
+  inline-size: 14%;
 }
 .directory :global(td:nth-child(7)) {
-  inline-size: 3rem;
+  inline-size: 4%;
 }
 
 .directory :global(td) strong,
@@ -106,8 +110,8 @@
 
 .openRow {
   display: grid;
-  inline-size: 2rem;
-  block-size: 2rem;
+  inline-size: 2.75rem;
+  block-size: 2.75rem;
   place-items: center;
   color: var(--or-text-muted);
   border-radius: var(--or-radius-sm);
@@ -597,5 +601,40 @@
     border-block-start: 1px solid var(--or-border);
     padding-inline-start: 0;
     padding-block-start: 0.75rem;
+  }
+}
+
+.secondaryFilters,
+.metricsDisclosure {
+  border-block-start: 1px solid var(--or-border);
+}
+.secondaryFilters > summary,
+.metricsDisclosure > summary {
+  padding: 0.75rem 1rem;
+  min-block-size: 2.75rem;
+  cursor: pointer;
+  font-size: var(--or-text-meta);
+  font-weight: 600;
+}
+.secondaryFilterGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
+  gap: 1rem;
+  align-items: end;
+  padding: 0 1rem 1rem;
+}
+@media (max-width: 60rem) {
+  .directory :global(td[data-label])::before {
+    content: attr(data-label);
+    display: block;
+    color: var(--or-text-muted);
+    font-size: 0.75rem;
+    margin-block-end: 0.2rem;
+  }
+  .directory :global(td) {
+    overflow-wrap: anywhere;
+  }
+  .directory :global(tr) {
+    border-radius: 0;
   }
 }

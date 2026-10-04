@@ -1,6 +1,7 @@
 "use client";
 
 import { DeliveryFailure } from "./delivery-failure";
+import { InboxTemplatePicker } from "../inbox-templates";
 
 import { errorMessage } from "../../i18n/error-message";
 import { useTranslations, useLocale, useTimeZone } from "next-intl";
@@ -250,6 +251,7 @@ export function ConversationThread({
   const [receipt, setReceipt] = useState<string>();
   const [controlsOpen, setControlsOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -370,9 +372,19 @@ export function ConversationThread({
           parameters: templateParameters(snapshot.parameters),
           confirmReal: true,
         },
-        { idempotencyKey: keys.get(conversation.id, metaSenderId, snapshot) },
+        {
+          idempotencyKey: keys.get(
+            conversation.id,
+            conversation.providerAccountId ?? metaSenderId,
+            snapshot,
+          ),
+        },
       );
-      keys.complete(conversation.id, metaSenderId, snapshot);
+      keys.complete(
+        conversation.id,
+        conversation.providerAccountId ?? metaSenderId,
+        snapshot,
+      );
       setDraft({
         ...snapshot,
         text: "",
@@ -660,6 +672,34 @@ export function ConversationThread({
         })}
         aria-busy={loading}
       >
+        {conversation.ownershipMode !== "ai" ||
+        !aiRepliesEnabled ||
+        conversation.handoffReasonSafe ? (
+          <div className="thread-notice thread-ownership" role="status">
+            <strong>
+              {conversation.ownershipMode === "ai"
+                ? locale.startsWith("he")
+                  ? "AI כבוי"
+                  : "AI disabled"
+                : t("inbox.humanResponder")}
+            </strong>
+            <span>
+              {conversation.handoffReasonSafe ??
+                (locale.startsWith("he")
+                  ? "תשובות אוטומטיות אינן פעילות בשיחה זו."
+                  : "Automatic replies are not active in this conversation.")}
+            </span>
+            {canOperate ? (
+              <Button
+                variant="quiet"
+                type="button"
+                onClick={() => setControlsOpen(true)}
+              >
+                {locale.startsWith("he") ? "ניהול המענה" : "Manage responder"}
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
         {history ? (
           <div className="thread-notice">
             {t("inbox.historyMode")}{" "}
@@ -858,6 +898,19 @@ export function ConversationThread({
           </ol>
         ) : null}
       </div>
+      <InboxTemplatePicker
+        conversationId={conversation.id}
+        open={templatesOpen}
+        onClose={() => setTemplatesOpen(false)}
+        onSelect={(template) =>
+          updateDraft({
+            kind: "template",
+            templateName: template.name,
+            language: template.language,
+            parameters: Array(template.parameterCount).fill("").join(" | "),
+          })
+        }
+      />
       <form className="composer conversation-composer" onSubmit={submit}>
         {receipt ? (
           <p role="status" className="queue-receipt">
@@ -889,7 +942,15 @@ export function ConversationThread({
                   {t(`tenantPrimary.${kind}`)}
                 </button>
               ))}
-              <span>{channelLabel}</span>
+              <span>
+                {channelLabel}
+                {conversation.senderAddress ? (
+                  <>
+                    {" "}
+                    · <bdi dir="ltr">{conversation.senderAddress}</bdi>
+                  </>
+                ) : null}
+              </span>
             </div>
             {draft.kind === "template" ? (
               <div className="template-fields">
@@ -947,6 +1008,17 @@ export function ConversationThread({
             )}
             <div className="composer-footer">
               <div className="composer-footer__tools">
+                <Button
+                  type="button"
+                  variant="quiet"
+                  disabled={pending}
+                  onClick={() => setTemplatesOpen(true)}
+                >
+                  <FileText aria-hidden="true" size={17} />
+                  {locale.startsWith("he")
+                    ? "תבניות WhatsApp"
+                    : "WhatsApp templates"}
+                </Button>
                 {draft.kind === "text" && quickReplies.length ? (
                   <Popover
                     align="start"

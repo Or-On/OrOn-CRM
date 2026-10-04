@@ -542,3 +542,13 @@ it("shows the phone inquiry, its follow-up state and replies awaiting linking", 
   expect(screen.getByText("Link to T-B")).toBeTruthy();
   expect(screen.getByText("Mark as Red call")).toBeTruthy();
 });
+
+it("uses the contact name returned on later pages instead of an initial directory", async () => {
+  const first = ticket({ contactName: "First page customer" });
+  const later = ticket({ id: "33333333-3333-4333-8333-333333333333", reference: "LATER-PAGE", contactId: "44444444-4444-4444-8444-444444444444", contactName: "Customer beyond first 500" });
+  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => page([later]) })));
+  render(localized(<TicketsWorkspace initialPage={page([first], true)} tenantTimeZone="Asia/Jerusalem" />));
+  fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+  await screen.findByText("Customer beyond first 500");
+  expect(screen.queryByText(later.contactId)).toBeNull();
+});

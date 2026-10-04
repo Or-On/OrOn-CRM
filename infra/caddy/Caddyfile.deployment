@@ -25,5 +25,15 @@
 	@simulators path /api/messaging/simulate/* /api/voice/simulated-calls /api/orchestration/simulate /api/orchestration/flows/*/simulate /api/campaigns/*/deliver /api/automations/*/run
 	respond @simulators "Unavailable outside local development" 403
 
-	reverse_proxy web:3000
+	# Expose only the signed provider callback, never dispatcher control routes.
+	handle /livekit/webhook {
+		reverse_proxy dispatcher:8082
+	}
+	handle {
+		reverse_proxy web:3000
+	}
+}
+
+http://127.0.0.1:8080 {
+	respond /healthz "ok" 200
 }

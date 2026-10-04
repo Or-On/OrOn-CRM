@@ -101,7 +101,7 @@ export default async function TicketDetailPage({
         </main>
       );
     return (
-      <main className="page page--wide page--workspace-premium">
+      <main className="page page--wide">
         <TicketDetailView
           canMarkEmergency={data.canMarkEmergency}
           contactName={data.contact?.name ?? data.detail.ticket.contactId}

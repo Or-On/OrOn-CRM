@@ -131,6 +131,7 @@ export function InboxWorkspace({
   conversations,
   initialMessages,
   initialConversationId,
+  initialThreadOpen = false,
   initialConversationNextCursor = null,
   initialNextCursor = null,
   quickReplies,
@@ -147,6 +148,7 @@ export function InboxWorkspace({
   readonly conversations: readonly ConversationSummary[];
   readonly initialMessages: readonly Message[];
   readonly initialConversationId?: string | undefined;
+  readonly initialThreadOpen?: boolean;
   readonly initialConversationNextCursor?: ConversationCursor | null;
   readonly initialNextCursor?: MessageCursor | null;
   readonly quickReplies: readonly QuickReply[];
@@ -172,7 +174,7 @@ export function InboxWorkspace({
   const [loadingMoreConversations, setLoadingMoreConversations] =
     useState(false);
   const [selectedId, setSelectedId] = useState(initialId);
-  const [mobileThread, setMobileThread] = useState(false);
+  const [mobileThread, setMobileThread] = useState(initialThreadOpen);
   const [contextOpen, setContextOpen] = useState(false);
   const [channelsCollapsed, setChannelsCollapsed] = useState(false);
   const [channelsOpen, setChannelsOpen] = useState(false);
@@ -289,8 +291,31 @@ export function InboxWorkspace({
 
   function selectConversation(id: string) {
     setSelectedId(id);
-    replaceInboxParam("conversation", id);
+    const url = new URL(window.location.href);
+    url.searchParams.set("conversation", id);
+    window.history.pushState(
+      { ...window.history.state, inboxConversation: true },
+      "",
+      url,
+    );
   }
+
+  function backToConversations() {
+    setMobileThread(false);
+    if (window.history.state?.inboxConversation) window.history.back();
+    else replaceInboxParam("conversation");
+  }
+
+  useEffect(() => {
+    const restore = () => {
+      const id = new URL(window.location.href).searchParams.get("conversation");
+      if (id) setSelectedId(id);
+      setMobileThread(id !== null);
+      setContextOpen(false);
+    };
+    window.addEventListener("popstate", restore);
+    return () => window.removeEventListener("popstate", restore);
+  }, []);
 
   const refreshItems = useCallback(
     async (
@@ -554,6 +579,15 @@ export function InboxWorkspace({
             ) : null}
           </span>
           <span className="conversation-row__metadata">
+            <span className="conversation-row__ownership">
+              {conversation.ownershipMode === "ai"
+                ? aiRepliesEnabled
+                  ? "AI"
+                  : locale.startsWith("he")
+                    ? "AI כבוי"
+                    : "AI disabled"
+                : t("inbox.humanResponder")}
+            </span>
             <span className="conversation-row__channel">
               <MessageCircle aria-hidden="true" size={12} />
               <bdi>
@@ -1039,7 +1073,7 @@ export function InboxWorkspace({
             agentProfiles={agentProfiles}
             aiRepliesEnabled={aiRepliesEnabled}
             mobileThreadOpen={mobileThread}
-            onBack={() => setMobileThread(false)}
+            onBack={backToConversations}
             onShowContact={(trigger) => {
               contactTriggerRef.current = trigger;
               setContextOpen(true);

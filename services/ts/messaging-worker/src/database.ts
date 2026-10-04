@@ -1,4 +1,5 @@
 import postgres, { type Sql } from "postgres";
+import { messageContextText } from "./message-context.js";
 
 import {
   deliverSimulatorBroadcastRecipient,
@@ -2585,6 +2586,8 @@ function tenantDisplayNameFrom(
 
 interface AiWork {
   readonly agentVersionId: string;
+  readonly reliabilityEnabled: boolean;
+  readonly triggerText: string;
   /** The resolved configuration this job runs under, pinned at admission. */
   readonly contract: AgentExecutionContract;
   readonly tenantDisplayName: string | null;
@@ -2867,24 +2870,30 @@ async function loadAiWork(
       identities[0]?.profile?.supportProfile,
     );
     const knowledge = await eligibleFacts(transaction, row.agent_version_id);
-    const history = await transaction<
+    const reliabilityEnabled =
+      (row.configuration as Record<string, unknown> | null)
+        ?.aiReliabilityV2Enabled === true;
+    const historyRows = await transaction<
       {
         id: string;
         direction: "inbound" | "outbound";
-        content_text: string;
+        content_type: string;
+        content_text: string | null;
+        structured_content: unknown;
         created_at: Date;
         sender_address: string | null;
         sender_identity_id: string | null;
       }[]
     >`
-      SELECT message.id, message.direction, message.content_text,
+      SELECT message.id, message.direction, message.content_type,
+             message.content_text, message.structured_content,
              message.created_at, origin.contact_identity_id AS sender_identity_id,
              origin.sender_address
       FROM messaging.messages message
       LEFT JOIN messaging.inbound_message_origins origin
         ON origin.tenant_id=message.tenant_id AND origin.message_id=message.id
       WHERE message.conversation_id = ${row.conversation_id}::uuid
-        AND message.content_type = 'text' AND message.content_text IS NOT NULL
+        AND (${reliabilityEnabled} OR (message.content_type='text' AND message.content_text IS NOT NULL))
         AND ((message.direction='inbound' AND message.status='received') OR
              (message.direction='outbound' AND
               message.status IN ('sent','delivered','read')))
@@ -2899,6 +2908,12 @@ async function loadAiWork(
           ), '-infinity'::timestamptz))
       ORDER BY message.created_at DESC, message.updated_at DESC, message.id DESC LIMIT 50
     `;
+    // Every accepted inbound type may trigger AI. Excluding media here killed
+    // its job after it had already superseded the preceding text turn.
+    const history = historyRows.map((message) => ({
+      ...message,
+      content_text: messageContextText(message),
+    }));
     const config = row.configuration as Record<string, unknown> | null;
     const channelConfiguration =
       row.provider === "meta" &&
@@ -2935,13 +2950,14 @@ async function loadAiWork(
       throw new TypeError("AI inbound trigger has no trusted sender identity");
     const responseLocale = latestMessageLocale(
       row.locale,
-      triggerMessage.content_text,
-      history
+      historyRows.find((message) => message.id === triggerMessageId)
+        ?.content_text ?? "",
+      historyRows
         .filter(
           (message) =>
             message.direction === "inbound" && message.id !== triggerMessageId,
         )
-        .map((message) => message.content_text),
+        .map((message) => message.content_text ?? ""),
     );
     const orderedHistory = history.toReversed();
     const notes = await transaction<
@@ -3078,6 +3094,10 @@ async function loadAiWork(
       voiceSessions.length > 0;
     return {
       agentVersionId: row.agent_version_id,
+      reliabilityEnabled,
+      triggerText:
+        historyRows.find((message) => message.id === triggerMessageId)
+          ?.content_text ?? "",
       contract,
       tenantDisplayName,
       ...(businessProfile === undefined ? {} : { businessProfile }),
@@ -3195,6 +3215,7 @@ function aiRequestFor(
   const pinned = work.contract.leadFieldSchema;
   return {
     systemPrompt: work.contract.agentPrompt,
+    tolerateDescriptiveExtras: work.reliabilityEnabled,
     locale: work.locale,
     capabilities: work.contract.capabilities,
     ...(work.tenantDisplayName === null
@@ -3491,8 +3512,11 @@ async function createAiHandoff(
   work: AiWork,
   jobId: string,
   reasonCode: WhatsAppAiEscalationReason,
+  modelFailure = false,
 ): Promise<string> {
-  const safeReason = safeEscalationReasons[reasonCode];
+  const safeReason = modelFailure
+    ? "Automatic response unavailable; operator follow-up required"
+    : safeEscalationReasons[reasonCode];
   const receipt = await transaction<{ id: string }[]>`
     INSERT INTO automation.handoffs
       (tenant_id, contact_id, conversation_id, requested_by_user_id,
@@ -3680,9 +3704,7 @@ async function processWhatsAppAiReply(
     const work = await loadAiWork(sql, workerId, job);
     if (work.provider === "simulator" && automation.simulatorEnabled !== true)
       throw new TypeError("simulation_disabled");
-    const triggerText =
-      work.messages.find((message) => message.id === work.triggerMessageId)
-        ?.text ?? "";
+    const triggerText = work.triggerText;
     const explicitCallRequested = explicitlyRequestsImmediateCall(triggerText);
     // Explicit callback consent is a deterministic action and must not wait on
     // or depend on an LLM classification. The voice agent receives the bounded
@@ -3691,6 +3713,8 @@ async function processWhatsAppAiReply(
       work.serviceIntake?.customerResolutionStatus === "conflict";
     const intakeRequiresHuman = work.serviceIntake?.status === "handed_off";
     const receipts: WhatsAppActionReceipt[] = [];
+    let modelFailureCode: string | undefined;
+    let modelRecoveryAttempts = 0;
     let leadState = work.lead;
     // Server-owned scope routing: a turn that only probes the model, asks for
     // prompts, other customers' data or another recipient, or asks for a
@@ -3732,11 +3756,41 @@ async function processWhatsAppAiReply(
                 // the last pass is offered no further actions.
                 for (let round = 0; ; round += 1) {
                   const last = round >= maximumLeadActionsPerTurn;
-                  const proposed = await provider.decide(
-                    aiRequestFor(work, leadState, receipts, {
-                      ...(last ? { replyOnly: true } : {}),
-                    }),
-                  );
+                  const request = aiRequestFor(work, leadState, receipts, {
+                    ...(last ? { replyOnly: true } : {}),
+                  });
+                  let proposed: WhatsAppAiDecision;
+                  for (;;) {
+                    try {
+                      proposed = await provider.decide(request);
+                      break;
+                    } catch (error) {
+                      if (
+                        !work.reliabilityEnabled ||
+                        !(error instanceof WhatsAppAiProviderError)
+                      )
+                        throw error;
+                      // Only generation is retried; committed tools and sends
+                      // are never replayed. One recovery attempt per whole turn.
+                      if (
+                        modelRecoveryAttempts < 1 &&
+                        (error.retryable || error.code === "ai_invalid_output")
+                      ) {
+                        modelRecoveryAttempts += 1;
+                        continue;
+                      }
+                      modelFailureCode = /^ai_[a-z0-9_]{1,80}$/u.test(
+                        error.code,
+                      )
+                        ? error.code
+                        : "ai_generation_failed";
+                      return {
+                        action: "handoff" as const,
+                        reasonCode: "insufficient_context" as const,
+                        text: "",
+                      };
+                    }
+                  }
                   const action = leadActionName(proposed);
                   if (action === undefined) return proposed;
                   if (last)
@@ -3785,6 +3839,16 @@ async function processWhatsAppAiReply(
       `;
       if (owned[0] === undefined)
         throw new TypeError("AI conversation ownership changed");
+      if (work.reliabilityEnabled) {
+        const enabled = await transaction<
+          { id: string }[]
+        >`SELECT channel.id FROM messaging.channels channel
+          JOIN messaging.conversations conversation ON conversation.channel_id=channel.id AND conversation.tenant_id=channel.tenant_id
+          WHERE conversation.id=${work.conversationId}::uuid AND channel.status='active'
+            AND channel.configuration->'aiReliabilityV2Enabled'='true'::jsonb FOR SHARE OF channel`;
+        if (enabled.length !== 1)
+          throw new TypeError("AI reliability canary disabled");
+      }
       await requireCurrentTrigger(
         transaction,
         work.conversationId,
@@ -3849,7 +3913,12 @@ async function processWhatsAppAiReply(
           work,
           job.id,
           decision.reasonCode,
+          modelFailureCode !== undefined,
         );
+        if (modelFailureCode !== undefined)
+          await transaction`INSERT INTO audit.records(tenant_id,actor_user_id,action,target_type,target_id,metadata)
+            VALUES(platform.current_tenant_id(),${work.authorizedUserId}::uuid,'conversation.ai_recovery_handoff','conversation',${work.conversationId}::uuid,
+              ${transaction.json({ failureCode: modelFailureCode, jobId: job.id, triggerMessageId: work.triggerMessageId, handoffId: resourceId, recoveryAttempts: modelRecoveryAttempts })})`;
         evidence = { kind: "receipt", operation: "handoff", resourceId };
         responseText = actionReceiptReply("handoff", work.locale);
       }
@@ -3997,6 +4066,7 @@ async function processWhatsAppAiReply(
                 agentVersionId: work.agentVersionId,
                 triggerMessageId: work.triggerMessageId,
                 locale: work.locale,
+                ...(work.reliabilityEnabled ? { reliabilityCanary: true } : {}),
                 evidence,
                 textSha256: factDigest(responseText),
               },
@@ -4527,6 +4597,16 @@ async function requireGroundedOutbound(
   },
 ): Promise<void> {
   const metadata = record(record(row.provider_payload).aiGrounding);
+  if (metadata.reliabilityCanary === true) {
+    const enabled = await transaction<
+      { id: string }[]
+    >`SELECT channel.id FROM messaging.channels channel
+      JOIN messaging.conversations conversation ON conversation.channel_id=channel.id AND conversation.tenant_id=channel.tenant_id
+      WHERE conversation.id=${row.conversation_id}::uuid AND channel.status='active'
+        AND channel.configuration->'aiReliabilityV2Enabled'='true'::jsonb FOR SHARE OF channel`;
+    if (enabled.length !== 1)
+      throw new WhatsAppProviderError("ai_reliability_canary_disabled", false);
+  }
   const evidence = record(metadata.evidence);
   if (
     metadata.schemaVersion !== "1.0" ||

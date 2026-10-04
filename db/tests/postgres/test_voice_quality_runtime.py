@@ -315,6 +315,8 @@ async def test_durable_admission_replay_concurrency_and_quality_summary(isolated
         tenant_id=tenant,
         flow_id=uuid4(),
         to_number="+12025550123",
+        from_number="+12025550100",
+        raw_metadata={"outbound_route": {"account_ref": "fixture", "trunk_id": "ST_fixture"}},
         caller_gender="male",
     )
     try:
@@ -337,6 +339,12 @@ async def test_durable_admission_replay_concurrency_and_quality_summary(isolated
             {"flow_version": 2},
             {"caller_gender": "female"},
             {"contact_id": uuid4()},
+            {"from_number": "+12025550101"},
+            {
+                "raw_metadata": {
+                    "outbound_route": {"account_ref": "foreign", "trunk_id": "ST_foreign"}
+                }
+            },
         ]:
             with pytest.raises(IdempotencyConflict):
                 await runtime.begin(
@@ -371,5 +379,10 @@ async def test_durable_admission_replay_concurrency_and_quality_summary(isolated
         admission = next(e for e in events if e["event_type"] == "voice.call.admission.v1")
         assert len(admission["payload"]["fingerprint"]) == 64
         assert "+12025550123" not in json.dumps(admission["payload"])
+        assert "+12025550100" not in json.dumps(admission["payload"])
+        assert admission["payload"]["outbound_route"] == {
+            "account_ref": "fixture",
+            "trunk_id": "ST_fixture",
+        }
     finally:
         await engine.dispose()

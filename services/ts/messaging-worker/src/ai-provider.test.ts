@@ -290,6 +290,46 @@ describe("OpenAiCompatibleChatProvider", () => {
     });
   });
 
+  it("ignores descriptive extra fields while retaining required action semantics", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(() =>
+        responseFor({
+          action: "reply",
+          text: "How can I help?",
+          reasonCode: null,
+          confidence: 0.9,
+          reasoning: "A greeting is appropriate",
+          locale: "en",
+        }),
+      ),
+    );
+    await expect(provider().decide(request)).rejects.toMatchObject({
+      code: "ai_invalid_output",
+    });
+    await expect(
+      provider().decide({ ...request, tolerateDescriptiveExtras: true }),
+    ).resolves.toEqual({
+      action: "reply",
+      text: "How can I help?",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        responseFor({
+          action: "request_call",
+          text: "Calling",
+          confidence: 0.9,
+        }),
+      ),
+    );
+    await expect(
+      provider().decide({ ...request, tolerateDescriptiveExtras: true }),
+    ).rejects.toMatchObject({
+      code: "ai_invalid_output",
+    });
+  });
+
   it("accepts only bounded handoff reasons", async () => {
     vi.stubGlobal(
       "fetch",

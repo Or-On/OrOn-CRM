@@ -113,6 +113,7 @@ export default async function InboxPage({
           initialConversationNextCursor={data.conversationNextCursor}
           initialMessages={data.messages}
           initialConversationId={data.selectedId}
+          initialThreadOpen={requestedId !== undefined}
           initialNextCursor={data.nextCursor}
           canOperate={data.canOperate}
           currentUserId={data.currentUserId}

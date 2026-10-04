@@ -211,6 +211,10 @@ def create_app(
                 status_code=409, detail="idempotency key is bound to different call parameters"
             ) from None
         except RealTelephonyDenied as exc:
+            logger.warning(
+                "Outbound voice routing denied",
+                extra={"tenant_id": str(principal.tenant_id), "reason": str(exc)},
+            )
             raise HTTPException(status_code=503, detail=str(exc)) from None
         except AgentStartupUnavailable as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from None

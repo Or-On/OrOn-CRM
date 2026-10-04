@@ -47,7 +47,7 @@ async def test_pause_waits_for_local_cancellation_before_acknowledging():
     ack.assert_awaited_with(1, "paused")
 
 
-async def test_resume_requires_new_explicit_epoch_after_database_outage():
+async def test_read_outage_recovers_only_after_fresh_authorized_read_and_ack():
     control, read, ack = controller()
     await control.refresh()
     assert not control.paused
@@ -57,12 +57,46 @@ async def test_resume_requires_new_explicit_epoch_after_database_outage():
     assert control.paused
     read.side_effect = None
     await control.refresh()
-    assert control.paused
-    ack.assert_awaited_with(0, "paused")
-    read.return_value = VoiceControlSnapshot(1, "ai")
-    await control.refresh()
     assert not control.paused
+    ack.assert_awaited_with(0, "ai")
     assert control.generation > old_generation
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        VoiceControlSnapshot(0, "paused"),
+        VoiceControlSnapshot(0, "ai", active=False),
+        VoiceControlSnapshot(0, "ai", resume_authorized=False),
+        VoiceControlSnapshot(1, "paused"),
+    ],
+)
+async def test_read_recovery_never_overrides_pause_revocation_or_takeover(state):
+    control, read, ack = controller()
+    await control.refresh()
+    read.side_effect = RuntimeError("fixture outage")
+    await control.refresh()
+    await control.refresh()
+    assert control.paused
+    read.side_effect = None
+    read.return_value = state
+    await control.refresh()
+    assert control.paused
+    ack.assert_awaited_with(state.epoch, "paused")
+
+
+async def test_read_recovery_requires_successful_exact_epoch_acknowledgement():
+    control, read, ack = controller()
+    await control.refresh()
+    read.side_effect = RuntimeError("fixture outage")
+    await control.refresh()
+    read.side_effect = None
+    ack.return_value = False
+    await control.refresh()
+    assert control.paused
+    ack.return_value = True
+    await control.refresh()
+    assert control.paused
 
 
 async def test_revoked_resume_and_stale_ack_never_enable_ai():

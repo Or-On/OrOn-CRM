@@ -7,7 +7,6 @@ import {
   usesServiceManagerExperience,
   listServiceInquiries,
   getTenantSettings,
-  listContacts,
   listTickets,
   summarizeTicketOutcomes,
   requireTenantFeature,
@@ -44,9 +43,8 @@ export default async function TicketsPage() {
           }),
         };
       }
-      const [page, contacts, settings, metrics, policy] = await Promise.all([
+      const [page, settings, metrics, policy] = await Promise.all([
         listTickets(sql, { status: "open", limit: 25 }),
-        listContacts(sql, { limit: 500 }),
         getTenantSettings(sql),
         // Aggregate outcomes live on the register, never on a single ticket.
         summarizeTicketOutcomes(sql, {
@@ -57,7 +55,7 @@ export default async function TicketsPage() {
       ]);
       const emergencyLabel =
         policy.emergency?.enabled === true ? policy.emergency.label : null;
-      return { page, contacts, settings, metrics, emergencyLabel };
+      return { page, settings, metrics, emergencyLabel };
     });
     // Names are resolved here so the browser receives only the names belonging
     // to the page it is showing, never the tenant's contact table.
@@ -71,14 +69,10 @@ export default async function TicketsPage() {
           />
         </main>
       );
-    const contactNames = Object.fromEntries(
-      data.contacts.map((contact) => [contact.id, contact.name]),
-    );
     return (
-      <main className="page page--wide page--workspace-premium">
-        <ProductHeading page="tickets" premium />
+      <main className="page page--wide">
+        <ProductHeading page="tickets" />
         <TicketsWorkspace
-          contactNames={contactNames}
           emergencyLabel={data.emergencyLabel}
           initialPage={data.page}
           metrics={data.metrics}

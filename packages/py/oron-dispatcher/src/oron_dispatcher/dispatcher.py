@@ -209,7 +209,7 @@ class Dispatcher:
         overrides: Mapping[str, object] | None = None,
     ) -> DispatchResult:
         normalized = validate_e164(phone_number)
-        self._sip.authorize(explicit_approval=explicit_approval)
+        route = self._sip.authorize(tenant_id=tenant_id, explicit_approval=explicit_approval)
         session_id = uuid5(
             NAMESPACE_URL,
             f"or-on-platform:livekit-outbound:{tenant_id}:{idempotency_key}",
@@ -218,6 +218,7 @@ class Dispatcher:
         context = CallContext(
             call_id=room,
             direction=Direction.OUTBOUND,
+            from_number=route.from_number,
             to_number=normalized,
             flow_id=flow_id,
             flow_version=flow_version,
@@ -228,10 +229,13 @@ class Dispatcher:
             contact_id=contact_id,
             source_conversation_id=source_conversation_id,
             handoff_id=handoff_id,
+            raw_metadata={"outbound_route": route.evidence()},
         )
         if active := self._active.get(room):
             binding_fields = (
                 "to_number",
+                "from_number",
+                "raw_metadata",
                 "flow_id",
                 "flow_version",
                 "agent_version_id",
@@ -259,6 +263,8 @@ class Dispatcher:
                 room=room,
                 phone_number=normalized,
                 identity=f"{self._settings.bot_identity}-callee",
+                tenant_id=tenant_id,
+                route=route,
                 explicit_approval=explicit_approval,
             )
         except Exception:

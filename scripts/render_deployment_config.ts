@@ -172,6 +172,7 @@ async function main(): Promise<void> {
     "LIVEKIT_API_KEY",
     "LIVEKIT_API_SECRET",
     "SIP_OUTBOUND_TRUNK_ID",
+    "VOICE_OUTBOUND_ROUTES_JSON",
     "SONIOX_API_KEY",
     "SONIOX_STT_MODEL",
     "SONIOX_TTS_MODEL",
@@ -216,7 +217,7 @@ async function main(): Promise<void> {
     ])
       required(source, name);
   if (flags.ENABLE_REAL_TELEPHONY === "true")
-    required(source, "SIP_OUTBOUND_TRUNK_ID");
+    required(source, "VOICE_OUTBOUND_ROUTES_JSON");
 
   const passwords = {
     migrator: secret(),

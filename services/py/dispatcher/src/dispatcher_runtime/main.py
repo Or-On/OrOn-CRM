@@ -54,7 +54,7 @@ def main() -> None:
             url=api_url,
             api_key=api_key,
             api_secret=api_secret,
-            trunk_id=dispatcher_settings.sip_outbound_trunk_id,
+            routes=dispatcher_settings.outbound_routes,
             enabled=dispatcher_settings.enable_real_telephony,
         ),
         resolve_phone=runtime.resolve_phone,

@@ -206,6 +206,8 @@ export interface TicketInquiryState {
 }
 
 export interface TicketSummary extends Ticket {
+  /** Resolved with this ticket, including every cursor page; never a directory preload. */
+  readonly contactName?: string | null;
   readonly emergency: {
     readonly at: string;
     readonly reason: string;
@@ -217,6 +219,8 @@ export interface TicketSummary extends Ticket {
 }
 
 interface TicketSummaryRow extends TicketRow {
+  contact_name: string | null;
+  last_activity_cursor: string;
   emergency_at: Date | null;
   emergency_reason: string | null;
   emergency_source: "voice" | "manual" | null;
@@ -233,6 +237,10 @@ interface TicketSummaryRow extends TicketRow {
 }
 
 const TICKET_SUMMARY_COLUMNS = `${TICKET_COLUMNS},
+  ticket.last_activity_at::text AS last_activity_cursor,
+  (SELECT contact.name FROM crm.contacts contact
+    WHERE contact.tenant_id = ticket.tenant_id AND contact.id = ticket.contact_id
+  ) AS contact_name,
   ticket.emergency_at, ticket.emergency_reason, ticket.emergency_source,
   (SELECT jsonb_build_object(
       'intakeStatus', draft.status, 'followupStatus', draft.followup_status,
@@ -283,6 +291,7 @@ export function inquiryFollowupAttention(state: {
 function mapTicketSummary(row: TicketSummaryRow): TicketSummary {
   return {
     ...mapTicket(row),
+    contactName: row.contact_name ?? null,
     emergency:
       row.emergency_at === null ||
       row.emergency_reason === null ||
@@ -933,7 +942,7 @@ export async function listTickets(
     tickets: page,
     nextCursor:
       rows.length > limit && last !== undefined
-        ? { activityAt: last.lastActivityAt, id: last.id }
+        ? { activityAt: rows[limit - 1]?.last_activity_cursor ?? last.lastActivityAt, id: last.id }
         : null,
   };
 }

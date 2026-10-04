@@ -498,6 +498,14 @@ def effective_capabilities(capabilities: Sequence[str]) -> frozenset[str]:
 
 def observation_item_schema(schema: LeadFieldSchema) -> dict[str, Any]:
     describe = CONTRACT["tools"]["observationItem"]
+    # A key enum alone hides whether a caller's Hebrew words represent a
+    # number, money or free text. Expose the already reviewed schema so the
+    # model can serialize a value correctly without weakening validation.
+    field_types = "; ".join(
+        f"{entry.key}: {entry.type}"
+        + (f", choices={json.dumps(entry.choices, ensure_ascii=False)}" if entry.choices else "")
+        for entry in schema.fields
+    )
     return {
         "type": "object",
         "additionalProperties": False,
@@ -513,7 +521,18 @@ def observation_item_schema(schema: LeadFieldSchema) -> dict[str, Any]:
                 "enum": list(FIELD_STATES),
                 "description": describe["state"],
             },
-            "value": {"type": "string", "description": describe["value"]},
+            "value": {
+                "type": "string",
+                "description": (
+                    describe["value"]
+                    + " Reviewed field types: "
+                    + field_types
+                    + ". For number/currency use decimal digits only, without units or currency "
+                    "words (for example Hebrew 'שלושה חדרים' is 3, 'חמישים אלף שקל' is 50000 "
+                    "with currency ILS). Convert only amounts explicitly said by the caller; "
+                    "never infer missing amounts or currency."
+                ),
+            },
             "currency": {"type": "string", "description": describe["currency"]},
             "confirmed": {"type": "boolean", "description": describe["confirmed"]},
             "sourceReference": {"type": "string", "description": describe["sourceReference"]},
@@ -559,10 +578,17 @@ def lead_tool_descriptors(
             required = [
                 name for name, argument in definition["arguments"].items() if argument["required"]
             ]
+        description = definition["description"]
+        if definition["name"] == "lead_request_follow_up":
+            description += (
+                " If all required fields are collected and the caller asks a person to review "
+                "or call them, first use lead_finalize_collection with that nextAction. "
+                "This follow-up tool alone does not submit a completed enquiry for review."
+            )
         descriptors.append(
             LeadToolDescriptor(
                 name=definition["name"],
-                description=definition["description"],
+                description=description,
                 capability=definition["capability"],
                 mutating=definition["mutating"],
                 properties=properties,

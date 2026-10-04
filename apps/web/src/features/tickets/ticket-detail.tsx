@@ -531,7 +531,7 @@ export function TicketDetailView({
   return (
     <>
       <PageHeader
-        className="page-heading page-heading--premium"
+        className="page-heading"
         eyebrow={t.title}
         title={<bdi>{ticket.subject}</bdi>}
         description={<bdi dir="ltr">{ticket.reference}</bdi>}

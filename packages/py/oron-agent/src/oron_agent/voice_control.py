@@ -153,6 +153,7 @@ class VoiceController:
         self.generation = 0
         self.paused = True
         self._blocked_epoch = -1
+        self._read_recovery_epoch: int | None = None
         self._lock = asyncio.Lock()
         self._barrier: Callable[[], Awaitable[None]] | None = None
         self._on_mode: Callable[[bool], None] | None = None
@@ -293,15 +294,35 @@ class VoiceController:
 
     async def refresh(self) -> None:
         async with self._lock:
+            # A failed read pauses immediately. Only a new successful read and
+            # exact-epoch durable acknowledgement may resume the last active
+            # command. Permission loss, explicit pause and barrier failures
+            # still latch until a newer authorized operator command.
             try:
                 async with asyncio.timeout(1.5):
                     state = await self.read()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                if not self.paused:
+                    self._read_recovery_epoch = self.epoch
+                try:
+                    await self._stop()
+                except Exception:
+                    self._blocked_epoch = max(self._blocked_epoch, self.epoch)
+                    self._read_recovery_epoch = None
+                return
+            try:
                 changed = state.epoch != self.epoch
                 permitted = state.active and state.resume_authorized
                 should_pause = state.mode == "paused" or not permitted
-                # Any loss of control needs a NEW explicit command, never an
-                # automatic reopen when the same old command becomes readable.
-                resume = changed and state.epoch > self._blocked_epoch and not should_pause
+                recovering = state.epoch == self._read_recovery_epoch
+                self._read_recovery_epoch = None
+                resume = (
+                    (changed or recovering)
+                    and state.epoch > self._blocked_epoch
+                    and not should_pause
+                )
                 if changed or (should_pause and not self.paused):
                     await self._stop()
                 self.epoch = state.epoch
@@ -325,6 +346,7 @@ class VoiceController:
             except asyncio.CancelledError:
                 raise
             except Exception:
+                self._read_recovery_epoch = None
                 self._blocked_epoch = max(self._blocked_epoch, self.epoch)
                 with suppress(Exception):
                     await self._stop()

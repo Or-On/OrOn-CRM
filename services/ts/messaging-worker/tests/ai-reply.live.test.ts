@@ -19,6 +19,7 @@ import {
 } from "@or-on/crm";
 
 import { createMessagingStore } from "../src/database.js";
+import { WhatsAppAiProviderError } from "../src/ai-provider.js";
 import {
   AutomaticCallProviderError,
   type AutomaticCallRequest,
@@ -142,6 +143,7 @@ describe.skipIf(sourceUrl === undefined)(
       messageId: string,
       text: string,
       timestamp = String(Math.floor(Date.now() / 1000)),
+      messageFields: Readonly<Record<string, unknown>> = {},
     ): Promise<void> {
       const rawBody = Buffer.from(
         JSON.stringify({
@@ -158,6 +160,7 @@ describe.skipIf(sourceUrl === undefined)(
                         id: messageId,
                         from: "12025550198",
                         type: "text",
+                        ...messageFields,
                         timestamp,
                         text: { body: text },
                       },
@@ -188,6 +191,199 @@ describe.skipIf(sourceUrl === undefined)(
           AND provider='meta' AND provider_message_id=${providerMessageId}
       `;
     }
+
+    it("answers media turns, retains sent-template context, and preserves operator contact names", async () => {
+      const from = "12025550171";
+      const bootstrap = createMessagingStore(
+        workerUrl,
+        `media-bootstrap-${randomUUID()}`,
+        {
+          simulator: new SimulatorWhatsAppProvider(),
+          meta: {
+            name: "meta",
+            send: vi.fn(() => Promise.reject(new Error("must not send"))),
+          },
+        },
+      );
+      await acceptInbound(
+        `wamid.media-first-${randomUUID()}`,
+        "The device stopped working",
+        undefined,
+        { from },
+      );
+      try {
+        await processUntilIdle(bootstrap);
+      } finally {
+        await bootstrap.close();
+      }
+      const conversations = await admin<{ id: string; contact_id: string }[]>`
+        SELECT conversation.id, conversation.contact_id FROM messaging.conversations conversation
+        JOIN crm.contact_channel_identities identity ON identity.contact_id=conversation.contact_id AND identity.tenant_id=conversation.tenant_id
+        WHERE conversation.tenant_id=${tenantId}::uuid AND identity.normalized_value=${`+${from}`}`;
+      const conversation = conversations[0];
+      if (!conversation) throw new Error("media test conversation missing");
+      await web.begin(async (sql) => {
+        await sql`SELECT set_config('app.current_tenant',${tenantId},true),set_config('app.current_user',${userId},true)`;
+        const profile = await createAgentProfileDraft(sql, userId, {
+          name: "Fictional media assistant",
+          systemPrompt: "Help troubleshoot fictional devices.",
+          channels: ["whatsapp"],
+          locale: "en",
+          toolPermissions: [],
+        });
+        expect(await publishAgentProfile(sql, userId, profile)).toBe(true);
+        const versions = await sql<
+          { id: string }[]
+        >`SELECT id FROM agents.agent_profile_versions WHERE agent_profile_id=${profile}::uuid AND published_at IS NOT NULL`;
+        await setConversationOwnership(
+          sql,
+          conversation.id,
+          userId,
+          "ai",
+          versions[0]!.id,
+        );
+      });
+      await admin`UPDATE crm.contacts SET name='Operator corrected customer' WHERE id=${conversation.contact_id}::uuid`;
+      await admin`UPDATE messaging.channels SET configuration=configuration || '{"aiReliabilityV2Enabled":true}'::jsonb
+        WHERE tenant_id=${tenantId}::uuid AND provider_account_id=${phoneNumberId}`;
+      await admin`INSERT INTO messaging.messages(tenant_id,conversation_id,direction,sender_type,sender_user_id,content_type,structured_content,provider,status)
+        VALUES(${tenantId}::uuid,${conversation.id}::uuid,'outbound','user',${userId}::uuid,'template',
+          '{"templateName":"service_followup","language":"en","parameters":["Fictional device"]}','meta','sent')`;
+      const decide = vi.fn(async () => ({
+        action: "reply" as const,
+        text: "What happened before this started?",
+      }));
+      const send = vi.fn(async (request: WhatsAppSendRequest) => {
+        await request.beforeAttempt?.();
+        return { messageId: `wamid.media-reply-${randomUUID()}` };
+      });
+      const store = createMessagingStore(
+        workerUrl,
+        `media-${randomUUID()}`,
+        {
+          simulator: new SimulatorWhatsAppProvider(),
+          meta: { name: "meta", send },
+        },
+        undefined,
+        { realWhatsAppEnabled: true, aiProvider: { decide } },
+      );
+      try {
+        for (const fields of [
+          {
+            type: "image",
+            image: {
+              id: "fixture-image",
+              caption: "The red indicator is blinking",
+              mime_type: "image/jpeg",
+            },
+          },
+          {
+            type: "document",
+            document: {
+              id: "fixture-document",
+              filename: "device-manual.pdf",
+              mime_type: "application/pdf",
+            },
+          },
+          {
+            type: "location",
+            location: {
+              latitude: 32.1,
+              longitude: 34.8,
+              address: "Fictional street",
+            },
+          },
+        ]) {
+          const id = `wamid.media-${randomUUID()}`;
+          await acceptInbound(id, "", undefined, { from, ...fields });
+          await processUntilIdle(store);
+          const calls = decide.mock.calls.length;
+          await acceptInbound(id, "", undefined, { from, ...fields });
+          await processUntilIdle(store);
+          expect(decide).toHaveBeenCalledTimes(calls);
+        }
+      } finally {
+        await store.close();
+      }
+      expect(decide).toHaveBeenCalledTimes(3);
+      expect(send).toHaveBeenCalledTimes(3);
+      const inputs = JSON.stringify(decide.mock.calls);
+      expect(inputs).toContain("The red indicator is blinking");
+      expect(inputs).toContain("device-manual.pdf");
+      expect(inputs).toContain("Fictional street");
+      expect(inputs).toContain("service_followup");
+      expect(inputs).toContain("Operator corrected customer");
+      const contacts = await admin<
+        { name: string }[]
+      >`SELECT name FROM crm.contacts WHERE id=${conversation.contact_id}::uuid`;
+      expect(contacts[0]?.name).toBe("Operator corrected customer");
+      const dead = await admin<
+        { last_error_safe: string }[]
+      >`SELECT last_error_safe FROM ops.jobs WHERE reference_id=${conversation.id}::uuid AND status='dead'`;
+      expect(dead).toEqual([]);
+
+      const failure = vi.fn(async () => {
+        throw new WhatsAppAiProviderError("ai_http_503", true);
+      });
+      const recoveryStore = createMessagingStore(
+        workerUrl,
+        `recovery-${randomUUID()}`,
+        {
+          simulator: new SimulatorWhatsAppProvider(),
+          meta: { name: "meta", send },
+        },
+        undefined,
+        { realWhatsAppEnabled: true, aiProvider: { decide: failure } },
+      );
+      const failedInbound = `wamid.failure-${randomUUID()}`;
+      try {
+        await acceptInbound(
+          failedInbound,
+          "The device still needs help",
+          undefined,
+          { from },
+        );
+        await processUntilIdle(recoveryStore);
+        await acceptInbound(
+          failedInbound,
+          "The device still needs help",
+          undefined,
+          { from },
+        );
+        await processUntilIdle(recoveryStore);
+        expect(failure).toHaveBeenCalledTimes(2);
+        expect(send).toHaveBeenCalledTimes(4);
+        const handoffs = await admin<
+          { id: string; reason_safe: string }[]
+        >`SELECT id,reason_safe FROM automation.handoffs WHERE conversation_id=${conversation.id}::uuid`;
+        expect(handoffs).toHaveLength(1);
+        expect(handoffs[0]?.reason_safe).toBe(
+          "Automatic response unavailable; operator follow-up required",
+        );
+        const tasks = await admin<
+          { id: string }[]
+        >`SELECT id FROM crm.tasks WHERE contact_id=${conversation.contact_id}::uuid`;
+        expect(tasks).toHaveLength(1);
+        const notices = await admin<
+          { id: string }[]
+        >`SELECT id FROM messaging.notifications WHERE reference_id=${handoffs[0]!.id}::uuid AND type='handoff.requested'`;
+        expect(notices.length).toBeGreaterThan(0);
+        const audit = await admin<
+          { metadata: { failureCode: string; recoveryAttempts: number } }[]
+        >`SELECT metadata FROM audit.records WHERE target_id=${conversation.id}::uuid AND action='conversation.ai_recovery_handoff'`;
+        expect(audit).toHaveLength(1);
+        expect(audit[0]?.metadata).toMatchObject({
+          failureCode: "ai_http_503",
+          recoveryAttempts: 1,
+        });
+      } finally {
+        await recoveryStore.close();
+        await admin`UPDATE messaging.channels SET configuration=configuration - 'aiReliabilityV2Enabled'
+          WHERE tenant_id=${tenantId}::uuid AND provider_account_id=${phoneNumberId}`;
+        await admin`UPDATE crm.tenant_settings SET whatsapp_ai_agent_profile_id=NULL,
+          whatsapp_ai_enabled_by_user_id=NULL,whatsapp_ai_enabled_at=NULL WHERE tenant_id=${tenantId}::uuid`;
+      }
+    }, 120_000);
 
     it("runs signed inbound to AI reply and starts an explicitly requested durable call", async () => {
       const businessProfile = {
@@ -231,6 +427,9 @@ describe.skipIf(sourceUrl === undefined)(
       FROM messaging.conversations conversation
       JOIN messaging.channels channel ON channel.id = conversation.channel_id
       WHERE channel.provider_account_id = ${phoneNumberId}
+        AND EXISTS (SELECT 1 FROM crm.contact_channel_identities identity
+          WHERE identity.contact_id=conversation.contact_id AND identity.tenant_id=conversation.tenant_id
+            AND identity.normalized_value='+12025550198')
     `;
       const conversationId = conversation[0]?.id;
       if (conversationId === undefined)
