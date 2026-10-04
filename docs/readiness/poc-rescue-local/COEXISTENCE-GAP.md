@@ -26,9 +26,19 @@ Accepted changes retain their payload and body digest in the durable inbound que
 
 Disabled receipts are retained with `importEnabled=false` and processed without importing. Enabling the capability later does not silently replay those receipts or duplicate their effects. Any recovery/import of retained disabled receipts requires a separately reviewed operation; there is no automatic bulk replay command in this change.
 
+## Compatibility and rollback
+
+An actual previous-image probe found that worker `42eebac2` claimed all four new receipt types on schema `8d32f4a91c70` and rejected them as invalid inbound envelopes. Additive migration `9e43a5b02d81` restores the existing three-argument claim function to ordinary events and adds a required four-argument opt-in for capable workers. The new worker requires that signature and EXECUTE privilege before reporting ready. Both contracts preserve receipt ordering, SKIP LOCKED, lease recovery and attempt/limit fences.
+
+After the forward migration, the exact previous worker processed ordinary text while all four new receipts remained `received`, attempts zero, with no external sends. The new-worker fixture checks the old contract, explicit opt-out, owner/grant boundaries, missing/denied capability readiness, and successful opt-in import.
+
+**The previous web image is not eligible to receive active Coexistence callbacks.** Its actual compiled parser emitted a live image envelope for a `history` media callback. Original `change.field` provenance is discarded before the existing database ingress function receives the normalized envelope, so the database cannot distinguish that result from delayed genuine inbound traffic. Do not claim complete old-image rollback compatibility after Coexistence activation. A reviewed rollback must retain Coexistence-capable webhook ingress, or explicitly suspend/reroute those callbacks under a reviewed provider plan. This is separate from deleting or disconnecting the Business phone app, which remains unauthorized. Current Coexistence bindings/subscriptions remain disabled, so ordinary-flow rollback verification remains valid within that scope.
+
+Evidence: `.artifacts/poc-rescue-local/previous-image-compat/old-worker-coexistence.json`, `old-parser-probe.json`, and `old-worker-coexistence-9e43a5b02d81.json` in the same directory. The forward-upgrade probe used the final migration source mounted into the prior-image test stack; it is labeled separately from final-image acceptance.
+
 ## Verification and remaining activation work
 
-The dedicated real-PostgreSQL test uses fictional accounts and actual `platform_web` / `platform_messaging` roles. It exercises HMAC rejection, cross-account and unknown database-binding rejection, default-off receipts, 205-message history bursts, duplicate/out-of-order imports, media follow-ups, contact tombstones, Cloud API echo deduplication, immediate human fencing, replay after AI resume, account-only revocation and zero automation/model/provider sends. It also checks unknown consent, closed/unread-free history threads and a null service window.
+`wa-coexistence-compat.log` passes four focused tests against fresh head `9e43a5b02d81`, including the actual concurrent live/history first-contact transaction probe. The dedicated real-PostgreSQL test uses fictional accounts and actual `platform_web` / `platform_messaging` roles. It exercises HMAC rejection, cross-account and unknown database-binding rejection, default-off receipts, 205-message history bursts, duplicate/out-of-order imports, media follow-ups, contact tombstones, Cloud API echo deduplication, immediate human fencing, replay after AI resume, account-only revocation and zero automation/model/provider sends. It also checks unknown consent, closed/unread-free history threads and a null service window.
 
 The existing HTTP ingress limit remains 2 MiB; larger deliveries return 413 rather than being partly imported. Validate actual Meta history payload sizes before activation and review any limit/streaming change separately.
 
