@@ -22,7 +22,7 @@ from oron_sessions import crud as session_crud
 from oron_sessions.crypto import LocalFieldCipher
 from oron_sessions.models import Session, SessionCreate, SessionEvent, SessionUpdate
 from oron_tenancy.flow_store import FlowNotFound, PostgresFlowStore
-from oron_tenancy.models import PhoneNumber
+from oron_tenancy.models import Flow, PhoneNumber
 from pydantic import Field, PostgresDsn, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import select, text
@@ -1558,9 +1558,29 @@ class PostgresVoiceRuntime:
                 .scalars()
                 .first()
             )
-        if row is None:
-            return None
-        return PhoneResolution(tenant_id=row.tenant_id, flow_id=row.flow_id)
+            if row is None:
+                return None
+            # Phone lookup is a service boundary; the flow read below must use
+            # the DID's tenant context and never accept an unowned legacy flow.
+            await set_tenant(database, str(row.tenant_id))
+            owned = (
+                await database.execute(
+                    select(col(Flow.flow_id))
+                    .where(
+                        col(Flow.flow_id) == row.flow_id,
+                        col(Flow.tenant_id) == row.tenant_id,
+                        text("platform.current_tenant_active()"),
+                    )
+                    .limit(1)
+                )
+            ).first()
+            if owned is None:
+                return None
+            return PhoneResolution(
+                tenant_id=row.tenant_id,
+                flow_id=row.flow_id,
+                dispatch_rule_id=row.dispatch_rule_id,
+            )
 
 
 def _database_json(value: object) -> Any:

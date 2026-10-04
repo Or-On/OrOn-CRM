@@ -95,6 +95,7 @@ def main() -> None:
             dispatcher_settings=dispatcher_settings,
             dispatcher=dispatcher,
             shutdown=runtime.close,
+            resolve_phone=runtime.resolve_phone,
         ),
         host=dispatcher_settings.bind_host,
         port=dispatcher_settings.port,

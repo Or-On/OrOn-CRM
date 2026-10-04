@@ -21,12 +21,16 @@ def make_transfer_action(
     api_secret: str,
     api_factory: Callable[..., api.LiveKitAPI] = api.LiveKitAPI,
     on_failure: Callable[[], Awaitable[None]] | None = None,
+    sip_refer_supported: bool = True,
 ):
     """`action["to"]` is already E164 — `ActionSpec` proved that at publish."""
 
     async def transfer(action: dict, flow_manager: Any) -> None:
         to = None
         try:
+            if not sip_refer_supported:
+                logger.warning("Transfer blocked by transport capability")
+                raise RuntimeError("transport does not support SIP REFER")
             # All inside: a raise here becomes FlowError and ends the call.
             to = validate_e164(action["to"])
             async with (
@@ -77,6 +81,7 @@ def make_emergency_transfer(
     api_key: str,
     api_secret: str,
     api_factory: Callable[..., api.LiveKitAPI] = api.LiveKitAPI,
+    sip_refer_supported: bool = True,
 ):
     """SIP REFER for an emergency escalation that REPORTS its outcome.
 
@@ -87,6 +92,9 @@ def make_emergency_transfer(
     """
 
     async def transfer(to: str) -> str:
+        if not sip_refer_supported:
+            logger.warning("Emergency transfer blocked by transport capability")
+            return "transfer_failed"
         try:
             target = validate_e164(to)
             async with (

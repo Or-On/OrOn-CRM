@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Retained Or-on per-call dispatcher adapted to canonical platform boundaries"
 requires-python = ">=3.14,<3.15"
 dependencies = [
+  "aiohttp==3.14.3",
   "asyncpg==0.31.0",
   "fastapi==0.141.1",
   "livekit-api==1.2.1",

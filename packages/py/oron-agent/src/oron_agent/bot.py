@@ -339,6 +339,7 @@ async def run_bot(
             url=st.livekit_url,
             api_key=st.livekit_api_key.get_secret_value(),
             api_secret=st.livekit_api_secret.get_secret_value(),
+            sip_refer_supported=ctx.sip_refer_supported,
         ),
     )
     if service_intake is not None:
@@ -887,6 +888,7 @@ async def run_bot(
         api_key=st.livekit_api_key.get_secret_value(),
         api_secret=st.livekit_api_secret.get_secret_value(),
         on_failure=on_failure,
+        sip_refer_supported=ctx.sip_refer_supported,
     )
 
     async def guarded_transfer(action, manager):

@@ -36,6 +36,9 @@ http://127.0.0.1:8080 {
 	handle /livekit/webhook {
 		reverse_proxy dispatcher:8082
 	}
+	handle /twilio/voice/inbound {
+		reverse_proxy dispatcher:8082
+	}
 	handle {
 		reverse_proxy web:3000
 	}

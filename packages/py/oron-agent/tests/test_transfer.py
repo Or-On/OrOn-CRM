@@ -15,6 +15,33 @@ ROOM = "call-1"
 DESK = "+14155552671"
 
 
+async def test_unsupported_transport_blocks_normal_and_emergency_refer_with_fallback():
+    from oron_agent.transfer import make_emergency_transfer
+
+    factory, fallback = MagicMock(), AsyncMock()
+    action = make_transfer_action(
+        room=ROOM,
+        url="x",
+        api_key="k",
+        api_secret="s",
+        api_factory=factory,
+        on_failure=fallback,
+        sip_refer_supported=False,
+    )
+    await action({"type": "transfer", "to": DESK}, None)
+    fallback.assert_awaited_once()
+    emergency = make_emergency_transfer(
+        room=ROOM,
+        url="x",
+        api_key="k",
+        api_secret="s",
+        api_factory=factory,
+        sip_refer_supported=False,
+    )
+    assert await emergency(DESK) == "transfer_failed"
+    factory.assert_not_called()
+
+
 def _api(*kinds: int) -> MagicMock:
     """A LiveKitAPI double whose room holds one participant per kind given."""
     lkapi = MagicMock()

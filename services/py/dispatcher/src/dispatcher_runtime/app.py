@@ -19,6 +19,7 @@ from oron_dispatcher.dispatcher import (
     SessionPersistence,
 )
 from oron_dispatcher.sip_client import SipClient
+from oron_dispatcher.twilio_inbound import TwilioInboundHandler
 from oron_dispatcher.webhook import create_app
 from oron_dispatcher.webhook_ledger import PostgresWebhookLedger
 
@@ -73,11 +74,21 @@ def build(
     dispatcher_settings: DispatcherSettings | None = None,
     dispatcher: Dispatcher | None = None,
     shutdown: Callable[[], Awaitable[None]] | None = None,
+    resolve_phone: ResolvePhone | None = None,
 ):
     """Build without globals; full I/O composition remains explicit at the edge."""
 
     platform = platform_settings or PlatformSettings.load(service="dispatcher")
     configured = dispatcher_settings or DispatcherSettings()
+    twilio_inbound = None
+    if configured.enable_twilio_inbound:
+        if resolve_phone is None or configured.twilio_inbound_callback_url is None:
+            raise RuntimeError("Twilio inbound requires authoritative phone resolution")
+        twilio_inbound = TwilioInboundHandler(
+            callback_url=configured.twilio_inbound_callback_url,
+            routes=configured.twilio_inbound_routes,
+            resolve_phone=resolve_phone,
+        )
 
     database_url = platform.voice_database_url
     ledger = PostgresWebhookLedger(str(database_url)) if database_url is not None else None
@@ -135,4 +146,5 @@ def build(
         ledger=ledger,
         assertion_verifier=verifier,
         shutdown=shutdown,
+        twilio_inbound=twilio_inbound,
     )

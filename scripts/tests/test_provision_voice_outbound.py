@@ -4,7 +4,79 @@ from unittest.mock import AsyncMock
 import pytest
 from livekit import api
 
-from scripts.provision_voice_outbound import OutboundProvisionPlan, review_or_apply
+from scripts.provision_voice_outbound import Carrier, OutboundProvisionPlan, review_or_apply
+
+
+@pytest.mark.parametrize("drift", [None, "account_sid", "sid", "phone_number", "voice", "trunk"])
+async def test_account_owned_sender_checks_exact_purchased_number_without_reattaching(drift):
+    plan, _, _ = fixture()
+    plan = plan.model_copy(
+        update={"sender_ownership_mode": "account_owned", "phone_number_sid": "PN" + "4" * 32}
+    )
+    account = "AC" + "5" * 32
+    number = {
+        "account_sid": account,
+        "sid": plan.phone_number_sid,
+        "phone_number": plan.from_number,
+        "capabilities": {"voice": True},
+        "trunk_sid": None,
+    }
+    if drift in ("account_sid", "sid", "phone_number"):
+        number[drift] = "foreign"
+    if drift == "voice":
+        number["capabilities"]["voice"] = False
+    carrier = Carrier(account, "fictional-token")
+
+    async def provider(path, *, fields=None):
+        assert fields is None  # all inspection operations remain read-only
+        if "IncomingPhoneNumbers" in path:
+            assert path.endswith(f"/{plan.phone_number_sid}.json")
+            return number
+        if "/Credentials.json" in path:
+            return {"credentials": [{"username": plan.sip_username}]}
+        if "/CredentialLists?" in path:
+            return {"credential_lists": [{"sid": plan.credential_list_id}]}
+        assert "/PhoneNumbers" not in path  # detached DID is allowed only in explicit mode
+        return {
+            "account_sid": "foreign" if drift == "trunk" else account,
+            "domain_name": plan.address,
+        }
+
+    carrier.request = AsyncMock(side_effect=provider)
+    try:
+        if drift is None:
+            assert (await carrier.inspect(plan))["credential_associated"] is True
+        else:
+            with pytest.raises(ValueError, match="configured account|account-owned"):
+                await carrier.inspect(plan)
+    finally:
+        await carrier.client.aclose()
+
+
+async def test_default_ownership_remains_strict_after_did_detach():
+    plan, _, _ = fixture()
+    assert plan.sender_ownership_mode == "trunk_associated"
+    carrier = Carrier("AC" + "5" * 32, "fictional-token")
+
+    async def provider(path, *, fields=None):
+        if "/Credentials.json" in path:
+            return {"credentials": [{"username": plan.sip_username}]}
+        if "/CredentialLists?" in path:
+            return {"credential_lists": [{"sid": plan.credential_list_id}]}
+        if "/PhoneNumbers?" in path:
+            return {"phone_numbers": []}
+        return {"account_sid": carrier.account, "domain_name": plan.address}
+
+    carrier.request = AsyncMock(side_effect=provider)
+    try:
+        with pytest.raises(ValueError, match="planned carrier trunk"):
+            await carrier.inspect(plan)
+        with pytest.raises(ValueError, match="exact phone number SID"):
+            OutboundProvisionPlan.model_validate(
+                {**plan.model_dump(), "sender_ownership_mode": "account_owned"}
+            )
+    finally:
+        await carrier.client.aclose()
 
 
 def fixture():

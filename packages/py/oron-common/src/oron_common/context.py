@@ -30,6 +30,8 @@ class CallContext(BaseModel):
     # The transport, not the carrier — carriers are swapped in the SIP trunk's
     # allowed_addresses and never reach the agent.
     provider: Literal["livekit"] = "livekit"
+    # Set by the trusted transport binding, never by a model/tool argument.
+    sip_refer_supported: bool = True
     direction: Direction
     from_number: str | None = None
     to_number: str | None = None

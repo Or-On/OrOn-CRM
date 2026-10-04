@@ -73,7 +73,11 @@ def _dispatcher(
         sip_client=sip or _sip(enabled=False),
         launch_bot=launch,
         resolve_phone=resolve
-        or AsyncMock(return_value=PhoneResolution(tenant_id=TENANT_ID, flow_id=FLOW_ID)),
+        or AsyncMock(
+            return_value=PhoneResolution(
+                tenant_id=TENANT_ID, flow_id=FLOW_ID, dispatch_rule_id="SDR_test"
+            )
+        ),
         hangup_room=hangup,
         mint_token=Mock(return_value="room-token"),
     )
@@ -81,7 +85,11 @@ def _dispatcher(
 
 
 def _participant_event(*, did: str | None = DID, room: str = "call-inbound"):
-    attributes = {"sip.phoneNumber": "+14155550100"}
+    attributes = {
+        "sip.phoneNumber": "+14155550100",
+        "sip.ruleID": "SDR_test",
+        "sip.trunkID": "ST_test",
+    }
     if did is not None:
         attributes["sip.trunkPhoneNumber"] = did
     return SimpleNamespace(
@@ -237,13 +245,17 @@ async def test_tenant_capacity_is_separate_from_global_capacity_and_released():
         await dispatcher.handle_participant_joined(_participant_event(room="tenant-one-excess"))
     foreign = uuid4()
     dispatcher._resolve_phone = AsyncMock(
-        return_value=PhoneResolution(tenant_id=foreign, flow_id=FLOW_ID)
+        return_value=PhoneResolution(
+            tenant_id=foreign, flow_id=FLOW_ID, dispatch_rule_id="SDR_test"
+        )
     )
     await dispatcher.handle_participant_joined(_participant_event(room="tenant-two"))
     assert len(dispatcher.active_calls()) == 2
     await dispatcher.hangup("tenant-one")
     dispatcher._resolve_phone = AsyncMock(
-        return_value=PhoneResolution(tenant_id=TENANT_ID, flow_id=FLOW_ID)
+        return_value=PhoneResolution(
+            tenant_id=TENANT_ID, flow_id=FLOW_ID, dispatch_rule_id="SDR_test"
+        )
     )
     await dispatcher.handle_participant_joined(_participant_event(room="tenant-one-replacement"))
     assert len(dispatcher.active_calls()) == 2
@@ -265,6 +277,87 @@ async def test_inbound_resolves_before_persisting_and_launches_once() -> None:
     assert context.tenant_id == TENANT_ID
     assert context.flow_id == FLOW_ID
     assert context.session_id == uuid5(NAMESPACE_URL, "or-on-platform:livekit-room:call-inbound")
+
+
+@pytest.mark.parametrize(
+    "stored,signed",
+    [
+        (None, "SDR_test"),
+        ("simulator-fixture", "SDR_test"),
+        ("SDR_other", "SDR_test"),
+        ("SDR_test", ""),
+    ],
+)
+async def test_inbound_rule_fence_precedes_all_call_work(stored, signed):
+    dispatcher, sessions, launch, hangup = _dispatcher(
+        resolve=AsyncMock(
+            return_value=PhoneResolution(
+                tenant_id=TENANT_ID,
+                flow_id=FLOW_ID,
+                dispatch_rule_id=stored,
+            )
+        )
+    )
+    event = _participant_event()
+    event.participant.attributes["sip.ruleID"] = signed
+    with pytest.raises(UnroutableInboundCall):
+        await dispatcher.handle_participant_joined(event)
+    sessions.begin.assert_not_awaited()
+    launch.assert_not_awaited()
+    if signed:
+        hangup.assert_awaited_once()
+    else:
+        # Missing rule could be a still-live outbound leg after restart.
+        hangup.assert_not_awaited()
+
+
+@pytest.mark.parametrize("mismatch", [None, "trunk", "tenant", "disabled", "formatted-did"])
+async def test_twiml_transport_checks_exact_trunk_tenant_and_capability(mismatch):
+    dispatcher, sessions, launch, _ = _dispatcher()
+    dispatcher._settings.enable_twilio_inbound = mismatch != "disabled"
+    dispatcher._settings.twilio_inbound_routes = (
+        SimpleNamespace(
+            did=DID,
+            tenant_id=uuid4() if mismatch == "tenant" else TENANT_ID,
+            trunk_id="ST_test",
+        ),
+    )
+    event = _participant_event()
+    if mismatch in {"trunk", "formatted-did"}:
+        event.participant.attributes["sip.trunkID"] = "ST_foreign"
+    if mismatch == "formatted-did":
+        event.participant.attributes["sip.trunkPhoneNumber"] = "+972 35550000"
+    if mismatch is None:
+        await dispatcher.handle_participant_joined(event)
+        context = sessions.begin.await_args.args[0]
+        assert context.sip_refer_supported is False
+        assert context.to_number == DID
+    else:
+        with pytest.raises(UnroutableInboundCall, match="transport_mismatch"):
+            await dispatcher.handle_participant_joined(event)
+        sessions.begin.assert_not_awaited()
+        launch.assert_not_awaited()
+
+
+async def test_pending_outbound_leg_is_not_reclassified_or_torn_down():
+    dispatcher, sessions, launch, hangup = _dispatcher()
+    from oron_common import CallContext, Direction
+
+    event = _participant_event()
+    dispatcher._pending[event.room.name] = (
+        CallContext(
+            call_id=event.room.name,
+            direction=Direction.OUTBOUND,
+            tenant_id=TENANT_ID,
+            flow_id=FLOW_ID,
+        ),
+        asyncio.get_running_loop().create_future(),
+        asyncio.current_task(),
+    )
+    await dispatcher.handle_participant_joined(event)
+    sessions.begin.assert_not_awaited()
+    launch.assert_not_awaited()
+    hangup.assert_not_awaited()
 
 
 @pytest.mark.parametrize("did", [None, "+000", "+14155550101"])

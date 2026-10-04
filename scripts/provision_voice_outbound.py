@@ -12,12 +12,13 @@ import asyncio
 import hashlib
 import json
 from pathlib import Path
+from typing import Literal
 from uuid import UUID
 
 import httpx
 from dotenv import dotenv_values
 from livekit import api
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class OutboundProvisionPlan(BaseModel):
@@ -31,6 +32,14 @@ class OutboundProvisionPlan(BaseModel):
     address: str = Field(pattern=r"^[a-z0-9-]+\.pstn\.twilio\.com$")
     sip_username: str = Field(min_length=1, max_length=120)
     livekit_trunk_name: str = Field(min_length=1, max_length=120)
+    sender_ownership_mode: Literal["trunk_associated", "account_owned"] = "trunk_associated"
+    phone_number_sid: str | None = Field(default=None, pattern=r"^PN[0-9a-f]{32}$")
+
+    @model_validator(mode="after")
+    def _account_owned_is_explicit(self):
+        if self.sender_ownership_mode == "account_owned" and self.phone_number_sid is None:
+            raise ValueError("account-owned sender requires the exact phone number SID")
+        return self
 
 
 def required(values: dict, key: str) -> str:
@@ -53,7 +62,6 @@ class Carrier:
     async def inspect(self, plan: OutboundProvisionPlan) -> dict:
         base = f"https://trunking.twilio.com/v1/Trunks/{plan.twilio_trunk_id}"
         trunk = await self.request(base)
-        numbers = await self.request(f"{base}/PhoneNumbers?PageSize=100")
         lists = await self.request(f"{base}/CredentialLists?PageSize=100")
         credentials = await self.request(
             f"https://api.twilio.com/2010-04-01/Accounts/{self.account}/SIP/"
@@ -61,8 +69,23 @@ class Carrier:
         )
         if trunk.get("account_sid") != self.account:
             raise ValueError("carrier trunk does not belong to configured account")
-        if not any(n.get("phone_number") == plan.from_number for n in numbers["phone_numbers"]):
-            raise ValueError("sender is not owned by the planned carrier trunk")
+        if plan.sender_ownership_mode == "trunk_associated":
+            numbers = await self.request(f"{base}/PhoneNumbers?PageSize=100")
+            if not any(n.get("phone_number") == plan.from_number for n in numbers["phone_numbers"]):
+                raise ValueError("sender is not owned by the planned carrier trunk")
+        else:
+            number = await self.request(
+                f"https://api.twilio.com/2010-04-01/Accounts/{self.account}/"
+                f"IncomingPhoneNumbers/{plan.phone_number_sid}.json"
+            )
+            if (
+                number.get("account_sid") != self.account
+                or number.get("sid") != plan.phone_number_sid
+                or number.get("phone_number") != plan.from_number
+                or not isinstance(number.get("capabilities"), dict)
+                or number["capabilities"].get("voice") is not True
+            ):
+                raise ValueError("sender is not the configured account-owned voice number")
         if not any(c.get("username") == plan.sip_username for c in credentials["credentials"]):
             raise ValueError("planned SIP username is absent from the existing credential list")
         if trunk.get("domain_name") not in (None, "", plan.address):
@@ -111,6 +134,7 @@ async def review_or_apply(plan, carrier, sip, *, password: str, apply: bool, rec
         "mode": "apply" if apply else "review_only",
         "tenant_id": str(plan.tenant_id),
         "account_ref": plan.account_ref,
+        "sender_ownership_mode": plan.sender_ownership_mode,
         "from_masked": "***" + plan.from_number[-4:],
         "carrier_trunk": plan.twilio_trunk_id,
         "address": plan.address,

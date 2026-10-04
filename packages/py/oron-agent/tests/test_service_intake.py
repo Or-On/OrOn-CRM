@@ -309,6 +309,33 @@ async def _silent(_text: str) -> None:
     return None
 
 
+async def test_later_emergency_target_change_preserves_urgent_fallback_without_false_announcement():
+    sessions, turns, context = _emergency_sessions(), AcceptedTurns(), _context()
+    context.sip_refer_supported = False
+    turns.accept()
+    transfer, speak = AsyncMock(), AsyncMock()
+    tools = await build_voice_service_intake(
+        sessions,
+        context,
+        {"capabilities": ["service.intake"]},
+        turns,
+        {},
+        emergency_transfer=transfer,
+    )
+    assert tools is not None
+    result = await tools.escalate({"reason": "Fictional urgent fault"}, speak)
+    assert result["receipt"]["transfer"] == "transfer_failed"
+    assert "staff must call back" in result["instruction"]
+    assert [c.kwargs["outcome"] for c in sessions.record_escalation_outcome.await_args_list] == [
+        "transfer_failed",
+        "fallback_urgent_followup",
+    ]
+    sessions.escalate_emergency.assert_awaited_once()
+    sessions.emergency_transfer_target.assert_not_awaited()
+    transfer.assert_not_awaited()
+    speak.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 async def test_emergency_tool_is_offered_only_when_the_tenant_enabled_it() -> None:
     turns = AcceptedTurns()

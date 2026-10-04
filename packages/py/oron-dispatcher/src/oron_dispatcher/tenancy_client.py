@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 class PhoneResolution(BaseModel):
     tenant_id: UUID
     flow_id: UUID
+    dispatch_rule_id: str | None = None
 
 
 class TenancyClient:

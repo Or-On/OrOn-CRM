@@ -2,10 +2,17 @@
 
 from typing import Literal
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from oron_dispatcher.outbound_routing import OutboundRoute, validate_routes
+from oron_dispatcher.twilio_inbound import (
+    TwilioInboundRoute,
+    validate_callback_url,
+)
+from oron_dispatcher.twilio_inbound import (
+    validate_routes as validate_inbound_routes,
+)
 
 
 class DispatcherSettings(BaseSettings):
@@ -14,6 +21,7 @@ class DispatcherSettings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        hide_input_in_errors=True,
     )
 
     livekit_url: str | None = Field(default=None, validation_alias="LIVEKIT_URL")
@@ -36,6 +44,32 @@ class DispatcherSettings(BaseSettings):
         return validate_routes(routes)
 
     enable_real_telephony: bool = Field(default=False, validation_alias="ENABLE_REAL_TELEPHONY")
+    enable_twilio_inbound: bool = Field(default=False, validation_alias="ENABLE_TWILIO_INBOUND")
+    twilio_inbound_callback_url: str | None = Field(
+        default=None, validation_alias="TWILIO_INBOUND_CALLBACK_URL"
+    )
+    twilio_inbound_routes: tuple[TwilioInboundRoute, ...] = Field(
+        default=(), validation_alias="TWILIO_INBOUND_ROUTES_JSON"
+    )
+
+    @field_validator("twilio_inbound_routes")
+    @classmethod
+    def _validate_inbound_routes(cls, routes: tuple[TwilioInboundRoute, ...]):
+        return validate_inbound_routes(routes)
+
+    @field_validator("twilio_inbound_callback_url")
+    @classmethod
+    def _validate_callback_url(cls, value: str | None):
+        return validate_callback_url(value) if value is not None else None
+
+    @model_validator(mode="after")
+    def _inbound_is_explicit(self):
+        if self.enable_twilio_inbound and (
+            not self.twilio_inbound_callback_url or not self.twilio_inbound_routes
+        ):
+            raise ValueError("enabled Twilio inbound requires callback URL and route bindings")
+        return self
+
     bind_host: Literal["127.0.0.1", "0.0.0.0"] = Field(  # noqa: S104
         default="127.0.0.1", validation_alias="DISPATCHER_BIND_HOST"
     )
@@ -59,6 +93,8 @@ class DispatcherSettings(BaseSettings):
             ),
             "enable_real_telephony": self.enable_real_telephony,
             "outbound_route_count": len(self.outbound_routes),
+            "enable_twilio_inbound": self.enable_twilio_inbound,
+            "twilio_inbound_route_count": len(self.twilio_inbound_routes),
             "bind_host": self.bind_host,
             "port": self.port,
             "room_prefix": self.room_prefix,

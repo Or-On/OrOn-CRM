@@ -2408,6 +2408,7 @@ name = "oron-dispatcher"
 version = "0.1.0"
 source = { editable = "packages/py/oron-dispatcher" }
 dependencies = [
+    { name = "aiohttp" },
     { name = "asyncpg" },
     { name = "fastapi" },
     { name = "livekit-api" },
@@ -2420,6 +2421,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiohttp", specifier = "==3.14.3" },
     { name = "asyncpg", specifier = "==0.31.0" },
     { name = "fastapi", specifier = "==0.141.1" },
     { name = "livekit-api", specifier = "==1.2.1" },

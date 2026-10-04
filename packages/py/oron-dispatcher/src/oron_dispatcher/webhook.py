@@ -32,6 +32,7 @@ from oron_dispatcher.dispatcher import (
     UnroutableInboundCall,
 )
 from oron_dispatcher.sip_client import RealTelephonyDenied
+from oron_dispatcher.twilio_inbound import CALLBACK_PATH, TwilioInboundHandler
 from oron_dispatcher.webhook_ledger import PostgresWebhookLedger, WebhookLedger
 from oron_dispatcher.webhook_pump import DurableDelivery, DurableWebhookPump
 
@@ -91,6 +92,7 @@ def create_app(
     assertion_verifier: ServiceAssertionVerifier | None,
     shutdown: Callable[[], Awaitable[None]] | None = None,
     participant_is_current: Callable[[Any], Awaitable[bool]] | None = None,
+    twilio_inbound: TwilioInboundHandler | None = None,
 ) -> FastAPI:
     """Build the dispatcher HTTP boundary with injected process-owned state."""
 
@@ -130,6 +132,12 @@ def create_app(
 
     app = FastAPI(title="Or-On Platform Dispatcher", version="0.1.0", lifespan=lifespan)
     bearer = HTTPBearer(auto_error=False)
+
+    @app.post(CALLBACK_PATH, include_in_schema=False)
+    async def twilio_voice_inbound(request: Request):
+        if twilio_inbound is None:
+            raise HTTPException(404, "not found")
+        return await twilio_inbound.respond(request)
 
     async def require_dial_capability(
         credentials: HTTPAuthorizationCredentials | None = Depends(bearer),

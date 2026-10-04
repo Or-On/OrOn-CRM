@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Literal, Protocol, cast
@@ -156,6 +157,15 @@ class Dispatcher:
         room = event.room.name
         if participant.kind != ParticipantInfo.SIP or room in self._active:
             return
+        pending = self._pending.get(room)
+        if pending is not None and pending[0].direction != Direction.INBOUND:
+            return
+        rule_id = participant.attributes.get("sip.ruleID")
+        if not rule_id:
+            # LiveKit leaves ruleID empty for outbound SIP legs. In particular,
+            # after a restart such a leg must never be reclassified as inbound
+            # or torn down merely because this process no longer owns its room.
+            raise UnroutableInboundCall("missing_inbound_rule")
         dialed = participant.attributes.get("sip.trunkPhoneNumber")
         resolution = await self._resolve_inbound_number(dialed)
         if resolution is None:
@@ -171,12 +181,33 @@ class Dispatcher:
                 except ValueError:
                     reason = "malformed_did"
             raise UnroutableInboundCall(reason)
+        assert dialed is not None
+        dialed = validate_e164(dialed)
+        if (
+            not resolution.dispatch_rule_id
+            or not re.fullmatch(r"SDR_[A-Za-z0-9_-]+", resolution.dispatch_rule_id)
+            or rule_id != resolution.dispatch_rule_id
+        ):
+            await self._hangup_room(room)
+            raise UnroutableInboundCall("inbound_rule_mismatch")
+        route = next(
+            (r for r in getattr(self._settings, "twilio_inbound_routes", ()) if r.did == dialed),
+            None,
+        )
+        if route is not None and (
+            not getattr(self._settings, "enable_twilio_inbound", False)
+            or route.tenant_id != resolution.tenant_id
+            or participant.attributes.get("sip.trunkID") != route.trunk_id
+        ):
+            await self._hangup_room(room)
+            raise UnroutableInboundCall("inbound_transport_mismatch")
         context = CallContext(
             call_id=room,
             provider="livekit",
+            sip_refer_supported=route is None,
             direction=Direction.INBOUND,
             from_number=participant.attributes.get("sip.phoneNumber"),
-            to_number=participant.attributes.get("sip.trunkPhoneNumber"),
+            to_number=dialed,
             flow_id=resolution.flow_id,
             tenant_id=resolution.tenant_id,
             session_id=uuid5(NAMESPACE_URL, f"or-on-platform:livekit-room:{room}"),

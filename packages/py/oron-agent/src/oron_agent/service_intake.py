@@ -294,6 +294,12 @@ class VoiceServiceIntake:
         outcome = "no_transfer_target"
         target = None
         transfer = self._emergency_transfer
+        if not self._context.sip_refer_supported:
+            # Preserve the durable urgent-followup path without promising a
+            # handoff or attempting unsupported REFER after a settings change.
+            transfer = None
+            if receipt.get("transferAvailable"):
+                logger.warning("Emergency transfer blocked by transport capability")
         if receipt.get("transferAvailable") and transfer is not None:
             try:
                 target = await self._sessions.emergency_transfer_target(self._context)
