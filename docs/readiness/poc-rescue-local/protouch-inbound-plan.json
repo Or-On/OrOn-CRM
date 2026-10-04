@@ -1,0 +1,27 @@
+{
+  "tenant_id": "633d9906-3866-4ddd-b85c-99c525bd3cb3",
+  "phone_row_id": "b68a0331-d6fb-51b6-8007-09a66fe319c0",
+  "flow_id": "4b4d1bd3-98c8-4faa-b486-28b8e6a104bb",
+  "flow_version": 1,
+  "did": "+97293764553",
+  "livekit_project_id": "p_12ecwwpmj7c",
+  "verified_sip_uri": "sip:12ecwwpmj7c.sip.livekit.cloud",
+  "trunk_name": "protouch-twilio-inbound",
+  "rule_name": "protouch-twilio-inbound-individual",
+  "room_prefix": "call-",
+  "allowed_addresses": [
+    "54.172.60.0/30",
+    "54.244.51.0/30",
+    "54.171.127.192/30",
+    "35.156.191.128/30",
+    "54.65.63.192/30",
+    "54.169.127.128/30",
+    "54.252.254.64/30",
+    "177.71.206.192/30"
+  ],
+  "allowlist_source": "https://www.twilio.com/docs/sip-trunking/ip-addresses",
+  "allowlist_checked_date": "2026-10-05",
+  "carrier_trunk_id": "TK8063d67ba0b48332a7a49024dbb164aa",
+  "origination_id": "OU9225846c82cd41552ab8fd30c3abaa1b",
+  "original_origination": "sip:34.165.22.57:5060"
+}

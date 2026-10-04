@@ -271,3 +271,53 @@ healthy services, disabled provider flags, internal networks and unchanged priva
 configuration are recorded in `forward-runtime-final.json`. Only this project was
 stopped afterwards; data and evidence remain available. Main-stack and live
 acceptance remain separately reported by the parent workstream.
+
+## Authorized live voice connection (2026-10-05 local time)
+
+The explicit live-connection instruction superseded the earlier provisioning
+gate. Fresh carrier checks detected independent ProTouch endpoint/credential
+changes; those were preserved. ProTouch outbound now uses
+`ST_Dc2P469Pn2ZU` with its single sender `***4553`, while Or-On retains
+`ST_hMBmL3fQMdFu` and `***5689`. The active tenant route map was validated and
+deployed by the parent with exact source `0331908b` and schema `9e43a5b02d81`.
+
+Actual normal web login, tenant switch, CRM read and voice permission checks
+passed. The approved `***7692` contact already existed with granted voice consent.
+The actual valid published ProTouch agent is `9a9bfdbf-4c46-4bd4-842f-2bfb8c4cb173`
+v1, and its canonical automation pins voice flow
+`4b4d1bd3-98c8-4faa-b486-28b8e6a104bb` v1.
+
+First session `c45df0f7-8daa-5efa-ab32-0c739c77f5a1` was admitted but failed
+carrier authentication before ringing. Twilio alert `NO905651db31e501a5a08066c84b35170c`
+recorded `32202`; the user independently reported no call. Its original ended/null
+record was corrected through an explicitly reviewed, tenant-scoped CAS transaction
+to failed/answered=false/carrier_authentication_failed, with the original end time
+and absent artifacts preserved. Original events remain, with an appended immutable
+reconciliation event and audit record; the canonical activity writer was invoked.
+The rollback rehearsal and actual commit receipts are retained.
+
+After a separately reviewed isolated credential repair, the one authorized retry
+created session `fc93b04d-7f3e-56ab-a5ef-8bebe1864c56`. Twilio call
+`CA92e7988f5427b50117d951ff64deb28a` connected from the correct ProTouch sender
+to the approved recipient and completed for 18 seconds. SIP status was active.
+The room also contained the failure-announcement participant, and real runtime
+finalization errors were observed. Therefore carrier connectivity is verified;
+full agent conversation, artifacts and lifecycle acceptance remain pending the
+new runtime fixes. No further calls were made during those repairs.
+
+Inbound preparation created trunk `ST_aJJSDZMGTeJ8`, whose readback contains
+only DID `***4553` and the eight current Twilio signaling `/30` networks, and
+individual rule `SDR_AcS72sUqk2ZM`, restricted explicitly to that trunk. No agent
+auto-dispatch was added. The Cloud API accepts and retains the ACL. It does not
+retain the redundant `SIPDispatchRuleInfo.numbers` input; called-number isolation
+is enforced by the single-DID trunk plus explicit-trunk rule, as supported by the
+[LiveKit SIP API](https://docs.livekit.io/reference/telephony/sip-api/).
+The allowlist came from [Twilio's signaling network inventory](https://www.twilio.com/docs/sip-trunking/ip-addresses).
+
+After the parent verified an actual provider-origin signed webhook receipt, an
+audited CAS changed only existing ProTouch phone row
+`b68a0331-d6fb-51b6-8007-09a66fe319c0` from its simulator rule to the real rule;
+tenant, DID and flow were preserved. Carrier origination is still the previous
+`sip:34.165.22.57:5060`; no inbound cutover or actual inbound-call acceptance has
+yet occurred. A complete PSTN proof requires a controlled cutover and inbound
+test after the runtime repair, retaining the exact existing origination for rollback.
