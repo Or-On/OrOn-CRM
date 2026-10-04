@@ -6955,6 +6955,7 @@ export function createMessagingStore(
           SELECT coalesce(bool_and(function.oid IS NOT NULL AND
             has_function_privilege(current_user,function.oid,'EXECUTE')),false) AS ready
           FROM unnest(ARRAY[
+            'ops.claim_inbound_events(text,integer,integer,boolean)',
             'ops.claim_fair_ai_reply(text)',
             'ops.claim_jobs_all_tenants(text,text,integer,integer)',
             'ops.renew_messaging_job_claim(uuid,text,uuid)',
@@ -7016,7 +7017,7 @@ export function createMessagingStore(
       for (let pass = 0; pass < 10; pass += 1) {
         const events = await sql<InboundEventRow[]>`
         SELECT id, tenant_id, event_type, payload
-        FROM ops.claim_inbound_events(${workerId}, 1, 60)
+        FROM ops.claim_inbound_events(${workerId}, 1, 60, true)
       `;
         if (events.length === 0) break;
         for (const event of events)

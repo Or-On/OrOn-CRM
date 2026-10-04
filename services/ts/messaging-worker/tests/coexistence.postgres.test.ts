@@ -170,6 +170,20 @@ describe.skipIf(!url)("owned Coexistence receipt and import pipeline", () => {
       }
     }
     try {
+      expect(await store.isReady()).toBe(true);
+      await admin`ALTER FUNCTION ops.claim_inbound_events(text,integer,integer,boolean) RENAME TO claim_inbound_events_coexistence_fixture`;
+      try {
+        expect(await store.isReady()).toBe(false);
+      } finally {
+        await admin`ALTER FUNCTION ops.claim_inbound_events_coexistence_fixture(text,integer,integer,boolean) RENAME TO claim_inbound_events`;
+      }
+      await admin`REVOKE EXECUTE ON FUNCTION ops.claim_inbound_events(text,integer,integer,boolean) FROM platform_messaging`;
+      try {
+        expect(await store.isReady()).toBe(false);
+      } finally {
+        await admin`GRANT EXECUTE ON FUNCTION ops.claim_inbound_events(text,integer,integer,boolean) TO platform_messaging`;
+      }
+      expect(await store.isReady()).toBe(true);
       for (const [id, ch, account] of [
         [tenant, channel, phone],
         [otherTenant, otherChannel, otherPhone],
@@ -255,6 +269,40 @@ describe.skipIf(!url)("owned Coexistence receipt and import pipeline", () => {
           },
         ],
       });
+      await admin.begin(async (tx) => {
+        await tx`SET LOCAL ROLE platform_messaging`;
+        await tx`SAVEPOINT legacy_probe`;
+        const legacy = await tx<
+          { event_type: string }[]
+        >`SELECT event_type FROM ops.claim_inbound_events('fictional-old-worker',100,60)`;
+        expect(
+          legacy.every(
+            (row) => !row.event_type.startsWith("whatsapp.coexistence."),
+          ),
+        ).toBe(true);
+        await tx`ROLLBACK TO SAVEPOINT legacy_probe`;
+        const noOptIn = await tx<
+          { event_type: string }[]
+        >`SELECT event_type FROM ops.claim_inbound_events('fictional-opt-out-worker',100,60,false)`;
+        expect(
+          noOptIn.every(
+            (row) => !row.event_type.startsWith("whatsapp.coexistence."),
+          ),
+        ).toBe(true);
+        await tx`ROLLBACK TO SAVEPOINT legacy_probe`;
+      });
+      expect(
+        (
+          await admin<
+            {
+              web: boolean;
+              worker: boolean;
+              definer: boolean;
+              same_owner: boolean;
+            }[]
+          >`SELECT has_function_privilege('platform_web','ops.claim_inbound_events(text,integer,integer,boolean)','EXECUTE') web,has_function_privilege('platform_messaging','ops.claim_inbound_events(text,integer,integer,boolean)','EXECUTE') worker,new.prosecdef definer,new.proowner=old.proowner same_owner FROM pg_proc new JOIN pg_proc old ON old.oid='ops.claim_inbound_events(text,integer,integer)'::regprocedure WHERE new.oid='ops.claim_inbound_events(text,integer,integer,boolean)'::regprocedure`
+        )[0],
+      ).toEqual({ web: false, worker: true, definer: true, same_owner: true });
       await admin`UPDATE platform.whatsapp_coexistence_accounts SET enabled=true WHERE tenant_id=${tenant}::uuid`;
       await drain();
       expect(
