@@ -50,17 +50,22 @@ export async function POST(request: Request) {
     if (
       !clientId ||
       !clientSecret ||
+      typeof body.expectedTenantId !== "string" ||
       clientId.length > 500 ||
       clientSecret.length > 2000
     )
       throw new TypeError("Client ID and client secret are required");
-    await withCurrentTenant("tenant:manage", (sql) =>
-      saveOAuthCredential(sql, provider, {
+    await withFreshCurrentTenant("tenant:manage", (sql, session) => {
+      if (body.expectedTenantId !== session.tenant.tenantId)
+        throw new TypeError(
+          "Workspace changed. Reload before saving credentials.",
+        );
+      return saveOAuthCredential(sql, provider, {
         clientId,
         clientSecret,
         ...(directoryTenant ? { directoryTenant } : {}),
-      }),
-    );
+      });
+    });
     return NextResponse.json({ configured: true, provider });
   } catch (error) {
     return crmErrorResponse(error);

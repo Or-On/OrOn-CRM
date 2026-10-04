@@ -111,6 +111,8 @@ const copy = {
       "Entered here, encrypted on the server, and never returned to the browser. The deployment encryption key remains managed by the platform operator.",
     credentialError:
       "OAuth credentials could not be saved. Your entries are still here.",
+    staleCredential:
+      "The workspace changed. Reload this page before saving credentials.",
   },
   he: {
     title: "אימייל",
@@ -180,6 +182,8 @@ const copy = {
       "הפרטים מוזנים כאן, מוצפנים בשרת ולעולם אינם מוחזרים לדפדפן. מפתח ההצפנה של הפריסה מנוהל בידי מפעיל הפלטפורמה.",
     credentialError:
       "לא הצלחנו לשמור את פרטי OAuth. הנתונים שהוזנו נשמרו בטופס.",
+    staleCredential:
+      "סביבת העבודה השתנתה. יש לרענן את העמוד לפני שמירת פרטי הגישה.",
   },
 } as const;
 
@@ -198,9 +202,11 @@ function providerKind(provider: string): "google" | "microsoft" | "other" {
 
 export function EmailWorkspace({
   channels,
+  tenantId,
   tenantName,
 }: {
   readonly channels: readonly EmailChannel[];
+  readonly tenantId: string;
   readonly tenantName: string;
 }) {
   const locale = useLocale();
@@ -267,6 +273,12 @@ export function EmailWorkspace({
   }, [credentialPending]);
 
   function openProviderSetup(provider: SetupProvider) {
+    if (provider !== setupProvider) {
+      setClientId("");
+      setClientSecret("");
+      setDirectoryTenant("");
+      setCredentialError(undefined);
+    }
     setSetupProvider(provider);
     setView("setup");
   }
@@ -285,16 +297,23 @@ export function EmailWorkspace({
     try {
       await crmMutation("/api/email/oauth/configuration", {
         provider: setupProvider,
+        expectedTenantId: tenantId,
         clientId,
         clientSecret,
         directoryTenant,
       });
-      window.location.href = new URL(
+      const start = new URL(
         `/api/email/oauth/${setupProvider}/start`,
         window.location.origin,
-      ).href;
-    } catch {
-      setCredentialError(c.credentialError);
+      );
+      start.searchParams.set("expectedTenantId", tenantId);
+      window.location.href = start.href;
+    } catch (error) {
+      setCredentialError(
+        error instanceof Error && error.message.startsWith("Workspace changed.")
+          ? c.staleCredential
+          : c.credentialError,
+      );
       setCredentialPending(false);
     }
   }

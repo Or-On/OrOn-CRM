@@ -34,6 +34,7 @@ export default async function EmailPage() {
         ORDER BY status = 'active' DESC, lower(provider), updated_at DESC, id
       `;
         return {
+          tenantId: session.tenant.tenantId,
           tenantName: session.tenant.tenantName,
           channels: rows.map((row): EmailChannel => ({
             id: row.id,
@@ -50,7 +51,7 @@ export default async function EmailPage() {
 
     return (
       <main className="page page--wide">
-        <EmailWorkspace {...data} />
+        <EmailWorkspace key={data.tenantId} {...data} />
       </main>
     );
   } catch (error) {

@@ -29,6 +29,16 @@ export async function GET(
     const client = await withFreshCurrentTenant(
       "tenant:manage",
       async (sql, session) => {
+        const expectedTenantId = new URL(request.url).searchParams.get(
+          "expectedTenantId",
+        );
+        if (
+          expectedTenantId !== null &&
+          expectedTenantId !== session.tenant.tenantId
+        )
+          throw new TypeError(
+            "Workspace changed. Reload before connecting this provider.",
+          );
         const configuration =
           await readOAuthCredential<OAuthClientConfiguration>(sql, provider);
         if (!configuration)

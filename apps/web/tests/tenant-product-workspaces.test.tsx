@@ -655,9 +655,88 @@ describe("Calendar workspace", () => {
 });
 
 describe("Email workspace", () => {
+  it("binds credential submission to its rendered tenant and retains a rejected draft with a clear stale-workspace error", async () => {
+    render(
+      localized(
+        <EmailWorkspace
+          tenantId="fictional-tenant-a"
+          channels={[]}
+          tenantName="Fictional tenant"
+        />,
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Connect Gmail" }));
+    const secret = screen.getByLabelText<HTMLInputElement>(
+      "OAuth client secret",
+    );
+    expect(secret.value).toBe("");
+    expect(secret.type).toBe("password");
+    expect(secret.required).toBe(true);
+    fireEvent.change(screen.getByLabelText("OAuth client ID"), {
+      target: { value: "fictional-client" },
+    });
+    fireEvent.change(secret, { target: { value: "fictional-secret" } });
+    transport.mutate.mockRejectedValueOnce(
+      new Error("Workspace changed. Reload before saving credentials."),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save securely and continue" }),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain(
+        "workspace changed",
+      ),
+    );
+    expect(transport.mutate).toHaveBeenCalledWith(
+      "/api/email/oauth/configuration",
+      {
+        provider: "google",
+        expectedTenantId: "fictional-tenant-a",
+        clientId: "fictional-client",
+        clientSecret: "fictional-secret",
+        directoryTenant: "",
+      },
+    );
+    expect(secret.value).toBe("fictional-secret");
+  });
+
+  it("does not carry a secret draft from one OAuth provider into another", () => {
+    render(
+      localized(
+        <EmailWorkspace
+          tenantId="fictional-tenant-a"
+          channels={[]}
+          tenantName="Fictional tenant"
+        />,
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Connect Gmail" }));
+    fireEvent.change(screen.getByLabelText("OAuth client ID"), {
+      target: { value: "fictional-google-client" },
+    });
+    fireEvent.change(screen.getByLabelText("OAuth client secret"), {
+      target: { value: "fictional-google-secret" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Accounts/u }));
+    fireEvent.click(screen.getByRole("button", { name: "Connect Outlook" }));
+    expect(
+      screen.getByLabelText<HTMLInputElement>("OAuth client secret").value,
+    ).toBe("");
+    expect(
+      screen.getByLabelText<HTMLInputElement>("OAuth client ID").value,
+    ).toBe("");
+    expect(transport.mutate).not.toHaveBeenCalled();
+  });
+
   it("opens and focuses an honest provider-specific setup guide in English and Hebrew", () => {
     const view = render(
-      localized(<EmailWorkspace channels={[]} tenantName="Fictional tenant" />),
+      localized(
+        <EmailWorkspace
+          tenantId="fictional-tenant-a"
+          channels={[]}
+          tenantName="Fictional tenant"
+        />,
+      ),
     );
 
     expect(screen.getAllByText("OAuth setup required").length).toBeGreaterThan(
@@ -701,7 +780,11 @@ describe("Email workspace", () => {
 
     view.rerender(
       localized(
-        <EmailWorkspace channels={[]} tenantName="סביבת בדיקה" />,
+        <EmailWorkspace
+          tenantId="fictional-tenant-a"
+          channels={[]}
+          tenantName="סביבת בדיקה"
+        />,
         "he",
       ),
     );
@@ -729,7 +812,11 @@ describe("Email workspace", () => {
     ];
     render(
       localized(
-        <EmailWorkspace channels={channels} tenantName="Fictional tenant" />,
+        <EmailWorkspace
+          tenantId="fictional-tenant-a"
+          channels={channels}
+          tenantName="Fictional tenant"
+        />,
       ),
     );
 
