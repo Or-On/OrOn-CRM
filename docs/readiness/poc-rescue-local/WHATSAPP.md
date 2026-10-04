@@ -17,6 +17,25 @@ See [the scoped registration plan](PROTOUCH-REGISTRATION-PLAN.md). Registration 
 
 After explicit user approval, the parent attempted the scoped registration and then repeated it once with the same protected PIN after reconciling the explicit rejection. Both were rejected with HTTP 400, code 100/subcode 2388001. Meta's returned user-facing reason says the number is already registered to an existing WhatsApp account and must be disconnected there first. This conflicts with any inference that `is_on_biz_app=false` proves no existing account. Registration remains pending; no further POST or deregistration is authorized by these diagnostic results. The user must identify the existing installation/provider and approve the appropriate migration/disconnection. Sanitized evidence: `wa-registration-rejection-detail.txt`, provider trace `A6p8XWhd8LwAceVs6Vh5sZj`.
 
+The user then confirmed an active WhatsApp Business phone app. The next evaluated path is Meta Coexistence to preserve it; no automatic app disconnection/deletion. The registration plan records the parent's authenticated primary-documentation findings and the current missing Embedded Signup/history/echo integration. `is_on_biz_app=false` alone must not be used as evidence that the phone app is absent.
+
+## Historical funnel investigation
+
+Read-only 30-day investigation at 20:52 UTC found all 35 unmatched inbound receipts marked processed, each with one attempt, dated September 13–19. Seven audited conversation deletions exist. Twenty-eight AI jobs reference those audited deleted conversations: 24 succeeded and four died. Twenty-three successful-send requests and all three dead-send requests no longer exist; 14 of 18 intake trigger messages are gone. These facts demonstrate missing retained evidence, not 35 proven ingestion losses. Exact provider-receipt-to-deleted-message attribution cannot be reconstructed from the retained rows.
+
+| Retained historical job failure | Count | Creation period |
+|---|---:|---|
+| `field_service_intake_failed` | 18 | September 15–19 |
+| `field_service_summary_failed` | 13 | September 15–16 |
+| `call_http_500` | 1 | September 14 |
+| `AI reply failed` | 3 | September 14 |
+| `AI inbound trigger superseded` | 2 | September 19 and 23 |
+| `ai_evidence_changed` outbound | 3 | September 13 |
+
+The 53 retained inbound messages split into 37 with exact linked outbound messages, 15 without a retained AI job, and one with a dead superseded AI job. The 15 no-job messages occurred September 20 (five), 21 (eight), and 30 (two); only two have an unlinked human/system follow-up candidate within an hour. Current AI ownership does not prove ownership when each was received. The retained superseded job was created at 19:10 for a 06:44 trigger; the next retained inbound at 14:03 has an accepted reply. That proves a later reply exists, not an on-time response to the older turn. All retained handoffs are resolved (two) or cancelled (seven).
+
+The parent's corrected `remote-baseline-30day-corrected.txt` is authoritative for provider acceptance: 37 exactly linked accepted/delivered responses among 88 unique inbound receipts, with the missing/deleted/ambiguous cohorts retained in the denominator. The historical errors precede the current deployment and were not automatically retried. Detail is in `wa-historical-causes.txt` and `wa-retained-cohorts.txt`; no customer message bodies were read.
+
 ## Effective WhatsApp agent and process
 
 | Binding | ProTouch | Or-On |
