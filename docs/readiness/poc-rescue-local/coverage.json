@@ -2304,12 +2304,12 @@
     "local": "REPRODUCED",
     "live": "BLOCKED",
     "required_verification": "Retain exact acceptance; local SDK/fake media, real PostgreSQL and synthetic real-model evidence are distinct from provider call/listening acceptance.",
-    "fix": "A real restricted inbound trunk and DID-specific dispatch rule were prepared, but a source outside all eight configured carrier CIDRs was admitted. Removed the new rule and restored the simulator DID marker by audited CAS; carrier origination never switched. Containment depends on provider dispatch-rule removal. The simulator marker did not enforce admission on live60f; the probe session failed during startup. Missing authoritative dispatch-rule validation is tracked separately as DISC-028.",
-    "tests": "One bounded non-PSTN INVITE from the owned VM outside the allowlist received200OK; signed ingress bound exact trunk/rule/session. Containment readback proves zero dispatch rules and no active probe room.",
-    "evidence": "docs/readiness/poc-rescue-local/VOICE.md; .artifacts/poc-rescue-local/voice-carrier-routing.json; docs/readiness/poc-rescue-local/LIVE-ACTIVATION.md; PROTOUCH-INBOUND-ACL-FAILURE.md",
-    "revision": "Live 60f26bfe1775997da1fb5159ec9e09a08246068b; schema 9e43a5b02d81 (139 revisions); deployed 2026-10-04T23:06Z",
+    "fix": "A real restricted inbound trunk and DID-specific dispatch rule were prepared, but a source outside all eight configured carrier CIDRs was admitted. Removed the new rule and restored the simulator DID marker by audited CAS; carrier origination never switched. Containment depends on provider dispatch-rule removal. The simulator marker did not enforce admission on live60f; the probe session failed during startup. Missing authoritative dispatch-rule validation is tracked separately as DISC-028.; A default-disabled authenticated Twilio inbound alternative and authoritative application rule fence are now locally verified; these do not prove provider digest enforcement or repair the observed live ACL failure.",
+    "tests": "One bounded non-PSTN INVITE from the owned VM outside the allowlist received200OK; signed ingress bound exact trunk/rule/session. Containment readback proves zero dispatch rules and no active probe room.; Local candidate79a4a84: combined314 passed; later handler/dispatcher/provider87 passed; official-vector handler25 passed; transfer13 passed; actual PostgreSQL4 passed under platform_voice; isolated TLS/Caddy6 routes passed. Counts overlap and must not be summed. Final independent run35 passed (17 gate/isolation probes plus18 tracked real-loopback cases); no provider calls.",
+    "evidence": "docs/readiness/poc-rescue-local/VOICE.md; .artifacts/poc-rescue-local/voice-carrier-routing.json; docs/readiness/poc-rescue-local/LIVE-ACTIVATION.md; PROTOUCH-INBOUND-ACL-FAILURE.md; INBOUND-PEER-REVIEW.md; TWILIO-INBOUND-SIGNED-ROUTING.md; .artifacts/poc-rescue-local/twilio-inbound-peer-final-79a4a84.json",
+    "revision": "Live 60f26bfe1775997da1fb5159ec9e09a08246068b; schema 9e43a5b02d81 (139 revisions); deployed 2026-10-04T23:06Z; Local candidate 79a4a84d1df4e00bad2e7821b5673c102bba55b5; independent test checkpoint 8e1a0a0. Last verified live baseline for this review: 60f26bf, schema 9e43a5b02d81. No new deployment or live inbound acceptance claimed.",
     "blocker": "Live provider ACL enforcement failed despite configuration readback. Inbound remains contained and unavailable; project enablement or another provider cause is not established.",
-    "next_action": "Obtain verified provider ACL enforcement or review an authenticated alternative; repeat a bounded rejected-source test before carrier cutover.",
+    "next_action": "Complete exact-image verification and the reviewed authenticated-inbound provider admission gates before any carrier cutover; retain containment until actual evidence exists.",
     "evidence_history": [
       {
         "as_of": "Before October5 live60f26bf evidence refresh",
@@ -2322,6 +2322,17 @@
           "next_action": "Wire durable real provisioning under reviewed provider plan, then verify both real DIDs against active tenant and published agent."
         },
         "reason": "Preserve prior local/baseline evidence while distinguishing current deployment, controlled outbound success and remaining provider gates."
+      },
+      {
+        "as_of": "Before October5 authenticated inbound candidate79a4a84 local verification",
+        "superseded_fields": {
+          "fix": "A real restricted inbound trunk and DID-specific dispatch rule were prepared, but a source outside all eight configured carrier CIDRs was admitted. Removed the new rule and restored the simulator DID marker by audited CAS; carrier origination never switched. Containment depends on provider dispatch-rule removal. The simulator marker did not enforce admission on live60f; the probe session failed during startup. Missing authoritative dispatch-rule validation is tracked separately as DISC-028.",
+          "tests": "One bounded non-PSTN INVITE from the owned VM outside the allowlist received200OK; signed ingress bound exact trunk/rule/session. Containment readback proves zero dispatch rules and no active probe room.",
+          "evidence": "docs/readiness/poc-rescue-local/VOICE.md; .artifacts/poc-rescue-local/voice-carrier-routing.json; docs/readiness/poc-rescue-local/LIVE-ACTIVATION.md; PROTOUCH-INBOUND-ACL-FAILURE.md",
+          "revision": "Live 60f26bfe1775997da1fb5159ec9e09a08246068b; schema 9e43a5b02d81 (139 revisions); deployed 2026-10-04T23:06Z",
+          "next_action": "Obtain verified provider ACL enforcement or review an authenticated alternative; repeat a bounded rejected-source test before carrier cutover."
+        },
+        "reason": "Preserve prior live failure/containment and partial local state; candidate verification does not establish a new deployed revision or provider acceptance."
       }
     ]
   },
@@ -2342,9 +2353,9 @@
     "live": "FIXED_UNVERIFIED",
     "required_verification": "Retain exact acceptance; local SDK/fake media, real PostgreSQL and synthetic real-model evidence are distinct from provider call/listening acceptance.",
     "fix": "Narrow public Caddy route/network repair owned by root; Python signature, replay and durable ownership preserved.",
-    "tests": "Dispatcher webhook tests plus real DB test_phase5_dispatcher_webhooks.py; voice-merged-memory-db31 passed0skip across6files.; LiveKit Console signed room_started EV_eugWmGhovZmm reached public /livekit/webhook, returned200 and durable processed in one attempt at22:46:34Z; unsigned request returned401. Controlled outbound calls also produced provider ingress.",
-    "evidence": "docs/readiness/poc-rescue-local/VOICE.md; .artifacts/poc-rescue-local/voice-merged-memory-db.log; docs/readiness/poc-rescue-local/LIVE-ACTIVATION.md",
-    "revision": "Live 60f26bfe1775997da1fb5159ec9e09a08246068b; schema 9e43a5b02d81 (139 revisions); deployed 2026-10-04T23:06Z",
+    "tests": "Dispatcher webhook tests plus real DB test_phase5_dispatcher_webhooks.py; voice-merged-memory-db31 passed0skip across6files.; LiveKit Console signed room_started EV_eugWmGhovZmm reached public /livekit/webhook, returned200 and durable processed in one attempt at22:46:34Z; unsigned request returned401. Controlled outbound calls also produced provider ingress.; Local candidate79a4a84: combined314 passed; later handler/dispatcher/provider87 passed; official-vector handler25 passed; transfer13 passed; actual PostgreSQL4 passed under platform_voice; isolated TLS/Caddy6 routes passed. Counts overlap and must not be summed. Final independent run35 passed (17 gate/isolation probes plus18 tracked real-loopback cases); no provider calls.",
+    "evidence": "docs/readiness/poc-rescue-local/VOICE.md; .artifacts/poc-rescue-local/voice-merged-memory-db.log; docs/readiness/poc-rescue-local/LIVE-ACTIVATION.md; INBOUND-PEER-REVIEW.md; TWILIO-INBOUND-SIGNED-ROUTING.md; .artifacts/poc-rescue-local/twilio-inbound-peer-final-79a4a84.json",
+    "revision": "Live 60f26bfe1775997da1fb5159ec9e09a08246068b; schema 9e43a5b02d81 (139 revisions); deployed 2026-10-04T23:06Z; Local candidate 79a4a84d1df4e00bad2e7821b5673c102bba55b5; independent test checkpoint 8e1a0a0. Last verified live baseline for this review: 60f26bf, schema 9e43a5b02d81. No new deployment or live inbound acceptance claimed.",
     "blocker": "Live authenticated ingress and unsigned rejection are verified; a dedicated live duplicate/replay launch-denial test for the full acceptance has not been recorded.",
     "next_action": "Retain provider event receipts; verify bounded live duplicate/replay behavior separately without enabling the contained inbound route.",
     "evidence_history": [
@@ -2359,6 +2370,15 @@
           "next_action": "Append root Docker/Caddy evidence; verify signed provider callback through deployed public endpoint with durable duplicate receipt."
         },
         "reason": "Preserve prior local/baseline evidence while distinguishing current deployment, controlled outbound success and remaining provider gates."
+      },
+      {
+        "as_of": "Before October5 authenticated inbound candidate79a4a84 local verification",
+        "superseded_fields": {
+          "tests": "Dispatcher webhook tests plus real DB test_phase5_dispatcher_webhooks.py; voice-merged-memory-db31 passed0skip across6files.; LiveKit Console signed room_started EV_eugWmGhovZmm reached public /livekit/webhook, returned200 and durable processed in one attempt at22:46:34Z; unsigned request returned401. Controlled outbound calls also produced provider ingress.",
+          "evidence": "docs/readiness/poc-rescue-local/VOICE.md; .artifacts/poc-rescue-local/voice-merged-memory-db.log; docs/readiness/poc-rescue-local/LIVE-ACTIVATION.md",
+          "revision": "Live 60f26bfe1775997da1fb5159ec9e09a08246068b; schema 9e43a5b02d81 (139 revisions); deployed 2026-10-04T23:06Z"
+        },
+        "reason": "Preserve prior live failure/containment and partial local state; candidate verification does not establish a new deployed revision or provider acceptance."
       }
     ]
   },
@@ -4214,10 +4234,10 @@
     "live": "BLOCKED",
     "required_verification": "Retain exact acceptance; local SDK/fake media, real PostgreSQL and synthetic real-model evidence are distinct from provider call/listening acceptance.",
     "fix": "Inbound preparation failed its negative-source ACL enforcement test and was contained; original DID simulator marker restored and carrier origination unchanged. Containment depends on provider dispatch-rule removal. The simulator marker did not enforce admission on live60f; the probe session failed during startup. Missing authoritative dispatch-rule validation is tracked separately as DISC-028.",
-    "tests": "Zero real inbound calls per DID; source/DB/provider-read checks are not the20-call acceptance.",
-    "evidence": "docs/readiness/poc-rescue-local/VOICE.md; .artifacts/poc-rescue-local/voice-carrier-routing.json; docs/readiness/poc-rescue-local/LIVE-ACTIVATION.md; PROTOUCH-INBOUND-ACL-FAILURE.md",
-    "revision": "Live 60f26bfe1775997da1fb5159ec9e09a08246068b; schema 9e43a5b02d81 (139 revisions); deployed 2026-10-04T23:06Z",
-    "blocker": "Provider inbound ACL enforcement is unresolved;20 successful real inbound calls perDID and Hebrew listening review remain absent.",
+    "tests": "Zero real inbound calls per DID; source/DB/provider-read checks are not the20-call acceptance.; Local candidate79a4a84: combined314 passed; later handler/dispatcher/provider87 passed; official-vector handler25 passed; transfer13 passed; actual PostgreSQL4 passed under platform_voice; isolated TLS/Caddy6 routes passed. Counts overlap and must not be summed. Final independent run35 passed (17 gate/isolation probes plus18 tracked real-loopback cases); no provider calls.",
+    "evidence": "docs/readiness/poc-rescue-local/VOICE.md; .artifacts/poc-rescue-local/voice-carrier-routing.json; docs/readiness/poc-rescue-local/LIVE-ACTIVATION.md; PROTOUCH-INBOUND-ACL-FAILURE.md; INBOUND-PEER-REVIEW.md; TWILIO-INBOUND-SIGNED-ROUTING.md; .artifacts/poc-rescue-local/twilio-inbound-peer-final-79a4a84.json",
+    "revision": "Live 60f26bfe1775997da1fb5159ec9e09a08246068b; schema 9e43a5b02d81 (139 revisions); deployed 2026-10-04T23:06Z; Local candidate 79a4a84d1df4e00bad2e7821b5673c102bba55b5; independent test checkpoint 8e1a0a0. Last verified live baseline for this review: 60f26bf, schema 9e43a5b02d81. No new deployment or live inbound acceptance claimed.",
+    "blocker": "Provider inbound ACL enforcement is unresolved;20 successful real inbound calls perDID and Hebrew listening review remain absent.; The completed local authenticated-inbound implementation does not substitute for actual provider admission or the required per-DID call/listening evidence.",
     "next_action": "Close the inbound security blocker and all voiceP0 first, then run authorized20-call-per-DID acceptance. The successful outbound call is not part of that denominator.",
     "evidence_history": [
       {
@@ -4230,6 +4250,16 @@
           "next_action": "Close all voiceP0, then run authorized20call/DID acceptance with callIDs, active tenant/agent/version, audio and finalized session evidence."
         },
         "reason": "Preserve prior local/baseline evidence while distinguishing current deployment, controlled outbound success and remaining provider gates."
+      },
+      {
+        "as_of": "Before October5 authenticated inbound candidate79a4a84 local verification",
+        "superseded_fields": {
+          "tests": "Zero real inbound calls per DID; source/DB/provider-read checks are not the20-call acceptance.",
+          "evidence": "docs/readiness/poc-rescue-local/VOICE.md; .artifacts/poc-rescue-local/voice-carrier-routing.json; docs/readiness/poc-rescue-local/LIVE-ACTIVATION.md; PROTOUCH-INBOUND-ACL-FAILURE.md",
+          "revision": "Live 60f26bfe1775997da1fb5159ec9e09a08246068b; schema 9e43a5b02d81 (139 revisions); deployed 2026-10-04T23:06Z",
+          "blocker": "Provider inbound ACL enforcement is unresolved;20 successful real inbound calls perDID and Hebrew listening review remain absent."
+        },
+        "reason": "Preserve prior live failure/containment and partial local state; candidate verification does not establish a new deployed revision or provider acceptance."
       }
     ]
   },
@@ -5446,10 +5476,10 @@
     "local": "VERIFIED_LOCAL",
     "live": "FIXED_UNVERIFIED",
     "required_verification": "Separate source/unit, actual DB/container, provider-read and live-call evidence; local stubs cannot certify carrier or cross-channel acceptance.",
-    "fix": "Verified grant selects tenant; immutable route binds tenant/account_ref/trunk_id/from_number/address. Strict parser rejects inconsistent/duplicate bindings. Dial checks exact route and current LiveKit endpoint/allowed sender inventory and explicitly supplies sip_number; admission persists safe refs and rejects route changes on replay. E.164 normalization alone never authorizes route.",
-    "tests": "1293 current voice/agent/flow/provision tests passed with17 explicitly gated eval skips; those17 separately executed. 35 actual PostgreSQL voice tests and31 memory/knowledge/webhook/usage tests passed0skip; Initial provider inventory was read-only; later live acceptance is recorded separately. Unit SDK boundary tests and real DB admission fingerprint tests cover wrong sender/account/trunk replay.; Final controlled session0af0ed12 used outbound account_ref protouch-twilio and LiveKit trunk ST_Dc2P469Pn2ZU; Twilio receipt confirms the dedicated ProTouch trunk and exact approved sender/recipient. User confirmed receipt and Hebrew conversation.",
-    "evidence": "docs/readiness/poc-rescue-local/VOICE.md; docs/readiness/poc-rescue-local/PROTOUCH-OUTBOUND-PLAN.md; docs/readiness/poc-rescue-local/RUNBOOK.md; .artifacts/poc-rescue-local/live-voice-60f26bf-result.json; .artifacts/poc-rescue-local/live-voice-60f26bf-provider.json",
-    "revision": "Live 60f26bfe1775997da1fb5159ec9e09a08246068b; schema 9e43a5b02d81 (139 revisions); deployed 2026-10-04T23:06Z",
+    "fix": "Verified grant selects tenant; immutable route binds tenant/account_ref/trunk_id/from_number/address. Strict parser rejects inconsistent/duplicate bindings. Dial checks exact route and current LiveKit endpoint/allowed sender inventory and explicitly supplies sip_number; admission persists safe refs and rejects route changes on replay. E.164 normalization alone never authorizes route.; New inbound route binds account/DID/tenant/provider trunk and action-time REFER capability; explicit account_owned outbound provisioning verifies pinned PN/account/E164/voice capability without weakening runtime route ownership.",
+    "tests": "1293 current voice/agent/flow/provision tests passed with17 explicitly gated eval skips; those17 separately executed. 35 actual PostgreSQL voice tests and31 memory/knowledge/webhook/usage tests passed0skip; Initial provider inventory was read-only; later live acceptance is recorded separately. Unit SDK boundary tests and real DB admission fingerprint tests cover wrong sender/account/trunk replay.; Final controlled session0af0ed12 used outbound account_ref protouch-twilio and LiveKit trunk ST_Dc2P469Pn2ZU; Twilio receipt confirms the dedicated ProTouch trunk and exact approved sender/recipient. User confirmed receipt and Hebrew conversation.; Local candidate79a4a84: combined314 passed; later handler/dispatcher/provider87 passed; official-vector handler25 passed; transfer13 passed; actual PostgreSQL4 passed under platform_voice; isolated TLS/Caddy6 routes passed. Counts overlap and must not be summed. Final independent run35 passed (17 gate/isolation probes plus18 tracked real-loopback cases); no provider calls.",
+    "evidence": "docs/readiness/poc-rescue-local/VOICE.md; docs/readiness/poc-rescue-local/PROTOUCH-OUTBOUND-PLAN.md; docs/readiness/poc-rescue-local/RUNBOOK.md; .artifacts/poc-rescue-local/live-voice-60f26bf-result.json; .artifacts/poc-rescue-local/live-voice-60f26bf-provider.json; INBOUND-PEER-REVIEW.md; TWILIO-INBOUND-SIGNED-ROUTING.md; .artifacts/poc-rescue-local/twilio-inbound-peer-final-79a4a84.json",
+    "revision": "Live 60f26bfe1775997da1fb5159ec9e09a08246068b; schema 9e43a5b02d81 (139 revisions); deployed 2026-10-04T23:06Z; Local candidate 79a4a84d1df4e00bad2e7821b5673c102bba55b5; independent test checkpoint 8e1a0a0. Last verified live baseline for this review: 60f26bf, schema 9e43a5b02d81. No new deployment or live inbound acceptance claimed.",
     "blocker": "The controlled ProTouch outbound call used the reviewed account/trunk/sender binding and recipient-observed sender ending 4553. Full cross-tenant, replay and every-entry-point live acceptance remains separate; route metadata alone does not establish carrier tariff.",
     "next_action": "Retain exact provider and admission binding evidence; verify remaining authorization/replay scenarios without default-account fallback.",
     "evidence_history": [
@@ -5464,6 +5494,16 @@
           "next_action": "Provision reviewed separate ProTouch trunk without modifying Or-On, activate verified mapping and capture safe provider/request/recipient evidence."
         },
         "reason": "Preserve prior local/baseline evidence while distinguishing current deployment, controlled outbound success and remaining provider gates."
+      },
+      {
+        "as_of": "Before October5 authenticated inbound candidate79a4a84 local verification",
+        "superseded_fields": {
+          "fix": "Verified grant selects tenant; immutable route binds tenant/account_ref/trunk_id/from_number/address. Strict parser rejects inconsistent/duplicate bindings. Dial checks exact route and current LiveKit endpoint/allowed sender inventory and explicitly supplies sip_number; admission persists safe refs and rejects route changes on replay. E.164 normalization alone never authorizes route.",
+          "tests": "1293 current voice/agent/flow/provision tests passed with17 explicitly gated eval skips; those17 separately executed. 35 actual PostgreSQL voice tests and31 memory/knowledge/webhook/usage tests passed0skip; Initial provider inventory was read-only; later live acceptance is recorded separately. Unit SDK boundary tests and real DB admission fingerprint tests cover wrong sender/account/trunk replay.; Final controlled session0af0ed12 used outbound account_ref protouch-twilio and LiveKit trunk ST_Dc2P469Pn2ZU; Twilio receipt confirms the dedicated ProTouch trunk and exact approved sender/recipient. User confirmed receipt and Hebrew conversation.",
+          "evidence": "docs/readiness/poc-rescue-local/VOICE.md; docs/readiness/poc-rescue-local/PROTOUCH-OUTBOUND-PLAN.md; docs/readiness/poc-rescue-local/RUNBOOK.md; .artifacts/poc-rescue-local/live-voice-60f26bf-result.json; .artifacts/poc-rescue-local/live-voice-60f26bf-provider.json",
+          "revision": "Live 60f26bfe1775997da1fb5159ec9e09a08246068b; schema 9e43a5b02d81 (139 revisions); deployed 2026-10-04T23:06Z"
+        },
+        "reason": "Preserve prior live failure/containment and partial local state; candidate verification does not establish a new deployed revision or provider acceptance."
       }
     ]
   },
@@ -9091,12 +9131,25 @@
     "local": "NOT_CHECKED",
     "live": "BLOCKED",
     "required_verification": "Separate provider/live-call acceptance, exact deployed image, local regressions and remaining scenario-specific gates.",
-    "fix": "Contained the failed test by removing only the newly created inbound dispatch rule and restoring the original DID simulator marker through audited CAS. Carrier origination was never switched; outbound and Or-On preserved. Containment depends on provider dispatch-rule removal. The simulator marker did not enforce admission on live60f; the probe session failed during startup. Missing authoritative dispatch-rule validation is tracked separately as DISC-028.",
-    "tests": "One owned-VM non-PSTN INVITE outside all eight carrier CIDRs received200OK and signed exact-trunk/rule ingress. ACK/BYE ended probe. Provider readback confirms zero dispatch rules and no active probe room; allowed-address readback was not enforcement proof.",
-    "evidence": "PROTOUCH-INBOUND-ACL-FAILURE.md; docs/readiness/poc-rescue-local/LIVE-ACTIVATION.md; .artifacts/poc-rescue-local/protouch-negative-sip-acl-admission.json; .artifacts/poc-rescue-local/protouch-inbound-acl-containment.json",
-    "revision": "Live 60f26bfe1775997da1fb5159ec9e09a08246068b; schema 9e43a5b02d81 (139 revisions); deployed 2026-10-04T23:06Z",
+    "fix": "Contained the failed test by removing only the newly created inbound dispatch rule and restoring the original DID simulator marker through audited CAS. Carrier origination was never switched; outbound and Or-On preserved. Containment depends on provider dispatch-rule removal. The simulator marker did not enforce admission on live60f; the probe session failed during startup. Missing authoritative dispatch-rule validation is tracked separately as DISC-028.; A default-disabled authenticated Twilio inbound alternative and authoritative application rule fence are now locally verified; these do not prove provider digest enforcement or repair the observed live ACL failure.",
+    "tests": "One owned-VM non-PSTN INVITE outside all eight carrier CIDRs received200OK and signed exact-trunk/rule ingress. ACK/BYE ended probe. Provider readback confirms zero dispatch rules and no active probe room; allowed-address readback was not enforcement proof.; Local candidate79a4a84: combined314 passed; later handler/dispatcher/provider87 passed; official-vector handler25 passed; transfer13 passed; actual PostgreSQL4 passed under platform_voice; isolated TLS/Caddy6 routes passed. Counts overlap and must not be summed. Final independent run35 passed (17 gate/isolation probes plus18 tracked real-loopback cases); no provider calls.",
+    "evidence": "PROTOUCH-INBOUND-ACL-FAILURE.md; docs/readiness/poc-rescue-local/LIVE-ACTIVATION.md; .artifacts/poc-rescue-local/protouch-negative-sip-acl-admission.json; .artifacts/poc-rescue-local/protouch-inbound-acl-containment.json; INBOUND-PEER-REVIEW.md; TWILIO-INBOUND-SIGNED-ROUTING.md; .artifacts/poc-rescue-local/twilio-inbound-peer-final-79a4a84.json",
+    "revision": "Live 60f26bfe1775997da1fb5159ec9e09a08246068b; schema 9e43a5b02d81 (139 revisions); deployed 2026-10-04T23:06Z; Local candidate 79a4a84d1df4e00bad2e7821b5673c102bba55b5; independent test checkpoint 8e1a0a0. Last verified live baseline for this review: 60f26bf, schema 9e43a5b02d81. No new deployment or live inbound acceptance claimed.",
     "blocker": "Actual inbound ACL enforcement failed. Whether project enablement or another provider issue caused it is unconfirmed; containment is verified, secure inbound activation is not.",
-    "next_action": "Obtain provider-confirmed ACL enforcement or separately review an authenticated alternative, then repeat source-rejection proof before carrier cutover."
+    "next_action": "Complete exact-image verification and the reviewed authenticated-inbound provider admission gates before any carrier cutover; retain containment until actual evidence exists.",
+    "evidence_history": [
+      {
+        "as_of": "Before October5 authenticated inbound candidate79a4a84 local verification",
+        "superseded_fields": {
+          "fix": "Contained the failed test by removing only the newly created inbound dispatch rule and restoring the original DID simulator marker through audited CAS. Carrier origination was never switched; outbound and Or-On preserved. Containment depends on provider dispatch-rule removal. The simulator marker did not enforce admission on live60f; the probe session failed during startup. Missing authoritative dispatch-rule validation is tracked separately as DISC-028.",
+          "tests": "One owned-VM non-PSTN INVITE outside all eight carrier CIDRs received200OK and signed exact-trunk/rule ingress. ACK/BYE ended probe. Provider readback confirms zero dispatch rules and no active probe room; allowed-address readback was not enforcement proof.",
+          "evidence": "PROTOUCH-INBOUND-ACL-FAILURE.md; docs/readiness/poc-rescue-local/LIVE-ACTIVATION.md; .artifacts/poc-rescue-local/protouch-negative-sip-acl-admission.json; .artifacts/poc-rescue-local/protouch-inbound-acl-containment.json",
+          "revision": "Live 60f26bfe1775997da1fb5159ec9e09a08246068b; schema 9e43a5b02d81 (139 revisions); deployed 2026-10-04T23:06Z",
+          "next_action": "Obtain provider-confirmed ACL enforcement or separately review an authenticated alternative, then repeat source-rejection proof before carrier cutover."
+        },
+        "reason": "Preserve prior live failure/containment and partial local state; candidate verification does not establish a new deployed revision or provider acceptance."
+      }
+    ]
   },
   {
     "id": "DISC-028",
@@ -9110,15 +9163,100 @@
     "role": "Authorized operator/service principal and approved test recipient",
     "code": "services/py/dispatcher/src/dispatcher_runtime/persistence.py:PostgresVoiceRuntime.resolve_phone; packages/py/oron-dispatcher/src/oron_dispatcher/dispatcher.py:Dispatcher.handle_participant_joined; packages/py/oron-dispatcher/src/oron_dispatcher/tenancy_client.py:PhoneResolution",
     "discovery": "REPRODUCED",
-    "implementation": "FIXED_UNVERIFIED",
-    "local": "NOT_CHECKED",
+    "implementation": "VERIFIED_LOCAL",
+    "local": "VERIFIED_LOCAL",
     "live": "BLOCKED",
     "required_verification": "Separate provider/live-call acceptance, exact deployed image, local regressions and remaining scenario-specific gates.",
-    "fix": "Repair in progress: retain authoritative dispatch-rule identity in PhoneResolution and verify exact signed sip.ruleID before session startup; authenticated Twilio inbound alternative remains local work only.",
-    "tests": "Source review confirmed resolve_phone omitted the database rule and handle_participant_joined resolved by DID alone. Earlier probe failure was a startup failure, not proof that a simulator marker denied admission. No passing repair regression or deployed fix is claimed in this refresh.",
-    "evidence": "PROTOUCH-INBOUND-ACL-FAILURE.md; docs/readiness/poc-rescue-local/LIVE-ACTIVATION.md; .artifacts/poc-rescue-local/protouch-negative-sip-acl-admission.json; .artifacts/poc-rescue-local/twilio-programmable-inbound-review.json",
-    "revision": "Live 60f26bfe1775997da1fb5159ec9e09a08246068b; schema 9e43a5b02d81 (139 revisions); deployed 2026-10-04T23:06Z",
-    "blocker": "Current live60f lacks the authoritative rule check. Provider dispatch-rule removal contains this path; the local admission repair and alternate inbound mode are not yet verified or activated.",
-    "next_action": "Verify negative missing/wrong/simulator rule and cross-tenant fixtures, review the exact admission boundary, then obtain scoped deployment and live rejection proof before carrier cutover."
+    "fix": "Preserve authoritative dispatch_rule_id; require exact signed real SDR identity before session/contact/agent startup. Configured TwiML routes additionally verify canonical DID, tenant and signed trunk. Resolve only active tenants and owned flows through existing platform_voice capabilities, without new grants. Missing rule quarantines without room teardown to preserve restarted outbound legs.",
+    "tests": "Independent red fixtures reproduced all four missing/foreign/simulator rule admissions. The same fixtures now refuse before session/launch; tracked dispatcher tests also cover exact trunk/tenant, disabled mode and canonical DID. Actual PostgreSQL4 cases verify active/disabled tenant, foreign/missing flow, unknown DID and tenant-context reset. Local candidate79a4a84: combined314 passed; later handler/dispatcher/provider87 passed; official-vector handler25 passed; transfer13 passed; actual PostgreSQL4 passed under platform_voice; isolated TLS/Caddy6 routes passed. Counts overlap and must not be summed. Final independent run35 passed (17 gate/isolation probes plus18 tracked real-loopback cases); no provider calls.",
+    "evidence": "PROTOUCH-INBOUND-ACL-FAILURE.md; docs/readiness/poc-rescue-local/LIVE-ACTIVATION.md; .artifacts/poc-rescue-local/protouch-negative-sip-acl-admission.json; .artifacts/poc-rescue-local/twilio-programmable-inbound-review.json; INBOUND-PEER-REVIEW.md; TWILIO-INBOUND-SIGNED-ROUTING.md; .artifacts/poc-rescue-local/twilio-inbound-peer-final-79a4a84.json",
+    "revision": "Local candidate 79a4a84d1df4e00bad2e7821b5673c102bba55b5; independent test checkpoint 8e1a0a0. Last verified live baseline for this review: 60f26bf, schema 9e43a5b02d81. No new deployment or live inbound acceptance claimed.",
+    "blocker": "Source repair is locally verified, but this review has no deployment or actual-provider admission acceptance for candidate79a4a84. The prior live path remains contained by provider rule removal.",
+    "next_action": "Verify the exact built/deployed candidate and reviewed provider negative/positive admission controls before carrier cutover; retain all broader inbound acceptance gates.",
+    "evidence_history": [
+      {
+        "as_of": "Before October5 authenticated inbound candidate79a4a84 local verification",
+        "superseded_fields": {
+          "implementation": "FIXED_UNVERIFIED",
+          "local": "NOT_CHECKED",
+          "fix": "Repair in progress: retain authoritative dispatch-rule identity in PhoneResolution and verify exact signed sip.ruleID before session startup; authenticated Twilio inbound alternative remains local work only.",
+          "tests": "Source review confirmed resolve_phone omitted the database rule and handle_participant_joined resolved by DID alone. Earlier probe failure was a startup failure, not proof that a simulator marker denied admission. No passing repair regression or deployed fix is claimed in this refresh.",
+          "evidence": "PROTOUCH-INBOUND-ACL-FAILURE.md; docs/readiness/poc-rescue-local/LIVE-ACTIVATION.md; .artifacts/poc-rescue-local/protouch-negative-sip-acl-admission.json; .artifacts/poc-rescue-local/twilio-programmable-inbound-review.json",
+          "revision": "Live 60f26bfe1775997da1fb5159ec9e09a08246068b; schema 9e43a5b02d81 (139 revisions); deployed 2026-10-04T23:06Z",
+          "blocker": "Current live60f lacks the authoritative rule check. Provider dispatch-rule removal contains this path; the local admission repair and alternate inbound mode are not yet verified or activated.",
+          "next_action": "Verify negative missing/wrong/simulator rule and cross-tenant fixtures, review the exact admission boundary, then obtain scoped deployment and live rejection proof before carrier cutover."
+        },
+        "reason": "Preserve prior live failure/containment and partial local state; candidate verification does not establish a new deployed revision or provider acceptance."
+      }
+    ]
+  },
+  {
+    "id": "DISC-029",
+    "priority": "P2",
+    "area": "new-discovery",
+    "source": "Independent review of the not-yet-deployed authenticated inbound candidate, October5 2026",
+    "requirement": "Malformed non-ASCII Twilio signatures raised a server exception instead of a controlled denial.",
+    "acceptance": "Malformed signatures return403 before database or provider reads and never receive credential-bearing XML.",
+    "tenant": "ProTouch; Or-On configuration preserved",
+    "channel": "voice",
+    "role": "Authorized operator/service principal and approved test recipient",
+    "code": "packages/py/oron-dispatcher/src/oron_dispatcher/twilio_inbound.py:TwilioInboundHandler.respond; packages/py/oron-dispatcher/tests/test_twilio_inbound.py",
+    "discovery": "REPRODUCED",
+    "implementation": "VERIFIED_LOCAL",
+    "local": "VERIFIED_LOCAL",
+    "live": "FIXED_UNVERIFIED",
+    "required_verification": "Separate provider/live-call acceptance, exact deployed image, local regressions and remaining scenario-specific gates.",
+    "fix": "Validate the complete ASCII Base64 signature shape before constant-time comparison.",
+    "tests": "Independent 28-character non-ASCII header reproduced TypeError before correction; now403 with zero resolver/provider awaits. Tracked ASGI malformed-signature case and final independent run pass.",
+    "evidence": "INBOUND-PEER-REVIEW.md; TWILIO-INBOUND-SIGNED-ROUTING.md; .artifacts/poc-rescue-local/twilio-inbound-peer-final-79a4a84.json",
+    "revision": "Local candidate 79a4a84d1df4e00bad2e7821b5673c102bba55b5; independent test checkpoint 8e1a0a0. Last verified live baseline for this review: 60f26bf, schema 9e43a5b02d81. No new deployment or live inbound acceptance claimed.",
+    "blocker": "Corrected and verified locally in candidate79a4a84. No new deployment or actual-provider acceptance is claimed; this new-handler defect was discovered before release and is not asserted to exist in live60f.",
+    "next_action": "Retain local regression evidence; complete exact-image and reviewed live ingress/admission acceptance with the candidate before enabling the new route."
+  },
+  {
+    "id": "DISC-030",
+    "priority": "P1",
+    "area": "new-discovery",
+    "source": "Independent review of the not-yet-deployed authenticated inbound candidate, October5 2026",
+    "requirement": "Valid fragmented Twilio Call JSON was rejected before EOF, preventing authenticated inbound routing.",
+    "acceptance": "Read valid fragmented responses through EOF within time/size bounds; refuse mismatched identities, terminal states, redirects and invalid bodies.",
+    "tenant": "ProTouch; Or-On configuration preserved",
+    "channel": "voice",
+    "role": "Authorized operator/service principal and approved test recipient",
+    "code": "packages/py/oron-dispatcher/src/oron_dispatcher/twilio_inbound.py:TwilioCallLookup.active; packages/py/oron-dispatcher/tests/test_twilio_call_lookup.py",
+    "discovery": "REPRODUCED",
+    "implementation": "VERIFIED_LOCAL",
+    "local": "VERIFIED_LOCAL",
+    "live": "FIXED_UNVERIFIED",
+    "required_verification": "Separate provider/live-call acceptance, exact deployed image, local regressions and remaining scenario-specific gates.",
+    "fix": "Replace one partial read plus at_eof check with bounded chunk iteration through response completion.",
+    "tests": "A real local HTTP server split valid JSON after nine bytes and reproduced a false RuntimeError.18 tracked loopback cases now pass, covering3 active states, exact identity mismatches, terminal states, redirects/status failure, oversize and malformed bodies.",
+    "evidence": "INBOUND-PEER-REVIEW.md; TWILIO-INBOUND-SIGNED-ROUTING.md; .artifacts/poc-rescue-local/twilio-inbound-peer-final-79a4a84.json",
+    "revision": "Local candidate 79a4a84d1df4e00bad2e7821b5673c102bba55b5; independent test checkpoint 8e1a0a0. Last verified live baseline for this review: 60f26bf, schema 9e43a5b02d81. No new deployment or live inbound acceptance claimed.",
+    "blocker": "Corrected and verified locally in candidate79a4a84. No new deployment or actual-provider acceptance is claimed; this new-handler defect was discovered before release and is not asserted to exist in live60f.",
+    "next_action": "Retain local regression evidence; complete exact-image and reviewed live ingress/admission acceptance with the candidate before enabling the new route."
+  },
+  {
+    "id": "DISC-031",
+    "priority": "P0",
+    "area": "new-discovery",
+    "source": "Independent review of the not-yet-deployed authenticated inbound candidate, October5 2026",
+    "requirement": "Equivalent formatted DID bypassed the configured inbound trunk and transport-capability check.",
+    "acceptance": "Resolution and authorization use one canonical DID; foreign trunk/tenant or disabled route cannot start sessions or enable unsupported REFER.",
+    "tenant": "ProTouch; Or-On configuration preserved",
+    "channel": "voice",
+    "role": "Authorized operator/service principal and approved test recipient",
+    "code": "packages/py/oron-dispatcher/src/oron_dispatcher/dispatcher.py:Dispatcher.handle_participant_joined; packages/py/oron-dispatcher/tests/test_dispatcher.py",
+    "discovery": "REPRODUCED",
+    "implementation": "VERIFIED_LOCAL",
+    "local": "VERIFIED_LOCAL",
+    "live": "FIXED_UNVERIFIED",
+    "required_verification": "Separate provider/live-call acceptance, exact deployed image, local regressions and remaining scenario-specific gates.",
+    "fix": "Reuse the canonical DID for configured route lookup and call context after authoritative resolution; retain exact rule, tenant and trunk checks before startup.",
+    "tests": "Independent formatted-DID fixture resolved the configured canonical number but admitted a foreign trunk before repair. The same fixture now refuses with zero sessions.begin/launch calls; tracked canonical-DID, trunk, tenant and disabled-route cases pass.",
+    "evidence": "INBOUND-PEER-REVIEW.md; TWILIO-INBOUND-SIGNED-ROUTING.md; .artifacts/poc-rescue-local/twilio-inbound-peer-final-79a4a84.json",
+    "revision": "Local candidate 79a4a84d1df4e00bad2e7821b5673c102bba55b5; independent test checkpoint 8e1a0a0. Last verified live baseline for this review: 60f26bf, schema 9e43a5b02d81. No new deployment or live inbound acceptance claimed.",
+    "blocker": "Corrected and verified locally in candidate79a4a84. No new deployment or actual-provider acceptance is claimed; this new-handler defect was discovered before release and is not asserted to exist in live60f.",
+    "next_action": "Retain local regression evidence; complete exact-image and reviewed live ingress/admission acceptance with the candidate before enabling the new route."
   }
 ]
