@@ -39,6 +39,38 @@ if [[ ${actual_archive_sha256} != "${EXPECTED_ARCHIVE_SHA256}" ]]; then
   echo "Release archive checksum mismatch" >&2
   exit 1
 fi
+
+# Serialize and preserve private recovery state before changing any config.
+for unit in oron-dev.service oron-dev-backup.service oron-dev-backup.timer; do
+  [[ -f /etc/systemd/system/${unit} ]] || {
+    echo "Existing DEV systemd unit required; provisioning is not authorized" >&2
+    exit 1
+  }
+done
+exec 9>"${LOCK_FILE}"
+if ! flock --nonblock 9; then
+  echo "Another deployment is already running" >&2
+  exit 1
+fi
+available_bytes="$(df --output=avail -B1 "${ORON_ROOT}" | tail -n 1 | tr -d ' ')"
+[[ ${available_bytes} =~ ^[0-9]+$ && ${available_bytes} -ge 5368709120 ]] || {
+  echo "At least 5 GiB free disk is required; no automatic pruning is permitted" >&2
+  exit 1
+}
+readonly RECOVERY_DIR="$(mktemp -d "${ORON_ROOT}/pre-deploy-${COMMIT_SHA}.XXXXXX")"
+chmod 0700 "${RECOVERY_DIR}"
+docker ps --all --format '{{.ID}} {{.Image}} {{.Status}}' >"${RECOVERY_DIR}/containers.txt"
+cp -a "${SHARED_DIR}/config" "${RECOVERY_DIR}/config"
+cp -a "${SHARED_DIR}/deployment.env" "${RECOVERY_DIR}/deployment.env"
+for path in "${ORON_ROOT}/current" "${ORON_ROOT}/deployed-commit"; do
+  [[ ! -e ${path} && ! -L ${path} ]] || cp -a "${path}" "${RECOVERY_DIR}/"
+done
+for unit in oron-dev.service oron-dev-backup.service oron-dev-backup.timer caddy.service; do
+  systemctl is-enabled "$unit" >"${RECOVERY_DIR}/${unit}.enabled" 2>&1 || true
+  systemctl is-active "$unit" >"${RECOVERY_DIR}/${unit}.active" 2>&1 || true
+  [[ ! -f /etc/systemd/system/${unit} ]] || cp -a "/etc/systemd/system/${unit}" "${RECOVERY_DIR}/"
+done
+
 for file in \
   "${SHARED_DIR}/deployment.env" \
   "${SHARED_DIR}/config/postgres-password.txt" \
@@ -180,11 +212,6 @@ fi
   exit 1
 }
 
-exec 9>"${LOCK_FILE}"
-if ! flock --nonblock 9; then
-  echo "Another deployment is already running" >&2
-  exit 1
-fi
 
 # The Python voice runtime uses UID 100 while the Node web and messaging
 # runtimes use GID 1000. The root is private to those principals; each adapter
@@ -320,8 +347,8 @@ if [[ -d ${RELEASE_DIR} ]]; then
   if [[ ${previous_release} == "${RELEASE_DIR}" ]]; then
     rm -rf -- "${STAGING_DIR}"
   else
-    rm -rf -- "${RELEASE_DIR}"
-    mv -- "${STAGING_DIR}" "${RELEASE_DIR}"
+    echo "Existing inactive release directory preserved; inspect before retry" >&2
+    exit 1
   fi
 else
   mv -- "${STAGING_DIR}" "${RELEASE_DIR}"
@@ -416,11 +443,14 @@ if [[ -n ${previous_release} ]]; then
   done
 fi
 compose config --quiet
-# Immutable commit tags otherwise accumulate until the host cannot extract the
-# next release. Docker never prunes an image referenced by a running or stopped
-# container, so the live release and its rollback path remain available while
-# obsolete, unreferenced release images are reclaimed before the pull.
-docker image prune --all --force >/dev/null
+# Preserve canonical installed units; refuse drift rather than silently overwrite.
+for unit in oron-dev.service oron-dev-backup.service oron-dev-backup.timer; do
+  cmp -s "${RELEASE_DIR}/infra/deployment/systemd/${unit}" "/etc/systemd/system/${unit}" || {
+    echo "Existing systemd unit differs from the reviewed release; explicit repair required: ${unit}" >&2
+    exit 1
+  }
+done
+# Preserve all images; insufficient disk aborts instead of pruning.
 # Pull each immutable application image explicitly before inspecting its digest
 # or stopping the currently running application. Compose can omit profiled
 # one-shot services such as the migrator from an aggregate pull even when their
@@ -437,6 +467,23 @@ for image in "${release_images[@]}"; do
   fi
 done
 compose up --detach postgres
+# Refuse bootstrap and reserve space for backup before stopping admission.
+user_count="$(compose exec --no-TTY postgres psql --username platform_migrator \
+  --dbname "${DEPLOYMENT_DATABASE_NAME}" --tuples-only --no-align \
+  --command 'SELECT count(*) FROM users')"
+[[ ${user_count} =~ ^[0-9]+$ && ${user_count} -gt 0 ]] || {
+  echo "Existing nonempty identity database required; bootstrap is not authorized" >&2
+  exit 1
+}
+database_bytes="$(compose exec --no-TTY postgres psql --username platform_migrator \
+  --dbname "${DEPLOYMENT_DATABASE_NAME}" --tuples-only --no-align \
+  --command 'SELECT pg_database_size(current_database())')"
+available_bytes="$(df --output=avail -B1 "${ORON_ROOT}" | tail -n 1 | tr -d ' ')"
+[[ ${database_bytes} =~ ^[0-9]+$ && ${available_bytes} =~ ^[0-9]+$ &&
+   ${available_bytes} -ge $((database_bytes * 2 + 1073741824)) ]] || {
+  echo "Insufficient disk for retained database backup and migration reserve" >&2
+  exit 1
+}
 if [[ -n ${previous_release} ]]; then
   # Stop request admission first. The messaging worker drains its current effect
   # under its 90-second grace period; the dispatcher remains up for active calls.
@@ -473,17 +520,9 @@ if [[ -n ${previous_release} ]]; then
     exit 1
   }
 fi
+printf '%s\n' "$schema_head_before_migration" >"${RECOVERY_DIR}/schema-before.txt"
 schema_migration_started=true
 compose --profile release run --rm migrator
-
-# Bootstrap is deliberately gated by the authoritative identity table. The
-# bootstrap program independently rechecks the entire empty-database invariant.
-user_count="$(compose exec --no-TTY postgres psql --username platform_migrator \
-  --dbname "${DEPLOYMENT_DATABASE_NAME}" --tuples-only --no-align \
-  --command 'SELECT count(*) FROM users')"
-if [[ ${user_count} == 0 ]]; then
-  compose --profile bootstrap run --rm bootstrap-owner
-fi
 
 if systemctl is-active --quiet caddy; then
   native_caddy_was_active=true
@@ -548,25 +587,10 @@ install -m 0750 -o root -g root "${RELEASE_DIR}/scripts/deploy-dev.sh" \
   "${ORON_ROOT}/scripts/deploy-dev.sh"
 install -m 0750 -o root -g root "${RELEASE_DIR}/scripts/backup-dev.sh" \
   "${ORON_ROOT}/scripts/backup-dev.sh"
-for unit in oron-dev.service oron-dev-backup.service oron-dev-backup.timer; do
-  install -m 0644 -o root -g root "${RELEASE_DIR}/infra/deployment/systemd/${unit}" \
-    "/etc/systemd/system/${unit}"
-done
-systemctl daemon-reload
-systemctl enable oron-dev.service oron-dev-backup.timer >/dev/null
-systemctl disable caddy >/dev/null 2>&1 || true
-systemctl start oron-dev-backup.timer
+# Preserve existing systemd units, enablement and timer state. Units must already
+# follow /opt/oron-dev/current; provisioning or unit repair is a separate action.
 deployment_succeeded=true
 trap - EXIT ERR
 
-# Keep the active release and the four newest predecessors. Never touch shared data.
-mapfile -t old_releases < <(find "${RELEASES_DIR}" -mindepth 1 -maxdepth 1 -type d \
-  ! -name '.staging-*' -printf '%T@ %p\n' | sort -nr | tail -n +6 | cut -d' ' -f2-)
-for old_release in "${old_releases[@]}"; do
-  resolved="$(readlink -f -- "${old_release}")"
-  if [[ ${resolved} == "${RELEASES_DIR}/"* && ${resolved} != "${RELEASE_DIR}" ]]; then
-    rm -rf -- "${resolved}"
-  fi
-done
-docker image prune --all --force >/dev/null
+# Preserve all release directories and images for explicit recovery/maintenance.
 echo "Successfully deployed ${COMMIT_SHA}"

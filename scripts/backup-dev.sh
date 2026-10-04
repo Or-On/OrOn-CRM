@@ -179,8 +179,7 @@ sha256sum "${temporary_archive}" | sed "s#${temporary_archive}#$(basename "${des
 chmod 0600 "${temporary_archive}" "${temporary_checksum}"
 mv -- "${temporary_archive}" "${destination}"
 mv -- "${temporary_checksum}" "${destination_checksum}"
-find "${BACKUP_DIR}" -maxdepth 1 -type f \
-  \( -name '*.backup.tar.gz' -o -name '*.backup.tar.gz.sha256' \) -mtime +7 -delete
+# Retention requires a separately approved maintenance action. Preserve all backups.
 if [[ ${database_only} == true ]]; then
   echo "Created pre-deploy database-only backup ${destination}"
 else

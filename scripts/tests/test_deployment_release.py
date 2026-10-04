@@ -195,7 +195,7 @@ def test_ci_uses_one_ephemeral_os_login_key_for_the_complete_dev_deploy() -> Non
             command = f"{command} {lines[index].strip()}"
         transfer_commands.append(command)
 
-    assert len(transfer_commands) == 3
+    assert len(transfer_commands) == 5
     for command in transfer_commands:
         assert '--ssh-key-file="${ORON_DEPLOY_SSH_KEY}"' in command
         assert "--tunnel-through-iap" in command
@@ -222,7 +222,9 @@ def test_ci_cleans_up_ephemeral_key_and_keeps_portable_dev_entry_points() -> Non
     cleanup = workflow[workflow.index("- name: Remove ephemeral DEV SSH key") :]
 
     assert "if: always()" in cleanup
-    assert "continue-on-error: true" in cleanup
+    assert "continue-on-error: true" not in cleanup
+    assert "check-oslogin-cleanup.py" in cleanup
+    assert "trap" in cleanup
     assert "gcloud compute os-login ssh-keys remove" in cleanup
     assert '--key-file="${key}.pub"' in cleanup
     assert 'rm -f "${key}" "${key}.pub"' in cleanup
@@ -257,15 +259,15 @@ def test_release_images_carry_and_enforce_source_revision() -> None:
         assert "org.opencontainers.image.revision" in dockerfile.read_text(encoding="utf-8")
 
 
-def test_deploy_reclaims_obsolete_tagged_images_before_pulling_release() -> None:
+def test_deploy_preserves_images_and_requires_disk_reserve() -> None:
     deploy = DEPLOY.read_text(encoding="utf-8")
     pull = 'docker pull "${release_images[${key}]}"'
     prune = "docker image prune --all --force"
 
-    assert deploy.count(prune) == 2
-    assert deploy.index(prune) < deploy.index(pull)
+    assert prune not in deploy
     assert "docker system prune" not in deploy
-    assert "referenced by a running or stopped" in deploy
+    assert "5368709120" in deploy
+    assert deploy.index("5368709120") < deploy.index(pull)
 
 
 def test_control_api_image_contains_the_opt_in_voice_evaluation_runtime() -> None:
@@ -319,7 +321,8 @@ def test_backup_covers_database_private_objects_and_checksums() -> None:
     assert "database.dump" in backup
     assert "objects.tar" in backup
     assert "SHA256SUMS" in backup
-    assert "*.backup.tar.gz.sha256" in backup
+    assert "destination_checksum" in backup
+    assert "-delete" not in backup
 
 
 def test_private_objects_are_shared_only_with_the_services_that_process_them() -> None:
@@ -355,7 +358,8 @@ def test_deploy_rejects_inconsistent_field_service_private_storage_configuration
     assert "ARTIFACTS_BACKEND must be local" in deploy
     assert "ARTIFACTS_LOCAL_ROOT is invalid" in deploy
     assert "Private runtime configuration must be owned by root" in deploy
-    assert deploy.index("read_private_config_value") < deploy.index('exec 9>"${LOCK_FILE}"')
+    assert deploy.index('exec 9>"${LOCK_FILE}"') < deploy.index("set_private_config_value")
+    assert deploy.index("BLIND_INDEX_KEY must match") < deploy.index("docker pull")
 
 
 def test_messaging_worker_health_is_a_release_gate() -> None:

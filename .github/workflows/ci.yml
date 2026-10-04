@@ -3,6 +3,11 @@ name: CI
 on:
   workflow_dispatch:
     inputs:
+      expected_commit:
+        description: Exact reviewed 40-character commit required for DEV deployment
+        required: false
+        default: ""
+        type: string
       deploy_dev:
         description: Publish images and deploy GCP DEV after all checks pass
         required: false
@@ -284,6 +289,19 @@ jobs:
       - run: docker build --build-arg ORON_SOURCE_REVISION="$GITHUB_SHA" --file infra/images/messaging-worker.Dockerfile --tag or-on/messaging-worker:ci .
       - run: docker build --build-arg ORON_SOURCE_REVISION="$GITHUB_SHA" --file infra/images/dispatcher.Dockerfile --tag or-on/dispatcher:ci .
       - run: docker build --build-arg ORON_SOURCE_REVISION="$GITHUB_SHA" --file infra/images/migrator.Dockerfile --tag or-on/migrator:ci .
+      - name: Verify exact approved deployment commit
+        if: >-
+          github.ref == 'refs/heads/main' &&
+          github.event_name == 'workflow_dispatch' && inputs.deploy_dev == true
+        shell: bash
+        env:
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ && "$GITHUB_SHA" == "$EXPECTED_COMMIT" ]] || {
+            echo "Deployment refused: expected_commit must equal the exact workflow commit" >&2
+            exit 1
+          }
       - name: Authenticate to Google Cloud for immutable DEV images
         if: >-
           github.ref == 'refs/heads/main' &&
@@ -343,6 +361,19 @@ jobs:
       url: https://dev.or-on.io
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Verify exact approved deployment commit
+        if: >-
+          github.ref == 'refs/heads/main' &&
+          github.event_name == 'workflow_dispatch' && inputs.deploy_dev == true
+        shell: bash
+        env:
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ && "$GITHUB_SHA" == "$EXPECTED_COMMIT" ]] || {
+            echo "Deployment refused: expected_commit must equal the exact workflow commit" >&2
+            exit 1
+          }
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
@@ -447,6 +478,19 @@ jobs:
             --ssh-key-file="${ORON_DEPLOY_SSH_KEY}" \
             --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" \
             --command="set -e; trap 'rm -f ${remote_archive} ${remote_deployer}' EXIT; test \"\$(sha256sum '${remote_deployer}' | cut -d' ' -f1)\" = '${DEPLOYER_SHA256}'; sudo bash '${remote_deployer}' '${GITHUB_SHA}' '${remote_archive}' '${ARCHIVE_SHA256}'"
+      - name: Verify actual deployed images and database schema
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          remote_verify="/tmp/oron-dev-verify-${GITHUB_SHA}.sh"
+          gcloud compute scp --quiet --tunnel-through-iap \
+            --ssh-key-file="${ORON_DEPLOY_SSH_KEY}" \
+            --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" \
+            scripts/verify-dev-runtime.sh "${DEV_VM}:${remote_verify}"
+          gcloud compute ssh "${DEV_VM}" --quiet --tunnel-through-iap \
+            --ssh-key-file="${ORON_DEPLOY_SSH_KEY}" \
+            --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" \
+            --command="set -e; trap 'rm -f ${remote_verify}' EXIT; sudo bash '${remote_verify}' '${GITHUB_SHA}'"
       - name: Verify the public DEV endpoint
         shell: bash
         run: |
@@ -456,14 +500,18 @@ jobs:
           curl --fail --silent --show-error --max-time 15 https://dev.or-on.io/login >/dev/null
       - name: Remove ephemeral DEV SSH key
         if: always()
-        continue-on-error: true
         shell: bash
         run: |
           set -Eeuo pipefail
           key="${ORON_DEPLOY_SSH_KEY:-${RUNNER_TEMP}/oron-dev-deploy}"
+          trap 'rm -f "${key}" "${key}.pub"' EXIT
           if [[ -f "${key}.pub" ]]; then
-            gcloud compute os-login ssh-keys remove \
-              --key-file="${key}.pub" --project="${GCP_PROJECT_ID}" --quiet || \
-              echo "OS Login key removal failed; the 30-minute TTL remains in force" >&2
+            removal_status=0
+            gcloud compute os-login ssh-keys remove --key-file="${key}.pub" \
+              --project="${GCP_PROJECT_ID}" --quiet || removal_status=$?
+            gcloud compute os-login ssh-keys list --project="${GCP_PROJECT_ID}" \
+              --format=json >"${RUNNER_TEMP}/oron-oslogin-after.json"
+            python3 scripts/check-oslogin-cleanup.py "${key}.pub" "${RUNNER_TEMP}/oron-oslogin-after.json"
+            echo "Temporary OS Login key absence verified (remove exit ${removal_status})"
           fi
           rm -f "${key}" "${key}.pub"
