@@ -71,6 +71,37 @@ for unit in oron-dev.service oron-dev-backup.service oron-dev-backup.timer caddy
   [[ ! -f /etc/systemd/system/${unit} ]] || cp -a "/etc/systemd/system/${unit}" "${RECOVERY_DIR}/"
 done
 
+restore_private_configuration() {
+  # Preflight changes permissions, TTS configuration and a derived sweeper file.
+  # Restore the exact private snapshot before restarting any previous image.
+  cp -a "${RECOVERY_DIR}/config/." "${SHARED_DIR}/config/" || return
+  cp -a "${RECOVERY_DIR}/deployment.env" "${SHARED_DIR}/deployment.env" || return
+  if [[ -e ${RECOVERY_DIR}/deployed-commit ]]; then
+    cp -a "${RECOVERY_DIR}/deployed-commit" "${ORON_ROOT}/deployed-commit" || return
+  else
+    rm -f -- "${ORON_ROOT}/deployed-commit" || return
+  fi
+  if [[ ! -e ${RECOVERY_DIR}/config/sweeper.env ]]; then
+    rm -f -- "${SWEEPER_CONFIG}" || return
+  fi
+}
+
+rollback_preflight() {
+  local exit_code=$?
+  trap - EXIT ERR INT TERM
+  [[ ${exit_code} -ne 0 ]] || exit_code=1
+  set +e
+  if ! restore_private_configuration; then
+    echo "Private configuration rollback failed; operator inspection required" >&2
+  fi
+  exit "${exit_code}"
+}
+# The later application rollback handler replaces this guard. Keep failed
+# admission/config/archive checks recoverable before that handler exists.
+trap rollback_preflight EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
 for file in \
   "${SHARED_DIR}/deployment.env" \
   "${SHARED_DIR}/config/postgres-password.txt" \
@@ -239,14 +270,18 @@ from pathlib import Path, PurePosixPath
 
 expected_files = {
     "images.env",
+    "db/contracts/schema-manifest.json",
     "infra/caddy/Caddyfile.deployment",
     "infra/compose/deployment.yaml",
     "infra/deployment/systemd/oron-dev-backup.service",
     "infra/deployment/systemd/oron-dev-backup.timer",
+    "infra/deployment/systemd/oron-dev-recovery.service",
+    "infra/deployment/systemd/oron-dev-recovery.timer",
     "infra/deployment/systemd/oron-dev.service",
     "scripts/backup-dev.sh",
     "scripts/deploy-dev.sh",
     "scripts/restore-dev-backup.py",
+    "scripts/recover_unhealthy.py",
 }
 expected_directories = {
     str(parent)
@@ -374,13 +409,17 @@ schema_migration_started=false
 schema_head_before_migration=""
 rollback() {
   local exit_code=$?
-  trap - EXIT ERR
+  trap - EXIT ERR INT TERM
   [[ ${deployment_succeeded} == true ]] && return
   # Explicit exits (including the active-call safety refusal) do not run ERR.
   # An unexpected clean exit is also an incomplete deployment.
   [[ ${exit_code} -ne 0 ]] || exit_code=1
   set +e
   echo "Deployment of ${COMMIT_SHA} failed; attempting application rollback" >&2
+  if ! restore_private_configuration; then
+    echo "Private configuration rollback failed; prior applications were not restarted" >&2
+    exit "${exit_code}"
+  fi
   if [[ -n ${previous_release} && -d ${previous_release} ]]; then
     # A successful DDL migration can revoke/replace runtime contracts. Never
     # restart an older image against an advanced or unreadable schema. PostgreSQL

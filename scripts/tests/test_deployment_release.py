@@ -14,14 +14,18 @@ ROOT = Path(__file__).resolve().parents[2]
 DEPLOY = ROOT / "scripts" / "deploy-dev.sh"
 EXPECTED = {
     "images.env",
+    "db/contracts/schema-manifest.json",
     "infra/caddy/Caddyfile.deployment",
     "infra/compose/deployment.yaml",
     "infra/deployment/systemd/oron-dev-backup.service",
     "infra/deployment/systemd/oron-dev-backup.timer",
+    "infra/deployment/systemd/oron-dev-recovery.service",
+    "infra/deployment/systemd/oron-dev-recovery.timer",
     "infra/deployment/systemd/oron-dev.service",
     "scripts/backup-dev.sh",
     "scripts/deploy-dev.sh",
     "scripts/restore-dev-backup.py",
+    "scripts/recover_unhealthy.py",
 }
 
 

@@ -372,11 +372,26 @@ def _inbound(to_number):
     )
 
 
-def test_the_dialed_number_says_which_rate_applies():
-    """Toll-free is 8x local, and the dialed DID is the only thing that says which
-    one was called."""
-    assert carrier_for(_inbound("+9721800600600")) is Carrier.TELNYX_IL_TOLLFREE
-    assert carrier_for(_inbound("+97236774000")) is Carrier.TELNYX_IL_LOCAL
+@pytest.mark.parametrize("number", ["+9721800600600", "+97236774000", "+15555550198"])
+def test_dialed_number_type_cannot_prove_telnyx_carrier_or_tariff(number):
+    usage = CallUsage(call_seconds=600, carrier=carrier_for(_inbound(number)))
+    cost = price(usage, PriceBook())
+    assert usage.carrier == Carrier.UNKNOWN
+    assert cost.telephony == 0
+    assert "telephony:unknown" in cost.unpriced
+
+
+def test_sip_metadata_and_logical_account_names_do_not_authorize_a_rate():
+    ctx = _inbound("+97236774000").model_copy(
+        update={
+            "raw_metadata": {
+                "carrier": "telnyx",
+                "sip.trunkName": "telnyx-local",
+                "outbound_route": {"account_ref": "twilio-fixture", "trunk_id": "ST_fixture"},
+            }
+        }
+    )
+    assert carrier_for(ctx) is Carrier.UNKNOWN
 
 
 @pytest.mark.parametrize(

@@ -54,6 +54,7 @@ timeout() { printf 'DEADLINE %s %s\\n' "$1" "$2" >&2; shift 2; "$@"; }
 ln() { printf 'LINK %s\\n' "$*"; }
 mv() { printf 'PUBLISH %s\\n' "$*"; }
 systemctl() { printf 'NATIVE %s\\n' "$*"; }
+restore_private_configuration() { printf 'CONFIG_RESTORED\\n'; }
 """.replace("ROLLBACK_STATUS", str(rollback_status))
         .replace("SCHEMA_HEAD", schema_head)
         .replace("SCHEMA_STATUS", str(schema_status))
@@ -87,6 +88,20 @@ def test_failed_rollback_preserves_original_error_and_reports_unproven_readiness
     assert "did not prove readiness (status 124)" in result.stderr
     assert result.stdout.count("RESTORE ") == 1
     assert "PUBLISH " in result.stdout
+
+
+def test_private_snapshot_restores_before_any_previous_application_restart() -> None:
+    result = _run("exit 17")
+    assert result.returncode == 17
+    assert result.stdout.index("CONFIG_RESTORED") < result.stdout.index("RESTORE ")
+
+
+def test_private_restore_failure_blocks_previous_image_restart() -> None:
+    result = _run("restore_private_configuration() { return 3; }\nexit 17")
+    assert result.returncode == 17
+    assert "prior applications were not restarted" in result.stderr
+    assert "RESTORE " not in result.stdout
+    assert "PUBLISH " not in result.stdout
 
 
 def test_successful_deployment_does_not_restore_on_exit() -> None:

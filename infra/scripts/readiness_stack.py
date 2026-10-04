@@ -20,7 +20,7 @@ import tarfile
 import time
 import urllib.request
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 ROOT = Path(__file__).resolve().parents[2]
 ARTIFACTS = ROOT / ".artifacts/readiness/post-implementation-stack"
@@ -293,14 +293,34 @@ def smoke() -> dict:
 
 
 def recovery() -> dict:
+    from cryptography.exceptions import InvalidTag
+    from oron_sessions.crypto import LocalFieldCipher
+
     start = time.monotonic()
     tenant, contact = str(uuid4()), str(uuid4())
+    session, flow = str(uuid4()), str(uuid4())
+    # This key is newly generated for fictional data and stored separately from
+    # every dump/archive. Never load a production/developer key for this drill.
+    key_file = ARTIFACTS / f"recovery-fixture-key-{session}.bin"
+    descriptor = os.open(key_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "wb") as output:
+        output.write(secrets.token_bytes(32))
+    expected_number = "+15555550198"
+    encrypted_number = LocalFieldCipher(key_file.read_bytes()).encrypt(
+        UUID(tenant), expected_number
+    )
+    if not re.fullmatch(r"v1:[A-Za-z0-9+/=]+", encrypted_number):
+        raise ValueError("Unexpected fictional ciphertext format")
     # Fictional data ONLY in this script's fixed disposable Compose project.
     sql(
         f"INSERT INTO tenants(id,name,slug) VALUES ('{tenant}',"  # noqa: S608
         f"'Recovery fixture','recovery-{tenant}'); "
         f"INSERT INTO crm.contacts(id,tenant_id,name) VALUES ('{contact}','{tenant}',"
-        "'Fictional recovery contact');"
+        "'Fictional recovery contact'); "
+        "INSERT INTO public.sessions(session_id,tenant_id,provider,direction,room,status,"
+        "flow_id,from_number,ended_at) "
+        f"VALUES('{session}','{tenant}','livekit','inbound','recovery-{session}',"  # noqa: S608
+        f"'ended','{flow}','{encrypted_number}',CURRENT_TIMESTAMP);"
     )
     archive = ARTIFACTS / f"recovery-{time.time_ns()}.dump"
     with archive.open("xb") as output:
@@ -363,6 +383,25 @@ def recovery() -> dict:
     # psql emits command tags around the one row count; require both restored/context parity.
     if sql(scoped) != sql(scoped, database):
         raise ValueError("Restored runtime-role RLS result differs")
+    restored_number = sql(
+        f"SELECT from_number FROM public.sessions WHERE session_id='{session}'",  # noqa: S608
+        database,
+    )
+    restored_cipher = LocalFieldCipher(key_file.read_bytes())
+    if restored_cipher.decrypt(UUID(tenant), restored_number) != expected_number:
+        raise ValueError("Restored encrypted fictional field could not be decrypted")
+    # Correct plaintext alone does not prove tenant binding survived restoration.
+    for cipher, identity in (
+        (restored_cipher, uuid4()),
+        (LocalFieldCipher(secrets.token_bytes(32)), UUID(tenant)),
+    ):
+        rejected = False
+        try:
+            cipher.decrypt(identity, restored_number)
+        except InvalidTag:
+            rejected = True
+        if not rejected:
+            raise ValueError("Restored ciphertext accepted a wrong key or tenant")
     object_source = ARTIFACTS / "data/objects/readiness" / f"{contact}.bin"
     object_source.parent.mkdir(parents=True, exist_ok=True)
     object_source.write_bytes(b"fictional-private-object-recovery-fixture")
@@ -386,8 +425,13 @@ def recovery() -> dict:
         "object_sha256": object_checksum,
         "scope": (
             "schema/table counts/head/forced RLS plus fictional contact content "
-            "and runtime-role RLS plus one synthetic private object"
+            "and runtime-role RLS plus encrypted fictional session field and one synthetic object"
         ),
+        "encrypted_field_decrypted": True,
+        "wrong_key_and_tenant_rejected": True,
+        "key_scope": "new fictional key retained separately from dump/archive; no production key",
+        "off_host_restore": False,
+        "production_key_escrow_verified": False,
         "workers_replayed": False,
     }
 

@@ -190,3 +190,25 @@ Owned source areas: `packages/py/oron-dispatcher`, selected
 `services/py/dispatcher`, and the admission test in
 `db/tests/postgres/test_voice_quality_runtime.py`. No TS CRM/web, schema,
 carrier or production mutations were made by this workstream.
+
+## Carrier-cost correction and image boundary — 2026-10-05
+
+PDF-088 inspection found that `oron_common.usage.carrier_for` assigned Telnyx
+rates to every inbound call solely from the dialed number's type. Actual trunk
+inventory instead identifies Twilio. `CallContext.provider` identifies LiveKit
+transport and supplies no authoritative carrier/tariff binding, so number type,
+country, trunk names and participant metadata cannot authorize a Telnyx price.
+New calls now keep the carrier unknown and expose `telephony:unknown` in the
+unpriced list when usage is nonzero. Existing explicitly recorded carrier fields
+and the historical price book remain unchanged. Reviewed account/trunk references
+remain available in outbound admission records; no Twilio rate was invented.
+
+`uv run --no-sync pytest packages/py/oron-common/tests
+packages/py/oron-agent/tests/test_cost.py -q` passed **61 tests, zero skips** in
+10.37 seconds. Regressions cover inbound local/toll-free/foreign numbers and
+spoofed metadata; Ruff passed. Source and local regression are verified. A real
+carrier usage reconciliation and an authoritative reviewed rate binding remain
+outstanding. The three Python images previously tested from `525be698` predate
+this correction and must be rebuilt from the final candidate; their artifact
+and health evidence remains historical. Local restore evidence and its off-host
+and production-key limitations are documented in `RUNBOOK.md`.

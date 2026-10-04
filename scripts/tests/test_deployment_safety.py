@@ -1,8 +1,11 @@
 """Exercise reviewed deployment admission and cleanup with synthetic inputs."""
 
 import importlib.util
+import json
 import os
+import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -139,18 +142,20 @@ def test_units_require_exact_reviewed_bytes_before_admission_stop():
 
 
 @pytest.mark.parametrize(
-    "revision,head,success",
+    "revision,head,expected_head,success",
     [
-        ("a" * 40, "fc6e851f3ba0", True),
-        ("b" * 40, "fc6e851f3ba0", False),
-        ("a" * 40, "9b2e7a4c6d18", False),
+        ("a" * 40, "fc6e851f3ba0", "fc6e851f3ba0", True),
+        ("a" * 40, "7c91e5a2b640", "7c91e5a2b640", True),
+        ("b" * 40, "fc6e851f3ba0", "fc6e851f3ba0", False),
+        ("a" * 40, "9b2e7a4c6d18", "fc6e851f3ba0", False),
     ],
 )
-def test_runtime_receipt_rejects_wrong_revision_or_schema(revision, head, success):
+def test_runtime_receipt_rejects_wrong_revision_or_schema(revision, head, expected_head, success):
     source = (ROOT / "scripts/verify-dev-runtime.sh").read_text()
     fragment = source[source.index("for pair in ") :]
     harness = f"""set -Eeuo pipefail
 expected_commit={"a" * 40}
+expected_schema_head={expected_head}
 DEPLOYMENT_DATABASE_NAME=synthetic
 WEB_IMAGE=synthetic
 CONTROL_API_IMAGE=synthetic
@@ -174,3 +179,23 @@ docker() {{
         [BASH, "-s"], input=harness + fragment, text=True, capture_output=True, timeout=5
     )
     assert (result.returncode == 0) is success
+
+
+@pytest.mark.parametrize("head", ["8d32f4a91c70", "", "bad;echo", ["8d32f4a91c70"], None])
+def test_runtime_receipt_reads_one_valid_head_from_release_manifest(tmp_path, head):
+    source = (ROOT / "scripts/verify-dev-runtime.sh").read_text()
+    loader = re.search(r"expected_schema_head=.*?<<'PY'\n(.*?)\nPY", source, re.DOTALL)
+    assert loader is not None
+    manifest = tmp_path / "schema-manifest.json"
+    manifest.write_text(json.dumps({"alembic_head": head}))
+    result = subprocess.run(  # noqa: S603 - actual read-only manifest loader, synthetic file
+        [sys.executable, "-", str(manifest)],
+        input=loader.group(1),
+        text=True,
+        capture_output=True,
+        timeout=5,
+        check=False,
+    )
+    assert (result.returncode == 0) is (head == "8d32f4a91c70")
+    if result.returncode == 0:
+        assert result.stdout.strip() == head

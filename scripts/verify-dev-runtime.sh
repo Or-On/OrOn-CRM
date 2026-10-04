@@ -14,6 +14,18 @@ source "${root}/shared/deployment.env"
 source "${release}/images.env"
 compose=(docker compose --env-file "${root}/shared/deployment.env"
   --env-file "${release}/images.env" --file "${release}/infra/compose/deployment.yaml")
+expected_schema_head="$(python3 - "${release}/db/contracts/schema-manifest.json" <<'PY'
+import json
+import re
+import sys
+from pathlib import Path
+
+head = json.loads(Path(sys.argv[1]).read_text())["alembic_head"]
+if not isinstance(head, str) or not re.fullmatch(r"[0-9a-f]{12}", head):
+    raise SystemExit("Release manifest must contain one valid Alembic head")
+print(head)
+PY
+)"
 for pair in "web WEB_IMAGE" "control-api CONTROL_API_IMAGE" \
   "messaging-worker MESSAGING_WORKER_IMAGE" "dispatcher DISPATCHER_IMAGE" "sweeper MIGRATOR_IMAGE"; do
   read -r service key <<<"$pair"
@@ -31,5 +43,5 @@ worker="$("${compose[@]}" ps --quiet messaging-worker)"
 head="$("${compose[@]}" exec --no-TTY postgres psql --username platform_migrator \
   --dbname "$DEPLOYMENT_DATABASE_NAME" --tuples-only --no-align \
   --command "SELECT string_agg(version_num, ',' ORDER BY version_num) FROM alembic_version")"
-[[ "$head" == fc6e851f3ba0 ]] || exit 1
+[[ "$head" == "$expected_schema_head" ]] || exit 1
 printf 'VERIFIED deployed_commit=%s schema=%s worker=healthy\n' "$expected_commit" "$head"

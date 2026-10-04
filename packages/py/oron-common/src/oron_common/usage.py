@@ -10,10 +10,9 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from uuid import UUID, uuid4
 
-import phonenumbers
 from pydantic import BaseModel, Field, PrivateAttr, computed_field
 
-from oron_common.context import CallContext, Direction
+from oron_common.context import CallContext
 
 
 class Carrier(StrEnum):
@@ -28,22 +27,15 @@ class Carrier(StrEnum):
 
 
 def carrier_for(ctx: CallContext) -> Carrier:
-    """Which rate the PSTN leg bills at, read off the number the caller dialed.
+    """Keep an unproven PSTN carrier unpriced.
 
-    Only the dialed number says whether the leg was toll-free, and libphonenumber
-    already knows Israel's toll-free ranges — hence no prefix table here. Outbound
-    bills by destination, which this book does not price, so it stays UNKNOWN
-    rather than being attributed to the DID we happened to dial from.
+    CallContext.provider identifies the LiveKit transport, not its SIP carrier.
+    The DID's country/type, trunk name and untrusted participant metadata cannot
+    prove a Telnyx contract. Reviewed outbound account/trunk references remain in
+    the admission record, but no authoritative priced carrier binding is supplied
+    here yet. Historical explicitly recorded carriers remain priceable on read.
     """
-    if ctx.direction is not Direction.INBOUND or not ctx.to_number:
-        return Carrier.UNKNOWN
-    try:
-        dialed = phonenumbers.parse(ctx.to_number, None)
-    except phonenumbers.NumberParseException:
-        return Carrier.UNKNOWN
-    if phonenumbers.number_type(dialed) is phonenumbers.PhoneNumberType.TOLL_FREE:
-        return Carrier.TELNYX_IL_TOLLFREE
-    return Carrier.TELNYX_IL_LOCAL
+    return Carrier.UNKNOWN
 
 
 class CallUsage(BaseModel):
@@ -58,9 +50,8 @@ class CallUsage(BaseModel):
     """
 
     call_seconds: float = 0.0
-    # Nothing in the pipeline reports the carrier, so it comes from `carrier_for`
-    # off the dialed number. Recorded on the row rather than re-derived on read:
-    # the number is encrypted at rest and the trunk can move.
+    # Preserve an explicitly recorded carrier rather than re-derive from an
+    # encrypted phone number or today's trunk. Unknown is never assumed Telnyx.
     carrier: str = Carrier.UNKNOWN
     llm_model: str = ""
     llm_prompt_tokens: int = 0
@@ -235,7 +226,7 @@ def price(usage: CallUsage, book: PriceBook) -> CallCost:
     if (rate := book.telephony_per_minute.get(usage.carrier)) is not None:
         cost.telephony = minutes * rate
     elif usage.call_seconds:
-        cost.unpriced.append(usage.carrier)
+        cost.unpriced.append(usage.carrier or "telephony:unknown")
 
     if llm := book.llm.get(usage.llm_model):
         # Clamped: a provider reporting more cache hits than prompt tokens must not
