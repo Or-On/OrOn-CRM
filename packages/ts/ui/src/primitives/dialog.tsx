@@ -108,8 +108,10 @@ export function Dialog({
         event.preventDefault();
         onClose();
       }}
-      onClose={() => {
-        if (open) onClose();
+      onClose={(event) => {
+        // close() queues a native event. A later showModal() may already have
+        // reopened this element when that old event reaches React.
+        if (open && !event.currentTarget.open) onClose();
       }}
       onPointerDown={(event) => {
         const bounds = event.currentTarget.getBoundingClientRect();

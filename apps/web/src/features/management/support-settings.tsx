@@ -27,6 +27,7 @@ import { useState, type SyntheticEvent } from "react";
 
 import { errorMessage } from "../../i18n/error-message";
 import { crmMutation } from "../crm";
+import { useMutationFocus } from "../keyboard";
 
 const factors = ["fullName", "phone", "nationalId", "customerNumber"] as const;
 
@@ -123,6 +124,7 @@ export function TenantSupportSettings({
     readonly TenantTerminologyEntry[]
   >(profile.terminology?.length ? profile.terminology : [emptyTerm()]);
   const [pending, setPending] = useState(false);
+  const rememberFocus = useMutationFocus(pending);
   const [feedback, setFeedback] = useState<{
     readonly message: string;
     readonly tone: "critical" | "positive";
@@ -130,6 +132,8 @@ export function TenantSupportSettings({
 
   async function save(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (pending) return;
+    rememberFocus();
     const form = new FormData(event.currentTarget);
     setPending(true);
     setFeedback(undefined);

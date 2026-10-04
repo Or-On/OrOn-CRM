@@ -216,6 +216,103 @@ async def test_voice_recording_is_tenant_authorized_and_streamed_as_wav() -> Non
     assert repository.principal.tenant_id == tenant_id
 
 
+@pytest.mark.parametrize(
+    ("range_header", "status", "content", "content_range"),
+    [
+        ("bytes=0-3", 206, b"RIFF", "bytes 0-3/16"),
+        ("bytes=12-", 206, b"wave", "bytes 12-15/16"),
+        ("bytes=-4", 206, b"wave", "bytes 12-15/16"),
+        ("bytes=0-999", 206, b"RIFFfixture-wave", "bytes 0-15/16"),
+        ("bytes=-999", 206, b"RIFFfixture-wave", "bytes 0-15/16"),
+        ("bytes=16-", 416, b"", "bytes */16"),
+        ("bytes=-0", 416, b"", "bytes */16"),
+        ("bytes=5-3", 416, b"", "bytes */16"),
+        ("bytes=0-1,4-5", 200, b"RIFFfixture-wave", None),
+        ("bytes=abc-def", 200, b"RIFFfixture-wave", None),
+        ("bytes=", 200, b"RIFFfixture-wave", None),
+        ("bytes=" + "9" * 200 + "-", 200, b"RIFFfixture-wave", None),
+    ],
+)
+async def test_recording_single_byte_ranges(
+    range_header: str, status: int, content: bytes, content_range: str | None
+) -> None:
+    app = create_app(
+        settings=_settings(),
+        database_probe=FakeProbe(),
+        voice_repository=FakeVoiceRepository(),
+        assertion_verifier=ServiceAssertionVerifier(SECRET),
+    )
+    async with (
+        app.router.lifespan_context(app),
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client,
+    ):
+        response = await client.get(
+            f"/api/v1/voice/sessions/{uuid4()}/recording",
+            headers={"authorization": f"Bearer {_token()}", "range": range_header},
+        )
+    assert response.status_code == status
+    assert response.content == content
+    assert response.headers.get("content-range") == content_range
+    assert response.headers["content-length"] == str(len(content))
+    assert response.headers["accept-ranges"] == "bytes"
+    assert response.headers["cache-control"] == "private, no-store"
+
+
+async def test_range_does_not_bypass_authorization_or_expose_missing_artifact_size() -> None:
+    class MissingRecordingRepository(FakeVoiceRepository):
+        async def get_recording(
+            self, principal: ServicePrincipal, session_id: UUID
+        ) -> bytes | None:
+            self.principal = principal
+            return None
+
+    repository = MissingRecordingRepository()
+    app = create_app(
+        settings=_settings(),
+        database_probe=FakeProbe(),
+        voice_repository=repository,
+        assertion_verifier=ServiceAssertionVerifier(SECRET),
+    )
+    async with (
+        app.router.lifespan_context(app),
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client,
+    ):
+        path = f"/api/v1/voice/sessions/{uuid4()}/recording"
+        denied = await client.get(path, headers={"range": "bytes=999999-"})
+        assert repository.principal is None
+        missing = await client.get(
+            path, headers={"authorization": f"Bearer {_token()}", "range": "bytes=999999-"}
+        )
+    assert denied.status_code == 401
+    assert missing.status_code == 404
+    assert "content-range" not in denied.headers
+    assert "content-range" not in missing.headers
+
+
+async def test_recording_if_range_without_validator_returns_complete_representation() -> None:
+    app = create_app(
+        settings=_settings(),
+        database_probe=FakeProbe(),
+        voice_repository=FakeVoiceRepository(),
+        assertion_verifier=ServiceAssertionVerifier(SECRET),
+    )
+    async with (
+        app.router.lifespan_context(app),
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client,
+    ):
+        response = await client.get(
+            f"/api/v1/voice/sessions/{uuid4()}/recording",
+            headers={
+                "authorization": f"Bearer {_token()}",
+                "range": "bytes=0-3",
+                "if-range": '"stale"',
+            },
+        )
+    assert response.status_code == 200
+    assert response.content == b"RIFFfixture-wave"
+    assert "content-range" not in response.headers
+
+
 async def test_artifact_verification_reports_states_not_a_stored_uri() -> None:
     tenant_id = uuid4()
     session_id = uuid4()

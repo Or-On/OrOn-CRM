@@ -5,13 +5,14 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated, Any, Literal, Protocol, cast
 from uuid import NAMESPACE_URL, UUID, uuid5
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from oron_common import E164, CallCost, CallUsage, Direction, PriceBook, price
 from oron_db import make_engine, make_sessionmaker, set_tenant
@@ -1224,21 +1225,47 @@ def create_voice_router(
     )
     async def get_voice_recording(
         session_id: UUID,
+        request: Request,
         principal: ServicePrincipal = Depends(require_voice_read),
         store: VoiceRepository = Depends(configured_repository),
     ) -> Response:
-        """Stream a tenant-authorized full-call WAV to the authenticated web BFF."""
+        """Serve full or single-range WAV bytes only after tenant authorization."""
         recording = await store.get_recording(principal, session_id)
         if recording is None:
             raise HTTPException(status_code=404, detail="voice recording not found")
-        return Response(
-            content=recording,
-            media_type="audio/wav",
-            headers={
-                "Cache-Control": "private, no-store",
-                "Content-Disposition": f'inline; filename="call-{session_id}.wav"',
-            },
+        headers = {
+            "Cache-Control": "private, no-store",
+            "Content-Disposition": f'inline; filename="call-{session_id}.wav"',
+            "Accept-Ranges": "bytes",
+        }
+        # Without a representation validator an If-Range cannot be matched;
+        # send the complete representation. Invalid/multiple ranges are ignored.
+        range_value = request.headers.get("range", "")
+        match = (
+            re.fullmatch(r"bytes=([0-9]{0,19})-([0-9]{0,19})", range_value)
+            if len(range_value) <= 64 and "if-range" not in request.headers
+            else None
         )
+        if match and (match[1] or match[2]):
+            size = len(recording)
+            if match[1]:
+                start = int(match[1])
+                end = min(int(match[2]), size - 1) if match[2] else size - 1
+            else:
+                suffix_size = int(match[2])
+                start = max(0, size - suffix_size)
+                end = size - 1
+            if start >= size or end < start:
+                headers["Content-Range"] = f"bytes */{size}"
+                return Response(status_code=416, headers=headers)
+            headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+            return Response(
+                content=recording[start : end + 1],
+                status_code=206,
+                media_type="audio/wav",
+                headers=headers,
+            )
+        return Response(content=recording, media_type="audio/wav", headers=headers)
 
     @router.get(
         "/sessions/{session_id}/artifacts",

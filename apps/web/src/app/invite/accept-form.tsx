@@ -4,6 +4,7 @@ import { Button, InlineFeedback, Input } from "@or-on/ui";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useState, type SyntheticEvent } from "react";
+import { useMutationFocus } from "../../features/keyboard";
 
 export function AcceptInvitationForm({
   existingAccount,
@@ -16,9 +17,12 @@ export function AcceptInvitationForm({
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
+  const rememberFocus = useMutationFocus(pending);
 
   async function accept(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (pending) return;
+    rememberFocus();
     setPending(true);
     setError(undefined);
     const data = new FormData(event.currentTarget);

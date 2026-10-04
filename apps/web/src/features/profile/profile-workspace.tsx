@@ -254,12 +254,19 @@ export function ProfileWorkspace({
 
   async function savePassword(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (pending) return;
     const form = event.currentTarget;
     const data = new FormData(form);
     if (data.get("newPassword") !== data.get("confirmPassword")) {
       setFeedback({ tone: "error", text: c.mismatch });
       return;
     }
+    const submitter = (event.nativeEvent as SubmitEvent).submitter;
+    submitterRef.current =
+      submitter instanceof HTMLButtonElement &&
+      document.activeElement === submitter
+        ? submitter
+        : null;
     setPending(true);
     setFeedback(undefined);
     try {

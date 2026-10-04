@@ -514,7 +514,7 @@ export function FieldOperationsSettings({
         {categories.map((category: AttachmentCategoryPolicy, index) => (
           <div
             className={styles.inlineRow}
-            key={`${category.key}-${String(index)}`}
+            key={`document-row-${String(index)}`}
           >
             <Input
               dir="ltr"

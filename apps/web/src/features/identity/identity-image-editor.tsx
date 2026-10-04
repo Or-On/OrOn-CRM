@@ -6,6 +6,7 @@ import { useRef, useState, type ChangeEvent } from "react";
 
 import { errorMessage } from "../../i18n/error-message";
 import { imageMutation } from "../crm";
+import { useMutationFocus } from "../keyboard";
 import { announceIdentityImageUpdate, IdentityImage } from "./identity-image";
 import { identityImageAccept } from "./image-types";
 
@@ -42,6 +43,7 @@ export function IdentityImageEditor({
     : source;
   const input = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState(false);
+  const rememberFocus = useMutationFocus(pending);
   const [feedback, setFeedback] = useState<{
     readonly tone: "error" | "success";
     readonly text: string;
@@ -56,6 +58,7 @@ export function IdentityImageEditor({
   }
 
   async function upload(event: ChangeEvent<HTMLInputElement>) {
+    if (pending) return;
     const file = event.target.files?.[0];
     if (file === undefined) return;
     if (
@@ -84,6 +87,8 @@ export function IdentityImageEditor({
   }
 
   async function remove() {
+    if (pending) return;
+    rememberFocus();
     setPending(true);
     setFeedback(undefined);
     try {
@@ -115,7 +120,10 @@ export function IdentityImageEditor({
           <button
             className="identity-image-editor__choose"
             disabled={pending}
-            onClick={() => input.current?.click()}
+            onClick={(event) => {
+              rememberFocus(event.currentTarget);
+              input.current?.click();
+            }}
             type="button"
           >
             <ImagePlus aria-hidden="true" size={15} />

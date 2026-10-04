@@ -13,6 +13,7 @@ import type {
 } from "@or-on/crm";
 import { Button, Checkbox, Input, Select, Textarea } from "@or-on/ui";
 import { crmMutation, crmRead } from "../crm";
+import { useMutationFocus } from "../keyboard";
 import { qualityCopy } from "./quality-copy";
 import { AgentAudioPreview } from "./agent-audio-preview";
 import { AgentProviderEvaluation } from "./agent-provider-evaluation";
@@ -55,6 +56,7 @@ export function AgentQualityWorkspace({
   const [data, setData] = useState<WorkspaceData>();
   const [selectedId, setSelectedId] = useState<string>();
   const [pending, setPending] = useState(false);
+  const rememberFocus = useMutationFocus(pending);
   const [error, setError] = useState(false);
   const [notice, setNotice] = useState("");
   const [evaluation, setEvaluation] = useState<AgentQualityEvaluation>();
@@ -102,6 +104,8 @@ export function AgentQualityWorkspace({
     data?.versions.find((version) => version.id === selectedId) ??
     data?.versions[0];
   async function run(work: () => Promise<void>) {
+    if (pending) return;
+    rememberFocus();
     setPending(true);
     setError(false);
     setNotice("");

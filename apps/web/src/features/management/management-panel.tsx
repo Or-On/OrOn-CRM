@@ -41,6 +41,7 @@ import {
 import Link from "next/link";
 import { useLocale, useTimeZone, useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
+import { useMutationFocus } from "../keyboard";
 import {
   useEffect,
   useMemo,
@@ -126,6 +127,7 @@ export function ManagementPanel({
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   useEffect(() => setActiveTab(initialTab), [initialTab]);
   const [pending, setPending] = useState(false);
+  const rememberMutationFocus = useMutationFocus(pending);
   const settingsSubmitterRef = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
     if (pending) return;
@@ -178,7 +180,13 @@ export function ManagementPanel({
     [settings?.timezone, supportedTimezones],
   );
 
-  async function execute(scope: FeedbackScope, operation: () => Promise<void>) {
+  async function execute(
+    scope: FeedbackScope,
+    operation: () => Promise<void>,
+    focusTarget?: HTMLElement,
+  ) {
+    if (pending) return;
+    rememberMutationFocus(focusTarget);
     setPending(true);
     setMessage(undefined);
     setMessageScope(scope);
@@ -255,6 +263,7 @@ export function ManagementPanel({
 
   async function changePassword(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (pending) return;
     const form = event.currentTarget;
     const data = new FormData(form);
     if (data.get("newPassword") !== data.get("confirmPassword")) {
@@ -263,6 +272,12 @@ export function ManagementPanel({
       setMessage(t("management.passwordMismatch"));
       return;
     }
+    const submitter = (event.nativeEvent as SubmitEvent).submitter;
+    settingsSubmitterRef.current =
+      submitter instanceof HTMLButtonElement &&
+      document.activeElement === submitter
+        ? submitter
+        : null;
     await execute("security", async () => {
       await crmMutation(
         "/api/account/password",
@@ -296,16 +311,24 @@ export function ManagementPanel({
     });
   }
 
-  async function changeRole(userId: string, role: TeamMember["role"]) {
-    await execute("team", async () => {
-      await crmMutation(
-        `/api/settings/members/${userId}`,
-        { role },
-        { method: "PATCH" },
-      );
-      setMessageTone("positive");
-      setMessage(t("management.roleSaved"));
-    });
+  async function changeRole(
+    userId: string,
+    role: TeamMember["role"],
+    select: HTMLSelectElement,
+  ) {
+    await execute(
+      "team",
+      async () => {
+        await crmMutation(
+          `/api/settings/members/${userId}`,
+          { role },
+          { method: "PATCH" },
+        );
+        setMessageTone("positive");
+        setMessage(t("management.roleSaved"));
+      },
+      select,
+    );
   }
 
   async function removeMember(member: TeamMember) {
@@ -1046,6 +1069,7 @@ export function ManagementPanel({
                             void changeRole(
                               member.userId,
                               event.target.value as TeamMember["role"],
+                              event.currentTarget,
                             )
                           }
                         >

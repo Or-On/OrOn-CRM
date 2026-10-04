@@ -160,6 +160,105 @@ const dossier: ServiceCaseDossier = {
 };
 
 describe("field-service UI contracts", () => {
+  it("restores the field-service settings submitter after a failed save and prevents duplicate pending saves", async () => {
+    let fail!: (reason: Error) => void;
+    state.crmMutation.mockReturnValue(
+      new Promise<{ feature: FieldServiceFeatureState }>((_resolve, reject) => {
+        fail = reject;
+      }),
+    );
+    render(
+      localized(<FieldServiceSettings initialState={feature} timezone="UTC" />),
+    );
+    const button = screen.getByRole("button", { name: "Save settings" });
+    const form = button.closest("form");
+    if (form === null) throw new Error("Settings form missing");
+    button.focus();
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+    expect(state.crmMutation).toHaveBeenCalledTimes(1);
+    button.blur();
+    fail(new Error("Synthetic unavailable"));
+    await waitFor(() =>
+      expect(screen.getByText("Synthetic unavailable")).toBeTruthy(),
+    );
+    await waitFor(() => expect(document.activeElement).toBe(button));
+  });
+  it("requests mandatory preparation only for the assigned technician session", async () => {
+    const visit: ServiceVisit = {
+      id: "50000000-0000-4000-8000-000000000001",
+      caseId: serviceCase.id,
+      appointmentId: null,
+      technicianId: "60000000-0000-4000-8000-000000000001",
+      visitNumber: 1,
+      status: "assigned",
+      arrivalAt: null,
+      departureAt: null,
+      durationSeconds: null,
+      arrivalSignatureObjectId: null,
+      departureSignatureObjectId: null,
+      arrivalIdentity: null,
+      departureIdentity: null,
+    };
+    const fetchPreparation = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          preparation: {
+            enabled: true,
+            acknowledged: false,
+            requirementsHash: "synthetic-requirements",
+            checklist: [],
+            checkedItems: [],
+            summary: {},
+          },
+        }),
+    });
+    vi.stubGlobal("fetch", fetchPreparation);
+    const workspace = (
+      isTechnician: boolean,
+      technicianId = visit.technicianId,
+    ) =>
+      localized(
+        <ServiceCaseWorkspace
+          canManage
+          canOperate
+          canReadVoice
+          isTechnician={isTechnician}
+          dossier={{ ...dossier, visits: [visit] }}
+          feature={feature}
+          linkCandidates={{ calls: [], conversations: [] }}
+          technicians={[]}
+          sessionTechnician={
+            isTechnician
+              ? {
+                  id: technicianId,
+                  fullName: "Synthetic technician",
+                  identityVerification: "verified",
+                }
+              : null
+          }
+          timezone="UTC"
+        />,
+      );
+    try {
+      const view = render(workspace(false));
+      await act(() => Promise.resolve());
+      expect(fetchPreparation).not.toHaveBeenCalled();
+      view.rerender(workspace(true, "60000000-0000-4000-8000-000000000002"));
+      await act(() => Promise.resolve());
+      expect(fetchPreparation).not.toHaveBeenCalled();
+      view.rerender(workspace(true));
+      await waitFor(() => expect(fetchPreparation).toHaveBeenCalledTimes(1));
+      expect(fetchPreparation.mock.calls[0]?.[0]).toBe(
+        `/api/field-service/visits/${visit.id}/preparation`,
+      );
+      await waitFor(() => expect(screen.getByRole("dialog")).toBeTruthy());
+    } finally {
+      cleanup();
+      vi.unstubAllGlobals();
+    }
+  });
   beforeEach(() => {
     state.crmMutation.mockReset();
     state.refresh.mockReset();

@@ -70,6 +70,11 @@ describe("technician session identity repository boundary", () => {
     expect(fixture.statements[3]).toContain(
       "INSERT INTO service.technician_session_identities",
     );
+    expect(fixture.statements[3]).toContain("visit.id = ?::uuid");
+    expect(fixture.values[3]).toContain(visitId);
+    expect(fixture.statements[3]).toContain(
+      "visit.tenant_id = platform.current_tenant_id()",
+    );
     expect(fixture.values[2]).toContain(sessionId);
     expect(fixture.values[3]).toContain(sessionId);
     expect(fixture.values[3]).toContainEqual(

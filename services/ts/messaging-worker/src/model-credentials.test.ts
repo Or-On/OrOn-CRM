@@ -13,6 +13,15 @@ const binding = () => ({
   provider: "gemini" as const,
 });
 
+function flipFirstByte(hex: string | null): string {
+  if (hex === null || hex.length < 2)
+    throw new Error("Synthetic envelope missing");
+  return (
+    (Number.parseInt(hex.slice(0, 2), 16) ^ 1).toString(16).padStart(2, "0") +
+    hex.slice(2)
+  );
+}
+
 describe("model-specific bound credential envelope", () => {
   it("decrypts a bound v2 model credential and serves identical bounded cache hits", () => {
     const key = randomBytes(32),
@@ -35,8 +44,8 @@ describe("model-specific bound credential envelope", () => {
       { modelConfigurationId: randomUUID() },
       { credentialId: randomUUID() },
       { provider: "openai" as const },
-      { ciphertext: "ff" + (envelope.ciphertext?.slice(2) ?? "") },
-      { nonce: "ff" + (envelope.nonce?.slice(2) ?? "") },
+      { ciphertext: flipFirstByte(envelope.ciphertext) },
+      { nonce: flipFirstByte(envelope.nonce) },
       { kind: "whatsapp_access_token_v2" },
       { algorithm: "aes-256-gcm" },
       { keyVersion: "env:v1" },

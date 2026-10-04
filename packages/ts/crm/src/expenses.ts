@@ -22,7 +22,7 @@ interface ExpenseRow {
   source_kind: Expense["sourceKind"];
   source_reference: string | null;
   notes: string | null;
-  incurred_at: Date;
+  incurred_at_ms: string;
   created_at: Date;
   updated_at: Date;
 }
@@ -99,7 +99,10 @@ function instant(value: string, name: string): string {
       `${name} must be an ISO 8601 instant with a time-zone offset`,
     );
   }
-  return new Date(normalized).toISOString();
+  const canonical = new Date(normalized).toISOString();
+  if (!/^[0-9]{4}-/u.test(canonical) || canonical.startsWith("0000-"))
+    throw new TypeError(`${name} must use a year from 0001 to 9999`);
+  return canonical;
 }
 
 function mapExpense(row: ExpenseRow): Expense {
@@ -115,7 +118,9 @@ function mapExpense(row: ExpenseRow): Expense {
     sourceKind: row.source_kind,
     sourceReference: row.source_reference,
     notes: row.notes,
-    incurredAt: row.incurred_at.toISOString(),
+    // Numeric UTC milliseconds avoid driver date parsing of historical local
+    // offsets containing seconds, and preserve years below 100 correctly.
+    incurredAt: new Date(Number(row.incurred_at_ms)).toISOString(),
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   };
@@ -155,7 +160,8 @@ export async function listExpensePage(
   const rows = await sql<ExpenseRow[]>`
     SELECT id, created_by_user_id, title, vendor, category, amount::text,
            currency, status, source_kind, source_reference, notes,
-           incurred_at, created_at, updated_at
+           (extract(epoch FROM incurred_at) * 1000)::text AS incurred_at_ms,
+           created_at, updated_at
     FROM finance.expenses
     WHERE (${query}::text = '' OR title ILIKE '%' || ${query} || '%'
            OR coalesce(vendor, '') ILIKE '%' || ${query} || '%'
@@ -244,7 +250,8 @@ export async function createExpense(
     )
     RETURNING id, created_by_user_id, title, vendor, category, amount::text,
       currency, status, source_kind, source_reference, notes,
-      incurred_at, created_at, updated_at
+      (extract(epoch FROM incurred_at) * 1000)::text AS incurred_at_ms,
+      created_at, updated_at
   `;
   const row = rows[0];
   if (row === undefined) throw new Error("expense insert returned no row");
@@ -307,7 +314,8 @@ export async function updateExpense(
     WHERE id = ${expenseId}::uuid AND status <> 'void'
     RETURNING id, created_by_user_id, title, vendor, category, amount::text,
       currency, status, source_kind, source_reference, notes,
-      incurred_at, created_at, updated_at
+      (extract(epoch FROM incurred_at) * 1000)::text AS incurred_at_ms,
+      created_at, updated_at
   `;
   return rows[0] === undefined ? undefined : mapExpense(rows[0]);
 }
@@ -322,7 +330,8 @@ export async function voidExpense(
     WHERE id = ${expenseId}::uuid AND status <> 'void'
     RETURNING id, created_by_user_id, title, vendor, category, amount::text,
       currency, status, source_kind, source_reference, notes,
-      incurred_at, created_at, updated_at
+      (extract(epoch FROM incurred_at) * 1000)::text AS incurred_at_ms,
+      created_at, updated_at
   `;
   return rows[0] === undefined ? undefined : mapExpense(rows[0]);
 }

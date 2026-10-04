@@ -906,7 +906,12 @@ export function InboxWorkspace({
               <X aria-hidden="true" size={14} />
             </button>
           ) : null}
-          <button className="sr-only" type="submit">
+          <button
+            aria-hidden="true"
+            className="sr-only"
+            tabIndex={-1}
+            type="submit"
+          >
             {t("inbox.search")}
           </button>
         </form>
@@ -929,6 +934,7 @@ export function InboxWorkspace({
               : filterFallback(option.id, locale);
             return (
               <button
+                inert={advanced && !advancedFiltersOpen}
                 aria-pressed={channelFilter === "all" && filter === option.id}
                 className={`inbox-filter ${advanced ? "inbox-filter--advanced" : ""} ${advancedFiltersOpen ? "inbox-filter--advanced-open" : ""} ${channelFilter === "all" && filter === option.id ? "inbox-filter--active" : ""}`}
                 disabled={option.disabled}
