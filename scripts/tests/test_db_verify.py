@@ -36,7 +36,8 @@ def test_graph_has_preserved_oron_root_and_one_target_head() -> None:
     # 111 adds durable fair admission;112 protects worker context provenance;
     # 115 also preserves retained conversation evidence and trusted model routing.
     # 137 starts a new failure window after an expired authentication lock.
-    assert report.revision_count == 137
+    # 138 adds tenant/channel-bound Coexistence receipts without automatic replies.
+    assert report.revision_count == 138
 
 
 def test_lead_workflow_guard_is_present_in_the_final_configuration_validator() -> None:

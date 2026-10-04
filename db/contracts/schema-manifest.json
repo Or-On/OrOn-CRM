@@ -1,5 +1,5 @@
 {
-  "alembic_head": "7c91e5a2b640",
+  "alembic_head": "8d32f4a91c70",
   "expected_functions": [
     "agents.activate_reviewed_memory",
     "agents.alert_exhausted_memory_summary",
