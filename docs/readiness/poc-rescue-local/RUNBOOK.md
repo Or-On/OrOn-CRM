@@ -201,8 +201,70 @@ as startup. Record every old image digest, the final migrated head and counts.
 Do not use a mainline checkout or the active rescue stack for that comparison.
 Do not downgrade the schema to make old images pass. Failure blocks application
 rollback eligibility and requires a compatible forward image or separately
-reviewed restore. The new WhatsApp pool migration must be included in this
-matrix before compatibility is claimed.
+reviewed restore.
+
+The actual prior registry images were subsequently pulled by immutable digest;
+all four OCI labels matched `42eebac2`. The separate owned compatibility project
+has fully internal networks. Docker Desktop therefore did not publish its HTTP
+port; HTTP probes ran from the old web container through its actual Caddy route.
+Against schema `9e43a5b02d81`, twelve HTTP checks passed: login/session, own-contact
+creation/read, unauthenticated/CSRF/other-tenant denials, logout and old-cookie
+rejection. The old dispatcher/control-api adapters also passed real PostgreSQL
+admission concurrency, modified-request replay rejection, pause-command replay,
+tenant denial, stale/exact acknowledgements and finalization. They preserved
+encrypted numbers and outcome fields. No call or provider send was made.
+
+This rehearsal found a real rollback fault at `8d32f4a91c70`: the old worker
+reported ready, claimed all four new Coexistence event types, and failed them
+with `invalid inbound envelope`; ordinary text succeeded. Additive migration
+`9e43a5b02d81` preserves the old three-argument claim contract and gives capable
+workers an explicit opt-in overload. After a read-only source-mounted forward
+upgrade, the **unchanged old image** processed ordinary text while leaving all
+four new event types at `received`, zero attempts. This preserves them for the
+capable worker; it does not make the old worker support Coexistence.
+
+**Old-web rollback remains ineligible once Coexistence callbacks are active.**
+The actual old `@or-on/crm` parser emitted a live image envelope from a
+`field: history` media notification. Claim separation cannot repair that old
+ingress parser. Keep the corrected ingress image, or use a separately reviewed
+compatible forward image; never declare complete rollback eligibility from
+health checks or ordinary-message success. The deployer's existing refusal to
+restart old images after a schema advance remains required.
+
+Detailed receipts are under
+`.artifacts/poc-rescue-local/previous-image-compat`: `old-app-functional.json`,
+`old-voice-functions.json`, both `old-worker-coexistence` JSON receipts,
+`old-parser-probe.json` and `forward-source-migration.json`. The latter explicitly
+records mounted-source validation. The final packaged migrator from `0331908b`
+then ran successfully at the same head, and its migration file checksum matched
+both the source archive and the applied source mount (`packaged-migration.json`).
+This is a same-head check; the main candidate's packaged upgrade/fresh-install
+evidence remains separate. The old Caddy/dispatcher callback also passed unsigned
+401, signed 200, duplicate 200, private outbound-route 404 and exactly one durable
+event (`old-caddy-callback.json`). LiveKit webhook Authorization carries the raw
+signed JWT expected by the SDK; adding HTTP `Bearer ` makes that fixture invalid.
+Timed full rollback and live availability remain separate acceptance gates.
+
+The same preserved compatibility database and private configuration were then
+recovered forward to all four exact `0331908b` application images. Twelve actual
+compiled-web auth/CRM/tenant-denial checks and the voice DB-adapter checks passed
+again. The current worker processed six preserved valid Coexistence receipts;
+two original claim-only contact fixtures had a misplaced timestamp and were
+correctly rejected without rewriting their bodies. Two new, correctly shaped
+successor receipts imported successfully. Messages increased from two to six,
+contact-state rows from zero to two, and automation jobs stayed at zero. Counting
+adapters recorded zero model invocations and external sends. The compiled current
+parser emitted zero live envelopes for the historical-media payload that failed
+under the old image.
+
+`forward-runtime-final.json` verifies actual image IDs/revisions, healthy status,
+all six provider/automation flags false, four internal networks, unchanged private
+configuration and head `9e43a5b02d81`. Only the compatibility containers were then
+stopped (3.623 seconds); all data, images and receipts were retained. This stop
+duration is not a rollback RTO. Functional receipts are `forward-app-functional.json`,
+`forward-worker-recovery.json`, `forward-voice-functions.json` and
+`forward-parser-probe.json` in the same evidence directory. No production source
+or active main-stack change was needed for this rehearsal.
 
 ## 6. Restore, keys and evidence
 
@@ -220,14 +282,15 @@ It neither loads production keys nor certifies production key escrow. Evidence
 states `off_host_restore=false`; a second database on the same Docker engine is
 not an independent server restoration. Workers are not replayed by this drill.
 
-Executed on 2026-10-05 against the historical local Python candidate: the
-1,773,741-byte dump restored successfully into a fresh database in 30.133 seconds.
+Executed again against final `0331908` / schema `9e43a5b02d81`: the
+1,790,630-byte dump restored into a fresh database in 29.689 seconds.
 Schema/table/head/forced-RLS parity, scoped contact visibility, fictional-field
 decryption, rejection of a wrong key and tenant, and object checksum all passed.
-The receipt is `container-stack/recover.json`; the command log is
-`container-stack/encrypted-recovery.log`. No service was stopped. The separately
-stored fixture key contains no real credential. Repeat against the final schema
-after the new migration; this result does not certify that later head.
+The final receipt is `container-stack/recover.json`; the command log is
+`container-stack/final-recovery.log`. The earlier 30.133-second historical run is
+retained in `container-stack/encrypted-recovery.log`. The separately stored
+fixture key contains no real credential. These remain small, same-host fictional
+restores; see [CONTAINER-ACCEPTANCE.md](CONTAINER-ACCEPTANCE.md) for the full scope.
 
 The stricter `scripts/restore-dev-backup.py` accepts only an exact fresh
 `oron_restore_<32-hex>` database on an approved local test port and a verified

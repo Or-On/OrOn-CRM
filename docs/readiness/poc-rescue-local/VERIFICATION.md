@@ -4,23 +4,26 @@ Evidence belongs to the exact source indicated. Local DB runs use fictional isol
 
 | Current merged source check | Result | Scope/limit |
 |---|---|---|
-| db_verify.py offline | Passed; 138 revisions, one head `8d32f4a91c70` | Graph/rendered SQL/security contract; final migration peer review continues |
+| db_verify.py offline | Passed;139 revisions, one head `9e43a5b02d81` | Deterministic rendered SQL1,196,330bytes; graph and security contract; fresh PostgreSQL migration exercised separately |
 | Harness python-aligned, fullpytest | 2295passed,3failed,17skipped | Failures: old revision counts2, SLI DBprefix1. Model gates explicitly skipped |
 | Harness python-aligned-recheck | 21passed,0skipped | Corrected all3 failures; actual PostgreSQL SLI denominator |
 | CRM full suite | 740passed,1failed,0skipped | Memory test depended on externally published fictional agent |
 | Harness crm-memory-current | 1passed,0skipped | Self-contained rolled-back fixture; provenance/auth assertions preserved |
 | Agent/dispatcher/runtime | 1293 passed, 17 model gates | All gated scenarios separately exercised with actual providers; see VOICE.md |
 | Worker before Coexistence | 69 files / 660 passed; one Windows POSIX-permissions skip | Actual DB gates enabled; new Coexistence suite recorded separately |
-| Web before final webhook pooling adapter | 157 files / 937 passed | Includes prior 99 focused UI tests; no DB-backed browser replacement implied |
-| Auth before verifier profile | 18 files / 91 passed | Real PostgreSQL; six final pool tests separately pass |
+| Final worker |70 source files /664 passed, one Windows symlink skip, zero failures | Runtime0331908 plus test-only269665e;398.64s. Linux033 spool suite passes8/8 including the skipped case; duplicated cases are not added to this count |
+| Final web |158 files /943 passed, zero skipped | One earlier cleanup timeout did not recur with the same10s hook; diagnostic rerun measured fixture close6ms and database drop954ms. No runtime leak proved or timeout increased |
+| Final auth |10 source files /48 unique source cases, zero skipped | Vitest additionally ran9 generated files/47 duplicate assertions;95 is the execution count, not unique coverage |
 | Final pool/verifier adapters | Six actual-DB pool tests; 36 webhook adapter tests; signature-proof DB regression passed | Exact DSN/profile bounds, tenant RLS, lazy privileged verifier and receipt retention on verifier failure |
 | Browser | 25/50/55tickets,contactnames beyond500,savedsettings,draft/back/deeplink and tenantdenial | UI evidence retains device/role limits |
 | Deployment tests | Initial71/72; correctedorderinggroup21passed | Controlled EXITrollback failures/drainorder; not live rollback |
 | Architecture | Passed | PostgreSQL/Alembic/package boundaries |
 | Actual cloud/provider reads | SSH/images/schema/Twilio/LiveKit/Meta succeeded | See registration attempts below; no provisioning/deployment mutation |
 | User real ProTouch inbound | No durable receipt; provider PENDING | No AI reply claimed |
+| Final Coexistence focused | Four focused tests passed with actual PostgreSQL gates enabled on head9e |205-message import, human control after next inbound, concurrent first-contact import/live receipt, old/new claim contracts, grants/owner and readiness gates |
+| Exact old-image compatibility |12 authenticated HTTP checks passed; old worker leaves new receipts unclaimed after9e | Old web history-media parser is incompatible after Coexistence activation; full old-image rollback not certified for that feature |
 
-Run suites with `uv run --no-sync python .artifacts/poc_rescue_verify.py <unique-label> <command-and-arguments>`. Harness strips provider secrets, disables real providers, migrates fresh DB, creates separate empty/seeded clones for claim-sensitive suites and drops only owned UUID DBs. Worker Coexistence and final container checks remain in progress.
+Run suites with `uv run --no-sync python .artifacts/poc_rescue_verify.py <unique-label> <command-and-arguments>`. Harness strips provider secrets, disables real providers, migrates fresh DB, creates separate empty/seeded clones for claim-sensitive suites and drops only owned UUID DBs. The final passing worker run uses per-scenario FAIR clones after reproducing cross-test contamination. Compiled-container acceptance is complete within the documented local scope.
 
 ## Container and deployment evidence
 
@@ -28,7 +31,9 @@ Python images were built from Git archive `525be698cf2bcbedf0a008b94809e5d69c9a1
 
 A fresh PostgreSQL container with delayed initialization reproduced three samples where a Unix socket was ready but TCP was unavailable. The new TCP healthcheck stayed unhealthy until the final server became reachable. The exact disposable regression container was removed; existing containers/volumes were retained. Evidence: `container-stack/pg-health-regression.json`, `python-runtime-acceptance.json`, and `python-artifact-lifecycles.json`.
 
-Later pricing/migration/source changes require final image rebuilds; these older images do not certify the evolving tree. Caddy signed ingress, dependency failure, enriched encrypted restore, final shutdown and previous-image compatibility remain distinct pending gates.
+All five final images were subsequently rebuilt from exact archive `0331908b56edf737bf970c7bb5fa174450310eb8`. The full stack passes signed/duplicate/tampered Caddy ingress, independent control/dispatcher failure, actual PostgreSQL outage and recovery, service restart, non-root/readonly/capability checks and encrypted fictional restore in29.689seconds. The Linux build stage passes all eight accounting-spool cases, including the Windows-skipped symlink test. See [CONTAINER-ACCEPTANCE.md](CONTAINER-ACCEPTANCE.md) for immutable IDs, receipts and limits.
+
+Exact deployed42 images and forward recovery to033 were tested with twelve authenticated HTTP/CRM/tenant checks and actual voice DB-adapter admission/control/finalization checks. Candidate worker forward recovery processed six valid preserved receipts and two corrected successors, retained/rejected two malformed original contact fixtures, and created zero automation jobs/model calls/sends. Old web remains incompatible with activated Coexistence history-media callbacks; do not certify a full old-image rollback from the passing ordinary-flow checks.
 
 ## Real provider boundary
 

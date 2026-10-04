@@ -212,3 +212,62 @@ outstanding. The three Python images previously tested from `525be698` predate
 this correction and must be rebuilt from the final candidate; their artifact
 and health evidence remains historical. Local restore evidence and its off-host
 and production-key limitations are documented in `RUNBOOK.md`.
+
+## Final images and actual prior-image compatibility
+
+Three final Python images were built from the secret-free Git archive of
+`0331908b56edf737bf970c7bb5fa174450310eb8`, with matching OCI revision labels:
+
+| Service | Local image ID | Build seconds |
+|---|---|---|
+| migrator | `sha256:96e9efa710d79c4cf416694ed36c831f57d82724b33f7082ad8508e670272401` | 36.336 |
+| control-api | `sha256:04d367194779105c23856d120dc0863f5a4c3341c9f586edfaa8a66413094a81` | 91.982 |
+| dispatcher | `sha256:9a107188f85e5b0b47eaa9568c884025cb3bc220a46c3d72d68156fd8c921465` | 58.434 |
+
+Build logs and `final-image-*.json` receipts are under the ignored rescue evidence
+directory. No registry publication occurred. Parent-owned main-stack acceptance
+of these final images is separate from the prior-image checks below.
+
+The four exact **deployed** application digests from `42eebac2` were pulled with
+existing read-only registry authentication and run in `oron-poc-rescue-compat`,
+using separate fictional configuration/data and internal networks. No active
+developer or main rescue container was modified. Against the forward schema
+`9e43a5b02d81`, the old dispatcher and control-api's actual database adapters
+passed admission concurrency (one true/one false), destination-change rejection,
+wrong-tenant read denial, pause/replay, stale/exact acknowledgement, wrong-tenant
+finalization rejection, repeated finalization, encrypted phone storage and
+preserved outcome/answer fields. Only one durable admission receipt was present.
+This invokes real PostgreSQL functions under `platform_voice`; no agent engine,
+SIP call, media or provider send is involved. Receipt: `old-voice-functions.json`.
+
+Through the actual isolated Caddy path, the old dispatcher returned unsigned
+401, signed 200, duplicate 200 and exactly one durable event; the public outbound
+control route returned 404 (`old-caddy-callback.json`). Twelve old-web HTTP auth,
+CRM and tenant-denial checks also passed (`old-app-functional.json`). These checks
+prove specific compatible contracts, not a timed complete rollback.
+
+Two actual old-image incompatibilities were found. At schema `8d32f4a91c70`, the
+old worker claimed all four Coexistence event types and failed them despite
+healthy readiness. Additive migration `9e43a5b02d81` repaired the claim contract:
+the unchanged old image then processed normal text and left new types untouched
+at zero attempts. The final packaged migrator successfully verified that same
+head; its migration file SHA-256 matched the archived source and the earlier
+source-mounted forward upgrade. Separately, the old CRM parser classified a
+historical image notification as a live message. Therefore **old-web rollback
+after Coexistence callback activation remains blocked**. The corrected claim
+contract alone does not remove that ingress risk. Full receipts and operational
+restrictions are in `RUNBOOK.md` and
+`.artifacts/poc-rescue-local/previous-image-compat`; no downgrade was performed.
+
+The preserved compatibility project was then recovered forward to the exact
+`0331908b` candidate images. The same actual voice admission/control/finalization
+adapter assertions passed (`forward-voice-functions.json`), alongside twelve
+compiled-web auth/CRM/tenant checks. The current worker recovered six valid
+preserved Coexistence receipts and imported two corrected successor contact
+fixtures, while retaining/rejecting two malformed original fixtures. No automation
+jobs, model calls or external sends resulted. The compiled current parser correctly
+emitted zero live envelopes for historical media. Actual running image labels,
+healthy services, disabled provider flags, internal networks and unchanged private
+configuration are recorded in `forward-runtime-final.json`. Only this project was
+stopped afterwards; data and evidence remain available. Main-stack and live
+acceptance remain separately reported by the parent workstream.
