@@ -2,6 +2,38 @@
 
 Work is in progress; none of the three readiness gates is declared passed.
 
+## Runtime alignment correction (authoritative)
+
+Fetching origin revealed local `3582027b` was six commits behind current main.
+Live DEV actually runs `42eebac2d423bb70a0c69690e8d2899beab12249`, confirmed by
+all four application OCI image revisions and immutable digests. Its schema is
+`fc6e851f3ba0`. The previous local baseline results below are historical local
+evidence ONLY, not evidence of defects in the running release.
+
+All local work was preserved in snapshot `86c3641`. A merge of origin/main into
+the rescue branch is being resolved with ownership by domain. Mature upstream
+media, model recovery, queue fencing, agent admission, memory, opening menus,
+auth lock preservation, manual deployment gates and rollback are retained;
+duplicate early repairs are removed. New tests will run on the integrated tree.
+
+GCP SSH is available through the existing deployment service account and existing
+Token Creator permission; no IAM bindings were changed. The earlier personal
+account denial is not an ongoing access blocker. Read-only inventory is in
+ignored `.artifacts/poc-rescue-local/remote-inventory.txt`.
+
+Active production-shaped DEV tenants are `or-on-dev`
+(`00000000-0000-0000-0000-000000000001`) and `protouch`
+(`633d9906-3866-4ddd-b85c-99c525bd3cb3`). A deleted ProTouch tenant with a different
+UUID still exists and must not be mistaken for the active tenant. Both active
+Meta channels are configured; ProTouch additional credentials exist in BOTH
+remote web and worker environments. Local developer configuration differs.
+
+The user confirmed ProTouch's source ending **4553** and a separate authorized
+test recipient ending **7692**. ProTouch has a distinct existing Twilio trunk
+with no termination domain or attached credential list. The existing carrier
+credential named Protouch and ignored local secret bundle were found. No
+provider provisioning, live call or message has been performed yet.
+
 - Repository: Or-On/OrOn-CRM, local directory OrOn-Platform.
 - Branch: `codex/poc-rescue-local-20261004`; initial clean HEAD `3582027b`.
 - Referenced `BOOST.md` absent in repo, parent directories, attachments and Downloads.

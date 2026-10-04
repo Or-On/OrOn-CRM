@@ -9,6 +9,7 @@ import {
   SectionHeader,
   Surface,
 } from "@or-on/ui";
+import { useMutationFocus } from "../keyboard";
 
 export function SmsSecurity() {
   const t = useTranslations("smsVerification");
@@ -21,6 +22,7 @@ export function SmsSecurity() {
     phoneHint: string;
   }>();
   const [pending, setPending] = useState(false);
+  const rememberFocus = useMutationFocus(pending);
   const [error, setError] = useState(false);
   const [saved, setSaved] = useState(false);
   async function refresh() {
@@ -38,6 +40,8 @@ export function SmsSecurity() {
   }, []);
   async function submit(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (pending) return;
+    rememberFocus();
     const form = new FormData(event.currentTarget);
     setPending(true);
     setError(false);

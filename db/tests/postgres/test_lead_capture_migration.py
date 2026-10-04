@@ -227,7 +227,8 @@ async def test_the_lead_migrations_roll_back_and_forward_without_losing_data(
     finally:
         await connection.close()
 
-    await run_alembic(isolated_postgres_url, "upgrade", "head")
+    # Both lead migrations, including implicit_ticketing, are the subject.
+    await run_alembic(isolated_postgres_url, "upgrade", "e3b9d7f1a2c6")
     await run_alembic(isolated_postgres_url, "downgrade", BEFORE_LEADS)
 
     connection = await asyncpg.connect(isolated_postgres_url)

@@ -6,10 +6,12 @@ correcting a rate or switching model re-prices history instead of needing a
 backfill.
 """
 
+from datetime import UTC, datetime
 from enum import StrEnum
+from uuid import UUID, uuid4
 
 import phonenumbers
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, Field, PrivateAttr, computed_field
 
 from oron_common.context import CallContext, Direction
 
@@ -75,6 +77,25 @@ class CallUsage(BaseModel):
     # where this is 0 while call_seconds is not says the meter is not running,
     # rather than saying the call was silent.
     stt_audio_seconds: float = 0.0
+    # Provider events are process-owned persistence state, never API/model input.
+    # Keep them until the checkpoint transaction actually commits.
+    _model_events: list[tuple[UUID, int, int, datetime]] = PrivateAttr(default_factory=list)
+
+    def record_model_event(self, input_tokens: int, output_tokens: int) -> None:
+        if any(
+            type(value) is not int or not 0 <= value < 2**63
+            for value in (input_tokens, output_tokens)
+        ):
+            raise ValueError("invalid provider-reported token counts")
+        if len(self._model_events) >= 2048:
+            raise RuntimeError("voice usage backlog capacity reached")
+        self._model_events.append((uuid4(), input_tokens, output_tokens, datetime.now(UTC)))
+
+    def pending_model_events(self) -> tuple[tuple[UUID, int, int, datetime], ...]:
+        return tuple(self._model_events)
+
+    def acknowledge_model_events(self, identifiers: set[UUID]) -> None:
+        self._model_events = [event for event in self._model_events if event[0] not in identifiers]
 
 
 class LlmRates(BaseModel):

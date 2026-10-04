@@ -5,13 +5,16 @@ import {
 import { voiceRecordingResponse } from "../../../../../../features/voice-server";
 
 export async function GET(
-  _request: Request,
+  request: Request,
   context: { readonly params: Promise<{ id: string }> },
 ) {
   try {
     const { id } = await context.params;
-    const upstream = await voiceRecordingResponse(id);
-    if (!upstream.ok || upstream.body === null) {
+    const upstream = await voiceRecordingResponse(id, request.headers);
+    if (
+      (!upstream.ok && upstream.status !== 416) ||
+      (upstream.body === null && upstream.status !== 416)
+    ) {
       return Response.json(
         {
           error:
@@ -26,9 +29,16 @@ export async function GET(
       "cache-control": "private, no-store",
       "content-type": upstream.headers.get("content-type") ?? "audio/wav",
     });
-    const contentLength = upstream.headers.get("content-length");
-    if (contentLength) headers.set("content-length", contentLength);
-    return new Response(upstream.body, { status: 200, headers });
+    for (const name of [
+      "content-length",
+      "content-range",
+      "accept-ranges",
+      "content-disposition",
+    ]) {
+      const value = upstream.headers.get(name);
+      if (value !== null) headers.set(name, value);
+    }
+    return new Response(upstream.body, { status: upstream.status, headers });
   } catch (error) {
     if (error instanceof UnauthenticatedError)
       return Response.json({ error: "Unauthenticated" }, { status: 401 });

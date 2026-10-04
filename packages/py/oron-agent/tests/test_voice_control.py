@@ -47,19 +47,34 @@ async def test_pause_waits_for_local_cancellation_before_acknowledging():
     ack.assert_awaited_with(1, "paused")
 
 
-async def test_read_outage_recovers_only_after_fresh_authorized_read_and_ack():
+async def test_transient_read_outage_preserves_media_and_recovers_same_epoch():
     control, read, ack = controller()
     await control.refresh()
     assert not control.paused
     old_generation = control.generation
     read.side_effect = RuntimeError("fixture outage")
     await control.refresh()
-    assert control.paused
+    assert not control.paused
+    assert control.generation == old_generation
+    assert ack.await_count == 1
     read.side_effect = None
     await control.refresh()
     assert not control.paused
+    assert control.generation == old_generation
     ack.assert_awaited_with(0, "ai")
-    assert control.generation > old_generation
+
+
+async def test_prolonged_read_outage_expires_media_and_recovers_with_fresh_ack():
+    control, read, ack = controller()
+    await control.refresh()
+    control._last_authorized_at -= 6  # noqa: SLF001 — expire the monotonic lease
+    read.side_effect = RuntimeError("fixture outage")
+    assert await control.refresh() is False
+    assert control.paused
+    read.side_effect = None
+    assert await control.refresh() is True
+    assert not control.paused
+    ack.assert_awaited_with(0, "ai")
 
 
 @pytest.mark.parametrize(
@@ -71,11 +86,11 @@ async def test_read_outage_recovers_only_after_fresh_authorized_read_and_ack():
         VoiceControlSnapshot(1, "paused"),
     ],
 )
-async def test_read_recovery_never_overrides_pause_revocation_or_takeover(state):
+async def test_expired_read_recovery_never_overrides_revocation_or_takeover(state):
     control, read, ack = controller()
     await control.refresh()
+    control._last_authorized_at -= 6  # noqa: SLF001
     read.side_effect = RuntimeError("fixture outage")
-    await control.refresh()
     await control.refresh()
     assert control.paused
     read.side_effect = None
@@ -85,18 +100,54 @@ async def test_read_recovery_never_overrides_pause_revocation_or_takeover(state)
     ack.assert_awaited_with(state.epoch, "paused")
 
 
-async def test_read_recovery_requires_successful_exact_epoch_acknowledgement():
+async def test_transient_outage_never_authorizes_new_actions():
+    control, read, _ = controller()
+    await control.refresh()
+    read.side_effect = RuntimeError("fixture outage")
+    operation = AsyncMock()
+    with pytest.raises(asyncio.CancelledError):
+        await control.action(operation)
+    operation.assert_not_awaited()
+    assert not control.paused
+    read.side_effect = None
+    await control.action(operation)
+    operation.assert_awaited_once()
+
+
+async def test_initial_read_failure_keeps_unknown_control_paused():
     control, read, ack = controller()
+    read.side_effect = RuntimeError("fixture outage")
+    await control.refresh()
+    assert control.paused
+    ack.assert_not_awaited()
+
+
+async def test_explicit_pause_remains_paused_through_read_outage():
+    control, read, _ = controller()
+    await control.refresh()
+    read.return_value = VoiceControlSnapshot(1, "paused")
     await control.refresh()
     read.side_effect = RuntimeError("fixture outage")
     await control.refresh()
+    assert control.paused
     read.side_effect = None
-    ack.return_value = False
     await control.refresh()
     assert control.paused
-    ack.return_value = True
+
+
+async def test_transient_read_timeout_keeps_established_media_state():
+    control, read, ack = controller()
     await control.refresh()
-    assert control.paused
+    generation = control.generation
+
+    async def stalled_read():
+        await asyncio.Event().wait()
+
+    read.side_effect = stalled_read
+    await control.refresh()
+    assert not control.paused
+    assert control.generation == generation
+    assert ack.await_count == 1
 
 
 async def test_revoked_resume_and_stale_ack_never_enable_ai():

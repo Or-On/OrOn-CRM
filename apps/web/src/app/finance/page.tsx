@@ -4,6 +4,8 @@ import { redirect } from "next/navigation";
 import { hasPermission } from "@or-on/auth";
 import { loadConfig } from "@or-on/config";
 import {
+  requireTenantFeature,
+  TenantFeatureDisabledError,
   getTenantSettings,
   listExpensePage,
   summarizeExpenses,
@@ -56,6 +58,7 @@ export default async function FinancePage() {
     const data = await withCurrentTenant(
       "tenant:manage",
       async (sql, session) => {
+        await requireTenantFeature(sql, "billing");
         const canReadVoice =
           session.isSuperuser ||
           hasPermission(session.tenant.role, "voice:read");
@@ -97,7 +100,11 @@ export default async function FinancePage() {
       </main>
     );
   } catch (error) {
-    if (error instanceof ForbiddenError) return <AccessDenied />;
+    if (
+      error instanceof ForbiddenError ||
+      error instanceof TenantFeatureDisabledError
+    )
+      return <AccessDenied />;
     if (error instanceof UnauthenticatedError) redirect("/login");
     throw error;
   }

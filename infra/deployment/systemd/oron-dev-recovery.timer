@@ -1,0 +1,11 @@
+[Unit]
+Description=Opt-in Or-On application health recovery schedule
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=30s
+AccuracySec=5s
+Unit=oron-dev-recovery.service
+
+[Install]
+WantedBy=timers.target

@@ -14,7 +14,10 @@ import type {
   TenantTemplateKey,
 } from "@or-on/crm";
 import { configurationFromTemplate } from "@or-on/crm/tenant-configuration-client";
-import { parseServiceWorkflowPolicy } from "@or-on/crm/service-workflow";
+import {
+  parseServiceWorkflowPolicy,
+  type ServiceWorkflowPolicy,
+} from "@or-on/crm/service-workflow";
 import {
   Badge,
   Button,
@@ -38,6 +41,7 @@ import { useLocale } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useState, type SyntheticEvent } from "react";
 import { crmMutation } from "../crm";
+import { useMutationFocus } from "../keyboard";
 import styles from "./business-configuration.module.css";
 import { FieldOperationsSettings } from "./field-operations-settings";
 
@@ -124,6 +128,27 @@ function text(form: FormData, key: string): string {
   return typeof value === "string" ? value : "";
 }
 
+function editableConfiguration(state: TenantConfigurationState | undefined) {
+  if (state?.draft) return state.draft.configuration;
+  // A returned release stays immutable history. Resume its contents as a new
+  // draft only when it is newer than the active release; normal save CAS and
+  // submission/approval still apply.
+  const latest = state?.history.reduce<
+    (typeof state.history)[number] | undefined
+  >(
+    (current, entry) =>
+      !current || entry.version > current.version ? entry : current,
+    undefined,
+  );
+  if (
+    latest?.status === "rejected" &&
+    latest.version > (state?.active?.version ?? 0)
+  ) {
+    return latest.configuration;
+  }
+  return state?.active?.configuration ?? state?.initialConfiguration;
+}
+
 export function BusinessConfiguration({
   initialFeatures,
   definitions,
@@ -173,14 +198,17 @@ export function BusinessConfiguration({
     processes: initialProcesses,
   };
   const [governance, setGovernance] = useState(initialGovernance);
-  const [draft, setDraft] = useState<TenantConfiguration>(
-    initialGovernance?.draft?.configuration ??
-      initialGovernance?.active?.configuration ??
-      initialGovernance?.initialConfiguration ??
-      fallback,
+  const initialConfiguration =
+    editableConfiguration(initialGovernance) ?? fallback;
+  const [draft, setDraft] = useState<TenantConfiguration>(initialConfiguration);
+  const [workflow, setWorkflowDraft] = useState(() =>
+    parseServiceWorkflowPolicy(
+      initialConfiguration.featureConfiguration.field_service?.workflow,
+    ),
   );
   const [dirty, setDirty] = useState(false);
   const [pending, setPending] = useState<string>();
+  const rememberFocus = useMutationFocus(pending !== undefined);
   const [reviewNote, setReviewNote] = useState("");
   const [feedback, setFeedback] = useState<{
     message: string;
@@ -192,9 +220,6 @@ export function BusinessConfiguration({
   const active = governance?.active?.configuration ?? fallback;
   const submitted = governance?.draft?.status === "submitted";
   const locked = pending !== undefined || submitted;
-  const workflow = parseServiceWorkflowPolicy(
-    draft.featureConfiguration.field_service?.workflow,
-  );
   const requiredIntake: readonly string[] = workflow.requiredIntakeFields;
   const requiredReport: readonly string[] = workflow.requiredReportFields;
   const editing =
@@ -257,11 +282,13 @@ export function BusinessConfiguration({
         ...draft.featureConfiguration,
         field_service: {
           ...draft.featureConfiguration.field_service,
-          // Validated again by the parser on render and by the server on save.
+          // Controlled fields can be temporarily incomplete while typing.
+          // Validate executable policy at save, and independently on the server.
           workflow: next as unknown as JsonValue,
         },
       },
     });
+    setWorkflowDraft(next as unknown as ServiceWorkflowPolicy);
   }
   function toggleFeature(key: TenantFeatureKey) {
     const selected = new Set(draft.features);
@@ -292,6 +319,12 @@ export function BusinessConfiguration({
   }
   function useTemplate(key: TenantTemplateKey) {
     const template = configurationFromTemplate(key);
+    if (template.featureConfiguration.field_service?.workflow !== undefined)
+      setWorkflowDraft(
+        parseServiceWorkflowPolicy(
+          template.featureConfiguration.field_service.workflow,
+        ),
+      );
     update({
       ...template,
       featureConfiguration: {
@@ -303,6 +336,9 @@ export function BusinessConfiguration({
     setFormVersion((value) => value + 1);
   }
   async function persist(): Promise<TenantConfigurationState> {
+    parseServiceWorkflowPolicy(
+      draft.featureConfiguration.field_service?.workflow,
+    );
     const result = await crmMutation<{
       configuration: TenantConfigurationState;
     }>(
@@ -319,6 +355,7 @@ export function BusinessConfiguration({
   }
   async function action(kind: "save" | "submit" | "approve" | "reject") {
     if (pending !== undefined) return;
+    rememberFocus();
     setPending(kind);
     setFeedback(undefined);
     try {
@@ -345,10 +382,12 @@ export function BusinessConfiguration({
           { method: "POST" },
         );
         setGovernance(result.configuration);
-        setDraft(
-          result.configuration.draft?.configuration ??
-            result.configuration.active?.configuration ??
-            draft,
+        const next = editableConfiguration(result.configuration) ?? draft;
+        setDraft(next);
+        setWorkflowDraft(
+          parseServiceWorkflowPolicy(
+            next.featureConfiguration.field_service?.workflow,
+          ),
         );
         setDirty(false);
         setReviewNote("");

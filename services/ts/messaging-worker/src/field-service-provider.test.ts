@@ -77,10 +77,16 @@ describe("field-service AI proposal boundary", () => {
     if (typeof init.body !== "string")
       throw new TypeError("Expected a JSON request body");
     const body = JSON.parse(init.body) as {
+      reasoning_effort?: string;
       response_format?: { json_schema?: { strict?: boolean } };
       messages?: { content?: string }[];
     };
     expect(body.response_format?.json_schema?.strict).toBe(true);
+    expect(body.reasoning_effort).toBe("none");
+    expect(body.messages?.[0]?.content).toContain(
+      "serviceIntent, confirmed, confidence, and fields",
+    );
+    expect(body.messages?.[0]?.content).not.toContain("readyForConfirmation");
     expect(body.messages?.[1]?.content).toContain(
       "untrusted_customer_service_intake_evidence",
     );

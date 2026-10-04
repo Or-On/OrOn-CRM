@@ -22,6 +22,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { tenantDateFormatter } from "../../i18n/tenant-date-time";
+import { csrfToken } from "../voice/mutation";
 import type { LeadTeamMember } from "./leads-workspace";
 import styles from "./leads-workspace.module.css";
 
@@ -309,7 +310,10 @@ export function LeadDetailView({
     try {
       const response = await fetch(`/api/leads/${lead.id}`, {
         method: "PATCH",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          "x-csrf-token": csrfToken(),
+        },
         body: JSON.stringify({
           status,
           ownerUserId: owner === "" ? null : owner,
@@ -353,7 +357,10 @@ export function LeadDetailView({
     try {
       const response = await fetch(`/api/leads/${lead.id}/fields`, {
         method: "PATCH",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          "x-csrf-token": csrfToken(),
+        },
         body: JSON.stringify({
           fields: changed.map(([key, value]) => ({
             key,

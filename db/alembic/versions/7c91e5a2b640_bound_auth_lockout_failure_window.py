@@ -1,13 +1,13 @@
-"""Do not extend an active account lock on unauthenticated failures.
+"""Reset failed attempts after an expired lock while preserving active locks.
 
 Revision ID: 7c91e5a2b640
-Revises: 9b2e7a4c6d18
+Revises: fc6e851f3ba0
 """
 
 from alembic import op
 
 revision = "7c91e5a2b640"
-down_revision = "9b2e7a4c6d18"
+down_revision = "fc6e851f3ba0"
 branch_labels = None
 depends_on = None
 

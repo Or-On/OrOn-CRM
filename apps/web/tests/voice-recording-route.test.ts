@@ -36,7 +36,64 @@ describe("voice recording BFF", () => {
     );
     expect(dependencies.voiceRecordingResponse).toHaveBeenCalledWith(
       "session-id",
+      expect.any(Headers),
     );
+  });
+
+  it("forwards ranges and preserves partial bytes and representation headers", async () => {
+    dependencies.voiceRecordingResponse.mockResolvedValue(
+      new Response(new Uint8Array([82, 73]), {
+        status: 206,
+        headers: {
+          "content-type": "audio/wav",
+          "content-length": "2",
+          "content-range": "bytes 0-1/15",
+          "accept-ranges": "bytes",
+          "set-cookie": "must-not-relay=1",
+          "x-storage-key": "private",
+        },
+      }),
+    );
+    const response = await GET(
+      new Request("http://localhost", { headers: { range: "bytes=0-1" } }),
+      { params: Promise.resolve({ id: "session-id" }) },
+    );
+    const forwarded: unknown =
+      dependencies.voiceRecordingResponse.mock.calls[0]?.[1];
+    expect(forwarded).toBeInstanceOf(Headers);
+    if (!(forwarded instanceof Headers))
+      throw new Error("Missing forwarded headers");
+    expect(forwarded.get("range")).toBe("bytes=0-1");
+    expect(response.status).toBe(206);
+    expect(response.headers.get("content-range")).toBe("bytes 0-1/15");
+    expect(response.headers.get("content-length")).toBe("2");
+    expect(response.headers.get("accept-ranges")).toBe("bytes");
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(response.headers.has("set-cookie")).toBe(false);
+    expect(response.headers.has("x-storage-key")).toBe(false);
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(
+      new Uint8Array([82, 73]),
+    );
+  });
+
+  it("preserves an unsatisfiable range without inventing a successful recording", async () => {
+    dependencies.voiceRecordingResponse.mockResolvedValue(
+      new Response(null, {
+        status: 416,
+        headers: {
+          "content-range": "bytes */15",
+          "content-length": "0",
+          "accept-ranges": "bytes",
+        },
+      }),
+    );
+    const response = await GET(
+      new Request("http://localhost", { headers: { range: "bytes=15-" } }),
+      { params: Promise.resolve({ id: "session-id" }) },
+    );
+    expect(response.status).toBe(416);
+    expect(response.headers.get("content-range")).toBe("bytes */15");
+    expect(await response.text()).toBe("");
   });
 
   it("does not turn a missing artifact into a successful audio response", async () => {

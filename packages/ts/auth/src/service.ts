@@ -1,3 +1,7 @@
+import {
+  withLoginAdmission,
+  validateLoginConcurrency,
+} from "./login-admission.js";
 import { Buffer } from "node:buffer";
 
 import {
@@ -44,13 +48,14 @@ export class InvalidSessionError extends Error {
 }
 
 export class ForbiddenError extends Error {
-  public constructor() {
-    super("The requested operation is not permitted");
+  public constructor(message = "The requested operation is not permitted") {
+    super(message);
     this.name = "ForbiddenError";
   }
 }
 
 export interface AuthServiceOptions {
+  readonly maximumConcurrentLogins?: number;
   readonly tokenPepper: string;
   readonly dummyPasswordHash: string;
   readonly now?: () => Date;
@@ -59,6 +64,7 @@ export interface AuthServiceOptions {
 
 export class AuthService {
   readonly #repository: AuthRepository;
+  readonly #maximumConcurrentLogins: number;
   readonly #tokenPepper: string;
   readonly #dummyPasswordHash: string;
   readonly #now: () => Date;
@@ -66,6 +72,9 @@ export class AuthService {
 
   public constructor(repository: AuthRepository, options: AuthServiceOptions) {
     this.#repository = repository;
+    this.#maximumConcurrentLogins = validateLoginConcurrency(
+      options.maximumConcurrentLogins ?? 2,
+    );
     this.#tokenPepper = options.tokenPepper;
     this.#dummyPasswordHash = options.dummyPasswordHash;
     this.#now = options.now ?? (() => new Date());
@@ -79,28 +88,30 @@ export class AuthService {
     userAgent?: string;
     ipAddress?: string;
   }): Promise<IssuedSession> {
-    const record = await this.#repository.lookupLogin(input.email.trim());
-    const candidateHash = record?.passwordHash ?? this.#dummyPasswordHash;
-    const passwordValid = await verifyPassword(candidateHash, input.password);
-    const now = this.#now();
-    const locked = (record?.lockedUntil?.getTime() ?? 0) > now.getTime();
-    if (
-      record?.passwordHash === undefined ||
-      record.status !== "active" ||
-      locked ||
-      !passwordValid
-    ) {
-      if (record !== undefined)
-        await this.#repository.recordLoginFailure(record.userId);
-      throw new InvalidCredentialsError();
-    }
-    if (record.smsEnabled === true) {
-      if (this.#sms === undefined) throw new SmsUnavailableError();
-      throw new SmsChallengeRequiredError(
-        await this.#sms.startLogin(record.userId),
-      );
-    }
-    return this.#issueSession(record, input);
+    return withLoginAdmission(this.#maximumConcurrentLogins, async () => {
+      const record = await this.#repository.lookupLogin(input.email.trim());
+      const candidateHash = record?.passwordHash ?? this.#dummyPasswordHash;
+      const passwordValid = await verifyPassword(candidateHash, input.password);
+      const now = this.#now();
+      const locked = (record?.lockedUntil?.getTime() ?? 0) > now.getTime();
+      if (
+        record?.passwordHash === undefined ||
+        record.status !== "active" ||
+        locked ||
+        !passwordValid
+      ) {
+        if (record !== undefined && !locked)
+          await this.#repository.recordLoginFailure(record.userId);
+        throw new InvalidCredentialsError();
+      }
+      if (record.smsEnabled === true) {
+        if (this.#sms === undefined) throw new SmsUnavailableError();
+        throw new SmsChallengeRequiredError(
+          await this.#sms.startLogin(record.userId),
+        );
+      }
+      return this.#issueSession(record, input);
+    });
   }
 
   public async finishSmsLogin(input: {

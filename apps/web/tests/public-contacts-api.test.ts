@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
 const dependencies = vi.hoisted(() => ({
   withApiKeyTenant: vi.fn(),
@@ -34,6 +34,17 @@ function request(body?: string, token = validToken) {
 }
 
 describe("public contacts API responses", () => {
+  beforeEach(() => {
+    dependencies.withApiKeyTenant.mockImplementation(
+      async (
+        _url: string,
+        _pepper: string,
+        _token: string,
+        _scope: string,
+        operation: (sql: object) => Promise<unknown>,
+      ) => await operation({}),
+    );
+  });
   afterEach(() => {
     vi.clearAllMocks();
     vi.restoreAllMocks();
@@ -62,7 +73,7 @@ describe("public contacts API responses", () => {
     expect((await POST(request(JSON.stringify({ name: "  " })))).status).toBe(
       400,
     );
-    expect(dependencies.withApiKeyTenant).not.toHaveBeenCalled();
+    expect(dependencies.withApiKeyTenant).toHaveBeenCalledTimes(2);
   });
 
   it("does not misreport an operation error as a credential failure", async () => {

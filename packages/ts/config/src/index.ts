@@ -98,6 +98,15 @@ const sourceSchema = z.object({
   ENABLE_REAL_VOICE_PROVIDERS: booleanFlag,
   ENABLE_REAL_WHATSAPP: booleanFlag,
   ENABLE_WHATSAPP_AI: booleanFlag,
+  ENABLE_WHATSAPP_AUDIO_TRANSCRIPTION: booleanFlag,
+  SONIOX_ASYNC_STT_MODEL: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z
+      .string()
+      .regex(/^[A-Za-z0-9_-]{1,32}$/u)
+      .optional(),
+  ),
+  SONIOX_API_KEY: optionalSecret,
   ENABLE_WHATSAPP_AUTO_CALLS: booleanFlag,
   ENABLE_REAL_BILLING: booleanFlag,
   ENABLE_REAL_SMS: booleanFlag,
@@ -122,10 +131,15 @@ const sourceSchema = z.object({
   LLM_PROVIDER: z.enum(["vertex", "openai-compat"]).default("vertex"),
   LLM_API_KEY: optionalSecret,
   LLM_MODEL: optionalText,
+  LLM_FALLBACK_MODEL: optionalText,
   LLM_BASE_URL: optionalProviderUrl,
   CREDENTIAL_ENCRYPTION_KEY: optionalSecret,
   STRIPE_SECRET_KEY: optionalSecret,
   STRIPE_WEBHOOK_SECRET: optionalSecret,
+  AUTH_MAX_CONCURRENT_LOGINS: z
+    .enum(["1", "2", "3", "4", "5", "6", "7", "8"])
+    .default("2")
+    .transform(Number),
   AUTH_TOKEN_PEPPER: z.preprocess(
     (value) => (value === "" ? undefined : value),
     z.string().min(32).optional(),
@@ -156,6 +170,7 @@ export interface LoadConfigOptions {
 }
 
 export interface PlatformConfig {
+  readonly maximumConcurrentLogins: number;
   readonly whatsAppAdditionalAccounts: readonly WhatsAppAccountConfig[];
   readonly sms: {
     readonly enabled: boolean;
@@ -178,9 +193,14 @@ export interface PlatformConfig {
   readonly enableWhatsAppAi: boolean;
   readonly enableWhatsAppAutoCalls: boolean;
   readonly enableRealBilling: boolean;
+  readonly audioTranscription: {
+    readonly enabled: boolean;
+    readonly model: string | undefined;
+  };
   readonly llm: {
     readonly provider: "vertex" | "openai-compat";
     readonly model: string | undefined;
+    readonly fallbackModel: string | undefined;
     readonly baseUrl: string | undefined;
   };
   readonly whatsApp: {
@@ -189,6 +209,7 @@ export interface PlatformConfig {
     readonly wabaId: string | undefined;
   };
   readonly secrets: {
+    readonly sonioxApiKey: string | undefined;
     readonly livekitApiSecret: string | undefined;
     readonly whatsappAccessToken: string | undefined;
     readonly whatsappAppSecret: string | undefined;
@@ -368,7 +389,19 @@ export function loadConfig(
       "Invalid platform configuration: real SMS requires valid provider settings and SMS_OTP_PEPPER",
     );
 
+  if (
+    result.data.ENABLE_WHATSAPP_AUDIO_TRANSCRIPTION &&
+    (!result.data.ENABLE_REAL_WHATSAPP ||
+      !result.data.ENABLE_REAL_VOICE_PROVIDERS ||
+      !result.data.SONIOX_ASYNC_STT_MODEL ||
+      !result.data.SONIOX_API_KEY)
+  )
+    throw new ConfigurationError(
+      "Invalid platform configuration: audio transcription requires explicit real WhatsApp and voice provider gates, Soniox model and API key",
+    );
+
   return {
+    maximumConcurrentLogins: result.data.AUTH_MAX_CONCURRENT_LOGINS,
     whatsAppAdditionalAccounts,
     sms: {
       enabled: result.data.ENABLE_REAL_SMS,
@@ -392,9 +425,14 @@ export function loadConfig(
     enableWhatsAppAi: result.data.ENABLE_WHATSAPP_AI,
     enableWhatsAppAutoCalls: result.data.ENABLE_WHATSAPP_AUTO_CALLS,
     enableRealBilling: result.data.ENABLE_REAL_BILLING,
+    audioTranscription: {
+      enabled: result.data.ENABLE_WHATSAPP_AUDIO_TRANSCRIPTION,
+      model: result.data.SONIOX_ASYNC_STT_MODEL,
+    },
     llm: {
       provider: result.data.LLM_PROVIDER,
       model: result.data.LLM_MODEL,
+      fallbackModel: result.data.LLM_FALLBACK_MODEL,
       baseUrl: result.data.LLM_BASE_URL,
     },
     whatsApp: {
@@ -403,6 +441,7 @@ export function loadConfig(
       wabaId: result.data.WHATSAPP_WABA_ID,
     },
     secrets: {
+      sonioxApiKey: result.data.SONIOX_API_KEY,
       livekitApiSecret: result.data.LIVEKIT_API_SECRET,
       whatsappAccessToken: result.data.WHATSAPP_ACCESS_TOKEN,
       whatsappAppSecret: result.data.WHATSAPP_APP_SECRET,
@@ -458,6 +497,10 @@ export function configDiagnostics(
     llmProvider: config.llm.provider,
     llmBaseUrl: config.llm.baseUrl === undefined ? "unset" : "configured",
     llmModel: config.llm.model ?? "unset",
+    audioTranscriptionEnabled: config.audioTranscription.enabled,
+    audioTranscriptionModel: config.audioTranscription.model ?? "unset",
+    sonioxApiKey:
+      config.secrets.sonioxApiKey === undefined ? "unset" : "[REDACTED]",
     credentialEncryptionKey:
       config.secrets.credentialEncryptionKey === undefined
         ? "unset"
@@ -475,4 +518,34 @@ export function configDiagnostics(
         ? "unset"
         : "[REDACTED]",
   };
+}
+
+/** This credential is read only by the server webhook boundary. It is deliberately
+ * absent from shared service configuration and all worker configuration/logs.
+ */
+export function loadWhatsAppMemoryVerifier(
+  environment: Readonly<Record<string, string | undefined>>,
+  service: string,
+): { readonly enabled: boolean; readonly databaseUrl: string | undefined } {
+  if (service !== "web") return { enabled: false, databaseUrl: undefined };
+  const flag = environment.WHATSAPP_MEMORY_SIGNATURE_PROOF_ENABLED ?? "false";
+  if (flag !== "true" && flag !== "false")
+    throw new TypeError("invalid WhatsApp signature proof flag");
+  if (flag !== "true") return { enabled: false, databaseUrl: undefined };
+  const databaseUrl = environment.WHATSAPP_MEMORY_VERIFIER_DATABASE_URL;
+  if (databaseUrl === undefined || databaseUrl.trim() === "")
+    return { enabled: true, databaseUrl: undefined };
+  let parsed: URL;
+  try {
+    parsed = new URL(databaseUrl);
+  } catch {
+    throw new TypeError("invalid WhatsApp verifier database configuration");
+  }
+  if (
+    !["postgres:", "postgresql:"].includes(parsed.protocol) ||
+    !parsed.hostname ||
+    parsed.pathname === "/"
+  )
+    throw new TypeError("invalid WhatsApp verifier database configuration");
+  return { enabled: true, databaseUrl };
 }

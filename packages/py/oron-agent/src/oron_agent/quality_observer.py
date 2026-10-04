@@ -47,8 +47,12 @@ _DURATION_STAGES = {
     "validation_ms": ("generated", "validated"),
     "validated_to_synthesis_ms": ("validated", "first_synthesized_audio"),
     "synthesis_to_transport_ms": ("first_synthesized_audio", "first_transport_submission"),
+    "speech_end_to_transport_submission_ms": ("speech_end", "first_transport_submission"),
     "accepted_to_transport_signal_ms": ("recognition_finalized", "transport_speaking_signal"),
 }
+
+
+_READ_DURATIONS = ("evidence_context_read_ms", "evidence_validation_read_ms")
 
 
 def _percentiles(values: list[float]) -> dict[str, Any]:
@@ -65,6 +69,7 @@ def _percentiles(values: list[float]) -> dict[str, Any]:
 class _Turn:
     index: int
     timestamps: dict[str, int] = field(default_factory=dict)
+    measured_reads: dict[str, float] = field(default_factory=dict)
     generation: int | None = None
     interrupted: bool = False
     transport_stopped: bool = False
@@ -87,6 +92,7 @@ class _Turn:
                 values[name] = (
                     round((end_ns - start_ns) / 1_000_000, 3) if end_ns >= start_ns else None
                 )
+        values.update({name: self.measured_reads.get(name) for name in _READ_DURATIONS})
         return values
 
 
@@ -209,6 +215,15 @@ class VoiceQualityObserver(BaseObserver):
         turn = self._current
         if turn is None:
             return
+        for name in _READ_DURATIONS:
+            value = frame.metadata.get(name)
+            if (
+                isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and math.isfinite(value)
+                and 0 <= value <= 60_000
+            ):
+                turn.measured_reads.setdefault(name, float(value))
         if isinstance(frame, LLMTextFrame) and data.source is self._llm:
             turn.timestamps.setdefault("model_first_token", stamp)
         elif isinstance(frame, AggregatedTextFrame):
@@ -264,7 +279,7 @@ class VoiceQualityObserver(BaseObserver):
                 }
             )
         summary: dict[str, Any] = {}
-        for name in _DURATION_STAGES:
+        for name in (*_DURATION_STAGES, *_READ_DURATIONS):
             summary[name] = _percentiles(
                 [value for turn in self._turns if (value := turn.durations()[name]) is not None]
             )
@@ -287,6 +302,23 @@ class VoiceQualityObserver(BaseObserver):
             "stale_audio_frames": self._stale_audio_frames,
             "turns": turns,
             "summary_ms": summary,
+            "sample_coverage": {
+                "denominator": "retained_pipeline_turns",
+                "retained_turns": len(self._turns),
+                "evicted_turns": self._turn_count - len(self._turns),
+                "interrupted_turns": sum(turn.interrupted for turn in self._turns),
+                "stages": {
+                    name: {
+                        "observed": summary[name]["samples"],
+                        "missing_or_invalid": len(self._turns) - summary[name]["samples"],
+                        "interrupted_observed": sum(
+                            turn.interrupted and turn.durations()[name] is not None
+                            for turn in self._turns
+                        ),
+                    }
+                    for name in (*_DURATION_STAGES, *_READ_DURATIONS)
+                },
+            },
             "limitations": ["no_remote_playback_receipt", "no_acoustic_quality_measurement"],
         }
 

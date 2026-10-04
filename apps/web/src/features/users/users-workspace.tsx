@@ -23,7 +23,13 @@ import {
 } from "lucide-react";
 import { useLocale, useTimeZone } from "next-intl";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, type SyntheticEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type SyntheticEvent,
+} from "react";
 
 import { crmMutation } from "../crm";
 import styles from "./users-workspace.module.css";
@@ -185,6 +191,8 @@ export function UsersWorkspace({
   const router = useRouter();
   const [view, setView] = useState<UserView>("members");
   const [query, setQuery] = useState("");
+  const memberSearch = useRef<HTMLInputElement>(null);
+  const removedMember = useRef(false);
   const [role, setRole] = useState<UserRoleFilter>(initialRole);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [invitationLink, setInvitationLink] = useState<string>();
@@ -192,6 +200,12 @@ export function UsersWorkspace({
   const [revokeTarget, setRevokeTarget] = useState<TenantInvitationSummary>();
   const [removeTarget, setRemoveTarget] = useState<TeamMember>();
   const [pending, setPending] = useState(false);
+  useEffect(() => {
+    if (!pending && removeTarget === undefined && removedMember.current) {
+      removedMember.current = false;
+      memberSearch.current?.focus();
+    }
+  }, [pending, removeTarget]);
   const [feedback, setFeedback] = useState<{
     readonly tone: "error" | "success";
     readonly text: string;
@@ -293,6 +307,7 @@ export function UsersWorkspace({
       );
       setRemoveTarget(undefined);
       setFeedback({ tone: "success", text: c.removed });
+      removedMember.current = true;
       router.refresh();
     } catch (error) {
       setFeedback({
@@ -452,6 +467,7 @@ export function UsersWorkspace({
               <Search aria-hidden="true" size={14} />
               <span className="or-visually-hidden">{c.search}</span>
               <input
+                ref={memberSearch}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder={c.search}
                 type="search"

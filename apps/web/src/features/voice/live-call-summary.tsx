@@ -125,42 +125,50 @@ export function LiveCallSummary({
           <div>
             <dt>{t("voice.telephonyCost")}</dt>
             <dd dir="ltr">{formatUsd(call.cost.telephony, locale)}</dd>
-            <meter
-              aria-label={t("voice.telephonyCost")}
-              min={0}
-              max={call.cost.total || 1}
-              value={call.cost.telephony ?? 0}
-            />
+            <dd className="voice-cost-meter">
+              <meter
+                aria-label={t("voice.telephonyCost")}
+                min={0}
+                max={call.cost.total || 1}
+                value={call.cost.telephony ?? 0}
+              />
+            </dd>
           </div>
           <div>
             <dt>{t("voice.sttCost")}</dt>
             <dd dir="ltr">{formatUsd(call.cost.stt, locale)}</dd>
-            <meter
-              aria-label={t("voice.sttCost")}
-              min={0}
-              max={call.cost.total || 1}
-              value={call.cost.stt ?? 0}
-            />
+            <dd className="voice-cost-meter">
+              <meter
+                aria-label={t("voice.sttCost")}
+                min={0}
+                max={call.cost.total || 1}
+                value={call.cost.stt ?? 0}
+              />
+            </dd>
           </div>
           <div>
             <dt>{t("voice.llmCost")}</dt>
             <dd dir="ltr">{formatUsd(call.cost.llm, locale)}</dd>
-            <meter
-              aria-label={t("voice.llmCost")}
-              min={0}
-              max={call.cost.total || 1}
-              value={call.cost.llm ?? 0}
-            />
+            <dd className="voice-cost-meter">
+              <meter
+                aria-label={t("voice.llmCost")}
+                min={0}
+                max={call.cost.total || 1}
+                value={call.cost.llm ?? 0}
+              />
+            </dd>
           </div>
           <div>
             <dt>{t("voice.ttsCost")}</dt>
             <dd dir="ltr">{formatUsd(call.cost.tts, locale)}</dd>
-            <meter
-              aria-label={t("voice.ttsCost")}
-              min={0}
-              max={call.cost.total || 1}
-              value={call.cost.tts ?? 0}
-            />
+            <dd className="voice-cost-meter">
+              <meter
+                aria-label={t("voice.ttsCost")}
+                min={0}
+                max={call.cost.total || 1}
+                value={call.cost.tts ?? 0}
+              />
+            </dd>
           </div>
         </dl>
       </Surface>

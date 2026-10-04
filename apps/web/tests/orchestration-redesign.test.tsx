@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 import "./dialog-test-support";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { OrchestrationPanel } from "../src/features/orchestration";
 import { localized } from "./localized";
@@ -36,6 +42,44 @@ afterEach(() => {
 });
 
 describe("focused orchestration workspaces", () => {
+  it("keeps a failed handoff acceptance recoverable with the initiating button focused", async () => {
+    let fail!: (reason: Error) => void;
+    mutate.mockReturnValue(
+      new Promise((_resolve, reject) => {
+        fail = reject;
+      }),
+    );
+    render(
+      localized(
+        <OrchestrationPanel
+          {...fixture}
+          initialTab="handoffs"
+          handoffs={[
+            {
+              id: "synthetic-handoff",
+              contactId: "synthetic-contact",
+              sourceChannel: "whatsapp",
+              reasonSafe: "Synthetic handoff",
+              status: "pending",
+              assignedUserId: null,
+              requestedAt: "2026-09-01T00:00:00Z",
+            },
+          ]}
+        />,
+      ),
+    );
+    const accept = screen.getByRole("button", {
+      name: en.orchestration.accept,
+    });
+    accept.focus();
+    fireEvent.click(accept);
+    fireEvent.click(accept);
+    expect(mutate).toHaveBeenCalledTimes(1);
+    accept.blur();
+    fail(new Error("Synthetic unavailable"));
+    await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
+    await waitFor(() => expect(document.activeElement).toBe(accept));
+  });
   it("retains a failed agent draft in its modal, including after closing and reopening", async () => {
     mutate.mockRejectedValueOnce(new Error("unavailable"));
     render(localized(<OrchestrationPanel {...fixture} />));

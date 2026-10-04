@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, Heebo } from "next/font/google";
+import localFont from "next/font/local";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { applicationHome, isPathInApplicationScope } from "@or-on/auth";
@@ -36,21 +36,24 @@ import { product } from "../branding";
 
 import "@xyflow/react/dist/style.css";
 
-const applicationLatin = Geist({
+const applicationLatin = localFont({
+  src: "../branding/fonts/Geist.ttf",
+  weight: "100 900",
   display: "swap",
-  subsets: ["latin"],
   variable: "--application-font-latin",
 });
 
-const applicationMono = Geist_Mono({
+const applicationMono = localFont({
+  src: "../branding/fonts/GeistMono.ttf",
+  weight: "100 900",
   display: "swap",
-  subsets: ["latin"],
   variable: "--application-font-mono",
 });
 
-const applicationHebrew = Heebo({
+const applicationHebrew = localFont({
+  src: "../branding/fonts/Heebo.ttf",
+  weight: "100 900",
   display: "swap",
-  subsets: ["hebrew"],
   variable: "--application-font-hebrew",
 });
 

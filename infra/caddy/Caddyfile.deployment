@@ -3,6 +3,13 @@
 	email {$TLS_CONTACT_EMAIL}
 }
 
+# Container-local liveness only; independent of upstream web/DB availability.
+# The listener is loopback-bound and its response contains no status metadata.
+http://127.0.0.1:8080 {
+	respond /health/live "OK" 200
+	respond 404
+}
+
 {$PLATFORM_ORIGIN} {
 	encode zstd gzip
 	request_body {
@@ -34,6 +41,3 @@
 	}
 }
 
-http://127.0.0.1:8080 {
-	respond /healthz "ok" 200
-}

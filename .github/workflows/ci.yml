@@ -3,11 +3,16 @@ name: CI
 on:
   workflow_dispatch:
     inputs:
+      expected_commit:
+        description: Exact reviewed 40-character commit required for DEV deployment
+        required: false
+        default: ""
+        type: string
       deploy_dev:
-        description: Deploy the reviewed main revision to DEV after all checks
-        required: true
-        type: boolean
+        description: Publish images and deploy GCP DEV after all checks pass
+        required: false
         default: false
+        type: boolean
   pull_request:
   push:
     branches:
@@ -100,7 +105,7 @@ jobs:
           POSTGRES_USER: platform_migrator
           POSTGRES_PASSWORD: ci-only-password
         ports:
-          - 5432:5432
+          - 55480:5432
         options: >-
           --health-cmd "pg_isready -U platform_migrator -d or_on_platform_ci"
           --health-interval 3s
@@ -120,8 +125,8 @@ jobs:
           --health-timeout 5s
           --health-retries 20
     env:
-      DATABASE_URL: postgresql://platform_migrator:ci-only-password@127.0.0.1:5432/or_on_platform_ci
-      TEST_DATABASE_URL: postgresql://platform_migrator:ci-only-password@127.0.0.1:5432/or_on_platform_ci
+      DATABASE_URL: postgresql://platform_migrator:ci-only-password@127.0.0.1:55480/or_on_platform_ci
+      TEST_DATABASE_URL: postgresql://platform_migrator:ci-only-password@127.0.0.1:55480/or_on_platform_ci
       READINESS_POSTGRES_URL: postgresql://platform_migrator:ci-only-password@127.0.0.1:55439/oron_readiness
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -150,7 +155,7 @@ jobs:
       - run: pnpm --filter @or-on/messaging-worker... build
       - name: Field-service web-role acceptance (no providers)
         env:
-          CRM_TEST_DATABASE_URL: postgresql://platform_migrator:ci-only-password@127.0.0.1:5432/or_on_platform_ci
+          CRM_TEST_DATABASE_URL: postgresql://platform_migrator:ci-only-password@127.0.0.1:55480/or_on_platform_ci
         run: >-
           pnpm --filter @or-on/crm exec vitest run
           src/field-service.postgres.test.ts
@@ -167,7 +172,7 @@ jobs:
       # variable makes that invisible in the summary.
       - name: Isolated cross-channel worker acceptance (no providers)
         env:
-          CROSS_CHANNEL_TEST_DATABASE_URL: postgresql://platform_migrator:ci-only-password@127.0.0.1:5432/or_on_platform_ci
+          CROSS_CHANNEL_TEST_DATABASE_URL: postgresql://platform_migrator:ci-only-password@127.0.0.1:55480/or_on_platform_ci
         run: >-
           pnpm --filter @or-on/messaging-worker exec vitest run
           tests/ai-reply.live.test.ts tests/call-followup.live.test.ts
@@ -284,10 +289,23 @@ jobs:
       - run: docker build --build-arg ORON_SOURCE_REVISION="$GITHUB_SHA" --file infra/images/messaging-worker.Dockerfile --tag or-on/messaging-worker:ci .
       - run: docker build --build-arg ORON_SOURCE_REVISION="$GITHUB_SHA" --file infra/images/dispatcher.Dockerfile --tag or-on/dispatcher:ci .
       - run: docker build --build-arg ORON_SOURCE_REVISION="$GITHUB_SHA" --file infra/images/migrator.Dockerfile --tag or-on/migrator:ci .
+      - name: Verify exact approved deployment commit
+        if: >-
+          github.ref == 'refs/heads/main' &&
+          github.event_name == 'workflow_dispatch' && inputs.deploy_dev == true
+        shell: bash
+        env:
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ && "$GITHUB_SHA" == "$EXPECTED_COMMIT" ]] || {
+            echo "Deployment refused: expected_commit must equal the exact workflow commit" >&2
+            exit 1
+          }
       - name: Authenticate to Google Cloud for immutable DEV images
         if: >-
           github.ref == 'refs/heads/main' &&
-          (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+          github.event_name == 'workflow_dispatch' && inputs.deploy_dev == true
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
           workload_identity_provider: projects/157867817612/locations/global/workloadIdentityPools/github-oron-dev/providers/oron-crm-main
@@ -295,12 +313,12 @@ jobs:
       - name: Configure the regional Artifact Registry
         if: >-
           github.ref == 'refs/heads/main' &&
-          (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+          github.event_name == 'workflow_dispatch' && inputs.deploy_dev == true
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
       - name: Publish immutable DEV images
         if: >-
           github.ref == 'refs/heads/main' &&
-          (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+          github.event_name == 'workflow_dispatch' && inputs.deploy_dev == true
         shell: bash
         env:
           REGISTRY: me-west1-docker.pkg.dev/website-478708/or-on-platform
@@ -316,7 +334,7 @@ jobs:
     name: Deploy GCP DEV
     if: >-
       github.ref == 'refs/heads/main' &&
-      github.event_name == 'workflow_dispatch' && inputs.deploy_dev
+      github.event_name == 'workflow_dispatch' && inputs.deploy_dev == true
     needs:
       [
         typescript,
@@ -343,6 +361,19 @@ jobs:
       url: https://dev.or-on.io
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Verify exact approved deployment commit
+        if: >-
+          github.ref == 'refs/heads/main' &&
+          github.event_name == 'workflow_dispatch' && inputs.deploy_dev == true
+        shell: bash
+        env:
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ && "$GITHUB_SHA" == "$EXPECTED_COMMIT" ]] || {
+            echo "Deployment refused: expected_commit must equal the exact workflow commit" >&2
+            exit 1
+          }
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
@@ -403,10 +434,12 @@ jobs:
             infra/deployment/systemd/oron-dev.service \
             infra/deployment/systemd/oron-dev-backup.service \
             infra/deployment/systemd/oron-dev-backup.timer \
-            scripts/deploy-dev.sh scripts/backup-dev.sh \
+            scripts/deploy-dev.sh scripts/backup-dev.sh scripts/restore-dev-backup.py \
             "${release_dir}"
           archive="${RUNNER_TEMP}/oron-dev-release-${GITHUB_SHA}.tar.gz"
           tar -czf "${archive}" -C "${release_dir}" .
+          # Validate actual bytes before SSH transfer, including the mandatory restore helper.
+          python3 scripts/check-dev-release.py "${archive}"
           echo "archive=${archive}" >>"${GITHUB_OUTPUT}"
           echo "archive_sha256=$(sha256sum "${archive}" | cut -d' ' -f1)" >>"${GITHUB_OUTPUT}"
           echo "deployer_sha256=$(sha256sum scripts/deploy-dev.sh | cut -d' ' -f1)" >>"${GITHUB_OUTPUT}"
@@ -445,6 +478,19 @@ jobs:
             --ssh-key-file="${ORON_DEPLOY_SSH_KEY}" \
             --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" \
             --command="set -e; trap 'rm -f ${remote_archive} ${remote_deployer}' EXIT; test \"\$(sha256sum '${remote_deployer}' | cut -d' ' -f1)\" = '${DEPLOYER_SHA256}'; sudo bash '${remote_deployer}' '${GITHUB_SHA}' '${remote_archive}' '${ARCHIVE_SHA256}'"
+      - name: Verify actual deployed images and database schema
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          remote_verify="/tmp/oron-dev-verify-${GITHUB_SHA}.sh"
+          gcloud compute scp --quiet --tunnel-through-iap \
+            --ssh-key-file="${ORON_DEPLOY_SSH_KEY}" \
+            --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" \
+            scripts/verify-dev-runtime.sh "${DEV_VM}:${remote_verify}"
+          gcloud compute ssh "${DEV_VM}" --quiet --tunnel-through-iap \
+            --ssh-key-file="${ORON_DEPLOY_SSH_KEY}" \
+            --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" \
+            --command="set -e; trap 'rm -f ${remote_verify}' EXIT; sudo bash '${remote_verify}' '${GITHUB_SHA}'"
       - name: Verify the public DEV endpoint
         shell: bash
         run: |
@@ -454,14 +500,18 @@ jobs:
           curl --fail --silent --show-error --max-time 15 https://dev.or-on.io/login >/dev/null
       - name: Remove ephemeral DEV SSH key
         if: always()
-        continue-on-error: true
         shell: bash
         run: |
           set -Eeuo pipefail
           key="${ORON_DEPLOY_SSH_KEY:-${RUNNER_TEMP}/oron-dev-deploy}"
+          trap 'rm -f "${key}" "${key}.pub"' EXIT
           if [[ -f "${key}.pub" ]]; then
-            gcloud compute os-login ssh-keys remove \
-              --key-file="${key}.pub" --project="${GCP_PROJECT_ID}" --quiet || \
-              echo "OS Login key removal failed; the 30-minute TTL remains in force" >&2
+            removal_status=0
+            gcloud compute os-login ssh-keys remove --key-file="${key}.pub" \
+              --project="${GCP_PROJECT_ID}" --quiet || removal_status=$?
+            gcloud compute os-login ssh-keys list --project="${GCP_PROJECT_ID}" \
+              --format=json >"${RUNNER_TEMP}/oron-oslogin-after.json"
+            python3 scripts/check-oslogin-cleanup.py "${key}.pub" "${RUNNER_TEMP}/oron-oslogin-after.json"
+            echo "Temporary OS Login key absence verified (remove exit ${removal_status})"
           fi
           rm -f "${key}" "${key}.pub"

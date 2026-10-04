@@ -77,6 +77,28 @@ export interface LeadBinding {
    */
   readonly conversationOwnershipEpoch?: string;
   readonly normalization?: LeadNormalizationOptions;
+  /** Trusted worker claim; SQL derives every business identity independently. */
+  readonly executionClaim?: {
+    readonly jobId: string;
+    readonly workerId: string;
+    readonly claimToken: string;
+  };
+}
+
+// The DB return shape varies by operation and is checked by its caller.
+// eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters
+async function machineLeadResult<T>(
+  sql: postgres.Sql | postgres.TransactionSql,
+  binding: LeadBinding,
+  operation: string,
+  argumentsValue: postgres.JSONValue,
+): Promise<{ result: T }[]> {
+  const claim = binding.executionClaim;
+  if (claim === undefined)
+    throw new TypeError("machine execution claim required");
+  return sql<{ result: T }[]>`
+    SELECT platform.machine_lead_tool(${claim.jobId}::uuid,${claim.workerId},
+      ${claim.claimToken}::uuid,${operation},${sql.json(argumentsValue)}) AS result`;
 }
 
 export interface LeadFieldStateRow {
@@ -266,6 +288,12 @@ export async function readLeadOperation(
   binding: LeadBinding,
   operationKey: string,
 ): Promise<LeadReceipt | null> {
+  if (binding.executionClaim !== undefined) {
+    // Machine writes reconcile through their canonical SQL action replay;
+    // a caller-supplied operation key cannot authorize a separate receipt read.
+    await machineLeadResult(sql, binding, "read", {});
+    return null;
+  }
   const rows = await leadCall(
     () => sql<{ receipt: LeadReceipt | null }[]>`
       SELECT platform.lead_operation_receipt(
@@ -542,8 +570,15 @@ export async function ensureLeadForInteraction(
     input.fieldSchemaVersion === undefined
   )
     throw new TypeError("a pinned field schema requires its version");
-  const rows = await leadCall(
-    () => sql<{ result: { receipt: LeadReceipt; created: boolean } }[]>`
+  const rows = await leadCall(() =>
+    binding.executionClaim !== undefined
+      ? machineLeadResult<{ receipt: LeadReceipt; created: boolean }>(
+          sql,
+          binding,
+          "ensure",
+          {},
+        )
+      : sql<{ result: { receipt: LeadReceipt; created: boolean } }[]>`
       SELECT platform.lead_ensure_for_interaction(
         ${sql.json(bindingJson(binding))},
         ${requireOperationKey(input.operationKey)},
@@ -569,11 +604,16 @@ export async function ensureLeadForInteraction(
 
 export async function readLeadState(
   sql: postgres.Sql | postgres.TransactionSql,
-  binding: Pick<LeadBinding, "contactId" | "capabilities">,
+  binding: Pick<LeadBinding, "contactId" | "capabilities" | "executionClaim">,
   leadId: string,
   options: { readonly history?: boolean } = {},
 ): Promise<LeadSnapshot> {
   assertCapability(binding.capabilities, "lead.read");
+  if (binding.executionClaim !== undefined) {
+    const claim = binding.executionClaim;
+    await sql`SELECT platform.machine_lead_tool(${claim.jobId}::uuid,${claim.workerId},
+      ${claim.claimToken}::uuid,'read',${sql.json({ leadId })})`;
+  }
   return snapshot(sql, await boundLeadRow(sql, binding, leadId), options);
 }
 
@@ -593,8 +633,15 @@ export async function findInteractionLead(
 ): Promise<LeadSnapshot | null> {
   assertCapability(binding.capabilities, "lead.read");
   requireUuid(binding.contactId, "contactId");
-  const rows = await leadCall(
-    () => sql<{ state: { lead: { id: string } } | null }[]>`
+  const rows = await leadCall(() =>
+    binding.executionClaim !== undefined
+      ? machineLeadResult<{ lead: { id: string } } | null>(
+          sql,
+          binding,
+          "read",
+          {},
+        ).then((rows) => rows.map((row) => ({ state: row.result })))
+      : sql<{ state: { lead: { id: string } } | null }[]>`
       SELECT platform.lead_capture_state(
         ${sql.json(bindingJson(binding))}, NULL, ${options.interestKey ?? null}
       ) AS state
@@ -650,10 +697,29 @@ export async function saveLeadFields(
     binding.recordedBy === "human"
       ? sql`platform.lead_operator_save_fields`
       : sql`platform.lead_save_fields`;
-  const rows = await leadCall(
-    () => sql<
-      { result: { receipt: LeadReceipt; rejected: readonly LeadRejection[] } }[]
-    >`
+  const rows = await leadCall(() =>
+    binding.executionClaim !== undefined
+      ? machineLeadResult<{
+          receipt: LeadReceipt;
+          rejected: readonly LeadRejection[];
+        }>(
+          sql,
+          binding,
+          "save",
+          databaseJson({
+            leadId,
+            expectedRevision: input.expectedRevision ?? null,
+            observations,
+          }),
+        )
+      : sql<
+          {
+            result: {
+              receipt: LeadReceipt;
+              rejected: readonly LeadRejection[];
+            };
+          }[]
+        >`
       SELECT ${entry}(
         ${sql.json(bindingJson(binding))}, ${leadId}::uuid, ${operationKey},
         ${input.expectedRevision ?? null}::integer,
@@ -690,8 +756,20 @@ export async function finalizeLeadCollection(
     throw new TypeError(
       "a finalization summary of 1–4000 characters is required",
     );
-  const rows = await leadCall(
-    () => sql<{ result: { receipt: LeadReceipt } }[]>`
+  const rows = await leadCall(() =>
+    binding.executionClaim !== undefined
+      ? machineLeadResult<{ receipt: LeadReceipt }>(
+          sql,
+          binding,
+          "finalize",
+          databaseJson({
+            leadId,
+            expectedRevision: input.expectedRevision ?? null,
+            summary,
+            nextAction: trimmedOrNull(input.nextAction),
+          }),
+        )
+      : sql<{ result: { receipt: LeadReceipt } }[]>`
       SELECT platform.lead_finalize(
         ${sql.json(bindingJson(binding))}, ${leadId}::uuid,
         ${requireOperationKey(input.operationKey)},
@@ -727,8 +805,19 @@ export async function requestLeadFollowUp(
     throw new TypeError("a follow-up note of 1–1000 characters is required");
   if (input.dueAt !== undefined && Number.isNaN(Date.parse(input.dueAt)))
     throw new TypeError("follow-up due time must be an ISO timestamp");
-  const rows = await leadCall(
-    () => sql<{ result: { receipt: LeadReceipt } }[]>`
+  const rows = await leadCall(() =>
+    binding.executionClaim !== undefined
+      ? machineLeadResult<{ receipt: LeadReceipt }>(
+          sql,
+          binding,
+          "follow_up",
+          databaseJson({
+            leadId,
+            note,
+            dueAt: input.dueAt ?? null,
+          }),
+        )
+      : sql<{ result: { receipt: LeadReceipt } }[]>`
       SELECT platform.lead_request_follow_up(
         ${sql.json(bindingJson(binding))}, ${leadId}::uuid,
         ${requireOperationKey(input.operationKey)}, ${note},

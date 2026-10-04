@@ -16,7 +16,7 @@ catalog:
   "@types/react": 19.2.18
   "@types/react-dom": 19.2.5
   "@types/ws": 8.18.1
-  hono: 4.13.5
+  hono: 4.13.7
   jose: 6.2.10
   lucide-react: 1.38.0
   motion: 13.2.0

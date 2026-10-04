@@ -1,3 +1,4 @@
+import { boundedMultipart } from "../../../../features/uploads";
 import { NextResponse } from "next/server";
 import {
   linkReportAttachment,
@@ -49,7 +50,7 @@ export async function POST(request: Request) {
   let staged: StagedPrivateObject | undefined;
   try {
     await assertCrmMutation(request);
-    const form = await request.formData();
+    const form = await boundedMultipart(request, 20 * 1024 * 1024 + 64 * 1024);
     const file = form.get("file");
     if (!(file instanceof File)) throw new TypeError("Select a file to upload");
     const caseId = uuid(form.get("caseId"), "Case");

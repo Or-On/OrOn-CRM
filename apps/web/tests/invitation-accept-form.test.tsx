@@ -78,4 +78,27 @@ describe("invitation acceptance navigation", () => {
     );
     expect(state.refresh).toHaveBeenCalledOnce();
   });
+
+  it("restores the submit focus after a failed acceptance and blocks repeated pending submission", async () => {
+    let finish!: (response: Response) => void;
+    const request = vi.fn().mockReturnValue(
+      new Promise<Response>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    vi.stubGlobal("fetch", request);
+    render(<AcceptInvitationForm existingAccount token={"z".repeat(48)} />);
+    const button = screen.getByRole("button", { name: "join" });
+    const form = button.closest("form");
+    if (form === null) throw new Error("Invitation form missing");
+    button.focus();
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+    expect(request).toHaveBeenCalledTimes(1);
+    button.blur();
+    finish(Response.json({ error: "synthetic failure" }, { status: 503 }));
+    await waitFor(() => expect(screen.getByText("failed")).toBeTruthy());
+    await waitFor(() => expect(document.activeElement).toBe(button));
+    expect(state.replace).not.toHaveBeenCalled();
+  });
 });

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Literal, Protocol
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
@@ -33,6 +34,10 @@ class AgentStartupUnavailable(RuntimeError):
 
 class IdempotencyConflict(RuntimeError):
     """A previously admitted call key was reused with different parameters."""
+
+
+class AdmissionUnavailable(RuntimeError):
+    """The process is draining or its bounded voice slots are occupied."""
 
 
 class UnroutableInboundCall(RuntimeError):
@@ -66,6 +71,9 @@ LaunchBot = Callable[[str, CallContext, Mapping[str, object] | None], Awaitable[
 ResolvePhone = Callable[[str], Awaitable[PhoneResolution | None]]
 HangupRoom = Callable[[str], Awaitable[None]]
 MintToken = Callable[[str, str], str]
+PlayAnnouncement = Callable[
+    [str, Literal["busy", "goodbye", "failure", "unavailable"]], Awaitable[None]
+]
 
 
 class _Active(BaseModel):
@@ -117,6 +125,7 @@ class Dispatcher:
         resolve_phone: ResolvePhone,
         hangup_room: HangupRoom,
         mint_token: MintToken,
+        play_announcement: PlayAnnouncement | None = None,
     ) -> None:
         self._settings = settings
         self._sessions = sessions
@@ -125,7 +134,12 @@ class Dispatcher:
         self._resolve_phone = resolve_phone
         self._hangup_room = hangup_room
         self._mint_token = mint_token
+        self._play_announcement = play_announcement
+        self._busy_rooms: set[str] = set()
+        self._busy_completed: OrderedDict[str, None] = OrderedDict()
         self._active: dict[str, _Active] = {}
+        self._pending: dict[str, tuple[CallContext, asyncio.Future[bool], asyncio.Task[Any]]] = {}
+        self._draining = False
         # Strong references: a bare create_task result is only weakly held by the
         # loop, so a completion handler can be garbage collected mid-hangup and
         # leave a provider leg open with the session still marked started.
@@ -169,10 +183,39 @@ class Dispatcher:
         )
         try:
             created = await self._start(room, context, idempotency_key=f"livekit-room:{room}")
-        except Exception:
+        except AdmissionUnavailable:
+            # Signed, tenant-resolved inbound room. No normal agent startup or
+            # model/TTS work is admitted on the capacity-rejection path.
+            if room in self._busy_rooms or room in self._busy_completed:
+                raise
+            self._busy_rooms.add(room)
+            try:
+                if self._play_announcement is not None:
+                    await self._play_announcement(room, "busy")
+            except Exception as error:
+                logger.warning("Busy audio failed (error_type=%s)", type(error).__name__)
+            finally:
+                try:
+                    await self._hangup_room(room)
+                finally:
+                    self._busy_rooms.discard(room)
+                    self._busy_completed[room] = None
+                    if len(self._busy_completed) > 256:
+                        self._busy_completed.popitem(last=False)
+            raise
+        except AgentStartupUnavailable:
+            try:
+                if self._play_announcement is not None:
+                    await self._play_announcement(room, "unavailable")
+            except Exception as error:
+                logger.warning("Unavailable audio failed (error_type=%s)", type(error).__name__)
+            finally:
+                await self._hangup_room(room)
+            raise UnroutableInboundCall("voice_agent_unavailable") from None
+        except BaseException:
             await self._hangup_room(room)
             raise
-        if not created:
+        if not created and room not in self._active:
             await self._hangup_room(room)
 
     async def _resolve_inbound_number(self, dialed: str | None) -> PhoneResolution | None:
@@ -339,12 +382,62 @@ class Dispatcher:
         idempotency_key: str,
         overrides: Mapping[str, object] | None = None,
     ) -> bool:
+        if pending := self._pending.get(room):
+            if pending[0] != context:
+                raise IdempotencyConflict("call parameters differ for the pending key")
+            await asyncio.shield(pending[1])
+            return False
+        if room in self._active:
+            return False
+        if self._draining:
+            raise AdmissionUnavailable("dispatcher is draining")
+        maximum = getattr(self._settings, "max_active_calls", 3)
+        tenant_maximum = getattr(self._settings, "max_active_calls_per_tenant", 3)
+        tenant_slots = sum(
+            active.context.tenant_id == context.tenant_id for active in self._active.values()
+        )
+        tenant_slots += sum(
+            pending[0].tenant_id == context.tenant_id for pending in self._pending.values()
+        )
+        if len(self._active) + len(self._pending) >= maximum or tenant_slots >= tenant_maximum:
+            raise AdmissionUnavailable("voice capacity exhausted")
+        # Reserve synchronously before the first persistence/provider await.
+        # Pending calls consume slots and duplicate deliveries share the result.
+        future = asyncio.get_running_loop().create_future()
+        owner = asyncio.current_task()
+        assert owner is not None
+        self._pending[room] = (context, future, owner)
+        created = False
+        try:
+            created = await self._start_reserved(
+                room, context, idempotency_key=idempotency_key, overrides=overrides
+            )
+            return created
+        except BaseException as error:
+            if not future.done():
+                future.set_exception(error)
+                # Consume the exception even when no duplicate awaited it.
+                future.exception()
+            raise
+        finally:
+            self._pending.pop(room, None)
+            if not future.done():
+                future.set_result(created)
+
+    async def _start_reserved(
+        self,
+        room: str,
+        context: CallContext,
+        *,
+        idempotency_key: str,
+        overrides: Mapping[str, object] | None = None,
+    ) -> bool:
         created = await self._sessions.begin(context, room=room, idempotency_key=idempotency_key)
         if not created:
             return False
         try:
             handle = await self._launch(room, context, overrides)
-        except Exception as error:
+        except (Exception, asyncio.CancelledError) as error:
             logger.error(
                 "Voice agent startup refused before dial (error_type=%s)",
                 type(error).__name__,
@@ -358,6 +451,8 @@ class Dispatcher:
                 await self._persist_finalization(room)
             except PersistenceUnavailable:
                 raise PersistenceUnavailable("failed to persist failed call startup") from None
+            if isinstance(error, asyncio.CancelledError):
+                raise
             public_reason = getattr(error, "public_reason", None)
             if not isinstance(public_reason, str) or not public_reason:
                 public_reason = "voice agent startup preflight failed"
@@ -467,8 +562,75 @@ class Dispatcher:
     async def health(self) -> HealthReport:
         persistence_ready = await self._sessions.ready()
         return HealthReport(
-            status="ready" if persistence_ready else "not_ready",
+            status="ready" if persistence_ready and not self._draining else "not_ready",
             active_calls=len(self._active),
             persistence_ready=persistence_ready,
             sip_configured=self._sip.configured,
         )
+
+    async def drain(self) -> None:
+        """Bound concurrent call shutdown; preserve unresolved durable writes."""
+        self._draining = True
+        try:
+            async with asyncio.timeout(getattr(self._settings, "drain_timeout_seconds", 90.0)):
+                await self._drain_owned_calls()
+        except TimeoutError as error:
+            raise PersistenceUnavailable("voice drain deadline expired") from error
+
+    async def _drain_owned_calls(self) -> None:
+        """Refuse admission and settle owned calls before persistence closes.
+
+        Provider goodbye/busy playback remains a separate media integration;
+        this lifecycle boundary never claims that cancellation plays audio.
+        """
+        self._draining = True
+        current = asyncio.current_task()
+        pending = [entry[2] for entry in self._pending.values() if entry[2] is not current]
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        errors = []
+
+        async def settle(room: str) -> None:
+            try:
+                await self._drain_room(room)
+            except Exception as error:
+                errors.append(error)
+
+        await asyncio.gather(*(settle(room) for room in list(self._active)))
+        if self._completions:
+            await asyncio.gather(*list(self._completions), return_exceptions=True)
+        for room in list(self._unfinalized):
+            try:
+                await self._persist_finalization(room)
+            except Exception as error:
+                errors.append(error)
+        if errors:
+            raise PersistenceUnavailable("voice drain left lifecycle work unresolved") from errors[
+                0
+            ]
+
+    async def _drain_room(self, room: str) -> None:
+        # Completion callbacks must not delete the room during goodbye playback.
+        active = self._active.pop(room, None)
+        if active is None:
+            return
+        self._remember_unfinalized(room, active.context, SessionStatus.ENDED)
+        try:
+            graceful_stop = getattr(active.handle, "graceful_stop", None)
+            if callable(graceful_stop):
+                # The current engine plays before its artifact/finalization
+                # boundary; the dispatcher owns the final provider teardown.
+                await graceful_stop()
+            else:
+                await active.handle.cancel()
+                if self._play_announcement is not None:
+                    await self._play_announcement(room, "goodbye")
+        finally:
+            try:
+                async with asyncio.timeout(5.0):
+                    await self._hangup_room(room)
+            finally:
+                async with asyncio.timeout(5.0):
+                    await self._persist_finalization(room)

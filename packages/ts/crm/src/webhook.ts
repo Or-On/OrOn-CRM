@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 function record(value: unknown): Readonly<Record<string, unknown>> | undefined {
-  return value !== null && typeof value === "object"
+  return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Readonly<Record<string, unknown>>)
     : undefined;
 }
@@ -34,7 +34,19 @@ export interface WhatsAppInboundEnvelope {
   readonly providerMessageId: string;
   readonly from: string;
   readonly profileName: string;
-  readonly contentType?: "text" | "image" | "document" | "location";
+  readonly contentType?:
+    | "text"
+    | "image"
+    | "document"
+    | "location"
+    | "audio"
+    | "video"
+    | "interactive"
+    | "event";
+  /** Provider content remains untrusted; it never determines tenant authority. */
+  readonly providerMessageType?: string;
+  readonly interaction?: { readonly id: string; readonly title: string };
+  readonly reaction?: { readonly messageId: string; readonly emoji: string };
   readonly text: string;
   /** The provider message this one replies to (WhatsApp `context.id`). */
   readonly replyToProviderMessageId?: string;
@@ -69,9 +81,13 @@ export function parseStoredWhatsAppStatusEnvelope(
   const status = envelope?.status;
   if (
     typeof envelope?.providerAccountId !== "string" ||
+    boundedString(envelope.providerAccountId, 500) === undefined ||
     typeof envelope.providerEventId !== "string" ||
+    boundedString(envelope.providerEventId, 2_100) === undefined ||
     typeof envelope.providerMessageId !== "string" ||
+    boundedString(envelope.providerMessageId, 1_000) === undefined ||
     typeof envelope.occurredAt !== "string" ||
+    !Number.isFinite(Date.parse(envelope.occurredAt)) ||
     (status !== "sent" &&
       status !== "delivered" &&
       status !== "read" &&
@@ -105,26 +121,63 @@ export function parseStoredWhatsAppEnvelope(
     (contentType !== "text" &&
       contentType !== "image" &&
       contentType !== "document" &&
-      contentType !== "location")
+      contentType !== "location" &&
+      contentType !== "audio" &&
+      contentType !== "video" &&
+      contentType !== "interactive" &&
+      contentType !== "event")
   ) {
     return undefined;
   }
   const mediaRecord = record(envelope.media);
   const locationRecord = record(envelope.location);
   const media =
-    contentType === "image" || contentType === "document"
+    contentType === "image" ||
+    contentType === "document" ||
+    contentType === "audio" ||
+    contentType === "video"
       ? storedMedia(mediaRecord)
       : undefined;
   const location =
     contentType === "location" ? storedLocation(locationRecord) : undefined;
   if (
-    ((contentType === "image" || contentType === "document") &&
+    ((contentType === "image" ||
+      contentType === "document" ||
+      contentType === "audio" ||
+      contentType === "video") &&
       media === undefined) ||
     (contentType === "location" && location === undefined) ||
-    (contentType === "text" && envelope.text.trim() === "")
+    envelope.text.length > 65_536 ||
+    (contentType === "text" && envelope.text.trim() === "") ||
+    boundedString(envelope.providerAccountId, 500) === undefined ||
+    boundedString(envelope.providerEventId, 2_001) === undefined ||
+    boundedString(envelope.providerMessageId, 1_000) === undefined ||
+    !/^\+[1-9]\d{6,14}$/u.test(envelope.from) ||
+    envelope.profileName.length > 500
   )
     return undefined;
   const replyTo = boundedString(envelope.replyToProviderMessageId, 1_000);
+  const providerMessageType = boundedString(envelope.providerMessageType, 100);
+  const interactionRecord = record(envelope.interaction);
+  const interactionId = boundedString(interactionRecord?.id, 500);
+  const interactionTitle = boundedString(interactionRecord?.title, 1_024);
+  const reactionRecord = record(envelope.reaction);
+  const reactionMessage = boundedString(reactionRecord?.messageId, 1_000);
+  const reactionEmoji =
+    typeof reactionRecord?.emoji === "string" &&
+    reactionRecord.emoji.length <= 64
+      ? reactionRecord.emoji
+      : undefined;
+  if (
+    contentType === "interactive" &&
+    (interactionId === undefined || interactionTitle === undefined)
+  )
+    return undefined;
+  if (
+    providerMessageType === "reaction" &&
+    (reactionMessage === undefined || reactionEmoji === undefined)
+  )
+    return undefined;
   return {
     ...(typeof envelope.occurredAt === "string" &&
     Number.isFinite(Date.parse(envelope.occurredAt))
@@ -138,6 +191,13 @@ export function parseStoredWhatsAppEnvelope(
     profileName: envelope.profileName,
     contentType,
     text: envelope.text,
+    ...(providerMessageType === undefined ? {} : { providerMessageType }),
+    ...(interactionId === undefined || interactionTitle === undefined
+      ? {}
+      : { interaction: { id: interactionId, title: interactionTitle } }),
+    ...(reactionMessage === undefined || reactionEmoji === undefined
+      ? {}
+      : { reaction: { messageId: reactionMessage, emoji: reactionEmoji } }),
     ...(media === undefined ? {} : { media }),
     ...(location === undefined ? {} : { location }),
   };
@@ -217,7 +277,7 @@ export function parseWhatsAppMessageEnvelopes(
   for (const entryValue of array(root.entry)) {
     const entry = record(entryValue);
     if (entry === undefined) continue;
-    const entryId = typeof entry.id === "string" ? entry.id : "unknown";
+    const entryId = boundedString(entry.id, 1_000) ?? "unknown";
 
     for (const changeValue of array(entry.changes)) {
       const value = record(record(changeValue)?.value);
@@ -235,7 +295,19 @@ export function parseWhatsAppMessageEnvelopes(
         const rawFrom = boundedString(message.from, 100);
         if (id === undefined || rawFrom === undefined) continue;
         const from = `+${rawFrom.replace(/^\+/u, "")}`;
-        const profileName = boundedString(profile?.name, 500) ?? from;
+        if (!/^\+[1-9]\d{6,14}$/u.test(from)) continue;
+        // A batch may contain several senders; never borrow the first name.
+        const matchingContact = contacts
+          .map(record)
+          .find(
+            (candidate) => candidate?.wa_id === rawFrom.replace(/^\+/u, ""),
+          );
+        const profileName =
+          boundedString(record(matchingContact?.profile)?.name, 500) ??
+          (contacts.length === 1 && contact?.wa_id === undefined
+            ? boundedString(profile?.name, 500)
+            : undefined) ??
+          from;
         const occurredAt = messageOccurredAt(message);
         const replyTo = boundedString(record(message.context)?.id, 1_000);
         const base = {
@@ -258,7 +330,13 @@ export function parseWhatsAppMessageEnvelopes(
             results.push({ ...base, contentType: "text", text: body });
           continue;
         }
-        if (type === "image" || type === "document") {
+        if (
+          type === "image" ||
+          type === "document" ||
+          type === "audio" ||
+          type === "video" ||
+          type === "sticker"
+        ) {
           const providerMedia = record(message[type]);
           const media = storedMedia(
             providerMedia === undefined
@@ -274,9 +352,74 @@ export function parseWhatsAppMessageEnvelopes(
           if (media !== undefined)
             results.push({
               ...base,
-              contentType: type,
-              text: media.caption ?? "",
+              contentType: type === "sticker" ? "image" : type,
+              ...(type === "sticker" ? { providerMessageType: "sticker" } : {}),
+              text:
+                type === "audio"
+                  ? "[Voice note: transcription pending]"
+                  : (media.caption ?? ""),
               media,
+            });
+          continue;
+        }
+        if (type === "interactive" || type === "button") {
+          const interactive = record(message.interactive);
+          const selected =
+            type === "button"
+              ? record(message.button)
+              : interactive?.type === "button_reply"
+                ? record(interactive.button_reply)
+                : interactive?.type === "list_reply"
+                  ? record(interactive.list_reply)
+                  : undefined;
+          if (
+            type === "interactive" &&
+            selected === undefined &&
+            boundedString(interactive?.type, 100) !== undefined &&
+            interactive?.type !== "button_reply" &&
+            interactive?.type !== "list_reply"
+          ) {
+            results.push({
+              ...base,
+              contentType: "event",
+              providerMessageType: "interactive",
+              text: "[Unsupported WhatsApp interactive message]",
+            });
+            continue;
+          }
+          const selectedId = boundedString(
+            type === "button" ? selected?.payload : selected?.id,
+            500,
+          );
+          const title = boundedString(
+            type === "button" ? selected?.text : selected?.title,
+            1_024,
+          );
+          if (selectedId !== undefined && title !== undefined)
+            results.push({
+              ...base,
+              contentType: "interactive",
+              providerMessageType: type,
+              text: title,
+              interaction: { id: selectedId, title },
+            });
+          continue;
+        }
+        if (type === "reaction") {
+          const reaction = record(message.reaction);
+          const messageId = boundedString(reaction?.message_id, 1_000);
+          const emoji =
+            typeof reaction?.emoji === "string" && reaction.emoji.length <= 64
+              ? reaction.emoji
+              : undefined;
+          if (messageId !== undefined && emoji !== undefined)
+            results.push({
+              ...base,
+              contentType: "event",
+              providerMessageType: "reaction",
+              text:
+                emoji === "" ? "[Reaction removed]" : `[Reaction: ${emoji}]`,
+              reaction: { messageId, emoji },
             });
           continue;
         }
@@ -299,7 +442,16 @@ export function parseWhatsAppMessageEnvelopes(
               text: location.name ?? location.address ?? "",
               location,
             });
+          continue;
         }
+        const unsupportedType = boundedString(type, 100);
+        if (unsupportedType !== undefined)
+          results.push({
+            ...base,
+            contentType: "event",
+            providerMessageType: unsupportedType,
+            text: `[Unsupported WhatsApp message: ${unsupportedType}]`,
+          });
       }
     }
   }
@@ -327,14 +479,10 @@ export function parseWhatsAppStatusEnvelopes(
     for (const changeValue of array(entry.changes)) {
       const value = record(record(changeValue)?.value);
       const metadata = record(value?.metadata);
-      const accountId =
-        typeof metadata?.phone_number_id === "string"
-          ? metadata.phone_number_id
-          : undefined;
+      const accountId = boundedString(metadata?.phone_number_id, 500);
       for (const statusValue of array(value?.statuses)) {
         const statusRecord = record(statusValue);
-        const messageId =
-          typeof statusRecord?.id === "string" ? statusRecord.id : undefined;
+        const messageId = boundedString(statusRecord?.id, 1_000);
         const status = statusRecord?.status;
         const timestamp =
           typeof statusRecord?.timestamp === "string"
@@ -347,6 +495,7 @@ export function parseWhatsAppStatusEnvelopes(
           timestamp === undefined ||
           !Number.isSafeInteger(timestampSeconds) ||
           timestampSeconds <= 0 ||
+          timestampSeconds >= 8_640_000_000_000 ||
           (status !== "sent" &&
             status !== "delivered" &&
             status !== "read" &&

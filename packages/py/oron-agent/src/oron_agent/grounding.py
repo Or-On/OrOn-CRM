@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -84,8 +85,8 @@ class GroundedReply:
     evidence: dict[str, object] = field(default_factory=dict)
 
 
-def eligible_facts(records: list[dict[str, Any]], tenant_id: str) -> list[KnowledgeFact]:
-    """Validate approved data and reject conflicting values for the same key."""
+def _candidate_facts(records: list[dict[str, Any]], tenant_id: str) -> list[KnowledgeFact]:
+    """Validate tenant-authorized inert approved statements before conflict checks."""
 
     candidates: list[KnowledgeFact] = []
     for record in records:
@@ -138,6 +139,19 @@ def eligible_facts(records: list[dict[str, Any]], tenant_id: str) -> list[Knowle
                     value=value.strip(),
                 )
             )
+    return candidates
+
+
+def conflicting_fact_keys(records: list[dict[str, Any]], tenant_id: str) -> frozenset[str]:
+    values: dict[str, set[str]] = {}
+    for fact in _candidate_facts(records, tenant_id):
+        values.setdefault(fact.key, set()).add(fact.value)
+    return frozenset(key for key, entries in values.items() if len(entries) > 1)
+
+
+def eligible_facts(records: list[dict[str, Any]], tenant_id: str) -> list[KnowledgeFact]:
+    """Reject conflicting values; document order never resolves a disagreement."""
+    candidates = _candidate_facts(records, tenant_id)
     values: dict[str, set[str]] = {}
     for fact in candidates:
         values.setdefault(fact.key, set()).add(fact.value)
@@ -255,6 +269,7 @@ def render_reply(
     *,
     save_claim_receipted: bool | None = None,
     allow_ticket_claim: bool = False,
+    conflicting_keys: frozenset[str] = frozenset(),
 ) -> GroundedReply:
     """Render approved facts exactly; otherwise preserve safe model conversation."""
 
@@ -280,6 +295,16 @@ def render_reply(
             }
             and value.get("kind") == "fact"
         ):
+            if isinstance(value.get("factKey"), str) and value["factKey"] in conflicting_keys:
+                unavailable = (
+                    "יש סתירה במידע המאושר בנושא הזה, ולכן איני יכול למסור תשובה ודאית. "
+                    "אפשר לבקש מנציג לבדוק זאת."
+                    if language.lower().startswith("he")
+                    else "The approved information conflicts on this topic, "
+                    "so I cannot give a certain "
+                    "answer. An operator can review it."
+                )
+                return GroundedReply(unavailable, "conflicting_approved_facts")
             selector = {key: selected for key, selected in value.items() if key != "kind"}
             for fact in facts:
                 if selector == fact.selector() and type(value["version"]) is int:
@@ -334,6 +359,7 @@ class VoiceEvidenceGate(FrameProcessor):
             self._generation += 1
         if direction is FrameDirection.DOWNSTREAM and isinstance(frame, AggregatedTextFrame):
             facts: list[KnowledgeFact] = []
+            conflicts: frozenset[str] = frozenset()
             # Eligibility is evaluated against clock_timestamp() by the loader's
             # own query, so it must be read at the point of use: an operator
             # revoking a document sets revoked_at and flips the source to
@@ -344,9 +370,12 @@ class VoiceEvidenceGate(FrameProcessor):
             # conversational text never reaches the selector branch.
             if requires_approved_facts(frame.text):
                 generation = self._generation
+                read_started = time.monotonic_ns()
                 try:
                     async with asyncio.timeout(1.0):
-                        facts = eligible_facts(await self._load_records(), self._tenant_id)
+                        records = await self._load_records()
+                        facts = eligible_facts(records, self._tenant_id)
+                        conflicts = conflicting_fact_keys(records, self._tenant_id)
                 except Exception:
                     # Never fatal to the call, but never silent either: with no
                     # facts a valid selector renders as the recovery line, so a
@@ -356,6 +385,9 @@ class VoiceEvidenceGate(FrameProcessor):
                         "selector; this chunk falls back"
                     )
                     facts = []
+                frame.metadata["evidence_validation_read_ms"] = round(
+                    (time.monotonic_ns() - read_started) / 1_000_000, 3
+                )
                 # Only the await above can have let an interruption through.
                 if generation != self._generation:
                     return
@@ -364,6 +396,7 @@ class VoiceEvidenceGate(FrameProcessor):
                 frame.text,
                 facts,
                 language,
+                conflicting_keys=conflicts,
                 save_claim_receipted=(
                     self._save_claim_receipted() if self._save_claim_receipted is not None else None
                 ),
@@ -415,6 +448,7 @@ class VoiceEvidenceContext(FrameProcessor):
                     "",
                 )
                 self._on_caller_text(latest)
+            read_started = time.monotonic_ns()
             try:
                 async with asyncio.timeout(1.0):
                     facts = eligible_facts(await self._load_records(), self._tenant_id)
@@ -424,6 +458,9 @@ class VoiceEvidenceContext(FrameProcessor):
                     "evidence block; the model answers without tenant facts"
                 )
                 facts = []
+            frame.metadata["evidence_context_read_ms"] = round(
+                (time.monotonic_ns() - read_started) / 1_000_000, 3
+            )
             if generation != self._generation:
                 return
             frame.context.set_messages(

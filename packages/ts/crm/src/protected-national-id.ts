@@ -6,6 +6,9 @@ import {
 } from "node:crypto";
 
 import type { ProtectedNationalIdEnvelope } from "./field-service.js";
+import { normalizeNationalId } from "./national-id.js";
+
+export { normalizeNationalId } from "./national-id.js";
 
 const prefix = "v1:";
 const nonceLength = 12;
@@ -40,13 +43,6 @@ export function protectedFieldKeysFromEnvironment(
   if (!blindIndexKeyBase64)
     throw new TypeError("BLIND_INDEX_KEY is not configured");
   return { cipherKeyBase64, blindIndexKeyBase64 };
-}
-
-export function normalizeNationalId(value: string): string {
-  const normalized = value.replace(/[\s-]/gu, "");
-  if (!/^\d{4,32}$/u.test(normalized))
-    throw new TypeError("National ID must contain 4 to 32 digits");
-  return normalized;
 }
 
 export function protectNationalIdWithKeys(

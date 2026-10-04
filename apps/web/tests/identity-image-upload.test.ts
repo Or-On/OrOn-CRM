@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { readIdentityImage } from "../src/features/identity";
+import { readIdentityImage } from "../src/features/identity-upload-server";
 
 function requestFor(bytes: Uint8Array, type = "application/octet-stream") {
   const form = new FormData();
@@ -15,9 +15,12 @@ function requestFor(bytes: Uint8Array, type = "application/octet-stream") {
 
 describe("identity image validation", () => {
   it("detects a supported image from its signature instead of trusting the browser MIME", async () => {
-    const bytes = new Uint8Array([
-      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00,
-    ]);
+    const bytes = Uint8Array.from(
+      Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAG0lEQVR4nGNQSlv1nxLMMGrAqAGjBvwfJgYAAGE+MR8B/c+7AAAAAElFTkSuQmCC",
+        "base64",
+      ),
+    );
     await expect(readIdentityImage(requestFor(bytes))).resolves.toEqual({
       contentType: "image/png",
       data: bytes,

@@ -629,55 +629,69 @@ export function CalendarWorkspace({
             ))}
           </div>
           <div className={styles.monthGrid} role="grid" aria-label={heading}>
-            {bounds.days.map((day) => {
-              const dayEvents = events.filter((event) =>
-                eventIntersectsDay(event, day, defaultTimezone),
-              );
-              const date = calendarDateForFormatting(day);
-              const today =
-                day === calendarDateKeyInTimeZone(new Date(), defaultTimezone);
-              const outside =
-                date.getUTCMonth() !==
-                calendarDateForFormatting(cursor).getUTCMonth();
-              return (
+            {Array.from(
+              { length: Math.ceil(bounds.days.length / 7) },
+              (_, week) => (
                 <div
-                  aria-current={today ? "date" : undefined}
-                  aria-label={new Intl.DateTimeFormat(locale, {
-                    dateStyle: "full",
-                    timeZone: "UTC",
-                  }).format(date)}
-                  className={[
-                    styles.dayCell ?? "",
-                    today ? (styles.today ?? "") : "",
-                    outside ? (styles.outside ?? "") : "",
-                  ].join(" ")}
-                  key={day}
-                  onDoubleClick={() => canEdit && openCreate(day)}
-                  role="gridcell"
+                  className={styles.weekRow}
+                  role="row"
+                  key={bounds.days[week * 7]}
                 >
-                  <span className={styles.dayNumber}>{date.getUTCDate()}</span>
-                  <div className={styles.events}>
-                    {dayEvents.slice(0, 3).map((event) => (
-                      <button
-                        className={styles.event}
-                        data-status={event.status}
-                        key={event.id}
-                        onClick={() => openEdit(event)}
-                        title={`${formatTime(event)} · ${event.title}`}
-                        type="button"
+                  {bounds.days.slice(week * 7, week * 7 + 7).map((day) => {
+                    const dayEvents = events.filter((event) =>
+                      eventIntersectsDay(event, day, defaultTimezone),
+                    );
+                    const date = calendarDateForFormatting(day);
+                    const today =
+                      day ===
+                      calendarDateKeyInTimeZone(new Date(), defaultTimezone);
+                    const outside =
+                      date.getUTCMonth() !==
+                      calendarDateForFormatting(cursor).getUTCMonth();
+                    return (
+                      <div
+                        aria-current={today ? "date" : undefined}
+                        aria-label={new Intl.DateTimeFormat(locale, {
+                          dateStyle: "full",
+                          timeZone: "UTC",
+                        }).format(date)}
+                        className={[
+                          styles.dayCell ?? "",
+                          today ? (styles.today ?? "") : "",
+                          outside ? (styles.outside ?? "") : "",
+                        ].join(" ")}
+                        key={day}
+                        onDoubleClick={() => canEdit && openCreate(day)}
+                        role="gridcell"
                       >
-                        <span>{event.title}</span>
-                      </button>
-                    ))}
-                    {dayEvents.length > 3 ? (
-                      <span className={styles.more}>
-                        +{dayEvents.length - 3} {t.more}
-                      </span>
-                    ) : null}
-                  </div>
+                        <span className={styles.dayNumber}>
+                          {date.getUTCDate()}
+                        </span>
+                        <div className={styles.events}>
+                          {dayEvents.slice(0, 3).map((event) => (
+                            <button
+                              className={styles.event}
+                              data-status={event.status}
+                              key={event.id}
+                              onClick={() => openEdit(event)}
+                              title={`${formatTime(event)} · ${event.title}`}
+                              type="button"
+                            >
+                              <span>{event.title}</span>
+                            </button>
+                          ))}
+                          {dayEvents.length > 3 ? (
+                            <span className={styles.more}>
+                              +{dayEvents.length - 3} {t.more}
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              );
-            })}
+              ),
+            )}
           </div>
           <div className={styles.mobileAgenda}>
             {/* Mobile month view */}

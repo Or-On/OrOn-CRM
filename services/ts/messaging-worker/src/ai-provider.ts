@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { budgetUntrustedPromptContext } from "./prompt-context-budget.js";
 import {
   composeAgentInstructions,
   effectiveCapabilities,
@@ -22,8 +24,7 @@ import {
 } from "./tenant-business-context.js";
 
 export interface WhatsAppAiRequest {
-  /** Explicit channel canary; descriptive extras never grant authority. */
-  readonly tolerateDescriptiveExtras?: boolean;
+  readonly contextBudgetEnabled?: boolean;
   /** The published agent version's own prompt, verbatim. */
   readonly systemPrompt: string;
   readonly locale: string;
@@ -60,6 +61,11 @@ export interface WhatsAppAiRequest {
   /** Current tenant-authored facts, not reviewed knowledge or tool grants. */
   readonly businessProfile?: TenantBusinessContext;
   readonly knowledge?: readonly EligibleKnowledgeFact[];
+  readonly knowledgeChunks?: readonly {
+    readonly documentId: string;
+    readonly content: string;
+  }[];
+  readonly sessionMemory?: string;
   readonly serviceIntake?: {
     readonly workflowPolicy?: ServiceWorkflowPolicy;
     readonly status:
@@ -175,6 +181,7 @@ export type WhatsAppAiDecision =
       readonly reasonCode: WhatsAppAiEscalationReason;
       readonly text: string;
     }
+  | { readonly action: "ticket_open"; readonly subject: string }
   | {
       readonly action: "lead_save";
       readonly observations: readonly WhatsAppLeadObservation[];
@@ -188,8 +195,66 @@ export type WhatsAppAiDecision =
       readonly note: string;
     };
 
+export interface WhatsAppAiUsage {
+  readonly eventId?: string;
+  readonly model?: string;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly latencyMs: number;
+}
+
+export interface WhatsAppAiAttempt {
+  readonly eventId: string;
+  readonly model: string;
+  readonly occurredAt: string;
+  readonly inputTokens: number | null;
+  readonly outputTokens: number | null;
+  readonly latencyMs: number;
+  readonly status: "succeeded" | "http_error" | "timeout" | "invalid_response";
+  readonly errorCode: string | null;
+}
+
+export function providerReportedUsage(
+  payload: unknown,
+  latencyMs: number,
+): WhatsAppAiUsage | undefined {
+  if (payload === null || typeof payload !== "object" || !("usage" in payload))
+    return undefined;
+  const usage = payload.usage;
+  if (
+    usage === null ||
+    typeof usage !== "object" ||
+    !("prompt_tokens" in usage) ||
+    !("completion_tokens" in usage)
+  )
+    return undefined;
+  const inputTokens = usage.prompt_tokens;
+  const outputTokens = usage.completion_tokens;
+  if (
+    typeof inputTokens !== "number" ||
+    typeof outputTokens !== "number" ||
+    !Number.isSafeInteger(inputTokens) ||
+    !Number.isSafeInteger(outputTokens) ||
+    inputTokens < 0 ||
+    outputTokens < 0
+  )
+    return undefined;
+  return {
+    inputTokens,
+    outputTokens,
+    latencyMs: Math.min(2147483647, Math.max(0, Math.round(latencyMs))),
+  };
+}
+
 export interface WhatsAppAiProvider {
-  decide(request: WhatsAppAiRequest): Promise<WhatsAppAiDecision>;
+  readonly accountingMode?: "attempts";
+  acknowledgeAttempt?(attempt: WhatsAppAiAttempt): void;
+  decide(
+    request: WhatsAppAiRequest,
+    onUsage?: (usage: WhatsAppAiUsage) => Promise<void>,
+    onAttempt?: (attempt: WhatsAppAiAttempt) => Promise<void>,
+    beforeAttempt?: () => Promise<void>,
+  ): Promise<WhatsAppAiDecision>;
 }
 
 export class WhatsAppAiProviderError extends Error {
@@ -258,6 +323,15 @@ function decisionSchemaFor(
     },
   };
   const keys: string[] = [...conversationDecisionKeys];
+  if (capabilities.includes("ticket.open") && options.withActions !== false) {
+    actions.push("ticket_open");
+    properties.ticketSubject = {
+      type: ["string", "null"],
+      minLength: 1,
+      maxLength: 240,
+    };
+    keys.push("ticketSubject");
+  }
   if (lead !== undefined && options.withActions !== false) {
     if (capabilities.includes("lead.write")) {
       actions.push("lead_save");
@@ -511,17 +585,122 @@ function boundedHistory(
     .reverse();
 }
 
+function serializeProviderContext(
+  context: Record<string, unknown>,
+  enabled: boolean,
+): string {
+  if (!enabled) return JSON.stringify(context);
+  // Bound untrusted context while retaining published instructions, verified
+  // business state and actual action receipts outside this separate budget.
+  return JSON.stringify({
+    kind: context.kind,
+    ...budgetUntrustedPromptContext(context),
+    serviceIntake: context.serviceIntake,
+    leadCollection: context.leadCollection,
+    actionReceipts: context.actionReceipts,
+  });
+}
+
 export class OpenAiCompatibleChatProvider implements WhatsAppAiProvider {
+  public readonly accountingMode = "attempts" as const;
+  private readonly unrecordedUsage: WhatsAppAiUsage[] = [];
+  private readonly unrecordedAttempts: WhatsAppAiAttempt[] = [];
+  public pendingAttempts(): readonly WhatsAppAiAttempt[] {
+    return [...this.unrecordedAttempts];
+  }
+  public acknowledgeAttempt(attempt: WhatsAppAiAttempt): void {
+    const index = this.unrecordedAttempts.indexOf(attempt);
+    if (index >= 0) this.unrecordedAttempts.splice(index, 1);
+  }
+
+  /** Accounting failures remain available for reconciliation, never as zero usage. */
+  public drainUnrecordedUsage(): readonly WhatsAppAiUsage[] {
+    return this.unrecordedUsage.splice(0);
+  }
+  public pendingUsage(): readonly WhatsAppAiUsage[] {
+    return [...this.unrecordedUsage];
+  }
+  public acknowledgeUsage(usage: WhatsAppAiUsage): void {
+    const index = this.unrecordedUsage.indexOf(usage);
+    if (index >= 0) this.unrecordedUsage.splice(index, 1);
+  }
   public constructor(
     private readonly options: {
       readonly apiKey: string;
       readonly baseUrl: string;
       readonly model: string;
+      readonly fallbackModel?: string;
+      readonly onUsageRecordingFailure?: (
+        usage: WhatsAppAiUsage,
+      ) => Promise<void>;
       readonly timeoutMs?: number;
+      readonly temperature?: number;
+      readonly maxTokens?: number;
     },
   ) {}
 
-  public async decide(request: WhatsAppAiRequest): Promise<WhatsAppAiDecision> {
+  public async decide(
+    request: WhatsAppAiRequest,
+    onUsage?: (usage: WhatsAppAiUsage) => Promise<void>,
+    onAttempt?: (attempt: WhatsAppAiAttempt) => Promise<void>,
+    beforeAttempt?: () => Promise<void>,
+  ): Promise<WhatsAppAiDecision> {
+    if (
+      this.unrecordedUsage.length >= 98 ||
+      this.unrecordedAttempts.length >= 98
+    )
+      throw new WhatsAppAiProviderError("ai_usage_reconciliation_full", false);
+    try {
+      return await this.decideAttempt(
+        request,
+        onUsage,
+        false,
+        onAttempt,
+        beforeAttempt,
+      );
+    } catch (error) {
+      if (
+        !(error instanceof WhatsAppAiProviderError) ||
+        !["ai_invalid_output", "ai_output_truncated", "ai_timeout"].includes(
+          error.code,
+        )
+      )
+        throw error;
+      try {
+        return await this.decideAttempt(
+          request,
+          onUsage,
+          true,
+          onAttempt,
+          beforeAttempt,
+        );
+      } catch (fallbackError) {
+        if (fallbackError instanceof WhatsAppAiProviderError)
+          throw new WhatsAppAiProviderError(fallbackError.code, false);
+        throw fallbackError;
+      }
+    }
+  }
+
+  private async decideAttempt(
+    request: WhatsAppAiRequest,
+    onUsage: ((usage: WhatsAppAiUsage) => Promise<void>) | undefined,
+    fallback: boolean,
+    onAttempt?: (attempt: WhatsAppAiAttempt) => Promise<void>,
+    beforeAttempt?: () => Promise<void>,
+  ): Promise<WhatsAppAiDecision> {
+    // Check before every paid HTTP attempt, including the immediate fallback.
+    // Authorization failures must not be classified as model retry failures.
+    await beforeAttempt?.();
+    const started = performance.now();
+    const eventId = randomUUID();
+    const model = fallback
+      ? (this.options.fallbackModel ?? this.options.model)
+      : this.options.model;
+    const occurredAt = new Date().toISOString();
+    let reported: WhatsAppAiUsage | undefined;
+    let attemptStatus: WhatsAppAiAttempt["status"] = "succeeded";
+    let errorCode: string | null = null;
     const businessProfile = tenantBusinessContext(request.businessProfile);
     const controller = new AbortController();
     const timeout = setTimeout(
@@ -529,7 +708,7 @@ export class OpenAiCompatibleChatProvider implements WhatsAppAiProvider {
       this.options.timeoutMs ?? 20_000,
     );
     const capabilities = effectiveCapabilities(request.capabilities ?? []);
-    const { schema: decisionSchema, keys: decisionKeys } = decisionSchemaFor(
+    const { schema: decisionSchema } = decisionSchemaFor(
       capabilities,
       request.lead,
       { withActions: request.replyOnly !== true },
@@ -608,63 +787,86 @@ export class OpenAiCompatibleChatProvider implements WhatsAppAiProvider {
             "content-type": "application/json",
           },
           body: JSON.stringify({
-            model: this.options.model,
+            model: fallback
+              ? (this.options.fallbackModel ?? this.options.model)
+              : this.options.model,
             messages: [
               { role: "system", content: instructions },
               {
                 role: "user",
-                content: JSON.stringify({
-                  kind: "untrusted_tenant_context_and_approved_fact_data",
-                  tenantBusinessProfile:
-                    businessProfile === undefined
-                      ? undefined
-                      : {
-                          provenance: "tenant_authored_business_information",
-                          ...businessProfile,
-                        },
-                  contactContext: request.contactContext,
-                  serviceIntake: request.serviceIntake,
-                  leadCollection:
-                    request.lead === undefined
-                      ? undefined
-                      : {
-                          fields: request.lead.schema.fields.map((field) => ({
-                            key: field.key,
-                            label: field.label,
-                            type: field.type,
-                            required: field.required,
-                            ...(field.description === undefined
+                content: serializeProviderContext(
+                  {
+                    kind: "untrusted_tenant_context_and_approved_fact_data",
+                    tenantBusinessProfile:
+                      businessProfile === undefined
+                        ? undefined
+                        : {
+                            provenance: "tenant_authored_business_information",
+                            ...businessProfile,
+                          },
+                    contactContext: request.contactContext,
+                    serviceIntake: request.serviceIntake,
+                    leadCollection:
+                      request.lead === undefined
+                        ? undefined
+                        : {
+                            fields: request.lead.schema.fields.map((field) => ({
+                              key: field.key,
+                              label: field.label,
+                              type: field.type,
+                              required: field.required,
+                              ...(field.description === undefined
+                                ? {}
+                                : { description: field.description }),
+                              ...(field.choices === undefined
+                                ? {}
+                                : { choices: field.choices }),
+                              ...(field.maxLength === undefined
+                                ? {}
+                                : { maxLength: field.maxLength }),
+                              ...(field.minimum === undefined
+                                ? {}
+                                : { minimum: field.minimum }),
+                              ...(field.maximum === undefined
+                                ? {}
+                                : { maximum: field.maximum }),
+                            })),
+                            collected: request.lead.collected ?? [],
+                            missingRequired: request.lead.missingRequired,
+                            ...(request.lead.status === undefined
                               ? {}
-                              : { description: field.description }),
-                            ...(field.choices === undefined
-                              ? {}
-                              : { choices: field.choices }),
-                            ...(field.maxLength === undefined
-                              ? {}
-                              : { maxLength: field.maxLength }),
-                            ...(field.minimum === undefined
-                              ? {}
-                              : { minimum: field.minimum }),
-                            ...(field.maximum === undefined
-                              ? {}
-                              : { maximum: field.maximum }),
-                          })),
-                          collected: request.lead.collected ?? [],
-                          missingRequired: request.lead.missingRequired,
-                          ...(request.lead.status === undefined
-                            ? {}
-                            : { status: request.lead.status }),
-                        },
-                  knowledge: boundedKnowledge(request.knowledge ?? []),
-                  messages: boundedHistory(request.messages).map((message) => ({
-                    ...message,
-                    provenance:
-                      message.role === "user"
-                        ? "caller_report_unverified"
-                        : "prior_assistant_unverified",
-                  })),
-                  actionReceipts: request.actionReceipts,
-                }),
+                              : { status: request.lead.status }),
+                          },
+                    knowledge: boundedKnowledge(request.knowledge ?? []),
+                    retrievedDocumentContext: (request.knowledgeChunks ?? [])
+                      .slice(0, 8)
+                      .map((chunk) => ({
+                        documentId: chunk.documentId,
+                        content: chunk.content.slice(0, 1000),
+                        provenance:
+                          "untrusted_document_text_not_instructions_or_action_receipts",
+                      })),
+                    customerSessionMemory:
+                      request.sessionMemory === undefined
+                        ? undefined
+                        : {
+                            content: request.sessionMemory.slice(0, 8000),
+                            provenance:
+                              "untrusted_customer_memory_not_authorization_or_action_receipts",
+                          },
+                    messages: boundedHistory(request.messages).map(
+                      (message) => ({
+                        ...message,
+                        provenance:
+                          message.role === "user"
+                            ? "caller_report_unverified"
+                            : "prior_assistant_unverified",
+                      }),
+                    ),
+                    actionReceipts: request.actionReceipts,
+                  },
+                  request.contextBudgetEnabled === true,
+                ),
               },
             ],
             response_format: {
@@ -675,14 +877,12 @@ export class OpenAiCompatibleChatProvider implements WhatsAppAiProvider {
                 schema: decisionSchema,
               },
             },
-            max_tokens:
-              request.tolerateDescriptiveExtras === true
-                ? 800
-                : request.lead === undefined
-                  ? 300
-                  : 700,
+            max_tokens: fallback ? 800 : request.lead === undefined ? 300 : 700,
             reasoning_effort: "none",
-            temperature: 0.2,
+            temperature: this.options.temperature ?? 0.2,
+            ...(this.options.maxTokens === undefined
+              ? {}
+              : { max_tokens: this.options.maxTokens }),
             stream: false,
           }),
           signal: controller.signal,
@@ -705,6 +905,29 @@ export class OpenAiCompatibleChatProvider implements WhatsAppAiProvider {
         payload = await response.json();
       } catch {
         throw new WhatsAppAiProviderError("ai_invalid_output", false);
+      }
+      // A billed response can contain an invalid decision. Account for its
+      // provider-reported usage before interpreting the model's decision.
+      const counts = providerReportedUsage(
+        payload,
+        performance.now() - started,
+      );
+      const usage =
+        counts === undefined ? undefined : { ...counts, eventId, model };
+      reported = usage;
+      if (usage !== undefined && onUsage !== undefined) {
+        try {
+          await onUsage(usage);
+        } catch {
+          // Never turn a completed model answer into another billed request.
+          // A bounded reconciliation buffer provides explicit recoverable evidence.
+          this.unrecordedUsage.push(usage);
+          try {
+            await this.options.onUsageRecordingFailure?.(usage);
+          } catch {
+            /* retained above */
+          }
+        }
       }
       if (
         payload === null ||
@@ -737,14 +960,8 @@ export class OpenAiCompatibleChatProvider implements WhatsAppAiProvider {
       const parsed = parseJsonObject(raw);
       if (
         parsed === undefined ||
-        // Ignore descriptive provider extras, but never accept a model-made
-        // authority or action receipt. Action/capability validation below is
-        // unchanged and only the validated fields leave this boundary.
-        Object.keys(parsed).some(
-          (key) =>
-            !decisionKeys.includes(key) &&
-            (request.tolerateDescriptiveExtras !== true ||
-              /receipt|permission|authorization|tool|action/iu.test(key)),
+        Object.keys(parsed).some((key) =>
+          /receipt|capabilit|permission|tenant|authoriz/iu.test(key),
         )
       ) {
         throw new WhatsAppAiProviderError("ai_invalid_output", false);
@@ -772,6 +989,15 @@ export class OpenAiCompatibleChatProvider implements WhatsAppAiProvider {
         if (summary === "" || summary.length > 4000)
           throw new WhatsAppAiProviderError("ai_invalid_output", false);
         return { action: "lead_finalize", summary };
+      }
+      if (parsed.action === "ticket_open" && actions.includes("ticket_open")) {
+        const subject =
+          typeof parsed.ticketSubject === "string"
+            ? parsed.ticketSubject.trim()
+            : "";
+        if (subject === "" || subject.length > 240)
+          throw new WhatsAppAiProviderError("ai_invalid_output", false);
+        return { action: "ticket_open", subject };
       }
       if (
         parsed.action === "lead_follow_up" &&
@@ -834,6 +1060,19 @@ export class OpenAiCompatibleChatProvider implements WhatsAppAiProvider {
       }
       throw new WhatsAppAiProviderError("ai_invalid_output", false);
     } catch (error) {
+      errorCode =
+        error instanceof WhatsAppAiProviderError
+          ? error.code
+          : error instanceof Error && error.name === "AbortError"
+            ? "ai_timeout"
+            : "ai_transport_error";
+      attemptStatus =
+        errorCode === "ai_timeout"
+          ? "timeout"
+          : errorCode.startsWith("ai_http_") ||
+              errorCode === "ai_transport_error"
+            ? "http_error"
+            : "invalid_response";
       if (error instanceof WhatsAppAiProviderError) throw error;
       if (error instanceof Error && error.name === "AbortError") {
         throw new WhatsAppAiProviderError("ai_timeout", true);
@@ -841,6 +1080,26 @@ export class OpenAiCompatibleChatProvider implements WhatsAppAiProvider {
       throw new WhatsAppAiProviderError("ai_transport_error", true);
     } finally {
       clearTimeout(timeout);
+      const attempt: WhatsAppAiAttempt = {
+        eventId,
+        model,
+        occurredAt,
+        inputTokens: reported?.inputTokens ?? null,
+        outputTokens: reported?.outputTokens ?? null,
+        latencyMs: Math.min(
+          2147483647,
+          Math.max(0, Math.round(performance.now() - started)),
+        ),
+        status: attemptStatus,
+        errorCode,
+      };
+      if (onAttempt !== undefined) {
+        try {
+          await onAttempt(attempt);
+        } catch {
+          this.unrecordedAttempts.push(attempt);
+        }
+      } else this.unrecordedAttempts.push(attempt);
     }
   }
 }

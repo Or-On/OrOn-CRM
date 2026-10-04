@@ -9,12 +9,17 @@ import {
   sep,
 } from "node:path";
 
+import { validatePrivateMp4 } from "./private-object-video.js";
+
 const supported = {
+  "video/mp4": { extension: ".mp4", maximum: 16 * 1024 * 1024 },
   "image/jpeg": { extension: ".jpg", maximum: 12 * 1024 * 1024 },
   "image/png": { extension: ".png", maximum: 12 * 1024 * 1024 },
   "image/webp": { extension: ".webp", maximum: 12 * 1024 * 1024 },
   "application/pdf": { extension: ".pdf", maximum: 20 * 1024 * 1024 },
   "text/plain": { extension: ".txt", maximum: 2 * 1024 * 1024 },
+  "audio/ogg": { extension: ".ogg", maximum: 16 * 1024 * 1024 },
+  "audio/wav": { extension: ".wav", maximum: 16 * 1024 * 1024 },
 } as const;
 
 export type PrivateObjectContentType = keyof typeof supported;
@@ -59,7 +64,9 @@ function confined(root: string, candidate: string): string {
 function contentType(value: string): PrivateObjectContentType {
   const normalized = value.split(";", 1)[0]?.trim().toLowerCase() ?? "";
   if (!(normalized in supported))
-    throw new TypeError("Use a JPEG, PNG, WebP, PDF, or plain-text file");
+    throw new TypeError(
+      "Use a JPEG, PNG, WebP, PDF, plain-text, Ogg Opus, PCM WAV, or H.264 MP4 file",
+    );
   return normalized as PrivateObjectContentType;
 }
 
@@ -219,6 +226,152 @@ function validateWebp(bytes: Uint8Array): void {
     throw new TypeError("The WebP image structure is invalid");
 }
 
+function validateWav(bytes: Uint8Array): void {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (bytes.length < 44 || view.getUint32(4, true) + 8 !== bytes.length)
+    throw new TypeError("The WAV container length is invalid");
+  let offset = 12;
+  let alignment = 0;
+  let sawData = false;
+  while (offset + 8 <= bytes.length) {
+    const type = Buffer.from(bytes.subarray(offset, offset + 4)).toString(
+      "ascii",
+    );
+    const length = view.getUint32(offset + 4, true);
+    const start = offset + 8;
+    const end = start + length;
+    if (end > bytes.length) throw new TypeError("The WAV chunk is incomplete");
+    if (type === "fmt ") {
+      if (alignment !== 0 || length !== 16 || view.getUint16(start, true) !== 1)
+        throw new TypeError("Only canonical PCM WAV is supported");
+      const channels = view.getUint16(start + 2, true);
+      const sampleRate = view.getUint32(start + 4, true);
+      const bits = view.getUint16(start + 14, true);
+      alignment = (channels * bits) / 8;
+      if (
+        ![1, 2].includes(channels) ||
+        ![8, 16, 24, 32].includes(bits) ||
+        sampleRate < 8000 ||
+        sampleRate > 192000 ||
+        view.getUint16(start + 12, true) !== alignment ||
+        view.getUint32(start + 8, true) !== sampleRate * alignment
+      )
+        throw new TypeError("The WAV PCM format is invalid");
+    } else if (type === "data") {
+      if (!alignment || sawData || length === 0 || length % alignment !== 0)
+        throw new TypeError("The WAV sample data is invalid");
+      sawData = true;
+    }
+    offset = end + (length % 2);
+  }
+  if (offset !== bytes.length || !sawData)
+    throw new TypeError("The WAV file is incomplete");
+}
+
+const oggCrcTable = Array.from({ length: 256 }, (_, index) => {
+  let value = index << 24;
+  for (let bit = 0; bit < 8; bit += 1)
+    value = value & 0x80000000 ? (value << 1) ^ 0x04c11db7 : value << 1;
+  return value >>> 0;
+});
+
+function validateOggOpus(bytes: Uint8Array): void {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let offset = 0;
+  let serial: number | undefined;
+  let sequence = 0;
+  let partial: number[] = [];
+  let packets = 0;
+  let ended = false;
+  while (offset < bytes.length) {
+    if (
+      ended ||
+      offset + 27 > bytes.length ||
+      Buffer.from(bytes.subarray(offset, offset + 4)).toString("ascii") !==
+        "OggS" ||
+      bytes[offset + 4] !== 0
+    )
+      throw new TypeError("The Ogg page header is invalid");
+    const flags = bytes[offset + 5] ?? 0;
+    const segments = bytes[offset + 26] ?? 0;
+    if (flags > 7 || offset + 27 + segments > bytes.length)
+      throw new TypeError("The Ogg segment table is incomplete");
+    const pageSerial = view.getUint32(offset + 14, true);
+    serial ??= pageSerial;
+    if (
+      pageSerial !== serial ||
+      view.getUint32(offset + 18, true) !== sequence ||
+      Boolean(flags & 2) !== (sequence === 0) ||
+      Boolean(flags & 1) !== partial.length > 0
+    )
+      throw new TypeError("The Ogg stream sequence is invalid");
+    let body = offset + 27 + segments;
+    const lengths = bytes.subarray(offset + 27, body);
+    const end = body + lengths.reduce((sum, length) => sum + length, 0);
+    if (end > bytes.length)
+      throw new TypeError("The Ogg page body is incomplete");
+    let crc = 0;
+    for (let index = offset; index < end; index += 1) {
+      const byte =
+        index >= offset + 22 && index < offset + 26 ? 0 : (bytes[index] ?? 0);
+      crc =
+        ((crc << 8) ^ (oggCrcTable[((crc >>> 24) ^ byte) & 0xff] ?? 0)) >>> 0;
+    }
+    if (crc !== view.getUint32(offset + 22, true))
+      throw new TypeError("The Ogg page checksum is invalid");
+    for (const length of lengths) {
+      for (const byte of bytes.subarray(body, body + length))
+        partial.push(byte);
+      body += length;
+      if (partial.length > 65536)
+        throw new TypeError("The Opus packet exceeds the safety limit");
+      if (length < 255) {
+        const packet = Buffer.from(partial);
+        if (
+          packets === 0 &&
+          (packet.length !== 19 ||
+            packet.toString("ascii", 0, 8) !== "OpusHead" ||
+            packet[8] !== 1 ||
+            ![1, 2].includes(packet[9] ?? 0) ||
+            packet[18] !== 0)
+        )
+          throw new TypeError("Only mono/stereo Ogg Opus is supported");
+        if (
+          packets === 1 &&
+          (packet.length < 16 || packet.toString("ascii", 0, 8) !== "OpusTags")
+        )
+          throw new TypeError("The Opus tags packet is invalid");
+        if (packets === 1) {
+          let tagOffset = 12 + packet.readUInt32LE(8);
+          if (tagOffset + 4 > packet.length)
+            throw new TypeError("The Opus vendor tag is incomplete");
+          const count = packet.readUInt32LE(tagOffset);
+          tagOffset += 4;
+          if (count > 4096)
+            throw new TypeError("The Opus tags exceed the safety limit");
+          for (let index = 0; index < count; index += 1) {
+            if (tagOffset + 4 > packet.length)
+              throw new TypeError("The Opus comment is incomplete");
+            const length = packet.readUInt32LE(tagOffset);
+            tagOffset += 4 + length;
+            if (tagOffset > packet.length)
+              throw new TypeError("The Opus comment is incomplete");
+          }
+        }
+        if (packets > 1 && packet.length === 0)
+          throw new TypeError("The Opus audio packet is empty");
+        packets += 1;
+        partial = [];
+      }
+    }
+    ended = Boolean(flags & 4);
+    offset = end;
+    sequence += 1;
+  }
+  if (!ended || partial.length || packets < 3)
+    throw new TypeError("The Ogg Opus stream is incomplete");
+}
+
 function validateMagic(
   bytes: Uint8Array,
   type: PrivateObjectContentType,
@@ -235,12 +388,20 @@ function validateMagic(
       ascii(0, 4) === "RIFF" &&
       ascii(8, 12) === "WEBP") ||
     (type === "application/pdf" && ascii(0, 5) === "%PDF-") ||
+    (type === "video/mp4" && ascii(4, 8) === "ftyp") ||
+    (type === "audio/ogg" && ascii(0, 4) === "OggS") ||
+    (type === "audio/wav" &&
+      ascii(0, 4) === "RIFF" &&
+      ascii(8, 12) === "WAVE") ||
     (type === "text/plain" && !bytes.includes(0));
   if (!valid)
     throw new TypeError("The file contents do not match its declared type");
-  if (type === "image/png") validatePng(bytes);
+  if (type === "video/mp4") validatePrivateMp4(bytes);
+  else if (type === "image/png") validatePng(bytes);
   else if (type === "image/jpeg") validateJpeg(bytes);
   else if (type === "image/webp") validateWebp(bytes);
+  else if (type === "audio/ogg") validateOggOpus(bytes);
+  else if (type === "audio/wav") validateWav(bytes);
   else if (type === "application/pdf") {
     const tail = Buffer.from(bytes.subarray(Math.max(0, bytes.length - 1_024)))
       .toString("ascii")
@@ -258,6 +419,16 @@ function validateMagic(
       throw new TypeError("The text file is not valid UTF-8", { cause: error });
     }
   }
+}
+
+/** Validate an identity image without creating or staging a stored object. */
+export function validatePrivateImage(
+  bytes: Uint8Array,
+  type: "image/png" | "image/jpeg" | "image/webp",
+): void {
+  if (!["image/png", "image/jpeg", "image/webp"].includes(type))
+    throw new TypeError("Choose a PNG, JPEG or WebP image");
+  validateMagic(bytes, type);
 }
 
 function safeSegment(value: string, label: string): string {
@@ -299,6 +470,11 @@ export async function stagePrivateObject(
 ): Promise<StagedPrivateObject> {
   requireLocalBackend(options);
   const type = contentType(input.declaredContentType);
+  const scope = input.scope ?? "field-service";
+  if (!["field-service", "customer-files", "messaging"].includes(scope))
+    throw new TypeError("Private object scope is invalid");
+  if (type === "video/mp4" && scope !== "messaging")
+    throw new TypeError("MP4 video storage is supported for messaging only");
   const definition = supported[type];
   if (input.bytes.byteLength < 1 || input.bytes.byteLength > definition.maximum)
     throw new TypeError(
@@ -309,7 +485,7 @@ export async function stagePrivateObject(
   const now = new Date();
   const storageKey = [
     safeSegment(input.tenantId, "Tenant identifier"),
-    input.scope ?? "field-service",
+    scope,
     safeSegment(input.caseId, "Case identifier"),
     safeSegment(input.category, "Attachment category"),
     String(now.getUTCFullYear()),

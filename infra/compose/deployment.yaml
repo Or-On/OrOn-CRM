@@ -31,6 +31,9 @@ services:
     cpus: 2
     pids_limit: 256
     environment:
+      # Verifier access belongs only to the HMAC-valid server webhook.
+      WHATSAPP_MEMORY_VERIFIER_DATABASE_URL: ""
+      WHATSAPP_MEMORY_SIGNATURE_PROOF_ENABLED: "false"
       POSTGRES_DB: ${DEPLOYMENT_DATABASE_NAME:?Set the deployment database name}
       POSTGRES_USER: platform_migrator
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
@@ -70,6 +73,9 @@ services:
       - path: ${DEPLOYMENT_CONFIG_DIR:?Set an absolute private config directory}/migrator.env
         format: raw
     environment:
+      # Verifier access belongs only to the HMAC-valid server webhook.
+      WHATSAPP_MEMORY_VERIFIER_DATABASE_URL: ""
+      WHATSAPP_MEMORY_SIGNATURE_PROOF_ENABLED: "false"
       PLATFORM_ENV: production
     depends_on: { postgres: { condition: service_healthy } }
     networks: [database]
@@ -95,6 +101,9 @@ services:
       - path: ${DEPLOYMENT_CONFIG_DIR}/bootstrap-owner.env
         format: raw
     environment:
+      # Verifier access belongs only to the HMAC-valid server webhook.
+      WHATSAPP_MEMORY_VERIFIER_DATABASE_URL: ""
+      WHATSAPP_MEMORY_SIGNATURE_PROOF_ENABLED: "false"
       PLATFORM_ENV: production
       BOOTSTRAP_OWNER_PASSWORD_FILE: /tmp/owner-password
     depends_on: { postgres: { condition: service_healthy } }
@@ -110,6 +119,9 @@ services:
       - path: ${DEPLOYMENT_CONFIG_DIR}/control-api.env
         format: raw
     environment:
+      # Verifier access belongs only to the HMAC-valid server webhook.
+      WHATSAPP_MEMORY_VERIFIER_DATABASE_URL: ""
+      WHATSAPP_MEMORY_SIGNATURE_PROOF_ENABLED: "false"
       <<: *provider-flags
       PLATFORM_ENV: production
       CONTROL_API_BIND_HOST: 0.0.0.0
@@ -134,12 +146,17 @@ services:
 
   dispatcher:
     <<: *service
+    # 90s concurrent drain plus cancellation/provider cleanup before SIGKILL.
+    stop_grace_period: 120s
     image: ${DISPATCHER_IMAGE:?Set an immutable dispatcher image digest}
     profiles: [voice]
     env_file:
       - path: ${DEPLOYMENT_CONFIG_DIR}/dispatcher.env
         format: raw
     environment:
+      # Verifier access belongs only to the HMAC-valid server webhook.
+      WHATSAPP_MEMORY_VERIFIER_DATABASE_URL: ""
+      WHATSAPP_MEMORY_SIGNATURE_PROOF_ENABLED: "false"
       <<: *provider-flags
       PLATFORM_ENV: production
       DISPATCHER_BIND_HOST: 0.0.0.0
@@ -171,6 +188,9 @@ services:
       - path: ${DEPLOYMENT_CONFIG_DIR}/messaging-worker.env
         format: raw
     environment:
+      # Verifier access belongs only to the HMAC-valid server webhook.
+      WHATSAPP_MEMORY_VERIFIER_DATABASE_URL: ""
+      WHATSAPP_MEMORY_SIGNATURE_PROOF_ENABLED: "false"
       <<: *provider-flags
       PLATFORM_ENV: production
       CONTROL_API_URL: http://control-api:8000
@@ -210,6 +230,9 @@ services:
       - path: ${DEPLOYMENT_CONFIG_DIR}/sweeper.env
         format: raw
     environment:
+      # Verifier access belongs only to the HMAC-valid server webhook.
+      WHATSAPP_MEMORY_VERIFIER_DATABASE_URL: ""
+      WHATSAPP_MEMORY_SIGNATURE_PROOF_ENABLED: "false"
       PLATFORM_ENV: production
     # "$$" keeps the interval a container-runtime value from sweeper.env rather
     # than a compose-time substitution from the shared deployment env.
@@ -239,6 +262,7 @@ services:
       CONTROL_API_URL: http://control-api:8000
       DISPATCHER_URL: http://dispatcher:8082
       PUBLIC_SITE_URL: ${PLATFORM_ORIGIN:?Set the canonical HTTPS origin}
+    # WhatsApp ingestion and the web DB do not require the control-api process.
     depends_on: { postgres: { condition: service_healthy } }
     healthcheck:
       test:
@@ -266,8 +290,28 @@ services:
     image: caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
     user: "65532:65532"
     mem_limit: 256m
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "--fail",
+          "--silent",
+          "--output",
+          "/dev/null",
+          "--max-time",
+          "2",
+          "http://127.0.0.1:8080/health/live",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
     cap_add: [NET_BIND_SERVICE]
     environment:
+      # Verifier access belongs only to the HMAC-valid server webhook.
+      WHATSAPP_MEMORY_VERIFIER_DATABASE_URL: ""
+      WHATSAPP_MEMORY_SIGNATURE_PROOF_ENABLED: "false"
       PLATFORM_ORIGIN: ${PLATFORM_ORIGIN}
       TLS_CONTACT_EMAIL: ${TLS_CONTACT_EMAIL:?Set a TLS contact email}
     ports: ["80:80", "443:443"]
@@ -277,20 +321,6 @@ services:
     tmpfs: [/config, /tmp]
     read_only: true
     depends_on: { web: { condition: service_healthy } }
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "wget",
-          "-q",
-          "-O",
-          "/dev/null",
-          "http://127.0.0.1:8080/healthz",
-        ]
-      interval: 10s
-      timeout: 3s
-      retries: 3
-      start_period: 10s
     networks: [edge, application]
 
 networks:

@@ -968,17 +968,20 @@ export async function updateCustomerDossier(
   const preferredLanguage = nullableText(input.preferredLanguage, 20);
   const address = nullableText(input.address, 500);
   const nationalId = input.nationalId;
-  await sql`
+  const updated = await sql<{ contact_id: string }[]>`
     INSERT INTO crm.customer_profiles(
       tenant_id, contact_id, national_id_ciphertext, national_id_blind_index,
       national_id_hint, preferred_language, address
-    ) VALUES (
-      platform.current_tenant_id(), ${contactId}::uuid,
+    ) SELECT
+      platform.current_tenant_id(), contact.id,
       ${nationalId === undefined ? null : (nationalId?.ciphertext ?? null)},
       ${nationalId === undefined ? null : (nationalId?.blindIndex ?? null)},
       ${nationalId === undefined ? null : (nationalId?.hint ?? null)},
       ${preferredLanguage}, ${address}
-    ) ON CONFLICT (tenant_id, contact_id) DO UPDATE SET
+    FROM crm.contacts contact
+    WHERE contact.id = ${contactId}::uuid
+      AND contact.tenant_id = platform.current_tenant_id()
+    ON CONFLICT (tenant_id, contact_id) DO UPDATE SET
       national_id_ciphertext = CASE WHEN ${nationalId !== undefined}
         THEN EXCLUDED.national_id_ciphertext ELSE crm.customer_profiles.national_id_ciphertext END,
       national_id_blind_index = CASE WHEN ${nationalId !== undefined}
@@ -990,10 +993,13 @@ export async function updateCustomerDossier(
       address = CASE WHEN ${input.address !== undefined}
         THEN EXCLUDED.address ELSE crm.customer_profiles.address END,
       updated_at = CURRENT_TIMESTAMP
+    RETURNING contact_id
   `;
+  if (updated.length === 0)
+    throw new TypeError("Customer dossier contact was not found");
   const dossier = await getCustomerDossier(sql, contactId);
   if (dossier === undefined)
-    throw new Error("Customer dossier contact was not found");
+    throw new TypeError("Customer dossier contact was not found");
   return dossier;
 }
 
@@ -2781,6 +2787,7 @@ export async function identifyTechnicianSession(
     JOIN service.technicians technician ON technician.id = ${input.technicianId}::uuid
       AND technician.id = visit.technician_id AND technician.active
     WHERE visit.tenant_id = platform.current_tenant_id()
+      AND visit.id = ${input.visitId}::uuid
       AND ${session.absolute_expires_at} > clock_timestamp()
       AND visit.status IN ('assigned','arrived')
       AND lower(btrim(technician.full_name)) = lower(btrim(${fullName}))
@@ -4062,8 +4069,8 @@ export async function finalizeReportRevision(
         'businessEmail', settings.business_email,
         'businessPhone', settings.business_phone,
         'businessAddress', settings.business_address,
-        'locale', settings.locale,
-        'timezone', settings.timezone
+        'locale', coalesce(settings.locale, 'en'),
+        'timezone', coalesce(settings.timezone, 'UTC')
       ), updated_at = CURRENT_TIMESTAMP
     FROM service.reports report
     JOIN service.cases service_case
@@ -4084,11 +4091,11 @@ export async function finalizeReportRevision(
     JOIN service.technicians technician
       ON technician.id = visit.technician_id
      AND technician.tenant_id = visit.tenant_id
-    JOIN crm.tenant_settings settings ON settings.tenant_id = report.tenant_id
+    LEFT JOIN crm.tenant_settings settings ON settings.tenant_id = report.tenant_id
     WHERE revision.id = ${revisionId}::uuid
       AND report.id = revision.report_id
       AND report.deleted_at IS NULL
-      AND settings.tenant_id = platform.current_tenant_id()
+      AND report.tenant_id = platform.current_tenant_id()
     RETURNING revision.id, revision.report_id, revision.version, revision.status,
       revision.diagnosis, revision.work_performed, revision.part_replaced,
       revision.replacement_part_details, revision.technician_notes,

@@ -245,7 +245,8 @@ async def test_setup_requests_fail_closed_without_or_with_other_tenant(pg: async
 
 
 async def test_concurrent_checkout_and_card_events_and_downgrade_guard(isolated_postgres_url: str):
-    await run_alembic(isolated_postgres_url, "upgrade", "head")
+    # Exercise the billing migration's own guard before later irreversible gates.
+    await run_alembic(isolated_postgres_url, "upgrade", "74e4f347dbbd")
     admin = await asyncpg.connect(isolated_postgres_url)
     try:
         initial_head = await admin.fetchval("SELECT version_num FROM alembic_version")
@@ -280,6 +281,19 @@ async def test_concurrent_checkout_and_card_events_and_downgrade_guard(isolated_
             await run_alembic(isolated_postgres_url, "downgrade", "6d9561f45598")
         assert "Billing binding data exists" in failure.value.stderr
         assert await admin.fetchval("SELECT version_num FROM alembic_version") == initial_head
+        assert (
+            await admin.fetchval(
+                "SELECT count(*) FROM billing.ledger_entries WHERE tenant_id=$1", tenant
+            )
+            == 1
+        )
+        await run_alembic(isolated_postgres_url, "upgrade", "head")
+        assert (
+            await admin.fetchval(
+                "SELECT available_minor FROM billing.wallets WHERE tenant_id=$1", tenant
+            )
+            == 1000
+        )
         assert (
             await admin.fetchval(
                 "SELECT count(*) FROM billing.ledger_entries WHERE tenant_id=$1", tenant

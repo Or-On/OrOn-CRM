@@ -20,8 +20,10 @@ def test_explicit_exit_and_command_failure_restore_previous_release(failure: str
         [
             "set -Eeuo pipefail",
             "COMMIT_SHA=fictional; previous_release=/proof/previous; CURRENT_LINK=/proof/current",
+            "SHARED_DIR=/proof; DEPLOYMENT_DATABASE_NAME=fictional",
             "mkdir -p /proof/previous",
-            'compose_previous() { printf "%s\\n" "$*" > /proof/rollback; }',
+            'docker() { printf "%s\\n" "$*" > /proof/rollback; }',
+            'timeout() { shift 2; "$@"; }',
             "native_caddy_was_active=false" + handler,
             failure,
         ]

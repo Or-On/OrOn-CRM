@@ -116,6 +116,28 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("tenant settings controls", () => {
+  it("recovers the initiating native role select after its popup loses document focus and saving fails", async () => {
+    let fail!: (reason: Error) => void;
+    state.mutate.mockReturnValue(
+      new Promise((_resolve, reject) => {
+        fail = reject;
+      }),
+    );
+    render(localized(<ManagementPanel {...props} initialTab="team" />));
+    const select = screen.getByRole<HTMLSelectElement>("combobox", {
+      name: /teammate@example.invalid/u,
+    });
+    expect(document.activeElement).toBe(document.body);
+    fireEvent.change(select, { target: { value: "viewer" } });
+    expect(state.mutate).toHaveBeenCalledOnce();
+    fail(new Error("Synthetic unavailable"));
+    await waitFor(() =>
+      expect(screen.getAllByText(en.management.failed).length).toBeGreaterThan(
+        0,
+      ),
+    );
+    await waitFor(() => expect(document.activeElement).toBe(select));
+  });
   it("offers a tenant-scoped organization logo editor", async () => {
     const { container } = render(localized(<ManagementPanel {...props} />));
     expect(

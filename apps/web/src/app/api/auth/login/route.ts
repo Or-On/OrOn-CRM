@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import {
   InvalidCredentialsError,
+  AuthenticationBusyError,
   SmsChallengeRequiredError,
   applicationHome,
   applicationScope,
@@ -44,6 +45,15 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ ok: true, home: applicationHome[scope] });
   } catch (error) {
+    if (error instanceof AuthenticationBusyError) {
+      return NextResponse.json(
+        { error: "Authentication is busy; retry shortly" },
+        {
+          status: 429,
+          headers: { "retry-after": "1", "cache-control": "no-store" },
+        },
+      );
+    }
     if (error instanceof SmsChallengeRequiredError) {
       return NextResponse.json(
         { smsChallenge: error.challenge },

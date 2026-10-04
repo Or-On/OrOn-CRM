@@ -12,6 +12,7 @@ from oron_dispatcher.config import DispatcherSettings
 from oron_dispatcher.sip_client import SipClient
 from oron_hebrew import build_g2p
 
+from dispatcher_runtime.announcements import RoomAnnouncements
 from dispatcher_runtime.app import build, compose_dispatcher
 from dispatcher_runtime.persistence import (
     AgentPostgresSessions,
@@ -67,6 +68,12 @@ def main() -> None:
         mint_token=lambda room, identity: mint_room_token(
             api_key, api_secret, room=room, identity=identity
         ),
+        play_announcement=RoomAnnouncements(
+            url=agent_settings.livekit_url,
+            mint_token=lambda room, identity: mint_room_token(
+                api_key, api_secret, room=room, identity=identity
+            ),
+        ).play,
         g2p=build_g2p(
             agent_settings.renikud_model_path,
             expected_sha256=agent_settings.renikud_model_sha256,

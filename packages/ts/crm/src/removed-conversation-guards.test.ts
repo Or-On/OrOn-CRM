@@ -58,6 +58,8 @@ function fixture(
 describe("removed Inbox conversation guardrails", () => {
   it("treats every queued conversation side effect as active deletion work", async () => {
     const deletion = fixture((statement) => {
+      if (statement.includes("current_actor_can_remove_conversation"))
+        return [{ allowed: true }];
       if (statement.includes("SELECT id, removed_from_inbox_at"))
         return [{ id: conversationId, removed_from_inbox_at: null }];
       if (statement.includes("SELECT (")) return [{ active: true }];

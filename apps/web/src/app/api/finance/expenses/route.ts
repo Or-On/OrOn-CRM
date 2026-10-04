@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import {
   createExpense,
   listExpensePage,
+  requireTenantFeature,
   type ExpenseInput,
   type ExpenseStatus,
 } from "@or-on/crm";
@@ -63,8 +64,9 @@ export async function GET(request: Request) {
       );
     if (cursorId !== null && !uuidPattern.test(cursorId))
       throw new TypeError("invalid expense cursor identifier");
-    const page = await withCurrentTenant("tenant:manage", (sql) =>
-      listExpensePage(sql, {
+    const page = await withCurrentTenant("tenant:manage", async (sql) => {
+      await requireTenantFeature(sql, "billing");
+      return listExpensePage(sql, {
         ...(parameters.get("q") === null
           ? {}
           : { query: parameters.get("q") ?? "" }),
@@ -76,8 +78,8 @@ export async function GET(request: Request) {
         ...(cursorAt === null || cursorId === null
           ? {}
           : { cursor: { incurredAt: cursorAt, id: cursorId } }),
-      }),
-    );
+      });
+    });
     return NextResponse.json(page);
   } catch (error) {
     return crmErrorResponse(error);
@@ -102,17 +104,21 @@ export async function POST(request: Request) {
     const vendor = nullableString(body, "vendor");
     const notes = nullableString(body, "notes");
     const status = editableStatus(body.status);
-    const expense = await withCurrentTenant("tenant:manage", (sql, session) =>
-      createExpense(sql, session.userId, {
-        title: body.title as string,
-        category: body.category as string,
-        amount: body.amount as string,
-        currency: body.currency as string,
-        incurredAt: body.incurredAt as string,
-        ...(vendor === undefined ? {} : { vendor }),
-        ...(notes === undefined ? {} : { notes }),
-        ...(status === undefined ? {} : { status }),
-      }),
+    const expense = await withCurrentTenant(
+      "tenant:manage",
+      async (sql, session) => {
+        await requireTenantFeature(sql, "billing");
+        return createExpense(sql, session.userId, {
+          title: body.title as string,
+          category: body.category as string,
+          amount: body.amount as string,
+          currency: body.currency as string,
+          incurredAt: body.incurredAt as string,
+          ...(vendor === undefined ? {} : { vendor }),
+          ...(notes === undefined ? {} : { notes }),
+          ...(status === undefined ? {} : { status }),
+        });
+      },
     );
     return NextResponse.json({ expense }, { status: 201 });
   } catch (error) {

@@ -21,6 +21,7 @@ EXPECTED = {
     "infra/deployment/systemd/oron-dev.service",
     "scripts/backup-dev.sh",
     "scripts/deploy-dev.sh",
+    "scripts/restore-dev-backup.py",
 }
 
 
@@ -96,6 +97,46 @@ def test_release_validator_extracts_only_the_exact_regular_payload(tmp_path: Pat
         assert stat.S_IMODE(caddyfile.stat().st_mode) == 0o644
 
 
+def test_actual_ci_payload_includes_restore_helper_and_passes_preflight(tmp_path: Path) -> None:
+    workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    copy = re.search(r"cp --parents \\\n(.*?)\"\$\{release_dir\}\"", workflow, re.DOTALL)
+    assert copy is not None
+    paths = copy.group(1).replace("\\", "").split()
+    assert set(paths) == EXPECTED - {"images.env"}
+    archive = tmp_path / "actual-release.tar.gz"
+    with tarfile.open(archive, "w:gz") as output:
+        for name in paths:
+            item = tarfile.TarInfo(name)
+            item.mode = 0o644
+            content = (ROOT / name).read_bytes()
+            item.size = len(content)
+            output.addfile(item, io.BytesIO(content))
+        output.addfile(_member("images.env"), io.BytesIO(b"x"))
+    result = subprocess.run(  # noqa: S603 - fixed interpreter and owned local paths
+        [sys.executable, str(ROOT / "scripts/check-dev-release.py"), str(archive)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert 'python3 scripts/check-dev-release.py "${archive}"' in workflow
+
+
+def test_preflight_rejects_the_reported_missing_restore_helper(tmp_path: Path) -> None:
+    archive = tmp_path / "missing-restore.tar.gz"
+    with tarfile.open(archive, "w:gz") as output:
+        for name in sorted(EXPECTED - {"scripts/restore-dev-backup.py"}):
+            output.addfile(_member(name), io.BytesIO(b"x"))
+    result = subprocess.run(  # noqa: S603 - fixed interpreter and owned local paths
+        [sys.executable, str(ROOT / "scripts/check-dev-release.py"), str(archive)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "missing=['scripts/restore-dev-backup.py']" in result.stderr
+
+
 @pytest.mark.parametrize(
     "mutation",
     ["missing", "extra", "duplicate", "traversal", "symlink", "hardlink"],
@@ -154,7 +195,7 @@ def test_ci_uses_one_ephemeral_os_login_key_for_the_complete_dev_deploy() -> Non
             command = f"{command} {lines[index].strip()}"
         transfer_commands.append(command)
 
-    assert len(transfer_commands) == 3
+    assert len(transfer_commands) == 5
     for command in transfer_commands:
         assert '--ssh-key-file="${ORON_DEPLOY_SSH_KEY}"' in command
         assert "--tunnel-through-iap" in command
@@ -181,7 +222,9 @@ def test_ci_cleans_up_ephemeral_key_and_keeps_portable_dev_entry_points() -> Non
     cleanup = workflow[workflow.index("- name: Remove ephemeral DEV SSH key") :]
 
     assert "if: always()" in cleanup
-    assert "continue-on-error: true" in cleanup
+    assert "continue-on-error: true" not in cleanup
+    assert "check-oslogin-cleanup.py" in cleanup
+    assert "trap" in cleanup
     assert "gcloud compute os-login ssh-keys remove" in cleanup
     assert '--key-file="${key}.pub"' in cleanup
     assert 'rm -f "${key}" "${key}.pub"' in cleanup
@@ -216,15 +259,15 @@ def test_release_images_carry_and_enforce_source_revision() -> None:
         assert "org.opencontainers.image.revision" in dockerfile.read_text(encoding="utf-8")
 
 
-def test_deploy_reclaims_obsolete_tagged_images_before_pulling_release() -> None:
+def test_deploy_preserves_images_and_requires_disk_reserve() -> None:
     deploy = DEPLOY.read_text(encoding="utf-8")
     pull = 'docker pull "${release_images[${key}]}"'
     prune = "docker image prune --all --force"
 
-    assert deploy.count(prune) == 2
-    assert deploy.index(prune) < deploy.index(pull)
+    assert prune not in deploy
     assert "docker system prune" not in deploy
-    assert "referenced by a running or stopped" in deploy
+    assert "5368709120" in deploy
+    assert deploy.index("5368709120") < deploy.index(pull)
 
 
 def test_control_api_image_contains_the_opt_in_voice_evaluation_runtime() -> None:
@@ -235,12 +278,25 @@ def test_control_api_image_contains_the_opt_in_voice_evaluation_runtime() -> Non
     assert "COPY packages/py/oron-agent packages/py/oron-agent" in dockerfile
     assert "COPY packages/py/oron-hebrew packages/py/oron-hebrew" in dockerfile
     assert "--package or-on-control-api --extra voice" in dockerfile
-    assert "libpcre2-8-0=10.42-1+deb12u1" in dockerfile
+    assert "libpcre2-8-0=10.42-1+deb12u2" in dockerfile
     assert "libssl3=3.0.22-1~deb12u1" in dockerfile
     assert "openssl=3.0.22-1~deb12u1" in dockerfile
     assert "libsndfile1" in dockerfile
     assert "uv pip uninstall nltk" in dockerfile
     assert 'python -c "import control_api.app; import oron_agent.agent_evaluation"' in dockerfile
+
+
+def test_all_runtime_images_pin_the_bookworm_liblzma_security_backport() -> None:
+    for name in (
+        "apps/web/Dockerfile",
+        "services/py/control-api/Dockerfile",
+        "infra/images/messaging-worker.Dockerfile",
+        "infra/images/dispatcher.Dockerfile",
+        "infra/images/migrator.Dockerfile",
+    ):
+        dockerfile = (ROOT / name).read_text(encoding="utf-8")
+        assert "liblzma5=5.4.1-1+deb12u2" in dockerfile, name
+        assert "apt-get upgrade" not in dockerfile, name
 
 
 def test_docker_context_excludes_nested_virtual_environments() -> None:
@@ -265,7 +321,8 @@ def test_backup_covers_database_private_objects_and_checksums() -> None:
     assert "database.dump" in backup
     assert "objects.tar" in backup
     assert "SHA256SUMS" in backup
-    assert "*.backup.tar.gz.sha256" in backup
+    assert "destination_checksum" in backup
+    assert "-delete" not in backup
 
 
 def test_private_objects_are_shared_only_with_the_services_that_process_them() -> None:
@@ -301,7 +358,8 @@ def test_deploy_rejects_inconsistent_field_service_private_storage_configuration
     assert "ARTIFACTS_BACKEND must be local" in deploy
     assert "ARTIFACTS_LOCAL_ROOT is invalid" in deploy
     assert "Private runtime configuration must be owned by root" in deploy
-    assert deploy.index("read_private_config_value") < deploy.index('exec 9>"${LOCK_FILE}"')
+    assert deploy.index('exec 9>"${LOCK_FILE}"') < deploy.index("set_private_config_value")
+    assert deploy.index("BLIND_INDEX_KEY must match") < deploy.index("docker pull")
 
 
 def test_messaging_worker_health_is_a_release_gate() -> None:

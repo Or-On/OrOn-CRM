@@ -220,7 +220,7 @@ export interface TicketSummary extends Ticket {
 
 interface TicketSummaryRow extends TicketRow {
   contact_name: string | null;
-  last_activity_cursor: string;
+  cursor_activity_at: string;
   emergency_at: Date | null;
   emergency_reason: string | null;
   emergency_source: "voice" | "manual" | null;
@@ -237,10 +237,10 @@ interface TicketSummaryRow extends TicketRow {
 }
 
 const TICKET_SUMMARY_COLUMNS = `${TICKET_COLUMNS},
-  ticket.last_activity_at::text AS last_activity_cursor,
   (SELECT contact.name FROM crm.contacts contact
     WHERE contact.tenant_id = ticket.tenant_id AND contact.id = ticket.contact_id
   ) AS contact_name,
+  to_char(ticket.last_activity_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_activity_at,
   ticket.emergency_at, ticket.emergency_reason, ticket.emergency_source,
   (SELECT jsonb_build_object(
       'intakeStatus', draft.status, 'followupStatus', draft.followup_status,
@@ -930,19 +930,19 @@ export async function listTickets(
                AND identity.channel IN ('phone','whatsapp')
                AND identity.normalized_value ILIKE '%' || ${query} || '%'
            ))
-      AND (${cursorActivity}::timestamptz IS NULL
+      AND (${cursorActivity}::text::timestamptz IS NULL
            OR (ticket.last_activity_at, ticket.id)
-              < (${cursorActivity}::timestamptz, ${cursorId}::uuid))
+              < (${cursorActivity}::text::timestamptz, ${cursorId}::uuid))
     ORDER BY ticket.last_activity_at DESC, ticket.id DESC
     LIMIT ${limit + 1}
   `;
   const page = rows.slice(0, limit).map(mapTicketSummary);
-  const last = page.at(-1);
+  const last = rows.slice(0, limit).at(-1);
   return {
     tickets: page,
     nextCursor:
       rows.length > limit && last !== undefined
-        ? { activityAt: rows[limit - 1]?.last_activity_cursor ?? last.lastActivityAt, id: last.id }
+        ? { activityAt: last.cursor_activity_at, id: last.id }
         : null,
   };
 }

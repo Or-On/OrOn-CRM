@@ -1,0 +1,14 @@
+[Unit]
+Description=Opt-in bounded Or-On application health recovery
+After=docker.service
+Requires=docker.service
+ConditionPathExists=/opt/oron-dev/shared/enable-health-recovery
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/oron-dev/current/scripts/recover_unhealthy.py --apply
+TimeoutStartSec=300
+UMask=0077
+NoNewPrivileges=true
+ProtectHome=true
+PrivateTmp=true

@@ -28,6 +28,7 @@ interface ContactRow {
   tags: unknown;
   classifications: unknown;
   sort_at: Date;
+  cursor_sort_at: string;
 }
 
 function safeArray(value: unknown): readonly Record<string, unknown>[] {
@@ -103,6 +104,8 @@ const contactProjection = `
          c.whatsapp_consent, c.whatsapp_opted_out_at,
          c.last_activity_at, c.created_at,
          COALESCE(c.last_activity_at, c.created_at) AS sort_at,
+         to_char(COALESCE(c.last_activity_at, c.created_at) AT TIME ZONE 'UTC',
+           'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_sort_at,
          COALESCE((SELECT jsonb_agg(jsonb_build_object(
            'id', i.id, 'channel', i.channel,
            'normalized_value', i.normalized_value,
@@ -164,15 +167,15 @@ export async function listContactPage(
              COALESCE(c.company, '') ILIKE '%' || $1 || '%' OR
              EXISTS (SELECT 1 FROM crm.contact_channel_identities ci
                      WHERE ci.contact_id = c.id AND ci.normalized_value ILIKE '%' || $1 || '%'))
-       AND ($3::timestamptz IS NULL OR
+       AND ($3::text::timestamptz IS NULL OR
          (COALESCE(c.last_activity_at, c.created_at), c.id) <
-         ($3::timestamptz, $4::uuid))
+         ($3::text::timestamptz, $4::uuid))
      ORDER BY COALESCE(c.last_activity_at, c.created_at) DESC, c.id DESC
      LIMIT $2`,
     [
       query,
       limit + 1,
-      cursorDate?.toISOString() ?? null,
+      options.cursor?.sortAt ?? null,
       options.cursor?.id ?? null,
     ],
   );
@@ -183,7 +186,7 @@ export async function listContactPage(
     contacts: selected.map(mapContact),
     nextCursor:
       hasMore && last !== undefined
-        ? { sortAt: last.sort_at.toISOString(), id: last.id }
+        ? { sortAt: last.cursor_sort_at, id: last.id }
         : null,
   };
 }

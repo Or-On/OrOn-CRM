@@ -225,12 +225,13 @@ describe.skipIf(sourceUrl === undefined)(
         {
           id: string;
           ownership_mode: string;
+          ownership_epoch: string;
           assigned_user_id: string | null;
           handoff_reason_safe: string | null;
           removed_from_inbox_at: Date | null;
         }[]
       >`
-        SELECT conversation.id, conversation.ownership_mode,
+        SELECT conversation.id, conversation.ownership_mode, conversation.ownership_epoch,
                conversation.assigned_user_id, conversation.handoff_reason_safe,
                conversation.removed_from_inbox_at
         FROM messaging.conversations conversation
@@ -245,7 +246,7 @@ describe.skipIf(sourceUrl === undefined)(
       return conversation;
     }
 
-    it("claims an unlinked conversation for AI again after it is removed", async () => {
+    it("retains admitted AI work and reopens the same conversation after removal", async () => {
       const from = "12025550401";
       await customerWrites(from, "שלום");
       const first = await conversationOf(from);
@@ -255,9 +256,14 @@ describe.skipIf(sourceUrl === undefined)(
         await asOperator((transaction) =>
           deleteConversation(transaction, first.id, userId),
         ),
-      ).toMatchObject({ status: "deleted" });
+      ).toMatchObject({ status: "removed_retained_evidence" });
       await customerWrites(from, "שלום שוב");
       const again = await conversationOf(from);
+      expect(again.id).toBe(first.id);
+      expect(BigInt(again.ownership_epoch)).toBeGreaterThan(
+        BigInt(first.ownership_epoch),
+      );
+      expect(again.removed_from_inbox_at).toBeNull();
       expect(again).toMatchObject({ ownership_mode: "ai" });
     });
 

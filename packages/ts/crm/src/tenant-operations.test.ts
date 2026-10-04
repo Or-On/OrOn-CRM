@@ -57,7 +57,7 @@ function expenseRow(id: string, incurredAt: string) {
     source_kind: "manual" as const,
     source_reference: null,
     notes: null,
-    incurred_at: new Date(incurredAt),
+    incurred_at_ms: String(new Date(incurredAt).getTime()),
     created_at: new Date("2026-09-10T08:00:00.000Z"),
     updated_at: new Date("2026-09-10T08:00:00.000Z"),
   };

@@ -144,6 +144,28 @@ function storedKnowledgeFacts(
   }
 }
 
+async function contentRetrievalEnabled(
+  sql: postgres.TransactionSql,
+): Promise<boolean> {
+  const rows = await sql<
+    { enabled: boolean }[]
+  >`SELECT enabled FROM platform.tenant_remediation_flags
+    WHERE tenant_id=platform.current_tenant_id() AND flag_key='retrieval_fts'`;
+  return rows[0]?.enabled === true;
+}
+
+function explicitlyContentOnly(metadata: unknown): boolean {
+  return (
+    metadata !== null &&
+    typeof metadata === "object" &&
+    "schemaVersion" in metadata &&
+    metadata.schemaVersion === "1.0" &&
+    "facts" in metadata &&
+    Array.isArray(metadata.facts) &&
+    metadata.facts.length === 0
+  );
+}
+
 export async function createKnowledgeDraft(
   sql: postgres.TransactionSql,
   actorId: string,
@@ -153,7 +175,12 @@ export async function createKnowledgeDraft(
   const row = qualityObject(input);
   const title = qualityText(row.title, "knowledge title", 160);
   const content = qualityText(row.content, "knowledge content", 16000);
-  const facts = parseKnowledgeFacts(row.facts);
+  const facts =
+    Array.isArray(row.facts) &&
+    row.facts.length === 0 &&
+    (await contentRetrievalEnabled(sql))
+      ? []
+      : parseKnowledgeFacts(row.facts);
   const validFrom = new Date(qualityText(row.validFrom, "valid from", 40));
   const validUntil =
     row.validUntil === null || row.validUntil === ""
@@ -214,8 +241,16 @@ export async function changeKnowledgePublication(
   if (!doc) throw new TypeError("knowledge version is unavailable");
   let changed: { id: string }[];
   if (action === "publish") {
-    if (!storedKnowledgeFacts(doc.metadata).length)
-      throw new TypeError("knowledge has no eligible approved statements");
+    if (!storedKnowledgeFacts(doc.metadata).length) {
+      const content =
+        explicitlyContentOnly(doc.metadata) &&
+        (await contentRetrievalEnabled(sql))
+          ? await sql`SELECT id FROM agents.knowledge_chunks WHERE document_id=${documentId}::uuid
+            AND tenant_id=platform.current_tenant_id() AND length(btrim(content))>0 LIMIT 1`
+          : [];
+      if (!content.length)
+        throw new TypeError("knowledge has no eligible approved statements");
+    }
     changed = await sql<
       { id: string }[]
     >`UPDATE agents.knowledge_documents SET published_at=CURRENT_TIMESTAMP

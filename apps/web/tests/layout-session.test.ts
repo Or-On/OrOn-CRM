@@ -4,10 +4,8 @@ const { currentPublicSession, shellTenant, path } = vi.hoisted(() => ({
   shellTenant: vi.fn(),
   path: { value: "/field-service" },
 }));
-vi.mock("next/font/google", () => ({
-  Geist: () => ({ variable: "font-latin" }),
-  Geist_Mono: () => ({ variable: "font-mono" }),
-  Heebo: () => ({ variable: "font-hebrew" }),
+vi.mock("next/font/local", () => ({
+  default: (options: { variable: string }) => ({ variable: options.variable }),
 }));
 vi.mock("next-intl/server", () => ({
   getLocale: vi.fn().mockResolvedValue("en"),

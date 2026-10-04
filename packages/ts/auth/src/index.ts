@@ -7,3 +7,5 @@ export * from "./service.js";
 export * from "./sms.js";
 export * from "./tenant-context.js";
 export type * from "./types.js";
+export * from "./login-admission.js";
+export * from "./whatsapp-channel-credentials.js";

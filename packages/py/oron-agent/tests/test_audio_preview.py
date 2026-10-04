@@ -224,10 +224,18 @@ async def test_hung_sdk_after_partial_pcm_is_cancelled_without_audio_or_orphan_t
     provider = RealPreviewProvider(
         settings_factory=settings, tts_factory=lambda *args, **kwargs: PartialTTS()
     )
-    started = monotonic()
-    with pytest.raises(TimeoutError):
-        async with asyncio.timeout(0.2):
-            await provider.synthesize("hello", {}, confirmed=True)
-    assert entered.is_set() and monotonic() - started < 3
+    synthesis = asyncio.create_task(provider.synthesize("hello", {}, confirmed=True))
+    try:
+        # The cancellation deadline tests a hung SDK *after* partial PCM, not
+        # platform-dependent pipeline startup. Bound startup independently.
+        await asyncio.wait_for(entered.wait(), timeout=3)
+        started = monotonic()
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(synthesis, timeout=0.2)
+        assert monotonic() - started < 3
+    finally:
+        if not synthesis.done():
+            synthesis.cancel()
+            await asyncio.gather(synthesis, return_exceptions=True)
     await asyncio.sleep(0)
     assert not {task for task in asyncio.all_tasks() - before if not task.done()}

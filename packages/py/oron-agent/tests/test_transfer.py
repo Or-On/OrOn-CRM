@@ -104,3 +104,78 @@ async def test_emergency_transfer_without_a_caller_reports_the_disconnect():
     lkapi = _api(models.ParticipantInfo.Kind.AGENT)
     assert await _emergency(lkapi)(DESK) == "caller_disconnected"
     lkapi.sip.transfer_sip_participant.assert_not_awaited()
+
+
+async def test_invalid_transfer_target_never_opens_provider_client():
+    factory = MagicMock()
+    action = make_transfer_action(
+        room=ROOM, url="x", api_key="k", api_secret="s", api_factory=factory
+    )
+    await action({"to": "sip:attacker@example.invalid"}, None)
+    factory.assert_not_called()
+
+
+async def test_refused_transfer_reports_fixed_fallback_without_private_provider_error():
+    from loguru import logger
+
+    lkapi = _api(models.ParticipantInfo.Kind.SIP)
+    lkapi.sip.transfer_sip_participant.side_effect = RuntimeError("private token and +14155552671")
+    fallback = AsyncMock()
+    messages = []
+    handle = logger.add(lambda message: messages.append(str(message)))
+    try:
+        action = make_transfer_action(
+            room=ROOM,
+            url="x",
+            api_key="k",
+            api_secret="s",
+            api_factory=lambda *args: lkapi,
+            on_failure=fallback,
+        )
+        await action({"to": DESK}, None)
+    finally:
+        logger.remove(handle)
+    fallback.assert_awaited_once()
+    assert all("private token" not in message and DESK not in message for message in messages)
+
+
+async def test_transfer_provider_timeout_is_bounded_and_cancels_pending_work(monkeypatch):
+    import asyncio
+
+    import oron_agent.transfer as module
+
+    monkeypatch.setattr(module, "_TRANSFER_TIMEOUT_SECONDS", 0.01)
+    lkapi = _api(models.ParticipantInfo.Kind.SIP)
+    cancelled = asyncio.Event()
+
+    async def wait_forever(request):
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    lkapi.sip.transfer_sip_participant.side_effect = wait_forever
+    fallback = AsyncMock()
+    action = make_transfer_action(
+        room=ROOM,
+        url="x",
+        api_key="k",
+        api_secret="s",
+        api_factory=lambda *args: lkapi,
+        on_failure=fallback,
+    )
+    await asyncio.wait_for(action({"to": DESK}, None), 1)
+    assert cancelled.is_set()
+    fallback.assert_awaited_once()
+    lkapi.__aexit__.assert_awaited_once()
+
+
+async def test_emergency_invalid_target_never_opens_provider_client():
+    from oron_agent.transfer import make_emergency_transfer
+
+    factory = MagicMock()
+    action = make_emergency_transfer(
+        room=ROOM, url="x", api_key="k", api_secret="s", api_factory=factory
+    )
+    assert await action("sip:attacker@example.invalid") == "transfer_failed"
+    factory.assert_not_called()

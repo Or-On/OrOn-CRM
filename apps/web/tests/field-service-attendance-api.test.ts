@@ -176,3 +176,19 @@ describe("atomic field-service attendance evidence", () => {
     expect(state.discard).toHaveBeenCalledTimes(1);
   });
 });
+
+it("rejects unauthenticated or CSRF-failed attendance before body consumption", async () => {
+  const { assertCrmMutation } = await import("../src/features/crm-route");
+  vi.mocked(assertCrmMutation).mockRejectedValueOnce(new Error("Forbidden"));
+  const inbound = request();
+  const response = await POST(inbound, context);
+  expect(response.status).toBe(400);
+  expect(inbound.bodyUsed).toBe(false);
+});
+it("rejects aggregate oversize before staging evidence", async () => {
+  const inbound = request();
+  inbound.headers.set("content-length", String(21 * 1024 * 1024));
+  const response = await POST(inbound, context);
+  expect(response.status).toBe(400);
+  expect(inbound.bodyUsed).toBe(false);
+});

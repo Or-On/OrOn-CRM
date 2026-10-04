@@ -24,6 +24,12 @@ class Tenant(TenantBase, Timestamped, table=True):
     __tablename__ = "tenants"
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     status: str = "active"
+    # Internal admission marker; clients neither choose nor receive it.
+    slug_guarded: bool = Field(
+        default=True,
+        exclude=True,
+        sa_column=sa.Column(sa.Boolean(), nullable=False, server_default=sa.text("true")),
+    )
 
 
 class TenantPublic(TenantBase):
@@ -155,10 +161,13 @@ class Role(StrEnum):
     AGENT = "agent"
     ADMIN = "admin"
     OWNER = "owner"
+    TECHNICIAN = "technician"
 
     def at_least(self, floor: Role) -> bool:
-        order = list(Role)
-        return order.index(self) >= order.index(floor)
+        generic = (Role.VIEWER, Role.AGENT, Role.ADMIN, Role.OWNER)
+        if self not in generic or floor not in generic:
+            return self == floor
+        return generic.index(self) >= generic.index(floor)
 
 
 class UserStatus(StrEnum):

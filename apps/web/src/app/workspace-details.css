@@ -2097,7 +2097,7 @@
 }
 
 .call-event-sequence {
-  color: var(--or-text-disabled);
+  color: var(--or-text-secondary);
   font: 0.66rem/1.5 var(--or-font-mono);
 }
 

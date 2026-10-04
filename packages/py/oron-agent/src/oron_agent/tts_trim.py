@@ -32,21 +32,25 @@ class TrimLeadingSilence(FrameProcessor):
         self._cancelled_contexts: deque[str] = deque(maxlen=128)
 
     async def _flush(self, direction: FrameDirection, *, offset: int = 0) -> None:
-        if self._buffer and self._template is not None:
-            audio = self._buffer[offset:]
-            if audio:
-                trimmed = TTSAudioRawFrame(
-                    audio=audio,
-                    sample_rate=self._template.sample_rate,
-                    num_channels=self._template.num_channels,
-                    context_id=self._template.context_id,
-                )
-                trimmed.metadata.update(self._template.metadata)
-                trimmed.transport_destination = self._template.transport_destination
-                await self.push_frame(trimmed, direction)
+        # Detach this response before awaiting transport delivery. Interruption
+        # frames are system frames and can start a new response during that await;
+        # clearing shared state afterwards would erase its buffered first audio.
+        buffer, template = self._buffer, self._template
         self._trimming = False
         self._buffer = b""
         self._template = None
+        if buffer and template is not None:
+            audio = buffer[offset:]
+            if audio:
+                trimmed = TTSAudioRawFrame(
+                    audio=audio,
+                    sample_rate=template.sample_rate,
+                    num_channels=template.num_channels,
+                    context_id=template.context_id,
+                )
+                trimmed.metadata.update(template.metadata)
+                trimmed.transport_destination = template.transport_destination
+                await self.push_frame(trimmed, direction)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)

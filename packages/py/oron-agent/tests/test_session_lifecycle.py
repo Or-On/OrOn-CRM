@@ -285,3 +285,39 @@ async def test_status_is_the_enum_not_a_string(status):
     await recorder.start(room="r1")
     await recorder.finish(status, CallUsage())
     assert client.finalized[0] is status
+
+
+async def test_default_checkpoint_preserves_cadence_and_final_write_keeps_latest_usage(monkeypatch):
+    import oron_agent.session_recorder as module
+
+    client, _ctx, recorder = make_recorder()
+    waiting, permit, checkpointed = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    delays = []
+
+    async def controlled_sleep(delay):
+        delays.append(delay)
+        waiting.set()
+        await permit.wait()
+        permit.clear()
+
+    original_checkpoint = client.checkpoint_usage
+
+    async def checkpoint(*args, **kwargs):
+        result = await original_checkpoint(*args, **kwargs)
+        checkpointed.set()
+        return result
+
+    monkeypatch.setattr(module.asyncio, "sleep", controlled_sleep)
+    client.checkpoint_usage = checkpoint
+    usage = CallUsage(llm_prompt_tokens=12)
+    await recorder.start(room="fixture")
+    recorder.start_usage_reporting(usage, started_at=time.monotonic())
+    await asyncio.wait_for(waiting.wait(), 1)
+    assert delays == [1.0] and not client.checkpoints
+    permit.set()
+    await asyncio.wait_for(checkpointed.wait(), 1)
+    assert client.checkpoints[-1].llm_prompt_tokens == 12
+    usage.llm_prompt_tokens = 24
+    await recorder.finish(SessionStatus.ENDED, usage)
+    assert client.calls[-1]["usage"].llm_prompt_tokens == 24
+    assert recorder._usage_task is None

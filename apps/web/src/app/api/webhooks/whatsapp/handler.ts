@@ -64,6 +64,8 @@ export async function receiveWhatsAppWebhook(
     readonly databaseUrl: string | undefined;
     readonly appSecret: string | undefined;
     readonly phoneNumberId?: string | undefined;
+    readonly memoryVerifierEnabled?: boolean;
+    readonly memoryVerifierDatabaseUrl?: string | undefined;
   },
 ) {
   if (!account.enabled) {
@@ -84,7 +86,22 @@ export async function receiveWhatsAppWebhook(
       request.headers.get("x-hub-signature-256"),
       account.appSecret,
       account.phoneNumberId,
+      account.memoryVerifierEnabled === true
+        ? account.memoryVerifierDatabaseUrl
+        : undefined,
     );
+    if (
+      account.memoryVerifierEnabled === true &&
+      account.memoryVerifierDatabaseUrl === undefined
+    )
+      console.warn("WhatsApp memory signature evidence unavailable", {
+        reason: "verification_not_configured",
+      });
+    if (accepted.skippedUnknownAccounts > 0) {
+      console.warn("WhatsApp webhook skipped unknown accounts", {
+        count: accepted.skippedUnknownAccounts,
+      });
+    }
     return NextResponse.json({ accepted: accepted.envelopes }, { status: 200 });
   } catch (error) {
     if (error instanceof RangeError)

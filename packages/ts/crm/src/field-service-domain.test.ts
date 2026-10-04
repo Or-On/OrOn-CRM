@@ -38,6 +38,18 @@ describe("field service domain rules", () => {
     ).toEqual({ customerName: "Dana", faultDescription: "No power" });
   });
 
+  it("drops malformed national IDs while preserving other valid facts", () => {
+    expect(
+      sanitizeIntakeProposal({
+        nationalId: "12A456789",
+        faultDescription: "No power",
+      }),
+    ).toEqual({ faultDescription: "No power" });
+    expect(sanitizeIntakeProposal({ nationalId: "001234567" })).toEqual({
+      nationalId: "001234567",
+    });
+  });
+
   it("does not let OCR retries overwrite confirmed human corrections", () => {
     expect(
       mergeOcrProposal(

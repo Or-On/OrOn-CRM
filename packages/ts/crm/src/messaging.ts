@@ -47,6 +47,8 @@ interface ConversationRow {
 }
 
 interface MessageRow {
+  provider: string;
+  sender_user_id: string | null;
   id: string;
   conversation_id: string;
   direction: Message["direction"];
@@ -97,6 +99,42 @@ export function templateSummary(value: unknown): TemplateSummary | null {
   };
 }
 
+/** Only canonical server-owned opening-menu messages gain this presentation. */
+export function openingMenuSummary(row: {
+  readonly id: string;
+  readonly direction: string;
+  readonly sender_type: string;
+  readonly sender_user_id: string | null;
+  readonly content_type: string;
+  readonly provider: string;
+  readonly structured_content: unknown;
+}): Exclude<Message["openingMenu"], undefined> {
+  const record = structuredRecord(row.structured_content);
+  const outcome = record.openingMenuOutcome;
+  if (
+    row.direction !== "outbound" ||
+    row.sender_type !== "system" ||
+    row.sender_user_id !== null ||
+    row.content_type !== "template" ||
+    row.provider !== "meta" ||
+    !/^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/iu.test(row.id) ||
+    record.openingMenuGeneration !== row.id ||
+    !templateSummary(record) ||
+    !Array.isArray(record.buttons) ||
+    record.buttons.length !== 2 ||
+    !record.buttons.every(
+      (text: unknown) =>
+        typeof text === "string" && text.length > 0 && text.length <= 20,
+    ) ||
+    (outcome !== "sending" &&
+      outcome !== "sent" &&
+      outcome !== "failed" &&
+      outcome !== "unknown")
+  )
+    return null;
+  return { outcome };
+}
+
 export function parseMessageCursor(
   createdAt: string | null,
   id: string | null,
@@ -141,17 +179,32 @@ export function messageMedia(
   structured: unknown,
   mediaObjectContentType: string | null = null,
 ): MessageMedia | null {
-  if (contentType !== "image" && contentType !== "document") return null;
+  if (
+    contentType !== "image" &&
+    contentType !== "document" &&
+    contentType !== "audio" &&
+    contentType !== "video"
+  )
+    return null;
   const record = structuredRecord(structured);
   const storedStatus = record.retrievalStatus;
-  const status: MessageMedia["status"] =
-    mediaObjectContentType !== null
-      ? "available"
-      : storedStatus === "pending" ||
-          storedStatus === "processing" ||
-          storedStatus === "failed"
-        ? storedStatus
-        : "unavailable";
+  // Only canonical available object metadata may advertise playback. Provider
+  // MIME/status claims never promote an unvalidated audio or video attachment.
+  const storedPlayableType =
+    mediaObjectContentType !== null &&
+    (contentType === "audio"
+      ? mediaObjectContentType === "audio/ogg" ||
+        mediaObjectContentType === "audio/wav"
+      : contentType === "video"
+        ? mediaObjectContentType === "video/mp4"
+        : true);
+  const status: MessageMedia["status"] = storedPlayableType
+    ? "available"
+    : storedStatus === "pending" ||
+        storedStatus === "processing" ||
+        storedStatus === "failed"
+      ? storedStatus
+      : "unavailable";
   return {
     kind: contentType,
     status,
@@ -159,6 +212,18 @@ export function messageMedia(
       mediaObjectContentType ?? boundedStructuredText(record.mimeType, 255),
     fileName: boundedStructuredText(record.fileName, 255),
     caption: boundedStructuredText(record.caption, 4_096),
+    ...(contentType === "audio"
+      ? {
+          transcriptionStatus:
+            record.transcriptionStatus === "pending" ||
+            record.transcriptionStatus === "processing" ||
+            record.transcriptionStatus === "completed" ||
+            record.transcriptionStatus === "failed" ||
+            record.transcriptionStatus === "disabled"
+              ? record.transcriptionStatus
+              : "unavailable",
+        }
+      : {}),
   };
 }
 
@@ -241,6 +306,7 @@ function mapMessage(row: MessageRow): Message {
           )
         : null,
     template: templateSummary(row.structured_content),
+    openingMenu: openingMenuSummary(row),
     media: messageMedia(
       row.content_type,
       row.structured_content,
@@ -436,7 +502,7 @@ export async function listMessagePage(
   // Bind the timestamp as text, then cast in PostgreSQL. Driver timestamptz
   // serialization via JavaScript Date would discard microsecond cursor precision.
   const rows = await sql<MessageRow[]>`
-    SELECT message.id, message.conversation_id, message.direction,
+    SELECT message.id, message.conversation_id, message.direction, message.provider, message.sender_user_id,
            message.sender_type, message.content_type, message.content_text,
            message.status, message.provider_message_id, message.created_at, message.structured_content,
            NULL::text AS media_object_content_type,
@@ -601,7 +667,8 @@ export async function ingestSimulatedInbound(
     `;
   } else {
     await sql`
-      UPDATE crm.contacts SET name = ${input.profileName.trim() || phone},
+      UPDATE crm.contacts SET name = CASE WHEN NULLIF(btrim(name), '') IS NULL
+        THEN ${input.profileName.trim() || phone} ELSE name END,
              last_activity_at = ${occurredAt}, updated_at = CURRENT_TIMESTAMP
       WHERE id = ${contactId}::uuid
     `;
@@ -713,11 +780,9 @@ export async function ingestWhatsAppInbound(
   )
     throw new TypeError("invalid inbound provider timestamp");
   const channelRows = await sql<
-    { id: string; mirror_inbound_media: boolean; reliability_enabled: boolean }[]
+    { id: string; mirror_inbound_media: boolean }[]
   >`
-    SELECT id, mirror_inbound_media,
-      configuration->'aiReliabilityV2Enabled' = 'true'::jsonb AS reliability_enabled
-    FROM messaging.channels
+    SELECT id, mirror_inbound_media FROM messaging.channels
     WHERE provider = 'meta' AND provider_account_id = ${input.providerAccountId}
       AND status = 'active'
     LIMIT 1
@@ -755,9 +820,8 @@ export async function ingestWhatsAppInbound(
     senderIdentityId = insertedIdentities[0]?.id;
   } else {
     await sql`
-      UPDATE crm.contacts SET name = CASE
-               WHEN NOT COALESCE(${channel.reliability_enabled}, false) OR NULLIF(btrim(name), '') IS NULL THEN ${input.profileName.trim() || phone}
-               ELSE name END,
+      UPDATE crm.contacts SET name = CASE WHEN NULLIF(btrim(name), '') IS NULL
+        THEN ${input.profileName.trim() || phone} ELSE name END,
              last_activity_at = CURRENT_TIMESTAMP,
              updated_at = CURRENT_TIMESTAMP
       WHERE id = ${contactId}::uuid
@@ -797,7 +861,10 @@ export async function ingestWhatsAppInbound(
   if (conversationId === undefined)
     throw new Error("conversation resolution failed");
   const structuredContent =
-    contentType === "image" || contentType === "document"
+    contentType === "image" ||
+    contentType === "document" ||
+    contentType === "audio" ||
+    contentType === "video"
       ? {
           providerMediaId: input.media?.id,
           mimeType: input.media?.mimeType,
@@ -815,14 +882,32 @@ export async function ingestWhatsAppInbound(
             name: input.location?.name,
             address: input.location?.address,
           }
-        : null;
+        : contentType === "interactive"
+          ? {
+              providerMessageType: input.providerMessageType,
+              interaction: input.interaction,
+            }
+          : contentType === "event"
+            ? {
+                providerMessageType: input.providerMessageType,
+                reaction: input.reaction,
+              }
+            : null;
   const preview =
     text ||
     (contentType === "image"
       ? "[Image]"
       : contentType === "document"
         ? "[Document]"
-        : "[Location]");
+        : contentType === "location"
+          ? "[Location]"
+          : contentType === "audio"
+            ? "[Audio: transcription pending]"
+            : contentType === "video"
+              ? "[Video]"
+              : contentType === "interactive"
+                ? "[Interactive message]"
+                : "[Message event]");
   const messageRows = await sql<{ id: string; created_at: Date }[]>`
     INSERT INTO messaging.messages
       (tenant_id, conversation_id, direction, sender_type, sender_contact_id,
@@ -1283,6 +1368,13 @@ export async function deleteConversation(
   conversationId: string,
   actorUserId: string,
 ): Promise<ConversationDeletionResult> {
+  const authorization = await sql<{ allowed: boolean }[]>`
+    SELECT platform.current_actor_can_remove_conversation(${actorUserId}::uuid) AS allowed
+  `;
+  if (authorization[0]?.allowed !== true)
+    throw Object.assign(new Error("conversation removal permission denied"), {
+      code: "42501",
+    });
   const conversations = await sql<
     { id: string; removed_from_inbox_at: Date | null }[]
   >`
@@ -1431,6 +1523,8 @@ export async function deleteConversation(
         FROM crm.lead_interactions interaction
         WHERE interaction.tenant_id = platform.current_tenant_id()
           AND interaction.conversation_id = ${conversationId}::uuid
+      ) OR platform.conversation_has_remediation_evidence(
+        ${conversationId}::uuid
       )
     ) AS retained
   `;

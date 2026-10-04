@@ -150,6 +150,166 @@ describe("business configuration", () => {
     fireEvent.click(screen.getByRole("tab", { name }));
   }
 
+  function fieldWorkspace() {
+    const base = state();
+    if (!base.draft) throw new Error("Missing fixture");
+    return workspace({
+      ...base,
+      draft: {
+        ...base.draft,
+        configuration: configurationFromTemplate("field_service"),
+      },
+    });
+  }
+
+  it("keeps partial template language editable and rejects invalid policy on save", async () => {
+    render(fieldWorkspace());
+    openSection(/^Service workflow/);
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: /Send the caller a WhatsApp summary/,
+      }),
+    );
+    fireEvent.change(screen.getByLabelText(/Approved template outside/), {
+      target: { value: "synthetic_followup" },
+    });
+    const language = screen.getByLabelText("Template language code");
+    fireEvent.change(language, { target: { value: "h" } });
+    expect(
+      screen.getByRole<HTMLInputElement>("textbox", {
+        name: "Template language code",
+      }).value,
+    ).toBe("h");
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    await waitFor(() =>
+      expect(
+        screen.getByText("Invalid approved WhatsApp template"),
+      ).toBeTruthy(),
+    );
+    expect(crmMutation).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Template language code")).toBeTruthy();
+    vi.mocked(crmMutation).mockResolvedValue({ configuration: state() });
+    fireEvent.change(language, { target: { value: "he" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    await waitFor(() => expect(crmMutation).toHaveBeenCalledTimes(1));
+    expect(
+      vi.mocked(crmMutation).mock.calls[0]?.[1].configuration,
+    ).toHaveProperty(
+      "featureConfiguration.field_service.workflow.whatsappFollowUp.templateLanguage",
+      "he",
+    );
+  });
+
+  it("keeps new incomplete document rows visible while strict save validation blocks them", async () => {
+    render(fieldWorkspace());
+    openSection(/^Service workflow/);
+    fireEvent.click(screen.getByRole("button", { name: "Add document type" }));
+    expect(screen.getByLabelText("Key")).toBeTruthy();
+    expect(screen.getByLabelText("Label")).toBeTruthy();
+    const key = screen.getByLabelText("Key");
+    key.focus();
+    fireEvent.change(key, { target: { value: "owned_doc" } });
+    expect(screen.getByLabelText("Key")).toBe(key);
+    expect(document.activeElement).toBe(key);
+    fireEvent.change(key, { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    await waitFor(() =>
+      expect(screen.getByText(/Invalid document type key/)).toBeTruthy(),
+    );
+    expect(crmMutation).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Key")).toBeTruthy();
+  });
+
+  it("allows adding and completing a checklist item before strict save validation", async () => {
+    render(fieldWorkspace());
+    openSection(/^Service workflow/);
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: /Show a preparation checklist/ }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Add checklist item" }));
+    const item = screen.getByLabelText("Item");
+    expect(item).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    await waitFor(() =>
+      expect(screen.getByText(/Checklist label/)).toBeTruthy(),
+    );
+    expect(crmMutation).not.toHaveBeenCalled();
+    vi.mocked(crmMutation).mockResolvedValue({ configuration: state() });
+    fireEvent.change(item, { target: { value: "Bring synthetic tools" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    await waitFor(() => expect(crmMutation).toHaveBeenCalledTimes(1));
+    expect(
+      vi.mocked(crmMutation).mock.calls[0]?.[1].configuration,
+    ).toHaveProperty(
+      "featureConfiguration.field_service.workflow.preparation.checklist.0.label",
+      "Bring synthetic tools",
+    );
+  });
+
+  it("resumes returned contents as a new draft without modifying review history", async () => {
+    const base = state();
+    if (!base.draft) throw new Error("Missing fixture");
+    const returned = {
+      ...base.draft,
+      status: "rejected" as const,
+      version: 2,
+      configuration: configurationFromTemplate("field_service"),
+      reviewNotes: "Update the workflow",
+    };
+    const governance = {
+      ...base,
+      draft: null,
+      history: [returned],
+      active: null,
+    };
+    const historyBefore = JSON.stringify(governance.history);
+    vi.mocked(crmMutation).mockResolvedValue({ configuration: state() });
+    render(workspace(governance));
+    openSection(/^Modules/);
+    expect(
+      screen.getByRole<HTMLInputElement>("checkbox", {
+        name: "Enable Field Service",
+      }).checked,
+    ).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    await waitFor(() => expect(crmMutation).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(crmMutation).mock.calls[0]?.[1]).toEqual({
+      configuration: returned.configuration,
+      expectedRevision: null,
+    });
+    expect(JSON.stringify(governance.history)).toBe(historyBefore);
+    expect(
+      screen.queryByRole("button", { name: "Approve & publish" }),
+    ).toBeNull();
+  });
+
+  it("does not resume an older returned release over a newer active configuration", () => {
+    const base = state();
+    if (!base.draft) throw new Error("Missing fixture");
+    render(
+      workspace({
+        ...base,
+        draft: null,
+        active: { ...base.draft, status: "published", version: 3 },
+        history: [
+          {
+            ...base.draft,
+            status: "rejected",
+            version: 2,
+            configuration: configurationFromTemplate("field_service"),
+          },
+        ],
+      }),
+    );
+    openSection(/^Modules/);
+    expect(
+      screen.getByRole<HTMLInputElement>("checkbox", {
+        name: "Enable Field Service",
+      }).checked,
+    ).toBe(false);
+    expect(crmMutation).not.toHaveBeenCalled();
+  });
+
   it("keeps feature choices in the draft until explicit save and approval", async () => {
     const saved = state();
     vi.mocked(crmMutation).mockResolvedValue({ configuration: saved });

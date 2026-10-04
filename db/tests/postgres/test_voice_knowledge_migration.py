@@ -34,7 +34,7 @@ async def knowledge_database() -> AsyncIterator[str]:
     if (
         target.hostname not in {"127.0.0.1", "localhost"}
         or not (
-            (target.port == 55439 and target.path == "/oron_readiness")
+            (target.port in {55439, 55480} and target.path == "/oron_readiness")
             or re.fullmatch(r"/oron_ui_preview_[a-f0-9]{32}", target.path)
         )
         or target.username != "platform_migrator"
@@ -77,7 +77,7 @@ async def test_upgrade_preserves_legacy_documents_and_unpublished_downgrade(
             tenant_id,
             source_id,
         )
-        await run_alembic(knowledge_database, "upgrade", "head")
+        await run_alembic(knowledge_database, "upgrade", "17f57105f1a9")
         original = await connection.fetchrow(
             "SELECT version,published_at,title FROM agents.knowledge_documents WHERE id=$1",
             original_id,
@@ -132,7 +132,7 @@ async def test_downgrade_refuses_to_discard_published_provenance(
 ) -> None:
     import subprocess
 
-    await run_alembic(knowledge_database, "upgrade", "head")
+    await run_alembic(knowledge_database, "upgrade", "17f57105f1a9")
     connection = await asyncpg.connect(knowledge_database)
     try:
         tenant_id = uuid4()
@@ -158,6 +158,17 @@ async def test_downgrade_refuses_to_discard_published_provenance(
         assert "published knowledge provenance requires backup and forward recovery" in (
             error.value.stderr
         )
+        assert (
+            await connection.fetchval("SELECT version_num FROM alembic_version") == "17f57105f1a9"
+        )
+        assert await connection.fetchval(
+            "SELECT published_at IS NOT NULL FROM agents.knowledge_documents WHERE id=$1",
+            document_id,
+        )
+        # Later privacy/provenance migrations deliberately prohibit automatic
+        # downgrade earlier; prove this historical guard at its own revision,
+        # then independently prove retained publication upgrades to current HEAD.
+        await run_alembic(knowledge_database, "upgrade", "head")
         assert (
             await connection.fetchval("SELECT version_num FROM alembic_version") == canonical_head()
         )

@@ -2,7 +2,13 @@
 import { useTranslations } from "next-intl";
 
 import { useRouter } from "next/navigation";
-import { Fragment, useState, type SyntheticEvent } from "react";
+import {
+  Fragment,
+  useEffect,
+  useRef,
+  useState,
+  type SyntheticEvent,
+} from "react";
 
 import { Button, InlineFeedback, Input } from "@or-on/ui";
 
@@ -11,6 +17,19 @@ export function LoginForm() {
   const router = useRouter();
   const [error, setError] = useState<string>();
   const [pending, setPending] = useState(false);
+  const submitterRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    if (pending) return;
+    const submitter = submitterRef.current;
+    submitterRef.current = null;
+    if (
+      submitter?.isConnected &&
+      !submitter.matches(":disabled") &&
+      document.activeElement === document.body
+    ) {
+      submitter.focus();
+    }
+  }, [pending]);
   const [challenge, setChallenge] = useState<{
     id: string;
     phoneHint: string;
@@ -18,6 +37,13 @@ export function LoginForm() {
 
   async function submit(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (pending) return;
+    const submitter = (event.nativeEvent as SubmitEvent).submitter;
+    submitterRef.current =
+      submitter instanceof HTMLButtonElement &&
+      document.activeElement === submitter
+        ? submitter
+        : null;
     setPending(true);
     setError(undefined);
     const data = new FormData(event.currentTarget);

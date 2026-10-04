@@ -3,7 +3,7 @@ import { AccessDenied } from "../../i18n/access-denied";
 import { ProductHeading } from "../../i18n/product-heading";
 import { redirect } from "next/navigation";
 
-import { listPipelineBoards } from "@or-on/crm";
+import { listPipelineBoards, TenantFeatureDisabledError } from "@or-on/crm";
 
 import {
   ForbiddenError,
@@ -24,7 +24,11 @@ export default async function PipelinesPage() {
       </main>
     );
   } catch (error) {
-    if (error instanceof ForbiddenError) return <AccessDenied />;
+    if (
+      error instanceof ForbiddenError ||
+      error instanceof TenantFeatureDisabledError
+    )
+      return <AccessDenied />;
     if (error instanceof UnauthenticatedError) redirect("/login");
     throw error;
   }

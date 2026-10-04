@@ -2,6 +2,14 @@ import { createHash } from "node:crypto";
 import type { WhatsAppSendDiagnostic } from "@or-on/crm";
 import { metaDiagnostic } from "./meta-diagnostics.js";
 
+function hasControlCharacters(value: string): boolean {
+  for (const character of value) {
+    const code = character.charCodeAt(0);
+    if (code <= 31 || code === 127) return true;
+  }
+  return false;
+}
+
 export type WhatsAppDelivery =
   | { readonly kind: "text"; readonly text: string }
   | {
@@ -9,9 +17,17 @@ export type WhatsAppDelivery =
       readonly templateName: string;
       readonly language: string;
       readonly parameters: readonly string[];
+      readonly quickReplies?: readonly {
+        readonly index: number;
+        readonly payload: string;
+      }[];
     };
 
 export interface WhatsAppSendRequest {
+  /** Trusted worker observer: called only after credentials, immediately before POST. */
+  readonly onAttemptStarted?: () => void;
+  readonly maximumAttempts?: 1;
+  readonly accessTokenForAttempt?: () => Promise<string | undefined>;
   readonly beforeAttempt?: () => Promise<void>;
   readonly senderPhoneNumberId?: string;
   readonly idempotencyKey: string;
@@ -23,7 +39,28 @@ export interface WhatsAppSendResult {
   readonly messageId: string;
 }
 
+export interface WhatsAppTemplateVerificationRequest {
+  readonly senderPhoneNumberId: string;
+  readonly wabaId: string;
+  readonly graphApiVersion: string;
+  readonly templateName: string;
+  readonly language: string;
+  readonly buttonIndices: readonly number[];
+  readonly buttonTexts: readonly string[];
+  readonly beforeAttempt: () => Promise<void>;
+  readonly accessTokenForAttempt: () => Promise<string | undefined>;
+}
+
+/** Server-resolved inbound message and account; guard rechecks AI ownership. */
+export interface WhatsAppInboundAcknowledgement {
+  readonly accessTokenForAttempt?: () => Promise<string | undefined>;
+  readonly senderPhoneNumberId: string;
+  readonly providerMessageId: string;
+  readonly beforeAttempt: () => Promise<void>;
+}
+
 export interface WhatsAppMediaDownloadRequest {
+  readonly accessTokenForAttempt?: () => Promise<string | undefined>;
   readonly mediaId: string;
   readonly senderPhoneNumberId?: string;
   readonly expectedMimeType?: string;
@@ -34,13 +71,23 @@ export interface WhatsAppMediaDownloadRequest {
 export interface WhatsAppMediaDownloadResult {
   readonly bytes: Uint8Array;
   readonly contentType:
-    "image/jpeg" | "image/png" | "image/webp" | "application/pdf";
+    | "image/jpeg"
+    | "image/png"
+    | "image/webp"
+    | "application/pdf"
+    | "video/mp4"
+    | "audio/ogg"
+    | "audio/wav";
   readonly sha256: string;
 }
 
 export interface WhatsAppProvider {
   readonly name: "simulator" | "meta";
   send(request: WhatsAppSendRequest): Promise<WhatsAppSendResult>;
+  verifyTemplate?(
+    request: WhatsAppTemplateVerificationRequest,
+  ): Promise<boolean>;
+  acknowledgeInbound?(request: WhatsAppInboundAcknowledgement): Promise<void>;
   downloadMedia?(
     request: WhatsAppMediaDownloadRequest,
   ): Promise<WhatsAppMediaDownloadResult>;
@@ -52,6 +99,7 @@ export class WhatsAppProviderError extends Error {
     public readonly retryable: boolean,
     public readonly status?: number,
     public readonly diagnostic?: WhatsAppSendDiagnostic,
+    public readonly retryAfterMs?: number,
   ) {
     super(`WhatsApp provider request failed (${code})`);
     this.name = "WhatsAppProviderError";
@@ -60,6 +108,46 @@ export class WhatsAppProviderError extends Error {
 
 const e164 = /^\+[1-9][0-9]{7,14}$/u;
 const graphVersion = /^v\d+\.0$/u;
+async function boundedMediaBody(
+  response: Response,
+  maximum: number,
+  timeoutMs: number,
+): Promise<Uint8Array> {
+  if (response.body === null)
+    throw new WhatsAppProviderError("media_empty_body", false);
+  const reader = response.body.getReader();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new WhatsAppProviderError("media_body_timeout", true)),
+      timeoutMs,
+    );
+  });
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  try {
+    for (;;) {
+      const chunk = await Promise.race([reader.read(), deadline]);
+      if (chunk.done) break;
+      length += chunk.value.byteLength;
+      if (length > maximum)
+        throw new WhatsAppProviderError("media_too_large", false);
+      chunks.push(chunk.value);
+    }
+    if (length === 0)
+      throw new WhatsAppProviderError("media_empty_body", false);
+    const bytes = new Uint8Array(length);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return bytes;
+  } finally {
+    clearTimeout(timer);
+    void reader.cancel().catch(() => undefined);
+  }
+}
 const resourceId = /^\d+$/u;
 const templateName = /^[a-z0-9_]{1,512}$/u;
 const templateLanguage = /^[a-z]{2,3}(?:_[A-Z]{2})?$/u;
@@ -87,10 +175,31 @@ export function validateWhatsAppRequest(request: WhatsAppSendRequest): void {
     request.delivery.parameters.some((value) => value.length > 1024)
   )
     throw new TypeError("invalid template parameters");
+  const replies = request.delivery.quickReplies ?? [];
+  if (
+    replies.length > 10 ||
+    new Set(replies.map((reply) => reply.index)).size !== replies.length ||
+    replies.some(
+      (reply) =>
+        !Number.isInteger(reply.index) ||
+        reply.index < 0 ||
+        reply.index > 9 ||
+        reply.payload.trim().length === 0 ||
+        Buffer.byteLength(reply.payload, "utf8") > 256 ||
+        hasControlCharacters(reply.payload),
+    )
+  )
+    throw new TypeError("invalid template quick replies");
 }
 
 export class SimulatorWhatsAppProvider implements WhatsAppProvider {
   public readonly name = "simulator" as const;
+
+  public async acknowledgeInbound(
+    request: WhatsAppInboundAcknowledgement,
+  ): Promise<void> {
+    await request.beforeAttempt();
+  }
 
   public async send(request: WhatsAppSendRequest): Promise<WhatsAppSendResult> {
     validateWhatsAppRequest(request);
@@ -128,7 +237,7 @@ function metaPayload(delivery: WhatsAppDelivery, recipient: string): object {
       text: { preview_url: false, body: delivery.text.trim() },
     };
   }
-  const components =
+  const bodyComponents =
     delivery.parameters.length === 0
       ? undefined
       : [
@@ -140,13 +249,22 @@ function metaPayload(delivery: WhatsAppDelivery, recipient: string): object {
             })),
           },
         ];
+  const components = [
+    ...(bodyComponents ?? []),
+    ...(delivery.quickReplies ?? []).map((reply) => ({
+      type: "button",
+      sub_type: "quick_reply",
+      index: String(reply.index),
+      parameters: [{ type: "payload", payload: reply.payload }],
+    })),
+  ];
   return {
     ...base,
     type: "template",
     template: {
       name: delivery.templateName,
       language: { code: delivery.language },
-      ...(components === undefined ? {} : { components }),
+      ...(components.length === 0 ? {} : { components }),
     },
   };
 }
@@ -157,6 +275,238 @@ export class MetaWhatsAppProvider implements WhatsAppProvider {
 
   public constructor(options: MetaWhatsAppProviderOptions) {
     this.#options = options;
+  }
+
+  public async verifyTemplate(
+    request: WhatsAppTemplateVerificationRequest,
+  ): Promise<boolean> {
+    if (!this.#options.enabled)
+      throw new WhatsAppProviderError("provider_disabled", false);
+    const version = this.#options.graphApiVersion;
+    if (
+      version === undefined ||
+      version !== request.graphApiVersion ||
+      !graphVersion.test(version) ||
+      !resourceId.test(request.wabaId) ||
+      request.senderPhoneNumberId !== this.#options.phoneNumberId ||
+      !templateName.test(request.templateName) ||
+      !templateLanguage.test(request.language) ||
+      request.buttonIndices.length !== 2 ||
+      request.buttonTexts.length !== 2 ||
+      request.buttonTexts.some(
+        (text) =>
+          text.trim().length === 0 || Buffer.byteLength(text, "utf8") > 256,
+      ) ||
+      new Set(request.buttonIndices).size !== 2 ||
+      request.buttonIndices.some(
+        (index) => !Number.isInteger(index) || index < 0 || index > 9,
+      )
+    )
+      throw new WhatsAppProviderError("template_configuration_invalid", false);
+    let cursor: string | undefined;
+    for (let page = 0; page < 10; page += 1) {
+      await request.beforeAttempt();
+      const token =
+        (await request.accessTokenForAttempt()) ?? this.#options.accessToken;
+      if (!token)
+        throw new WhatsAppProviderError(
+          "channel_credential_unavailable",
+          false,
+        );
+      const url = new URL(
+        `https://graph.facebook.com/${version}/${request.wabaId}/message_templates`,
+      );
+      url.searchParams.set("name", request.templateName);
+      url.searchParams.set("fields", "name,language,status,components");
+      url.searchParams.set("limit", "100");
+      if (cursor !== undefined) url.searchParams.set("after", cursor);
+      const response = await (this.#options.fetch ?? fetch)(url, {
+        method: "GET",
+        redirect: "error",
+        headers: { authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(this.#options.timeoutMs ?? 8000),
+      });
+      if (!response.ok)
+        throw new WhatsAppProviderError(
+          "template_catalog_unavailable",
+          response.status === 429 || response.status >= 500,
+          response.status,
+        );
+      const body: unknown = JSON.parse(
+        Buffer.from(
+          await boundedMediaBody(
+            response,
+            256 * 1024,
+            this.#options.timeoutMs ?? 8000,
+          ),
+        ).toString("utf8"),
+      );
+      if (
+        typeof body !== "object" ||
+        body === null ||
+        !("data" in body) ||
+        !Array.isArray(body.data)
+      )
+        throw new WhatsAppProviderError("template_catalog_invalid", false);
+      for (const template of body.data as unknown[]) {
+        if (
+          typeof template !== "object" ||
+          template === null ||
+          !("name" in template) ||
+          template.name !== request.templateName ||
+          !("language" in template) ||
+          template.language !== request.language ||
+          !("status" in template) ||
+          template.status !== "APPROVED" ||
+          !("components" in template) ||
+          !Array.isArray(template.components)
+        )
+          continue;
+        const component = template.components.find(
+          (value: unknown) =>
+            typeof value === "object" &&
+            value !== null &&
+            "type" in value &&
+            value.type === "BUTTONS",
+        ) as { buttons?: unknown } | undefined;
+        const buttons = component?.buttons;
+        const requiresParameters = template.components.some(
+          (component: unknown) => {
+            if (
+              typeof component !== "object" ||
+              component === null ||
+              !("type" in component)
+            )
+              return true;
+            if (component.type !== "BODY" && component.type !== "HEADER")
+              return false;
+            if (
+              component.type === "HEADER" &&
+              (!("format" in component) || component.format !== "TEXT")
+            )
+              return true;
+            return (
+              !("text" in component) ||
+              typeof component.text !== "string" ||
+              component.text.includes("{{")
+            );
+          },
+        );
+        if (
+          !requiresParameters &&
+          Array.isArray(buttons) &&
+          buttons.length === 2 &&
+          request.buttonIndices.every((index, position) => {
+            const button: unknown = buttons[index];
+            return (
+              typeof button === "object" &&
+              button !== null &&
+              "type" in button &&
+              button.type === "QUICK_REPLY" &&
+              "text" in button &&
+              button.text === request.buttonTexts[position]
+            );
+          })
+        )
+          return true;
+      }
+      const paging = "paging" in body ? body.paging : undefined;
+      const cursors =
+        typeof paging === "object" && paging !== null && "cursors" in paging
+          ? paging.cursors
+          : undefined;
+      const next =
+        typeof paging === "object" && paging !== null && "next" in paging
+          ? paging.next
+          : undefined;
+      const after =
+        typeof cursors === "object" && cursors !== null && "after" in cursors
+          ? cursors.after
+          : undefined;
+      if (next === undefined) return false;
+      if (
+        typeof after !== "string" ||
+        after.length === 0 ||
+        after.length > 2048 ||
+        hasControlCharacters(after) ||
+        after === cursor
+      )
+        throw new WhatsAppProviderError(
+          "template_catalog_cursor_invalid",
+          false,
+        );
+      cursor = after;
+    }
+    throw new WhatsAppProviderError("template_catalog_pagination_limit", false);
+  }
+
+  public async acknowledgeInbound(
+    request: WhatsAppInboundAcknowledgement,
+  ): Promise<void> {
+    if (!this.#options.enabled)
+      throw new WhatsAppProviderError("provider_disabled", false);
+    const {
+      accessToken,
+      graphApiVersion: version,
+      phoneNumberId,
+    } = this.#options;
+    if (request.senderPhoneNumberId !== phoneNumberId)
+      throw new WhatsAppProviderError("sender_configuration_changed", false);
+    if (
+      (!accessToken && request.accessTokenForAttempt === undefined) ||
+      !version ||
+      !graphVersion.test(version) ||
+      !phoneNumberId ||
+      !resourceId.test(phoneNumberId)
+    )
+      throw new WhatsAppProviderError("provider_not_configured", false);
+    if (!/^wamid\.[A-Za-z0-9+/=_-]{1,1024}$/u.test(request.providerMessageId))
+      throw new TypeError("invalid inbound provider message identifier");
+    // This best-effort signal never retries or sleeps behind rate limits. The
+    // ingestion caller handles failure separately from durable reply work.
+    await request.beforeAttempt();
+    const attemptToken =
+      request.accessTokenForAttempt === undefined
+        ? accessToken
+        : ((await request.accessTokenForAttempt()) ?? accessToken);
+    if (!attemptToken)
+      throw new WhatsAppProviderError("provider_not_configured", false);
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      Math.min(this.#options.timeoutMs ?? 1000, 1000),
+    );
+    try {
+      const response = await (this.#options.fetch ?? fetch)(
+        `https://graph.facebook.com/${version}/${phoneNumberId}/messages`,
+        {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${attemptToken}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            messaging_product: "whatsapp",
+            status: "read",
+            message_id: request.providerMessageId,
+            typing_indicator: { type: "text" },
+          }),
+          signal: controller.signal,
+        },
+      );
+      await response.body?.cancel();
+      if (!response.ok)
+        throw new WhatsAppProviderError(
+          `acknowledgement_http_${String(response.status)}`,
+          response.status === 429 || response.status >= 500,
+          response.status,
+        );
+    } catch (error) {
+      if (error instanceof WhatsAppProviderError) throw error;
+      throw new WhatsAppProviderError("acknowledgement_transport_error", true);
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   public async downloadMedia(
@@ -171,7 +521,8 @@ export class MetaWhatsAppProvider implements WhatsAppProvider {
     )
       throw new WhatsAppProviderError("sender_configuration_changed", false);
     if (
-      accessToken === undefined ||
+      (accessToken === undefined &&
+        request.accessTokenForAttempt === undefined) ||
       version === undefined ||
       !graphVersion.test(version) ||
       !resourceId.test(request.mediaId)
@@ -180,6 +531,12 @@ export class MetaWhatsAppProvider implements WhatsAppProvider {
     const execute = this.#options.fetch ?? fetch;
     const requestWithTimeout = async (url: string): Promise<Response> => {
       await request.beforeAttempt?.();
+      const attemptToken =
+        request.accessTokenForAttempt === undefined
+          ? accessToken
+          : ((await request.accessTokenForAttempt()) ?? accessToken);
+      if (!attemptToken)
+        throw new WhatsAppProviderError("provider_not_configured", false);
       const controller = new AbortController();
       const timeout = setTimeout(
         () => controller.abort(),
@@ -188,7 +545,8 @@ export class MetaWhatsAppProvider implements WhatsAppProvider {
       try {
         return await execute(url, {
           method: "GET",
-          headers: { authorization: `Bearer ${accessToken}` },
+          redirect: "error",
+          headers: { authorization: `Bearer ${attemptToken}` },
           signal: controller.signal,
         });
       } catch {
@@ -206,10 +564,28 @@ export class MetaWhatsAppProvider implements WhatsAppProvider {
         metadataResponse.status === 429 || metadataResponse.status >= 500,
         metadataResponse.status,
       );
-    const metadata = (await metadataResponse.json().catch(() => undefined)) as
-      Readonly<Record<string, unknown>> | undefined;
+    const metadataBytes = await boundedMediaBody(
+      metadataResponse,
+      32 * 1024,
+      this.#options.timeoutMs ?? 8_000,
+    );
+    let metadata: Readonly<Record<string, unknown>>;
+    try {
+      const parsed: unknown = JSON.parse(
+        new TextDecoder("utf-8", { fatal: true }).decode(metadataBytes),
+      );
+      if (
+        typeof parsed !== "object" ||
+        parsed === null ||
+        Array.isArray(parsed)
+      )
+        throw new TypeError("media metadata must be an object");
+      metadata = parsed as Readonly<Record<string, unknown>>;
+    } catch {
+      throw new WhatsAppProviderError("media_metadata_invalid", false);
+    }
     const mediaUrl =
-      typeof metadata?.url === "string" ? metadata.url : undefined;
+      typeof metadata.url === "string" ? metadata.url : undefined;
     if (mediaUrl === undefined)
       throw new WhatsAppProviderError("media_metadata_invalid", false);
     let parsedUrl: URL;
@@ -242,25 +618,37 @@ export class MetaWhatsAppProvider implements WhatsAppProvider {
         .get("content-type")
         ?.split(";", 1)[0]
         ?.toLowerCase() ??
-      (typeof metadata?.mime_type === "string"
+      (typeof metadata.mime_type === "string"
         ? metadata.mime_type.toLowerCase()
         : "");
     if (
       declared !== "image/jpeg" &&
       declared !== "image/png" &&
       declared !== "image/webp" &&
-      declared !== "application/pdf"
+      declared !== "application/pdf" &&
+      declared !== "video/mp4" &&
+      declared !== "audio/ogg" &&
+      declared !== "audio/wav"
     )
       throw new WhatsAppProviderError("media_content_type_unsupported", false);
     if (
       request.expectedMimeType !== undefined &&
-      request.expectedMimeType.toLowerCase() !== declared
+      request.expectedMimeType.split(";", 1)[0]?.trim().toLowerCase() !==
+        declared
     )
       throw new WhatsAppProviderError("media_content_type_mismatch", false);
+    const maximumBytes =
+      declared.startsWith("audio/") || declared === "video/mp4"
+        ? 16 * 1024 * 1024
+        : 20 * 1024 * 1024;
     const contentLength = Number(mediaResponse.headers.get("content-length"));
-    if (Number.isFinite(contentLength) && contentLength > 20 * 1024 * 1024)
+    if (Number.isFinite(contentLength) && contentLength > maximumBytes)
       throw new WhatsAppProviderError("media_too_large", false);
-    const bytes = new Uint8Array(await mediaResponse.arrayBuffer());
+    const bytes = await boundedMediaBody(
+      mediaResponse,
+      maximumBytes,
+      this.#options.timeoutMs ?? 8_000,
+    );
     if (bytes.byteLength < 1 || bytes.byteLength > 20 * 1024 * 1024)
       throw new WhatsAppProviderError("media_too_large", false);
     const digest = createHash("sha256").update(bytes).digest();
@@ -288,7 +676,8 @@ export class MetaWhatsAppProvider implements WhatsAppProvider {
       phoneNumberId,
     } = this.#options;
     if (
-      accessToken === undefined ||
+      (accessToken === undefined &&
+        request.accessTokenForAttempt === undefined) ||
       version === undefined ||
       phoneNumberId === undefined ||
       !graphVersion.test(version) ||
@@ -305,12 +694,20 @@ export class MetaWhatsAppProvider implements WhatsAppProvider {
     const execute = this.#options.fetch ?? fetch;
     const maxAttempts = Math.min(
       Math.max(this.#options.maxAttempts ?? 3, 1),
-      5,
+      request.maximumAttempts ?? 5,
     );
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      let retryAfterMs = 0;
       // Authorization is re-read after every rate-limit delay. Refusal occurs
       // before HTTP and is not an ambiguous provider outcome or a retry signal.
       await request.beforeAttempt?.();
+      const attemptToken =
+        request.accessTokenForAttempt === undefined
+          ? accessToken
+          : ((await request.accessTokenForAttempt()) ?? accessToken);
+      if (!attemptToken)
+        throw new WhatsAppProviderError("provider_not_configured", false);
+      request.onAttemptStarted?.();
       const controller = new AbortController();
       const timeout = setTimeout(
         () => controller.abort(),
@@ -322,7 +719,7 @@ export class MetaWhatsAppProvider implements WhatsAppProvider {
           {
             method: "POST",
             headers: {
-              authorization: `Bearer ${accessToken}`,
+              authorization: `Bearer ${attemptToken}`,
               "content-type": "application/json",
             },
             body: JSON.stringify(
@@ -353,6 +750,25 @@ export class MetaWhatsAppProvider implements WhatsAppProvider {
         // Only explicit rate-limit rejection is safe to repeat. A gateway/server
         // error may have happened after provider acceptance of a POST.
         const retryable = response.status === 429;
+        if (retryable) {
+          const header = response.headers.get("retry-after")?.trim();
+          if (header !== undefined) {
+            const delay = /^\d+$/u.test(header)
+              ? Number(header) * 1000
+              : Date.parse(header) - Date.now();
+            if (Number.isFinite(delay) && delay > 0) {
+              if (delay > 30_000)
+                throw new WhatsAppProviderError(
+                  "rate_limit_deferred",
+                  true,
+                  429,
+                  metaDiagnostic(payload, response.status, true),
+                  delay,
+                );
+              retryAfterMs = delay;
+            }
+          }
+        }
         if (response.status >= 500)
           throw new WhatsAppProviderError(
             "delivery_outcome_unknown",
@@ -372,6 +788,7 @@ export class MetaWhatsAppProvider implements WhatsAppProvider {
             retryable,
             response.status,
             diagnostic,
+            retryAfterMs > 0 ? retryAfterMs : undefined,
           );
         }
       } catch (error) {
@@ -383,7 +800,10 @@ export class MetaWhatsAppProvider implements WhatsAppProvider {
         clearTimeout(timeout);
       }
       const jitter = (this.#options.random ?? Math.random)() * 100;
-      const delay = Math.min(2000, 200 * 2 ** (attempt - 1) + jitter);
+      const delay = Math.max(
+        retryAfterMs,
+        Math.min(2000, 200 * 2 ** (attempt - 1) + jitter),
+      );
       await (
         this.#options.wait ??
         ((ms) => new Promise((resolve) => setTimeout(resolve, ms)))
@@ -413,6 +833,20 @@ export class RoutedMetaWhatsAppProvider implements WhatsAppProvider {
   public async send(request: WhatsAppSendRequest): Promise<WhatsAppSendResult> {
     const provider = this.#provider(request.senderPhoneNumberId);
     return provider.send(request);
+  }
+
+  public async verifyTemplate(
+    request: WhatsAppTemplateVerificationRequest,
+  ): Promise<boolean> {
+    return this.#provider(request.senderPhoneNumberId).verifyTemplate(request);
+  }
+
+  public async acknowledgeInbound(
+    request: WhatsAppInboundAcknowledgement,
+  ): Promise<void> {
+    return this.#provider(request.senderPhoneNumberId).acknowledgeInbound(
+      request,
+    );
   }
 
   public async downloadMedia(

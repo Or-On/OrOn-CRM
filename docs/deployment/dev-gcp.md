@@ -7,7 +7,7 @@ keeps the platform secure and repeatable. It does not duplicate production
 high availability.
 
 ```text
-GitHub main push or manual workflow run on main
+Manual CI workflow run on main with deploy_dev=true
   -> existing CI (all jobs must succeed)
   -> GitHub OIDC / Workload Identity Federation
   -> immutable SHA images in Artifact Registry
@@ -114,16 +114,18 @@ transferred to `/opt/oron-dev/shared/` and set to root ownership and mode
 `0600`. Do not put them in VM metadata, Git, a release archive, or a command
 line.
 
-## CI and continuous deployment
+## CI and manual deployment
 
-`.github/workflows/ci.yml` remains the sole CI workflow. On an exact push to
-`main`, or a manual `workflow_dispatch` run that selects `main`, its container
-job authenticates with GitHub OIDC, publishes five commit-SHA images, and
-records no mutable deployment tag. The manual path deliberately selects
-`main` because the Workload Identity provider is restricted to that ref.
-`deploy-dev` has `needs` on every CI job, so neither path can bypass a failed or
-cancelled check. Job-level concurrency serializes deployments without
-cancelling an in-progress DEV release.
+`.github/workflows/ci.yml` remains the sole CI workflow. A push to `main`
+runs checks and local container builds without cloud authentication, image
+publication or deployment. A manual `workflow_dispatch` run also defaults to
+checks only. To publish five commit-SHA images and deploy DEV, select `main`
+in Actions → CI → Run workflow and explicitly enable `deploy_dev`.
+The manual path selects `main` because the Workload Identity provider is
+restricted to that ref. `deploy-dev` still requires every CI job to succeed;
+the manual option cannot bypass failed or cancelled checks. Job-level
+concurrency serializes deployments without cancelling an in-progress release.
+This control does not grant cloud access or enable provider features.
 
 The `github-oron-dev/oron-crm-main` Workload Identity provider trusts only
 `Abssel-AI/OrOn-CRM` on

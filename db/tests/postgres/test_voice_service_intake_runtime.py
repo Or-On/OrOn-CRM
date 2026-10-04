@@ -17,7 +17,7 @@ pytestmark = [pytest.mark.postgres, pytest.mark.integration, pytest.mark.rls]
 
 
 @pytest_asyncio.fixture
-async def service_runtime(postgres_url):
+async def service_runtime(postgres_url, request):
     engine = create_async_engine(_async_database_url(postgres_url))
     async with engine.connect() as connection:
         transaction = await connection.begin()
@@ -98,6 +98,67 @@ async def service_runtime(postgres_url):
             )
             await connection.execute(text("SET LOCAL ROLE platform_voice"))
             await runtime.pin_voice_agent(context, agent)
+            if getattr(request, "param", True):
+                # Existing happy workflows now use an actual independent factor
+                # proof; a correlated caller-ID is never substituted for it.
+                await connection.execute(text("RESET ROLE"))
+                channel = (
+                    await execute(
+                        connection,
+                        "INSERT INTO messaging.channels(tenant_id,kind,provider,"
+                        "provider_account_id,status) "
+                        "VALUES(:tenant,'whatsapp','simulator',:account,'active') RETURNING id",
+                        tenant=tenant,
+                        account=f"verification-{session}",
+                    )
+                ).scalar_one()
+                conversation = (
+                    await execute(
+                        connection,
+                        "INSERT INTO messaging.conversations(tenant_id,channel_id,contact_id) "
+                        "VALUES(:tenant,:channel,:contact) RETURNING id",
+                        tenant=tenant,
+                        channel=channel,
+                        contact=contact,
+                    )
+                ).scalar_one()
+                handoff = (
+                    await execute(
+                        connection,
+                        "INSERT INTO automation.handoffs(tenant_id,contact_id,conversation_id,"
+                        "source_channel,reason_safe,idempotency_key) VALUES(:tenant,:contact,"
+                        ":conversation,'whatsapp','Fictional verification',:key) RETURNING id",
+                        tenant=tenant,
+                        contact=contact,
+                        conversation=conversation,
+                        key=f"verification-{session}",
+                    )
+                ).scalar_one()
+                await execute(
+                    connection,
+                    "INSERT INTO crm.customer_profiles(tenant_id,contact_id,national_id_ciphertext,"
+                    "national_id_blind_index,national_id_hint) VALUES(:tenant,:contact,"
+                    "'v1:fictional','fictional-factor-index','0000')",
+                    tenant=tenant,
+                    contact=contact,
+                )
+                await connection.execute(text("SET LOCAL ROLE platform_voice"))
+                await execute(
+                    connection,
+                    "SELECT platform.initialize_voice_identity_verification(:session,:handoff)",
+                    session=session,
+                    handoff=handoff,
+                )
+                receipt = (
+                    await execute(
+                        connection,
+                        "SELECT platform.verify_voice_caller_identity(:session,'fixturecaller',"
+                        "'+972502345678','fictional-factor-index',NULL)",
+                        session=session,
+                    )
+                ).scalar_one()
+                assert receipt["verified"] is True
+
             yield runtime, context, connection, policy
         finally:
             await transaction.rollback()
@@ -281,7 +342,22 @@ async def test_outbound_intake_uses_called_number_not_contact_primary_or_busines
     await connection.execute(text("SET LOCAL ROLE platform_voice"))
     await runtime.pin_voice_agent(outbound, agent)
     result = await runtime.get_service_intake_context(outbound)
-    assert result["knownFields"]["customerPhone"] == "+972502345678"
+    # Correlation on a new call never inherits the first session's factor proof.
+    assert result["knownFields"] == {} and result["storeOptions"] == []
+    await connection.execute(text("RESET ROLE"))
+    identity = (
+        await execute(
+            connection,
+            "SELECT identity.normalized_value FROM public.session_events event "
+            "JOIN crm.contact_channel_identities identity ON identity.tenant_id=event.tenant_id "
+            "AND identity.id=(event.payload->>'caller_identity_id')::uuid "
+            "WHERE event.tenant_id=:tenant AND event.session_id=:session "
+            "AND event.event_type='voice.agent.binding.v1'",
+            tenant=context.tenant_id,
+            session=session,
+        )
+    ).scalar_one()
+    assert identity == "+972502345678"
 
 
 async def test_voice_service_rejects_cross_tenant_and_model_phone_substitution(service_runtime):
@@ -471,5 +547,199 @@ async def test_voice_photos_join_the_same_case_before_and_after_confirmation(ser
             tenant=context.tenant_id,
             case=UUID(completed["caseId"]),
             conversation=conversation,
+        )
+    ).scalar_one() == 1
+
+
+@pytest.mark.parametrize("service_runtime", [False], indirect=True)
+async def test_unverified_transport_identity_does_not_unlock_private_crm_prefill(service_runtime):
+    runtime, context, _connection, _policy = service_runtime
+    initial = await runtime.get_service_intake_context(context)
+    # Even a globally valid contact phone is only correlation; this call supplied
+    # no independent factors and has no session-bound verification receipt.
+    assert "customerName" not in initial["knownFields"]
+    assert initial["storeOptions"] == []
+
+
+@pytest.mark.parametrize("service_runtime", [False], indirect=True)
+async def test_unverified_caller_intake_keeps_only_same_call_claims(service_runtime):
+    runtime, context, connection, _policy = service_runtime
+    result = await runtime.capture_service_intake(
+        context,
+        fields={
+            "customerName": "Caller stated name",
+            "chainName": "Caller stated chain",
+            "storeName": "Caller stated branch",
+            "faultDescription": "Caller stated fault",
+            "exactFailure": "Caller stated symptom",
+        },
+        confirmed=True,
+    )
+    assert result["knownFields"]["customerName"] == "Caller stated name"
+    assert result["storeOptions"] == []
+    assert "Fixture caller" not in str(result)
+
+    assert result["status"] == "confirmed" and result["caseId"] and result["ticketId"]
+    await connection.execute(text("RESET ROLE"))
+    provenance = (
+        await execute(
+            connection,
+            "SELECT payload FROM public.session_events WHERE tenant_id=:tenant "
+            "AND session_id=:session AND event_type='voice.caller.correlation.v1'",
+            tenant=context.tenant_id,
+            session=context.session_id,
+        )
+    ).scalar_one()
+    assert provenance == {
+        "source": "provider_transport",
+        "identity_verified": False,
+        "purpose": "callback_routing",
+    }
+    assert (
+        await execute(
+            connection,
+            "SELECT count(*) FROM automation.voice_identity_verifications "
+            "WHERE tenant_id=:tenant AND session_id=:session",
+            tenant=context.tenant_id,
+            session=context.session_id,
+        )
+    ).scalar_one() == 0
+
+
+async def test_verified_prefill_rechecks_revoked_pinned_identity(service_runtime):
+    runtime, context, connection, _policy = service_runtime
+    assert (await runtime.get_service_intake_context(context))["knownFields"][
+        "customerName"
+    ] == "Fixture caller"
+    await connection.execute(text("RESET ROLE"))
+    await execute(
+        connection,
+        "UPDATE crm.contact_channel_identities SET validation_status='revoked' "
+        "WHERE tenant_id=:tenant AND contact_id=:contact",
+        tenant=context.tenant_id,
+        contact=context.contact_id,
+    )
+    await connection.execute(text("SET LOCAL ROLE platform_voice"))
+    result = await runtime.get_service_intake_context(context)
+    assert result["knownFields"] == {} and result["storeOptions"] == []
+
+
+async def test_pending_verification_keeps_private_context_locked(service_runtime):
+    runtime, context, connection, _policy = service_runtime
+    await connection.execute(text("RESET ROLE"))
+    await execute(
+        connection,
+        "UPDATE automation.voice_identity_verifications SET state='collecting_identity',"
+        "verified_at=NULL,context_unlocked_at=NULL WHERE tenant_id=:tenant AND session_id=:session",
+        tenant=context.tenant_id,
+        session=context.session_id,
+    )
+    await connection.execute(text("SET LOCAL ROLE platform_voice"))
+    result = await runtime.get_service_intake_context(context)
+    assert result["status"] == "identity_required" and result["knownFields"] == {}
+
+
+async def test_archived_bound_agent_cannot_read_verified_private_prefill(service_runtime):
+    runtime, context, connection, _policy = service_runtime
+    await connection.execute(text("RESET ROLE"))
+    await execute(
+        connection,
+        "UPDATE agents.agent_profiles SET archived_at=clock_timestamp() WHERE tenant_id=:tenant",
+        tenant=context.tenant_id,
+    )
+    await connection.execute(text("SET LOCAL ROLE platform_voice"))
+    with pytest.raises(DBAPIError):
+        await runtime.get_service_intake_context(context)
+
+
+@pytest.mark.parametrize("service_runtime", [False], indirect=True)
+async def test_unverified_legacy_draft_keeps_private_history_without_disclosure(service_runtime):
+    runtime, context, connection, policy = service_runtime
+    await connection.execute(text("RESET ROLE"))
+    private = {
+        "customerName": "Legacy private customer",
+        "storeName": "Legacy private branch",
+        "serviceAddress": "Legacy private address",
+    }
+    draft = (
+        await execute(
+            connection,
+            "INSERT INTO service.intake_drafts(tenant_id,source_session_id,reporting_contact_id,"
+            "customer_contact_id,customer_resolution_status,correlation_key,collected_fields,"
+            "workflow_policy,status) VALUES(:tenant,:session,:contact,:contact,'reporting_contact',"
+            ":key,CAST(:fields AS jsonb),CAST(:policy AS jsonb),'collecting') RETURNING id",
+            tenant=context.tenant_id,
+            session=context.session_id,
+            contact=context.contact_id,
+            key=f"legacy-{context.session_id}",
+            fields=json.dumps(private),
+            policy=json.dumps(policy),
+        )
+    ).scalar_one()
+    await connection.execute(text("SET LOCAL ROLE platform_voice"))
+    result = await runtime.get_service_intake_context(context)
+    assert result["status"] == "identity_required" and result["knownFields"] == {}
+    assert result["storeOptions"] == [] and result["intakeId"] is None
+    assert result["caseId"] is None and result["ticketId"] is None
+    assert "Legacy private" not in str(result)
+    with pytest.raises(DBAPIError):
+        await runtime.capture_service_intake(
+            context, fields={"customerName": "New caller"}, confirmed=False
+        )
+    await connection.execute(text("RESET ROLE"))
+    retained = (
+        await execute(
+            connection,
+            "SELECT collected_fields FROM service.intake_drafts "
+            "WHERE tenant_id=:tenant AND id=:draft",
+            tenant=context.tenant_id,
+            draft=draft,
+        )
+    ).scalar_one()
+    assert retained == private
+
+
+async def test_runtime_retains_exact_compiled_voice_flow_and_rejects_retry_drift(service_runtime):
+    runtime, context, connection, _ = service_runtime
+    await connection.execute(text("RESET ROLE"))
+    agent = (
+        await execute(
+            connection,
+            "SELECT (payload->>'agent_version_id')::uuid FROM session_events "
+            "WHERE session_id=:session AND event_type='voice.agent.binding.v1'",
+            session=context.session_id,
+        )
+    ).scalar_one()
+    fresh_session = await seed_call(connection, context.tenant_id, context.contact_id)
+    fresh = context.model_copy(update={"session_id": fresh_session})
+    await connection.execute(text("SET LOCAL ROLE platform_voice"))
+    await runtime.pin_voice_agent(fresh, agent, compiled_flow_version=3)
+    await runtime.pin_voice_agent(fresh, agent, compiled_flow_version=3)
+    retained = (
+        (
+            await execute(
+                connection,
+                "SELECT sequence,payload FROM session_events WHERE session_id=:session "
+                "AND event_type='voice.flow.binding.v1'",
+                session=fresh_session,
+            )
+        )
+        .mappings()
+        .all()
+    )
+    assert len(retained) == 1
+    assert retained[0]["payload"] == {
+        "compiled_flow_id": str(context.flow_id),
+        "compiled_flow_version": 3,
+        "agent_version_id": str(agent),
+    }
+    with pytest.raises(ValueError, match="flow binding cannot change"):
+        await runtime.pin_voice_agent(fresh, agent, compiled_flow_version=4)
+    assert (
+        await execute(
+            connection,
+            "SELECT count(*) FROM session_events WHERE session_id=:session "
+            "AND event_type='voice.flow.binding.v1'",
+            session=fresh_session,
         )
     ).scalar_one() == 1

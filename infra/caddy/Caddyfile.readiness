@@ -22,5 +22,6 @@
 }
 
 http://127.0.0.1:8080 {
-	respond /healthz "ok" 200
+	respond /health/live "OK" 200
+	respond 404
 }

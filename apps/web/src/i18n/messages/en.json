@@ -1069,6 +1069,7 @@
     "campaignsLink": "Voice campaigns",
     "flowsLink": "Voice flow library",
     "disabled": "Real calls disabled",
+    "providerComparisonUnavailable": "Provider comparison not performed",
     "calls": "Calls",
     "completed": "Completed",
     "answered": "Answered",
@@ -1374,7 +1375,25 @@
         "available": "Attachment is available",
         "failed": "Attachment could not be retrieved",
         "unavailable": "Attachment mirroring is unavailable"
-      }
+      },
+      "audio": "Customer voice message",
+      "video": "Customer video",
+      "playVideo": "Play customer video",
+      "downloadVideo": "Download customer video",
+      "videoPlaybackFailed": "The video could not be played. You can download the file.",
+      "videoUnsupported": "This video format is unsupported. Use a progressive H.264 MP4 file.",
+      "playAudio": "Play customer voice message",
+      "playbackFailed": "The voice message could not be played",
+      "transcription": {
+        "pending": "Transcription is waiting",
+        "processing": "Transcribing voice message",
+        "completed": "Voice transcript",
+        "failed": "Transcription failed; operator review is needed",
+        "disabled": "Automatic transcription is disabled",
+        "unavailable": "No transcript is available"
+      },
+      "downloadAudio": "Download voice message",
+      "videoUnavailable": "Video playback is unavailable; the caption is shown below"
     },
     "location": {
       "shared": "Shared location",
@@ -1458,7 +1477,16 @@
     "contactDetails": "Contact details",
     "conversationQueue": "Conversation queue",
     "queueSummary": "{count} conversations loaded",
-    "allFilters": "More filters"
+    "allFilters": "More filters",
+    "openingMenu": {
+      "title": "Opening menu",
+      "services": "Services",
+      "support": "Support",
+      "sending": "Send attempt in progress. Delivery has not been confirmed.",
+      "sent": "Accepted by the provider. See delivery status below.",
+      "failed": "Sending failed. See the server delivery details.",
+      "unknown": "Delivery outcome unknown; operator reconciliation required before retry."
+    }
   },
   "deliveryFailure": {
     "provider_disabled": "Real delivery is turned off. This attempt was not sent to Meta.",

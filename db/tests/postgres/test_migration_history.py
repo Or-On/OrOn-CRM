@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import subprocess
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -102,7 +103,8 @@ async def test_supported_target_successor_downgrade_and_reupgrade(
     isolated_postgres_url: str,
     schema_manifest: dict[str, Any],
 ) -> None:
-    await run_alembic(isolated_postgres_url, "upgrade", "head")
+    # Exact successor of a41d2f6c2925 owns the foundation rollback.
+    await run_alembic(isolated_postgres_url, "upgrade", "34376836baf5")
     await run_alembic(isolated_postgres_url, "downgrade", "a41d2f6c2925")
 
     connection = await asyncpg.connect(isolated_postgres_url)
@@ -176,7 +178,8 @@ async def test_ai_handoff_tasks_are_backfilled_to_their_contact(
     finally:
         await connection.close()
 
-    await run_alembic(isolated_postgres_url, "upgrade", "head")
+    # Exact contact-backfill successor; full head is checked after rollback.
+    await run_alembic(isolated_postgres_url, "upgrade", "91bd6f76a3e4")
     connection = await asyncpg.connect(isolated_postgres_url)
     try:
         assert (
@@ -193,6 +196,61 @@ async def test_ai_handoff_tasks_are_backfilled_to_their_contact(
             "SELECT EXISTS (SELECT 1 FROM information_schema.columns "
             "WHERE table_schema='crm' AND table_name='tasks' AND column_name='contact_id')"
         )
+    finally:
+        await connection.close()
+
+    await run_alembic(isolated_postgres_url, "upgrade", "head")
+    connection = await asyncpg.connect(isolated_postgres_url)
+    try:
+        assert (
+            await connection.fetchval("SELECT contact_id FROM crm.tasks WHERE id=$1", task_id)
+            == contact_id
+        )
+    finally:
+        await connection.close()
+
+
+async def test_full_head_privacy_downgrade_refuses_and_remains_atomic(
+    isolated_postgres_url: str,
+    schema_manifest: dict[str, Any],
+) -> None:
+    await run_alembic(isolated_postgres_url, "upgrade", "head")
+    connection = await asyncpg.connect(isolated_postgres_url)
+    try:
+        initial_head = await connection.fetchval("SELECT version_num FROM alembic_version")
+        assert initial_head == schema_manifest["alembic_head"]
+        before = await connection.fetch(
+            "SELECT p.oid::regprocedure::text AS identity,pg_get_functiondef(p.oid) AS definition "
+            "FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
+            "WHERE n.nspname IN ('platform','service') ORDER BY identity"
+        )
+        with pytest.raises(subprocess.CalledProcessError) as failure:
+            await run_alembic(isolated_postgres_url, "downgrade", "ec624ebf31a6")
+        # The newer signature-proof retention gate refuses before the historical
+        # caller-privacy revision. The entire attempted downgrade stays atomic.
+        assert "Removing signature proof requires reviewed retention" in failure.value.stderr
+        assert await connection.fetchval("SELECT version_num FROM alembic_version") == initial_head
+        after = await connection.fetch(
+            "SELECT p.oid::regprocedure::text AS identity,pg_get_functiondef(p.oid) AS definition "
+            "FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
+            "WHERE n.nspname IN ('platform','service') ORDER BY identity"
+        )
+        assert after == before
+    finally:
+        await connection.close()
+
+
+async def test_historical_caller_privacy_gate_still_refuses_automatic_downgrade(
+    isolated_postgres_url: str,
+) -> None:
+    await run_alembic(isolated_postgres_url, "upgrade", "ed735fc042b7")
+    with pytest.raises(subprocess.CalledProcessError) as failure:
+        await run_alembic(isolated_postgres_url, "downgrade", "ec624ebf31a6")
+    assert "caller_privacy_gate_cannot_be_removed_by_automatic_downgrade" in failure.value.stderr
+    connection = await asyncpg.connect(isolated_postgres_url)
+    try:
+        head = await connection.fetchval("SELECT version_num FROM alembic_version")
+        assert head == "ed735fc042b7"
     finally:
         await connection.close()
 
@@ -562,7 +620,8 @@ async def test_whatsapp_binding_upgrade_and_downgrade_quarantine_pending_work(
     finally:
         await connection.close()
 
-    await run_alembic(isolated_postgres_url, "upgrade", "head")
+    # Binding successor fixes active NULL recipients before exercising quarantine.
+    await run_alembic(isolated_postgres_url, "upgrade", "9b7e4c2d1a60")
     connection = await asyncpg.connect(isolated_postgres_url)
     try:
         assert tuple(
@@ -700,6 +759,25 @@ async def test_whatsapp_binding_upgrade_and_downgrade_quarantine_pending_work(
             "SELECT EXISTS (SELECT 1 FROM information_schema.columns "
             "WHERE table_schema='messaging' AND table_name='outbound_requests' "
             "AND column_name='recipient_address')"
+        )
+    finally:
+        await connection.close()
+
+    # Full-head forward compatibility is separate from historical quarantine rollback.
+    await run_alembic(isolated_postgres_url, "upgrade", "head")
+    connection = await asyncpg.connect(isolated_postgres_url)
+    try:
+        assert (
+            await connection.fetchval(
+                "SELECT status FROM messaging.outbound_requests WHERE id=$1", new_request_id
+            )
+            == "failed"
+        )
+        assert (
+            await connection.fetchval(
+                "SELECT status FROM ops.jobs WHERE id=$1", new_callback_job_id
+            )
+            == "dead"
         )
     finally:
         await connection.close()

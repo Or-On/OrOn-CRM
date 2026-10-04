@@ -487,21 +487,7 @@ export async function getFieldServiceFeatureState(
         SELECT 1 FROM messaging.channels channel
         WHERE channel.kind = 'whatsapp' AND channel.status = 'active'
       ) AS whatsapp_channel_ready,
-      EXISTS (
-        SELECT 1 FROM crm.tenant_settings settings
-        JOIN agents.agent_profiles profile
-          ON profile.id=settings.whatsapp_ai_agent_profile_id
-         AND profile.tenant_id=settings.tenant_id
-         AND profile.archived_at IS NULL
-        JOIN agents.agent_profile_versions version
-          ON version.agent_profile_id=profile.id
-         AND version.tenant_id=profile.tenant_id
-         AND version.published_at IS NOT NULL
-         AND version.validation_status='valid'
-         AND version.channel_capabilities @> ARRAY['whatsapp']::text[]
-        WHERE settings.tenant_id=current.tenant_id
-          AND settings.whatsapp_ai_enabled_by_user_id IS NOT NULL
-      ) AS whatsapp_agent_ready
+      platform.current_field_service_whatsapp_agent_ready() AS whatsapp_agent_ready
     FROM (SELECT platform.current_tenant_id() AS tenant_id) current
     LEFT JOIN platform.tenant_feature_entitlements entitlement
       ON entitlement.tenant_id = current.tenant_id

@@ -111,34 +111,42 @@ describe("persisted agent quality workspace", () => {
     expect(instructions.value).toBe("Unsaved fictional instructions");
     expect(document.querySelector("audio")).toBeNull();
   });
-  it("shows actual deterministic response/evidence with no automatic audio", async () => {
-    const copy = qualityCopy("en");
-    api.mutate.mockResolvedValue({
-      evaluation: {
-        mode: "deterministic-preview",
-        acceptedText: "Fictional hours question",
-        response: "Fictional approved hours",
-        sources: [],
-        conflicts: [],
-        timings: {
-          deterministicMs: 2,
-          sttMs: null,
-          modelMs: null,
-          ttsMs: null,
+  it.each(["en", "he"] as const)(
+    "labels the %s configuration preview without claiming real model quality",
+    async (locale) => {
+      const copy = qualityCopy(locale);
+      api.mutate.mockResolvedValue({
+        evaluation: {
+          mode: "deterministic-preview",
+          acceptedText: "Fictional hours question",
+          response: "Fictional approved hours",
+          sources: [],
+          conflicts: [],
+          timings: {
+            deterministicMs: 2,
+            sttMs: null,
+            modelMs: null,
+            ttsMs: null,
+          },
         },
-      },
-    });
-    render(localized(<AgentQualityWorkspace profileId={profileId} />));
-    const scenario = await screen.findByLabelText(copy.scenario);
-    fireEvent.change(scenario, {
-      target: { value: "Fictional hours question" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: copy.run }));
-    expect(await screen.findByText("Fictional approved hours")).toBeDefined();
-    expect(screen.getByRole("region", { name: "Audio preview" })).toBeDefined();
-    expect(screen.getByText(copy.stages)).toBeDefined();
-    expect(document.querySelector("audio")).toBeNull();
-  });
+      });
+      render(
+        localized(<AgentQualityWorkspace profileId={profileId} />, locale),
+      );
+      const scenario = await screen.findByLabelText(copy.scenario);
+      fireEvent.change(scenario, {
+        target: { value: "Fictional hours question" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: copy.run }));
+      expect(await screen.findByText("Fictional approved hours")).toBeDefined();
+      expect(screen.getByText(copy.evaluate)).toBeDefined();
+      expect(screen.getByText(copy.testRequired)).toBeDefined();
+      expect(screen.getByRole("button", { name: copy.publish })).toBeDefined();
+      expect(screen.getByText(copy.disclaimer)).toBeDefined();
+      expect(screen.getByText(copy.stages)).toBeDefined();
+      expect(document.querySelector("audio")).toBeNull();
+    },
+  );
   it.each(["en", "he"] as const)(
     "shows in %s which version new voice calls use and that a newer published version is not bound",
     async (locale) => {

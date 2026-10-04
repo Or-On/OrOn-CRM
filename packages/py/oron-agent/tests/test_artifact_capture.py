@@ -31,6 +31,35 @@ def test_session_dir_creates_parents(tmp_path):
     assert Path(d.transcript).parent.is_dir()
 
 
+async def test_staging_cleanup_waits_for_canonical_persistence_and_preserves_siblings(tmp_path):
+    staging = tmp_path / "staging"
+    directory = SessionDir(SID, root=str(staging))
+    sibling = SessionDir(uuid.uuid4(), root=str(staging))
+    Path(directory.transcript).write_text("Synthetic recovery transcript")
+    Path(sibling.transcript).write_text("Synthetic separate session")
+    assert not directory.cleanup(artifacts_uploaded=False, session_finalized=True)
+    assert not directory.cleanup(artifacts_uploaded=True, session_finalized=False)
+    assert Path(directory.transcript).exists()
+    store = LocalArtifactStore(root=str(tmp_path / "persisted"))
+    assert await store.upload_dir(str(directory.path), SID)
+    assert directory.cleanup(artifacts_uploaded=True, session_finalized=True)
+    assert not directory.path.exists()
+    assert Path(sibling.transcript).exists()
+    assert directory.cleanup(artifacts_uploaded=True, session_finalized=True)
+
+
+def test_cleanup_rejects_redirected_session_path(tmp_path):
+    directory = SessionDir(SID, root=str(tmp_path / "staging"))
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    directory.path = outside
+    import pytest
+
+    with pytest.raises(ValueError, match="owned session root"):
+        directory.cleanup(artifacts_uploaded=True, session_finalized=True)
+    assert outside.exists()
+
+
 async def test_transcript_appends_turns_in_order(tmp_path):
     out = tmp_path / "transcript.txt"
     h = TranscriptHandler(output_file=str(out))
@@ -158,7 +187,7 @@ async def test_twenty_local_lifecycles_retain_durable_files_without_staging_leak
         Path(directory.transcript).write_text("fictional test transcript")
         await save_audio_file(b"\x00\x01" * 8000, directory.recording, 16000, 1)
         assert await store.upload_dir(str(directory.path), session_id)
-        directory.cleanup()
+        directory.cleanup(artifacts_uploaded=True, session_finalized=True)
         durable = store_root / "conversations" / str(session_id)
         assert (durable / RECORDING_PATH).stat().st_size > 16000
         assert (durable / TRANSCRIPT_PATH).read_text() == "fictional test transcript"
@@ -171,6 +200,6 @@ def test_staging_cleanup_cannot_delete_sibling_session(tmp_path):
     owned = SessionDir(uuid.uuid4(), root=str(tmp_path))
     other = SessionDir(uuid.uuid4(), root=str(tmp_path))
     owned.path = other.path
-    with pytest.raises(ValueError, match="unowned"):
-        owned.cleanup()
+    with pytest.raises(ValueError, match="outside its owned"):
+        owned.cleanup(artifacts_uploaded=True, session_finalized=True)
     assert other.path.exists()

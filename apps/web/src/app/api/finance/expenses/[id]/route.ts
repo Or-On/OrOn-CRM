@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 
-import { updateExpense, voidExpense, type ExpenseInput } from "@or-on/crm";
+import {
+  requireTenantFeature,
+  updateExpense,
+  voidExpense,
+  type ExpenseInput,
+} from "@or-on/crm";
 
 import { jsonObject, withCurrentTenant } from "../../../../../features/auth";
 import {
@@ -56,8 +61,9 @@ export async function PATCH(
     const status = optionalStatus(body.status);
     const notes = nullableString(body, "notes");
     const incurredAt = optionalString(body, "incurredAt");
-    const expense = await withCurrentTenant("tenant:manage", (sql) =>
-      updateExpense(sql, id, {
+    const expense = await withCurrentTenant("tenant:manage", async (sql) => {
+      await requireTenantFeature(sql, "billing");
+      return updateExpense(sql, id, {
         ...(title === undefined ? {} : { title }),
         ...(vendor === undefined ? {} : { vendor }),
         ...(category === undefined ? {} : { category }),
@@ -66,8 +72,8 @@ export async function PATCH(
         ...(status === undefined ? {} : { status }),
         ...(notes === undefined ? {} : { notes }),
         ...(incurredAt === undefined ? {} : { incurredAt }),
-      }),
-    );
+      });
+    });
     return expense === undefined
       ? NextResponse.json({ error: "Not found" }, { status: 404 })
       : NextResponse.json({ expense });
@@ -85,9 +91,10 @@ export async function DELETE(
     const { id } = await context.params;
     if (!uuidPattern.test(id))
       throw new TypeError("invalid expense identifier");
-    const expense = await withCurrentTenant("tenant:manage", (sql) =>
-      voidExpense(sql, id),
-    );
+    const expense = await withCurrentTenant("tenant:manage", async (sql) => {
+      await requireTenantFeature(sql, "billing");
+      return voidExpense(sql, id);
+    });
     return expense === undefined
       ? NextResponse.json({ error: "Not found" }, { status: 404 })
       : NextResponse.json({ expense });

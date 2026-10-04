@@ -21,6 +21,7 @@ import {
 } from "./agent-publication-review.js";
 import { parseKnowledgeSourceIds } from "./agent-quality.js";
 import { assertAgentKnowledgePublishable } from "./agent-quality-store.js";
+import { assertAgentGoldenPublishable } from "./agent-quality-gate.js";
 import { assertKnowledgeManager } from "./knowledge.js";
 import { parseLeadFieldSchema } from "./lead-schema.js";
 
@@ -48,6 +49,8 @@ export interface CanonicalFlowEdge {
   readonly id: string;
   readonly source: string;
   readonly target: string;
+  /** Optional channel scope; omitted edges retain their existing behavior. */
+  readonly channels?: readonly SupportedChannel[];
 }
 
 export interface CanonicalFlow {
@@ -155,10 +158,29 @@ export function parseCanonicalFlow(value: unknown): CanonicalFlow {
       !/^[\w-]{1,64}$/u.test(candidate.target)
     )
       throw new TypeError("flow edge id/source/target is invalid");
+    const edgeChannels = candidate.channels;
+    if (
+      edgeChannels !== undefined &&
+      (!Array.isArray(edgeChannels) ||
+        edgeChannels.length === 0 ||
+        edgeChannels.some(
+          (channel: unknown) =>
+            typeof channel !== "string" ||
+            !channels.includes(channel as SupportedChannel),
+        ))
+    )
+      throw new TypeError(
+        "flow edge channels must be supported selected channels",
+      );
     return {
       id: candidate.id,
       source: candidate.source,
       target: candidate.target,
+      ...(edgeChannels === undefined
+        ? {}
+        : {
+            channels: sortedUniqueChannels(edgeChannels as SupportedChannel[]),
+          }),
     };
   });
   return { schemaVersion: "1.0", channels, nodes, edges };
@@ -243,6 +265,12 @@ export function validateCanonicalFlow(flow: CanonicalFlow): FlowValidation {
     errors.push("flow must contain at least one end node");
   const edgeIds = new Set<string>();
   for (const edge of flow.edges) {
+    if (
+      edge.channels !== undefined &&
+      (edge.channels.length === 0 ||
+        edge.channels.some((channel) => !channels.includes(channel)))
+    )
+      errors.push(`edge ${edge.id} has invalid channel scope`);
     if (edgeIds.has(edge.id)) errors.push(`duplicate edge ID: ${edge.id}`);
     edgeIds.add(edge.id);
     if (!ids.has(edge.source) || !ids.has(edge.target))
@@ -262,7 +290,12 @@ function compileAdapter(
     .toSorted((left, right) => left.id.localeCompare(right.id));
   const ids = new Set(nodes.map((node) => node.id));
   const edges = flow.edges
-    .filter((edge) => ids.has(edge.source) && ids.has(edge.target))
+    .filter(
+      (edge) =>
+        ids.has(edge.source) &&
+        ids.has(edge.target) &&
+        (edge.channels === undefined || edge.channels.includes(channel)),
+    )
     .toSorted((left, right) => left.id.localeCompare(right.id));
   return {
     schemaVersion: channel === "voice" ? "oron-flow.v1" : "wacrm-automation.v1",
@@ -1005,6 +1038,7 @@ export async function publishAgentProfile(
     sql,
     parseKnowledgeSourceIds(draft.knowledge_configuration.sourceIds ?? []),
   );
+  await assertAgentGoldenPublishable(sql, draft.id);
   const rows = await sql<{ id: string }[]>`
     UPDATE agents.agent_profile_versions SET published_at = CURRENT_TIMESTAMP
     WHERE id = ${draft.id}::uuid AND published_at IS NULL AND validation_status='valid'

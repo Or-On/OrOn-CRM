@@ -23,6 +23,7 @@ import { useLocale } from "next-intl";
 import { useState, type SyntheticEvent } from "react";
 
 import { crmMutation } from "../crm";
+import { useMutationFocus } from "../keyboard";
 
 export interface FieldServiceRuntimeReadiness {
   readonly aiProviderConfigured: boolean;
@@ -47,6 +48,7 @@ export function FieldServiceSettings({
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string>();
   const [critical, setCritical] = useState(false);
+  const rememberFocus = useMutationFocus(pending);
   const runtime = runtimeReadiness ?? {
     aiProviderConfigured: false,
     protectedFieldsConfigured: false,
@@ -74,6 +76,8 @@ export function FieldServiceSettings({
 
   async function save(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (pending) return;
+    rememberFocus();
     const form = new FormData(event.currentTarget);
     setPending(true);
     setMessage(undefined);

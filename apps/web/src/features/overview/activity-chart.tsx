@@ -22,6 +22,8 @@ function MessageActivityChartContent({
   const t = useTranslations("premiumOverview");
   const copy = useTranslations("tenantOverview");
   const locale = useLocale();
+  // Initial SVG attributes must match SSR even when the browser prefers reduced motion.
+  // Zero-duration transitions below respect that preference without hydration drift.
   const reduceMotion = useReducedMotion();
   const [selected, setSelected] = useState<number>();
   const [outcomes, setOutcomes] = useState(false);
@@ -185,7 +187,7 @@ function MessageActivityChartContent({
               <m.line
                 animate={{ opacity: 1, pathLength: 1 }}
                 className="overview-chart-trend"
-                initial={reduceMotion ? false : { opacity: 0, pathLength: 0 }}
+                initial={{ opacity: 0, pathLength: 0 }}
                 transition={{
                   delay: reduceMotion ? 0 : 0.2,
                   duration: reduceMotion ? 0 : 0.8,
@@ -202,7 +204,7 @@ function MessageActivityChartContent({
                 animate={{ opacity: 1, y: 0 }}
                 className="overview-chart-line overview-chart-line--angular overview-chart-line--animated"
                 d={linePath}
-                initial={reduceMotion ? false : { opacity: 0.35, y: 8 }}
+                initial={{ opacity: 0.35, y: 8 }}
                 transition={{
                   duration: reduceMotion ? 0 : 0.45,
                   ease: "easeOut",

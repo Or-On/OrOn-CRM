@@ -317,7 +317,7 @@ function calendarDateKey(value: string, timeZone: string): string {
   }).formatToParts(date);
   const part = (type: Intl.DateTimeFormatPartTypes) =>
     parts.find((item) => item.type === type)?.value ?? "";
-  return `${part("year")}-${part("month")}-${part("day")}`;
+  return `${part("year").padStart(4, "0")}-${part("month")}-${part("day")}`;
 }
 
 function referenceDateKey(value: string, timeZone: string): string {
@@ -330,6 +330,21 @@ function dateKeyOrdinal(dateKey: string): number {
 
 function dateKeyFromOrdinal(ordinal: number): string {
   return new Date(ordinal).toISOString().slice(0, 10);
+}
+
+function utcCalendarTime(
+  year: number,
+  month: number,
+  day: number,
+  hour = 0,
+  minute = 0,
+  second = 0,
+): number {
+  // Date.UTC interprets years below100 as1900–1999; preserve the actual input year.
+  const date = new Date(0);
+  date.setUTCFullYear(year, month - 1, day);
+  date.setUTCHours(hour, minute, second, 0);
+  return date.getTime();
 }
 
 function timeZoneClockAsUtc(value: number, timeZone: string): number {
@@ -347,9 +362,9 @@ function timeZoneClockAsUtc(value: number, timeZone: string): number {
   }).formatToParts(value);
   const part = (type: Intl.DateTimeFormatPartTypes) =>
     Number(parts.find((item) => item.type === type)?.value ?? Number.NaN);
-  return Date.UTC(
+  return utcCalendarTime(
     part("year"),
-    part("month") - 1,
+    part("month"),
     part("day"),
     part("hour"),
     part("minute"),
@@ -363,8 +378,11 @@ function calendarDateToInstant(dateKey: string, timeZone: string): string {
   const year = Number(match[1]);
   const month = Number(match[2]);
   const day = Number(match[3]);
-  const localNoon = Date.UTC(year, month - 1, day, 12);
-  if (dateKeyFromOrdinal(Date.UTC(year, month - 1, day)) !== dateKey) {
+  const localNoon = utcCalendarTime(year, month, day, 12);
+  if (
+    year < 1 ||
+    dateKeyFromOrdinal(utcCalendarTime(year, month, day)) !== dateKey
+  ) {
     throw new RangeError("Invalid calendar date");
   }
 
@@ -658,21 +676,22 @@ export function FinanceWorkspace({
 
   async function submitExpense(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (pending) return;
     setPending(true);
     setError(undefined);
-    const body = {
-      title: draft.title.trim(),
-      vendor: draft.vendor.trim() || null,
-      category: draft.category.trim(),
-      amount: draft.amount,
-      currency: draft.currency.trim().toUpperCase(),
-      status: draft.status,
-      notes: draft.notes.trim() || null,
-      incurredAt: calendarDateToInstant(draft.incurredAt, timeZone),
-      sourceKind: "manual",
-      sourceReference: null,
-    };
     try {
+      const body = {
+        title: draft.title.trim(),
+        vendor: draft.vendor.trim() || null,
+        category: draft.category.trim(),
+        amount: draft.amount,
+        currency: draft.currency.trim().toUpperCase(),
+        status: draft.status,
+        notes: draft.notes.trim() || null,
+        incurredAt: calendarDateToInstant(draft.incurredAt, timeZone),
+        sourceKind: "manual",
+        sourceReference: null,
+      };
       const result = await crmMutation<ExpensePayload>(
         editing
           ? `/api/finance/expenses/${editing.id}`

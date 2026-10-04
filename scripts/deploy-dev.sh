@@ -39,6 +39,38 @@ if [[ ${actual_archive_sha256} != "${EXPECTED_ARCHIVE_SHA256}" ]]; then
   echo "Release archive checksum mismatch" >&2
   exit 1
 fi
+
+# Serialize and preserve private recovery state before changing any config.
+for unit in oron-dev.service oron-dev-backup.service oron-dev-backup.timer; do
+  [[ -f /etc/systemd/system/${unit} ]] || {
+    echo "Existing DEV systemd unit required; provisioning is not authorized" >&2
+    exit 1
+  }
+done
+exec 9>"${LOCK_FILE}"
+if ! flock --nonblock 9; then
+  echo "Another deployment is already running" >&2
+  exit 1
+fi
+available_bytes="$(df --output=avail -B1 "${ORON_ROOT}" | tail -n 1 | tr -d ' ')"
+[[ ${available_bytes} =~ ^[0-9]+$ && ${available_bytes} -ge 5368709120 ]] || {
+  echo "At least 5 GiB free disk is required; no automatic pruning is permitted" >&2
+  exit 1
+}
+readonly RECOVERY_DIR="$(mktemp -d "${ORON_ROOT}/pre-deploy-${COMMIT_SHA}.XXXXXX")"
+chmod 0700 "${RECOVERY_DIR}"
+docker ps --all --format '{{.ID}} {{.Image}} {{.Status}}' >"${RECOVERY_DIR}/containers.txt"
+cp -a "${SHARED_DIR}/config" "${RECOVERY_DIR}/config"
+cp -a "${SHARED_DIR}/deployment.env" "${RECOVERY_DIR}/deployment.env"
+for path in "${ORON_ROOT}/current" "${ORON_ROOT}/deployed-commit"; do
+  [[ ! -e ${path} && ! -L ${path} ]] || cp -a "${path}" "${RECOVERY_DIR}/"
+done
+for unit in oron-dev.service oron-dev-backup.service oron-dev-backup.timer caddy.service; do
+  systemctl is-enabled "$unit" >"${RECOVERY_DIR}/${unit}.enabled" 2>&1 || true
+  systemctl is-active "$unit" >"${RECOVERY_DIR}/${unit}.active" 2>&1 || true
+  [[ ! -f /etc/systemd/system/${unit} ]] || cp -a "/etc/systemd/system/${unit}" "${RECOVERY_DIR}/"
+done
+
 for file in \
   "${SHARED_DIR}/deployment.env" \
   "${SHARED_DIR}/config/postgres-password.txt" \
@@ -180,11 +212,6 @@ fi
   exit 1
 }
 
-exec 9>"${LOCK_FILE}"
-if ! flock --nonblock 9; then
-  echo "Another deployment is already running" >&2
-  exit 1
-fi
 
 # The Python voice runtime uses UID 100 while the Node web and messaging
 # runtimes use GID 1000. The root is private to those principals; each adapter
@@ -219,6 +246,7 @@ expected_files = {
     "infra/deployment/systemd/oron-dev.service",
     "scripts/backup-dev.sh",
     "scripts/deploy-dev.sh",
+    "scripts/restore-dev-backup.py",
 }
 expected_directories = {
     str(parent)
@@ -319,8 +347,8 @@ if [[ -d ${RELEASE_DIR} ]]; then
   if [[ ${previous_release} == "${RELEASE_DIR}" ]]; then
     rm -rf -- "${STAGING_DIR}"
   else
-    rm -rf -- "${RELEASE_DIR}"
-    mv -- "${STAGING_DIR}" "${RELEASE_DIR}"
+    echo "Existing inactive release directory preserved; inspect before retry" >&2
+    exit 1
   fi
 else
   mv -- "${STAGING_DIR}" "${RELEASE_DIR}"
@@ -342,25 +370,51 @@ compose_previous() {
 native_caddy_was_active=false
 previous_optional_services=()
 deployment_succeeded=false
+schema_migration_started=false
+schema_head_before_migration=""
 rollback() {
   local exit_code=$?
-  trap - EXIT
-  if [[ ${deployment_succeeded} == true ]]; then
-    return
-  fi
-  # Explicit exit, a failed command, and a trapped termination all reach EXIT.
-  # Never report an unfinished deployment as successful.
+  trap - EXIT ERR
+  [[ ${deployment_succeeded} == true ]] && return
+  # Explicit exits (including the active-call safety refusal) do not run ERR.
+  # An unexpected clean exit is also an incomplete deployment.
   [[ ${exit_code} -ne 0 ]] || exit_code=1
   set +e
   echo "Deployment of ${COMMIT_SHA} failed; attempting application rollback" >&2
   if [[ -n ${previous_release} && -d ${previous_release} ]]; then
-    if compose_previous up --detach --remove-orphans --wait --wait-timeout 100 \
-      postgres control-api web caddy "${previous_optional_services[@]}"; then
-      ln -sfn "${previous_release}" "${CURRENT_LINK}.rollback"
-      mv -Tf "${CURRENT_LINK}.rollback" "${CURRENT_LINK}"
-    else
-      echo "Application rollback failed its health gate; operator action required" >&2
+    # A successful DDL migration can revoke/replace runtime contracts. Never
+    # restart an older image against an advanced or unreadable schema. PostgreSQL
+    # Alembic runs transactionally; unchanged head is the narrow recovery case.
+    if [[ ${schema_migration_started} == true ]]; then
+      schema_head_after_failure="$(timeout --kill-after=1s 5s docker compose \
+        --env-file "${SHARED_DIR}/deployment.env" \
+        --env-file "${previous_release}/images.env" \
+        --file "${previous_release}/infra/compose/deployment.yaml" \
+        exec --no-TTY postgres psql --username platform_migrator \
+        --dbname "${DEPLOYMENT_DATABASE_NAME}" --tuples-only --no-align \
+        --command "SELECT string_agg(version_num, ',' ORDER BY version_num) FROM alembic_version")"
+      schema_probe_status=$?
+      if [[ ${schema_probe_status} -ne 0 || ! ${schema_head_before_migration} =~ ^[0-9a-f]{12}$ ||
+            ${schema_head_after_failure} != "${schema_head_before_migration}" ]]; then
+        echo "Automatic application rollback refused: schema advanced or compatibility could not be proved. Prior images were not restarted; operator must choose a compatible forward image or an approved backup recovery." >&2
+        exit "${exit_code}"
+      fi
     fi
+    # Bound the complete Compose operation, not only its healthcheck wait.
+    # Allow at most 6 seconds for schema verification and 5 for termination.
+    # The configured recovery commands remain within the two-minute budget.
+    timeout --kill-after=5s 105s docker compose \
+      --env-file "${SHARED_DIR}/deployment.env" \
+      --env-file "${previous_release}/images.env" \
+      --file "${previous_release}/infra/compose/deployment.yaml" \
+      up --detach --remove-orphans --wait --wait-timeout 90 \
+      postgres control-api web caddy "${previous_optional_services[@]}"
+    rollback_status=$?
+    if [[ ${rollback_status} -ne 0 ]]; then
+      echo "Application rollback did not prove readiness (status ${rollback_status}); operator intervention required" >&2
+    fi
+    ln -sfn "${previous_release}" "${CURRENT_LINK}.rollback"
+    mv -Tf "${CURRENT_LINK}.rollback" "${CURRENT_LINK}"
   elif [[ ${native_caddy_was_active} == true ]]; then
     systemctl start caddy || true
   fi
@@ -369,6 +423,7 @@ rollback() {
 trap rollback EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+command -v timeout >/dev/null || { echo "GNU timeout is required for bounded rollback" >&2; exit 1; }
 
 # shellcheck disable=SC1091
 source "${SHARED_DIR}/deployment.env"
@@ -384,17 +439,20 @@ fi
 if [[ -n ${previous_release} ]]; then
   mapfile -t previous_running_services < <(compose_previous ps --services --filter status=running)
   for service in "${previous_running_services[@]}"; do
-    if [[ ${service} == messaging-worker || ${service} == dispatcher ]]; then
+    if [[ ${service} == messaging-worker || ${service} == dispatcher || ${service} == sweeper ]]; then
       previous_optional_services+=("${service}")
     fi
   done
 fi
 compose config --quiet
-# Immutable commit tags otherwise accumulate until the host cannot extract the
-# next release. Docker never prunes an image referenced by a running or stopped
-# container, so the live release and its rollback path remain available while
-# obsolete, unreferenced release images are reclaimed before the pull.
-docker image prune --all --force >/dev/null
+# Preserve canonical installed units; refuse drift rather than silently overwrite.
+for unit in oron-dev.service oron-dev-backup.service oron-dev-backup.timer; do
+  cmp -s "${RELEASE_DIR}/infra/deployment/systemd/${unit}" "/etc/systemd/system/${unit}" || {
+    echo "Existing systemd unit differs from the reviewed release; explicit repair required: ${unit}" >&2
+    exit 1
+  }
+done
+# Preserve all images; insufficient disk aborts instead of pruning.
 # Pull each immutable application image explicitly before inspecting its digest
 # or stopping the currently running application. Compose can omit profiled
 # one-shot services such as the migrator from an aggregate pull even when their
@@ -411,9 +469,30 @@ for image in "${release_images[@]}"; do
   fi
 done
 compose up --detach postgres
+# Refuse bootstrap and reserve space for backup before stopping admission.
+user_count="$(compose exec --no-TTY postgres psql --username platform_migrator \
+  --dbname "${DEPLOYMENT_DATABASE_NAME}" --tuples-only --no-align \
+  --command 'SELECT count(*) FROM users')"
+[[ ${user_count} =~ ^[0-9]+$ && ${user_count} -gt 0 ]] || {
+  echo "Existing nonempty identity database required; bootstrap is not authorized" >&2
+  exit 1
+}
+database_bytes="$(compose exec --no-TTY postgres psql --username platform_migrator \
+  --dbname "${DEPLOYMENT_DATABASE_NAME}" --tuples-only --no-align \
+  --command 'SELECT pg_database_size(current_database())')"
+available_bytes="$(df --output=avail -B1 "${ORON_ROOT}" | tail -n 1 | tr -d ' ')"
+[[ ${database_bytes} =~ ^[0-9]+$ && ${available_bytes} =~ ^[0-9]+$ &&
+   ${available_bytes} -ge $((database_bytes * 2 + 1073741824)) ]] || {
+  echo "Insufficient disk for retained database backup and migration reserve" >&2
+  exit 1
+}
 if [[ -n ${previous_release} ]]; then
-  # Keep webhook ingestion and replies available while voice drains. A failed
-  # voice wait must leave the healthy messaging release serving customers.
+  # Keep webhook ingestion and replies available during voice drain. Stop
+  # admission only once the voice gate passes, immediately before migration.
+  # Run the existing least-privileged, bounded stale-session repair once before
+  # waiting. Its configured cutoff must remain above the maximum live-call
+  # budget; never shorten it merely to make a deployment proceed.
+  compose_previous --profile workers run --rm --no-deps sweeper oron-sessions-sweeper
   active_calls=0
   for _ in {1..36}; do
     active_calls="$(compose_previous exec --no-TTY postgres psql \
@@ -427,19 +506,25 @@ if [[ -n ${previous_release} ]]; then
     echo "Active voice sessions did not drain; refusing to migrate or disconnect callers" >&2
     exit 1
   fi
-  compose_previous stop --timeout 90 dispatcher control-api
-  "${RELEASE_DIR}/scripts/backup-dev.sh"
+  # The periodic sweeper also writes the voice schema. Stop it before the
+  # backup/migration boundary, after the one-shot repair and call drain.
+  compose_previous stop --timeout 120 dispatcher control-api sweeper
+  compose_previous stop --timeout 120 messaging-worker web caddy
+  "${RELEASE_DIR}/scripts/backup-dev.sh" --database-only
 fi
+if [[ -n ${previous_release} ]]; then
+  schema_head_before_migration="$(compose exec --no-TTY postgres psql \
+    --username platform_migrator --dbname "${DEPLOYMENT_DATABASE_NAME}" \
+    --tuples-only --no-align \
+    --command "SELECT string_agg(version_num, ',' ORDER BY version_num) FROM alembic_version")"
+  [[ ${schema_head_before_migration} =~ ^[0-9a-f]{12}$ ]] || {
+    echo "Existing schema must have one verified Alembic head before migration" >&2
+    exit 1
+  }
+fi
+printf '%s\n' "$schema_head_before_migration" >"${RECOVERY_DIR}/schema-before.txt"
+schema_migration_started=true
 compose --profile release run --rm migrator
-
-# Bootstrap is deliberately gated by the authoritative identity table. The
-# bootstrap program independently rechecks the entire empty-database invariant.
-user_count="$(compose exec --no-TTY postgres psql --username platform_migrator \
-  --dbname "${DEPLOYMENT_DATABASE_NAME}" --tuples-only --no-align \
-  --command 'SELECT count(*) FROM users')"
-if [[ ${user_count} == 0 ]]; then
-  compose --profile bootstrap run --rm bootstrap-owner
-fi
 
 if systemctl is-active --quiet caddy; then
   native_caddy_was_active=true
@@ -451,7 +536,8 @@ for service_and_key in \
   "web WEB_IMAGE" \
   "control-api CONTROL_API_IMAGE" \
   "messaging-worker MESSAGING_WORKER_IMAGE" \
-  "dispatcher DISPATCHER_IMAGE"; do
+  "dispatcher DISPATCHER_IMAGE" \
+  "sweeper MIGRATOR_IMAGE"; do
   read -r service key <<<"${service_and_key}"
   container_id="$(compose ps --quiet "${service}")"
   [[ -n ${container_id} ]] || { echo "Expected service is not running: ${service}" >&2; exit 1; }
@@ -503,25 +589,10 @@ install -m 0750 -o root -g root "${RELEASE_DIR}/scripts/deploy-dev.sh" \
   "${ORON_ROOT}/scripts/deploy-dev.sh"
 install -m 0750 -o root -g root "${RELEASE_DIR}/scripts/backup-dev.sh" \
   "${ORON_ROOT}/scripts/backup-dev.sh"
-for unit in oron-dev.service oron-dev-backup.service oron-dev-backup.timer; do
-  install -m 0644 -o root -g root "${RELEASE_DIR}/infra/deployment/systemd/${unit}" \
-    "/etc/systemd/system/${unit}"
-done
-systemctl daemon-reload
-systemctl enable oron-dev.service oron-dev-backup.timer >/dev/null
-systemctl disable caddy >/dev/null 2>&1 || true
-systemctl start oron-dev-backup.timer
+# Preserve existing systemd units, enablement and timer state. Units must already
+# follow /opt/oron-dev/current; provisioning or unit repair is a separate action.
 deployment_succeeded=true
-trap - EXIT INT TERM
+trap - EXIT ERR INT TERM
 
-# Keep the active release and the four newest predecessors. Never touch shared data.
-mapfile -t old_releases < <(find "${RELEASES_DIR}" -mindepth 1 -maxdepth 1 -type d \
-  ! -name '.staging-*' -printf '%T@ %p\n' | sort -nr | tail -n +6 | cut -d' ' -f2-)
-for old_release in "${old_releases[@]}"; do
-  resolved="$(readlink -f -- "${old_release}")"
-  if [[ ${resolved} == "${RELEASES_DIR}/"* && ${resolved} != "${RELEASE_DIR}" ]]; then
-    rm -rf -- "${resolved}"
-  fi
-done
-docker image prune --all --force >/dev/null
+# Preserve all release directories and images for explicit recovery/maintenance.
 echo "Successfully deployed ${COMMIT_SHA}"

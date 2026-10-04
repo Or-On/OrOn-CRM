@@ -55,7 +55,7 @@ migrator         93aa3e52a415cfb3f049aab123225944d7fb16e6a0a7dbe34e0471371643f3c
 ## Narrow repairs verified
 
 - All four runtime Dockerfiles install the exact Debian Bookworm security package
-  `libpcre2-8-0=10.42-1+deb12u1`. A disposable container's refreshed official APT
+  `libpcre2-8-0=10.42-1+deb12u2`. A disposable container's refreshed official APT
   catalogue identified this as the only available package upgrade on this baseline.
   The patched SBOMs confirm that exact installed version.
 - Node runtime layers remove npm/corepack and their launcher symlinks; the build
@@ -126,3 +126,31 @@ Exact final SBOM config identities:
 
 Final disposable startup/restore and web rollback smoke passed separately. Those
 results do not override the failed security gate. No registry publication occurred.
+
+## 2026-10-04 bounded runtime package remediation
+
+The historical four-image scanner counts above apply only to the listed image
+identities and their historical feed. They do not describe the new five-image
+candidate. Current Debian security metadata and actual shipped package inventories
+identified `liblzma5=5.4.1-1+deb12u1` in all five new runtime images as affected by
+[GHSA-5qpq-xqfv-j9pg](https://github.com/tukaani-project/xz/security/advisories/GHSA-5qpq-xqfv-j9pg).
+Upstream rates it high; no application exploit path has been demonstrated. The
+issue requires decoder reinitialization after allocation failure for the affected
+LZMA/Lzip/MicroLZMA modes; upstream excludes XZ and raw stream decoding.
+
+All five runtime recipes now explicitly install the signed Bookworm security
+backport `liblzma5=5.4.1-1+deb12u2`. Disposable queries and APT simulations on both
+pinned Node and Python bases verified availability and upgrade of that single
+package, with no added or removed packages and no broad distribution upgrade.
+Existing PCRE and OpenSSL pins are preserved. Acceptance requires rebuilding the
+exact candidate, checking the installed version in each immutable image, and
+repeating offline imports and relevant dependency/security assessment.
+
+Raw audits of actual shipped npm/PyPI versions found no reported advisories in
+their stated scopes. The Windows development environment's existing NLTK finding
+and dated exception remain separate; actual Linux runtime inventories exclude
+NLTK. Debian metadata also contains open or undetermined low/unrated entries.
+Neither an inventory nor those ecosystem results establish a vulnerability-free
+OS or replace real application, restoration and channel acceptance. No registry
+publication, shared database migration or live deployment is authorized by these
+local results.

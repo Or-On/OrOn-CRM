@@ -59,6 +59,7 @@ export async function voiceClient(
 
 export async function voiceRecordingResponse(
   sessionId: string,
+  requestHeaders?: Headers,
 ): Promise<Response> {
   const resolved = await currentRawSession();
   if (resolved === undefined) throw new UnauthenticatedError();
@@ -68,9 +69,14 @@ export async function voiceRecordingResponse(
     `/api/v1/voice/sessions/${encodeURIComponent(sessionId)}/recording`,
     config.controlApiUrl,
   );
+  const headers = new Headers({ authorization: `Bearer ${assertion}` });
+  for (const name of ["range", "if-range"]) {
+    const value = requestHeaders?.get(name);
+    if (value !== null && value !== undefined) headers.set(name, value);
+  }
   return fetch(url, {
     cache: "no-store",
-    headers: { authorization: `Bearer ${assertion}` },
+    headers,
   });
 }
 

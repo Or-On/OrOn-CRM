@@ -250,6 +250,7 @@ export function ServiceCaseWorkspace({
     readonly key: string;
   }>();
   const [latestReport, setLatestReport] = useState<ReportRevision>();
+  const [reportTrigger, setReportTrigger] = useState<HTMLElement>();
   const [identifiedVisits, setIdentifiedVisits] = useState<ReadonlySet<string>>(
     new Set(),
   );
@@ -384,7 +385,8 @@ export function ServiceCaseWorkspace({
     });
   }
 
-  async function openReport(visit: ServiceVisit) {
+  async function openReport(visit: ServiceVisit, trigger: HTMLButtonElement) {
+    setReportTrigger(trigger);
     setLatestReport(undefined);
     setReportVisit(undefined);
     await run(`open-report:${visit.id}`, async () => {
@@ -419,8 +421,23 @@ export function ServiceCaseWorkspace({
 
   async function saveReport(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const reportForm = event.currentTarget;
+    const nativeEvent = event.nativeEvent;
+    const submitter =
+      nativeEvent instanceof SubmitEvent ? nativeEvent.submitter : null;
+    const form = new FormData(reportForm);
     await run("save-report", () => persistReport(form));
+    requestAnimationFrame(() => {
+      if (
+        reportForm.isConnected &&
+        submitter instanceof HTMLButtonElement &&
+        submitter.isConnected &&
+        !submitter.disabled &&
+        document.activeElement === document.body
+      ) {
+        submitter.focus();
+      }
+    });
   }
 
   async function finalizeReport(form: FormData) {
@@ -560,6 +577,66 @@ export function ServiceCaseWorkspace({
   const nextStatuses = nextServiceCaseStatuses(serviceCase.status);
   const briefing = dossier.technicianBriefing;
 
+  function renderOcrReview(item: ServiceCaseDossier["attachments"][number]) {
+    const ocr = (dossier.ocrResults ?? []).find(
+      (result) => result.attachmentId === item.id,
+    );
+    if (!ocr) return null;
+    const values = { ...ocr.proposedFields, ...ocr.confirmedFields };
+    return (
+      <details className="service-ocr-review">
+        <summary>
+          <ScanText aria-hidden="true" size={14} />
+          OCR · {ocrStatusLabel(ocr.status, he)}
+          {ocr.confidence === null
+            ? ""
+            : ` · ${String(Math.round(ocr.confidence * 100))}%`}
+        </summary>
+        {ocr.errorSafe ? <InlineFeedback description={ocr.errorSafe} /> : null}
+        {canOperate &&
+        (ocr.status === "review_required" || ocr.status === "failed") ? (
+          <form onSubmit={(event) => void confirmOcr(event, ocr.id)}>
+            <Input
+              defaultValue={values.productType ?? ""}
+              id={`ocr-product-type-${ocr.id}`}
+              label={he ? "סוג מוצר" : "Product type"}
+              name="productType"
+            />
+            <Input
+              defaultValue={values.productModel ?? ""}
+              id={`ocr-product-model-${ocr.id}`}
+              label={he ? "דגם" : "Model"}
+              name="productModel"
+            />
+            <Input
+              defaultValue={values.serialNumber ?? ""}
+              id={`ocr-serial-${ocr.id}`}
+              label={he ? "מספר סידורי" : "Serial number"}
+              name="serialNumber"
+            />
+            <Button
+              busy={pendingAction === "confirm-ocr"}
+              disabled={pending}
+              size="small"
+              type="submit"
+            >
+              {he ? "אישור תיקונים" : "Confirm corrections"}
+            </Button>
+          </form>
+        ) : (
+          <dl>
+            {Object.entries(values).map(([key, value]) => (
+              <div key={key}>
+                <dt>{key}</dt>
+                <dd dir="auto">{value}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
+      </details>
+    );
+  }
+
   return (
     <div className="service-case-workspace">
       <Link className="service-case-back" href="/field-service">
@@ -625,6 +702,7 @@ export function ServiceCaseWorkspace({
           <PreparationPrompt
             canWork={
               canOperate &&
+              isTechnician &&
               evidenceDefaultVisit !== undefined &&
               canWorkVisit(evidenceDefaultVisit)
             }
@@ -945,8 +1023,8 @@ export function ServiceCaseWorkspace({
                           <Button
                             busy={pendingAction === `open-report:${visit.id}`}
                             disabled={pending}
-                            onClick={() => {
-                              void openReport(visit);
+                            onClick={(event) => {
+                              void openReport(visit, event.currentTarget);
                             }}
                             size="small"
                             variant="secondary"
@@ -985,7 +1063,25 @@ export function ServiceCaseWorkspace({
               ) : null}
             </header>
             {serviceManager ? (
-              <AttachmentGallery items={dossier.attachments} />
+              <>
+                <AttachmentGallery items={dossier.attachments} />
+                <div className="service-evidence-grid">
+                  {dossier.attachments
+                    .filter((item) =>
+                      (dossier.ocrResults ?? []).some(
+                        (result) => result.attachmentId === item.id,
+                      ),
+                    )
+                    .map((item) => (
+                      <article className="service-evidence-card" key={item.id}>
+                        <strong>
+                          {evidenceCategoryLabel(item.category, he)}
+                        </strong>
+                        {renderOcrReview(item)}
+                      </article>
+                    ))}
+                </div>
+              </>
             ) : dossier.attachments.length === 0 ? (
               <EmptyState
                 title={he ? "אין ראיות מצורפות" : "No evidence attached"}
@@ -998,13 +1094,6 @@ export function ServiceCaseWorkspace({
             ) : (
               <div className="service-evidence-grid">
                 {dossier.attachments.map((item) => {
-                  const ocr = (dossier.ocrResults ?? []).find(
-                    (result) => result.attachmentId === item.id,
-                  );
-                  const values = {
-                    ...ocr?.proposedFields,
-                    ...ocr?.confirmedFields,
-                  };
                   return (
                     <article className="service-evidence-card" key={item.id}>
                       <a
@@ -1024,65 +1113,7 @@ export function ServiceCaseWorkspace({
                         </small>
                         <Download aria-hidden="true" size={15} />
                       </a>
-                      {ocr ? (
-                        <details className="service-ocr-review">
-                          <summary>
-                            <ScanText aria-hidden="true" size={14} />
-                            OCR · {ocrStatusLabel(ocr.status, he)}
-                            {ocr.confidence === null
-                              ? ""
-                              : ` · ${String(Math.round(ocr.confidence * 100))}%`}
-                          </summary>
-                          {ocr.errorSafe ? (
-                            <InlineFeedback description={ocr.errorSafe} />
-                          ) : null}
-                          {canOperate &&
-                          (ocr.status === "review_required" ||
-                            ocr.status === "failed") ? (
-                            <form
-                              onSubmit={(event) =>
-                                void confirmOcr(event, ocr.id)
-                              }
-                            >
-                              <Input
-                                defaultValue={values.productType ?? ""}
-                                id={`ocr-product-type-${ocr.id}`}
-                                label={he ? "סוג מוצר" : "Product type"}
-                                name="productType"
-                              />
-                              <Input
-                                defaultValue={values.productModel ?? ""}
-                                id={`ocr-product-model-${ocr.id}`}
-                                label={he ? "דגם" : "Model"}
-                                name="productModel"
-                              />
-                              <Input
-                                defaultValue={values.serialNumber ?? ""}
-                                id={`ocr-serial-${ocr.id}`}
-                                label={he ? "מספר סידורי" : "Serial number"}
-                                name="serialNumber"
-                              />
-                              <Button
-                                busy={pendingAction === "confirm-ocr"}
-                                disabled={pending}
-                                size="small"
-                                type="submit"
-                              >
-                                {he ? "אישור תיקונים" : "Confirm corrections"}
-                              </Button>
-                            </form>
-                          ) : (
-                            <dl>
-                              {Object.entries(values).map(([key, value]) => (
-                                <div key={key}>
-                                  <dt>{key}</dt>
-                                  <dd dir="auto">{value}</dd>
-                                </div>
-                              ))}
-                            </dl>
-                          )}
-                        </details>
-                      ) : null}
+                      {renderOcrReview(item)}
                     </article>
                   );
                 })}
@@ -1529,6 +1560,9 @@ export function ServiceCaseWorkspace({
             })}
         onClose={closeReportDialog}
         open={reportVisit !== undefined && latestReport !== undefined}
+        {...(reportTrigger === undefined
+          ? {}
+          : { returnFocusElement: reportTrigger })}
         title={he ? "דוח טכנאי" : "Technician report"}
       >
         {latestReport === undefined ? null : (

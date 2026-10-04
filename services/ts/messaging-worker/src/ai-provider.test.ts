@@ -36,6 +36,25 @@ function responseFor(value: unknown): Response {
 }
 
 describe("OpenAiCompatibleChatProvider", () => {
+  it("admits bounded ticket decisions only with the published capability", async () => {
+    const value = {
+      action: "ticket_open",
+      ticketSubject: "Fictional support",
+      text: null,
+      replyCode: null,
+      documentId: null,
+      factKey: null,
+      reasonCode: null,
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(responseFor(value)));
+    await expect(
+      provider().decide({ ...request, capabilities: ["ticket.open"] }),
+    ).resolves.toEqual({ action: "ticket_open", subject: "Fictional support" });
+    await expect(provider().decide(request)).rejects.toBeInstanceOf(
+      WhatsAppAiProviderError,
+    );
+  });
+
   it("supplies complete tenant-authored business prose as data without granting actions or knowledge authority", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       responseFor({
@@ -119,6 +138,7 @@ describe("OpenAiCompatibleChatProvider", () => {
         content: JSON.stringify({
           kind: "untrusted_tenant_context_and_approved_fact_data",
           knowledge: [],
+          retrievedDocumentContext: [],
           messages: [
             {
               role: "user",
@@ -290,46 +310,6 @@ describe("OpenAiCompatibleChatProvider", () => {
     });
   });
 
-  it("ignores descriptive extra fields while retaining required action semantics", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockImplementation(() =>
-        responseFor({
-          action: "reply",
-          text: "How can I help?",
-          reasonCode: null,
-          confidence: 0.9,
-          reasoning: "A greeting is appropriate",
-          locale: "en",
-        }),
-      ),
-    );
-    await expect(provider().decide(request)).rejects.toMatchObject({
-      code: "ai_invalid_output",
-    });
-    await expect(
-      provider().decide({ ...request, tolerateDescriptiveExtras: true }),
-    ).resolves.toEqual({
-      action: "reply",
-      text: "How can I help?",
-    });
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(
-        responseFor({
-          action: "request_call",
-          text: "Calling",
-          confidence: 0.9,
-        }),
-      ),
-    );
-    await expect(
-      provider().decide({ ...request, tolerateDescriptiveExtras: true }),
-    ).rejects.toMatchObject({
-      code: "ai_invalid_output",
-    });
-  });
-
   it("accepts only bounded handoff reasons", async () => {
     vi.stubGlobal(
       "fetch",
@@ -408,7 +388,7 @@ describe("OpenAiCompatibleChatProvider", () => {
     });
   });
 
-  it("classifies timeout as transient", async () => {
+  it("exhausts a bounded timeout recovery", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(
@@ -422,7 +402,7 @@ describe("OpenAiCompatibleChatProvider", () => {
     );
     await expect(provider(1).decide(request)).rejects.toMatchObject({
       code: "ai_timeout",
-      retryable: true,
+      retryable: false,
     });
   });
 
@@ -495,24 +475,26 @@ describe("OpenAiCompatibleChatProvider", () => {
     });
   });
 
-  it("treats an empty max-token completion as transient", async () => {
+  it("exhausts a bounded max-token recovery", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            choices: [
-              { finish_reason: "MAX_TOKENS", message: { content: "" } },
-            ],
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
+      vi.fn().mockImplementation(() =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              choices: [
+                { finish_reason: "MAX_TOKENS", message: { content: "" } },
+              ],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
         ),
       ),
     );
 
     await expect(provider().decide(request)).rejects.toMatchObject({
       code: "ai_output_truncated",
-      retryable: true,
+      retryable: false,
     });
   });
 });
@@ -576,7 +558,9 @@ function decisionSchemaOf(fetchMock: ReturnType<typeof vi.fn>): {
 }
 
 function stubReply(value: unknown): ReturnType<typeof vi.fn> {
-  const fetchMock = vi.fn().mockResolvedValue(responseFor(value));
+  const fetchMock = vi
+    .fn()
+    .mockImplementation(() => Promise.resolve(responseFor(value)));
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
 }

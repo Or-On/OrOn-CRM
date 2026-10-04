@@ -1,10 +1,12 @@
-"""Per-call fail-closed AI ownership with bounded PostgreSQL polling.
+"""Per-call AI ownership with fresh authorization for actions.
 
 Pausing cancels local work and waits for processing barriers. It cannot recall
 already transmitted audio or prove a human connected to a telephone leg.
+Transient read failures preserve established media state but authorize no new action.
 """
 
 import asyncio
+import time
 from collections import deque
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
@@ -154,6 +156,7 @@ class VoiceController:
         self.paused = True
         self._blocked_epoch = -1
         self._read_recovery_epoch: int | None = None
+        self._last_authorized_at: float | None = None
         self._lock = asyncio.Lock()
         self._barrier: Callable[[], Awaitable[None]] | None = None
         self._on_mode: Callable[[bool], None] | None = None
@@ -292,30 +295,53 @@ class VoiceController:
         if self._reset_utterance is not None:
             await self._reset_utterance()
 
-    async def refresh(self) -> None:
+    async def interrupt_reply(self) -> None:
+        """Discard current model/TTS/transport queues before fixed recovery audio.
+
+        The action guard provides fresh ownership; the barrier proves the SDK
+        processors consumed the interruption, rather than merely enqueuing it.
+        Ordinary caller capture and the durable ownership epoch remain intact.
+        """
         async with self._lock:
-            # A failed read pauses immediately. Only a new successful read and
-            # exact-epoch durable acknowledgement may resume the last active
-            # command. Permission loss, explicit pause and barrier failures
-            # still latch until a newer authorized operator command.
+            if self.paused or self._barrier is None:
+                raise asyncio.CancelledError("voice recovery is not authorized")
+            await self._barrier()
+
+    async def suspend_for_failure(self) -> None:
+        """Close AI gates on an unknown/permanent failure without ending the SIP leg."""
+        async with self._lock:
+            self._blocked_epoch = max(self._blocked_epoch, self.epoch)
+            await self._stop()
+
+    async def refresh(self) -> bool:
+        async with self._lock:
             try:
                 async with asyncio.timeout(1.5):
                     state = await self.read()
             except asyncio.CancelledError:
                 raise
             except Exception:
-                if not self.paused:
+                # A transient outage is not an explicit operator revocation.
+                # Keep the established media state for at most five seconds,
+                # never indefinitely. New actions always require a fresh read.
+                if (
+                    not self.paused
+                    and self._last_authorized_at is not None
+                    and time.monotonic() - self._last_authorized_at >= 5.0
+                ):
                     self._read_recovery_epoch = self.epoch
-                try:
-                    await self._stop()
-                except Exception:
-                    self._blocked_epoch = max(self._blocked_epoch, self.epoch)
-                    self._read_recovery_epoch = None
-                return
+                    try:
+                        await self._stop()
+                    except Exception:
+                        self._blocked_epoch = max(self._blocked_epoch, self.epoch)
+                        self._read_recovery_epoch = None
+                return False
             try:
                 changed = state.epoch != self.epoch
                 permitted = state.active and state.resume_authorized
                 should_pause = state.mode == "paused" or not permitted
+                # Explicit revocation/capture failure needs a NEW command;
+                # transient read failure does not block the readable epoch.
                 recovering = state.epoch == self._read_recovery_epoch
                 self._read_recovery_epoch = None
                 resume = (
@@ -338,11 +364,13 @@ class VoiceController:
                     acknowledged = await self.acknowledge(state.epoch, mode)
                 if not acknowledged:
                     await self._stop()
-                    return
+                    return False
                 if mode == "ai":
                     self.paused = False
+                    self._last_authorized_at = time.monotonic()
                     if self._on_mode:
                         self._on_mode(False)
+                return True
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -350,6 +378,7 @@ class VoiceController:
                 self._blocked_epoch = max(self._blocked_epoch, self.epoch)
                 with suppress(Exception):
                     await self._stop()
+                return False
 
     async def run(self) -> None:
         while True:
@@ -359,9 +388,9 @@ class VoiceController:
     async def action(self, operation: Callable[..., Awaitable[Any]], *args: Any) -> Any:
         """Recheck durable ownership before existing flow work and invalidate its result."""
         owner = self._action_owner.get()
-        await self.refresh()
-        if self.paused or (owner is not None and owner != self.generation):
-            raise asyncio.CancelledError("voice AI is paused")
+        fresh = await self.refresh()
+        if not fresh or self.paused or (owner is not None and owner != self.generation):
+            raise asyncio.CancelledError("voice action is not authorized")
         generation = self.generation
 
         async def execute():

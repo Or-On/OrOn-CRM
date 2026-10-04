@@ -515,7 +515,7 @@
   margin: 0;
   font-variant-numeric: tabular-nums;
 }
-.voice-cost-inspector meter {
+.voice-cost-inspector .voice-cost-meter {
   grid-column: 1 / -1;
 }
 .voice-chronology .technical-details pre {

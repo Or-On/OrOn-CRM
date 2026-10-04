@@ -7,6 +7,61 @@ import {
 } from "../src/index.js";
 
 describe("loadConfig", () => {
+  it("defaults audio transcription off without inventing a model", () => {
+    expect(loadConfig({}).audioTranscription).toEqual({
+      enabled: false,
+      model: undefined,
+    });
+  });
+  it("requires explicit real-provider gates, model and secret for audio", () => {
+    const enabled = {
+      ENABLE_WHATSAPP_AUDIO_TRANSCRIPTION: "true",
+      ENABLE_REAL_WHATSAPP: "true",
+      ENABLE_REAL_VOICE_PROVIDERS: "true",
+      SONIOX_ASYNC_STT_MODEL: "explicit-model",
+      SONIOX_API_KEY: "synthetic-soniox-key",
+    };
+    expect(loadConfig(enabled).audioTranscription).toEqual({
+      enabled: true,
+      model: "explicit-model",
+    });
+    for (const key of [
+      "ENABLE_REAL_WHATSAPP",
+      "ENABLE_REAL_VOICE_PROVIDERS",
+      "SONIOX_ASYNC_STT_MODEL",
+      "SONIOX_API_KEY",
+    ]) {
+      expect(() => loadConfig({ ...enabled, [key]: undefined })).toThrow(
+        ConfigurationError,
+      );
+    }
+    expect(() =>
+      loadConfig({ ...enabled, ENABLE_WHATSAPP_AUDIO_TRANSCRIPTION: "yes" }),
+    ).toThrow(ConfigurationError);
+    for (const model of [
+      "https://evil.invalid/model",
+      "../model",
+      "bad model",
+      "model\nsecret",
+      "model.version",
+      "m".repeat(33),
+    ])
+      expect(() =>
+        loadConfig({ ...enabled, SONIOX_ASYNC_STT_MODEL: model }),
+      ).toThrow(ConfigurationError);
+    expect(
+      JSON.stringify(configDiagnostics(loadConfig(enabled))),
+    ).not.toContain(enabled.SONIOX_API_KEY);
+    expect(configDiagnostics(loadConfig(enabled)).sonioxApiKey).toBe(
+      "[REDACTED]",
+    );
+  });
+  it("uses an explicitly configured fallback model without inventing a default", () => {
+    expect(loadConfig({}).llm.fallbackModel).toBeUndefined();
+    expect(
+      loadConfig({ LLM_FALLBACK_MODEL: "configured-model" }).llm.fallbackModel,
+    ).toBe("configured-model");
+  });
   it("validates the public metadata origin without credentials or paths", () => {
     expect(loadConfig({}).publicSiteUrl).toBe("http://127.0.0.1:3000");
     expect(

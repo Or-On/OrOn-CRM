@@ -33,6 +33,442 @@ function provider(
 }
 
 describe("WhatsApp providers", () => {
+  const templateVerification = {
+    senderPhoneNumberId: "1312069101984418",
+    wabaId: "123456789",
+    graphApiVersion: "v26.0",
+    templateName: "conversation_start",
+    language: "he",
+    buttonIndices: [0, 1],
+    buttonTexts: ["Services", "Help"],
+    beforeAttempt: () => Promise.resolve(),
+    accessTokenForAttempt: () => Promise.resolve("synthetic-fresh-credential"),
+  };
+  it("verifies the exact approved template through fixed-host pagination and fresh authority", async () => {
+    const beforeAttempt = vi.fn().mockResolvedValue(undefined);
+    const accessTokenForAttempt = vi
+      .fn()
+      .mockResolvedValue("synthetic-fresh-credential");
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        Response.json({
+          data: [],
+          paging: {
+            next: "https://untrusted.invalid/never-follow",
+            cursors: { after: "cursor+1" },
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          data: [
+            {
+              name: "conversation_start",
+              language: "he",
+              status: "APPROVED",
+              components: [
+                {
+                  type: "BUTTONS",
+                  buttons: [
+                    { type: "QUICK_REPLY", text: "Services" },
+                    { type: "QUICK_REPLY", text: "Help" },
+                  ],
+                },
+              ],
+            },
+          ],
+        }),
+      );
+    await expect(
+      provider(fetcher).verifyTemplate({
+        ...templateVerification,
+        beforeAttempt,
+        accessTokenForAttempt,
+      }),
+    ).resolves.toBe(true);
+    expect(beforeAttempt).toHaveBeenCalledTimes(2);
+    expect(accessTokenForAttempt).toHaveBeenCalledTimes(2);
+    const requestedUrl = fetcher.mock.calls[1]?.[0];
+    if (!(requestedUrl instanceof URL)) throw new Error("Expected fixed URL");
+    const url = requestedUrl;
+    expect(url.hostname).toBe("graph.facebook.com");
+    expect(url.searchParams.get("after")).toBe("cursor+1");
+  });
+  it.each(["PENDING", "REJECTED", "PAUSED"])(
+    "refuses unapproved catalog status %s",
+    async (status) => {
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+        Response.json({
+          data: [
+            {
+              name: "conversation_start",
+              language: "he",
+              status,
+              components: [
+                {
+                  type: "BUTTONS",
+                  buttons: [
+                    { type: "QUICK_REPLY", text: "Services" },
+                    { type: "QUICK_REPLY", text: "Help" },
+                  ],
+                },
+              ],
+            },
+          ],
+        }),
+      );
+      await expect(
+        provider(fetcher).verifyTemplate(templateVerification),
+      ).resolves.toBe(false);
+    },
+  );
+  it("does not fetch after fresh authority was revoked", async () => {
+    const fetcher = vi.fn<typeof fetch>();
+    await expect(
+      provider(fetcher).verifyTemplate({
+        ...templateVerification,
+        beforeAttempt: () => Promise.reject(new Error("revoked")),
+      }),
+    ).rejects.toThrow("revoked");
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+  it.each([
+    [
+      {
+        type: "BUTTONS",
+        buttons: [
+          { type: "QUICK_REPLY", text: "Help" },
+          { type: "QUICK_REPLY", text: "Services" },
+        ],
+      },
+    ],
+    [
+      { type: "BODY", text: "Hello {{1}}" },
+      {
+        type: "BUTTONS",
+        buttons: [
+          { type: "QUICK_REPLY", text: "Services" },
+          { type: "QUICK_REPLY", text: "Help" },
+        ],
+      },
+    ],
+    [
+      { type: "HEADER", format: "IMAGE" },
+      {
+        type: "BUTTONS",
+        buttons: [
+          { type: "QUICK_REPLY", text: "Services" },
+          { type: "QUICK_REPLY", text: "Help" },
+        ],
+      },
+    ],
+  ])(
+    "refuses semantic button swaps or unbound template parameters: %j",
+    async (...components) => {
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+        Response.json({
+          data: [
+            {
+              name: "conversation_start",
+              language: "he",
+              status: "APPROVED",
+              components,
+            },
+          ],
+        }),
+      );
+      await expect(
+        provider(fetcher).verifyTemplate(templateVerification),
+      ).resolves.toBe(false);
+    },
+  );
+  it("records physical attempt only after fresh credentials and preserves deferred rejection delay", async () => {
+    const onAttemptStarted = vi.fn();
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        new Response("{}", { status: 429, headers: { "retry-after": "100" } }),
+      );
+    await expect(
+      provider(fetcher).send({
+        ...request,
+        maximumAttempts: 1,
+        onAttemptStarted,
+        accessTokenForAttempt: () =>
+          Promise.reject(new Error("revoked before POST")),
+      }),
+    ).rejects.toThrow("revoked before POST");
+    expect(onAttemptStarted).not.toHaveBeenCalled();
+    expect(fetcher).not.toHaveBeenCalled();
+    await expect(
+      provider(fetcher).send({
+        ...request,
+        maximumAttempts: 1,
+        onAttemptStarted,
+      }),
+    ).rejects.toMatchObject({ status: 429, retryAfterMs: 100000 });
+    expect(onAttemptStarted).toHaveBeenCalledOnce();
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+  it("bounds catalog body and refuses repeated cursor", async () => {
+    const huge = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response("x".repeat(256 * 1024 + 1)));
+    await expect(
+      provider(huge).verifyTemplate(templateVerification),
+    ).rejects.toMatchObject({ code: "media_too_large" });
+    const repeated = vi.fn<typeof fetch>().mockImplementation(() =>
+      Promise.resolve(
+        Response.json({
+          data: [],
+          paging: { next: "untrusted", cursors: { after: "same" } },
+        }),
+      ),
+    );
+    await expect(
+      provider(repeated).verifyTemplate(templateVerification),
+    ).rejects.toMatchObject({ code: "template_catalog_cursor_invalid" });
+    expect(repeated).toHaveBeenCalledTimes(2);
+  });
+  it("sends stable opaque quick-reply payloads at approved button indices", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        Response.json({ messages: [{ id: "wamid.menu.synthetic" }] }),
+      );
+    await provider(fetcher).send({
+      ...request,
+      delivery: {
+        kind: "template",
+        templateName: "conversation_start",
+        language: "he",
+        parameters: [],
+        quickReplies: [
+          { index: 0, payload: "menu:generation:services" },
+          { index: 1, payload: "menu:generation:support" },
+        ],
+      },
+    });
+    const options = fetcher.mock.calls[0]?.[1];
+    if (typeof options?.body !== "string")
+      throw new Error("Expected JSON body");
+    expect(JSON.parse(options.body)).toMatchObject({
+      template: {
+        name: "conversation_start",
+        language: { code: "he" },
+        components: [
+          {
+            type: "button",
+            sub_type: "quick_reply",
+            index: "0",
+            parameters: [
+              { type: "payload", payload: "menu:generation:services" },
+            ],
+          },
+          {
+            type: "button",
+            sub_type: "quick_reply",
+            index: "1",
+            parameters: [
+              { type: "payload", payload: "menu:generation:support" },
+            ],
+          },
+        ],
+      },
+    });
+  });
+  it.each([
+    [
+      { index: 0, payload: "a" },
+      { index: 0, payload: "b" },
+    ],
+    [{ index: -1, payload: "a" }],
+    [{ index: 10, payload: "a" }],
+    [{ index: 0.5, payload: "a" }],
+    [{ index: 0, payload: " " }],
+    [{ index: 0, payload: "x".repeat(257) }],
+    [{ index: 0, payload: "\u0000" }],
+  ])(
+    "rejects invalid quick replies before any physical send: %j",
+    async (...quickReplies) => {
+      const fetcher = vi.fn<typeof fetch>();
+      await expect(
+        provider(fetcher).send({
+          ...request,
+          delivery: {
+            kind: "template",
+            templateName: "conversation_start",
+            language: "en",
+            parameters: [],
+            quickReplies,
+          },
+        }),
+      ).rejects.toThrow("invalid template quick replies");
+      expect(fetcher).not.toHaveBeenCalled();
+    },
+  );
+  it("defers a long rejection delay without a second physical send", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        new Response("{}", { status: 429, headers: { "retry-after": "100" } }),
+      );
+    const wait = vi.fn<(ms: number) => Promise<void>>().mockResolvedValue();
+    await expect(
+      provider(fetcher, { wait }).send(request),
+    ).rejects.toMatchObject({
+      code: "rate_limit_deferred",
+      retryable: true,
+      retryAfterMs: 100000,
+    });
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(wait).not.toHaveBeenCalled();
+  });
+  it("honors HTTP-date Retry-After using the current clock", async () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.UTC(2026, 9, 4));
+    try {
+      const fetcher = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(
+          new Response("{}", {
+            status: 429,
+            headers: { "retry-after": "Sun, 04 Oct 2026 00:00:04 GMT" },
+          }),
+        )
+        .mockResolvedValueOnce(
+          Response.json({ messages: [{ id: "wamid.synthetic" }] }),
+        );
+      const wait = vi.fn<(ms: number) => Promise<void>>().mockResolvedValue();
+      await provider(fetcher, { wait }).send(request);
+      expect(wait).toHaveBeenCalledWith(4000);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+  it.each([
+    ["3", 3000],
+    ["invalid", 200],
+    ["-1", 200],
+  ])(
+    "uses bounded Retry-After %s only after explicit rejection",
+    async (header, delay) => {
+      const fetcher = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(
+          new Response("{}", {
+            status: 429,
+            headers: { "retry-after": header },
+          }),
+        )
+        .mockResolvedValueOnce(
+          Response.json({ messages: [{ id: "wamid.synthetic" }] }),
+        );
+      const wait = vi.fn<(ms: number) => Promise<void>>().mockResolvedValue();
+      await expect(provider(fetcher, { wait }).send(request)).resolves.toEqual({
+        messageId: "wamid.synthetic",
+      });
+      expect(wait).toHaveBeenCalledWith(delay);
+      expect(fetcher).toHaveBeenCalledTimes(2);
+    },
+  );
+  it.each(["null", "[]", "123", '"primitive"', "{broken"])(
+    "rejects non-object or malformed media metadata %s before downloading",
+    async (body) => {
+      const fetcher = vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(new Response(body));
+      await expect(
+        provider(fetcher).downloadMedia({ mediaId: "123456789" }),
+      ).rejects.toMatchObject({
+        code: "media_metadata_invalid",
+        retryable: false,
+      });
+      expect(fetcher).toHaveBeenCalledOnce();
+    },
+  );
+  it("marks the bound inbound read and typing immediately after the ownership guard", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response(null, { status: 200 }));
+    const guard = vi.fn().mockResolvedValue(undefined);
+    await provider(fetcher).acknowledgeInbound({
+      senderPhoneNumberId: "1312069101984418",
+      providerMessageId: "wamid.synthetic",
+      beforeAttempt: guard,
+    });
+    expect(guard).toHaveBeenCalledOnce();
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(JSON.parse(jsonBody(fetcher.mock.calls[0]?.[1])) as unknown).toEqual(
+      {
+        messaging_product: "whatsapp",
+        status: "read",
+        message_id: "wamid.synthetic",
+        typing_indicator: { type: "text" },
+      },
+    );
+    expect(guard.mock.invocationCallOrder[0]).toBeLessThan(
+      required(fetcher.mock.invocationCallOrder[0]),
+    );
+  });
+
+  it("never acknowledges a human-owned or unknown-account inbound", async () => {
+    const fetcher = vi.fn<typeof fetch>();
+    const owned = {
+      senderPhoneNumberId: "1312069101984418",
+      providerMessageId: "wamid.synthetic",
+      beforeAttempt: vi.fn().mockRejectedValue(new Error("human_owned")),
+    };
+    await expect(provider(fetcher).acknowledgeInbound(owned)).rejects.toThrow(
+      "human_owned",
+    );
+    await expect(
+      provider(fetcher).acknowledgeInbound({
+        ...owned,
+        senderPhoneNumberId: "999",
+      }),
+    ).rejects.toMatchObject({ code: "sender_configuration_changed" });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("does not retry acknowledgement rate limits or leak response bodies", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response("limited", { status: 429 }));
+    await expect(
+      provider(fetcher).acknowledgeInbound({
+        senderPhoneNumberId: "1312069101984418",
+        providerMessageId: "wamid.synthetic",
+        beforeAttempt: () => Promise.resolve(),
+      }),
+    ).rejects.toMatchObject({
+      code: "acknowledgement_http_429",
+      retryable: true,
+    });
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
+  it("bounds acknowledgement HTTP time and permits no real request in tests", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            "abort",
+            () => reject(new Error("aborted")),
+            { once: true },
+          );
+        }),
+    );
+    await expect(
+      provider(fetcher, { timeoutMs: 5 }).acknowledgeInbound({
+        senderPhoneNumberId: "1312069101984418",
+        providerMessageId: "wamid.synthetic",
+        beforeAttempt: () => Promise.resolve(),
+      }),
+    ).rejects.toMatchObject({ code: "acknowledgement_transport_error" });
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
   it("selects the bound Meta account and refuses an unknown sender before HTTP", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(JSON.stringify({ messages: [{ id: "sent-1" }] }), {
@@ -500,3 +936,13 @@ describe("WhatsApp providers", () => {
     expect(rendered).not.toContain("+972501234567");
   });
 });
+
+function jsonBody(init: RequestInit | undefined): string {
+  if (typeof init?.body !== "string")
+    throw new Error("Expected JSON request body");
+  return init.body;
+}
+function required<T>(value: T | undefined): T {
+  if (value === undefined) throw new Error("Expected fixture value");
+  return value;
+}

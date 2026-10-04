@@ -40,6 +40,7 @@ import {
 } from "@or-on/ui";
 
 import { crmMutation } from "../crm";
+import { useMutationFocus } from "../keyboard";
 import { AutomationRunHistory } from "../operations";
 import { AgentRegister } from "./agent-register";
 import { CanonicalFlowEditor } from "./canonical-flow-editor";
@@ -116,6 +117,7 @@ export function OrchestrationPanel({
       .includes(flowQuery.trim().toLocaleLowerCase(locale)),
   );
   const [pending, setPending] = useState(false);
+  const rememberMutationFocus = useMutationFocus(pending);
   const [error, setError] = useState<string>();
   const [creation, setCreation] = useState<
     "agents" | "flows" | "handoff" | "simulation" | null
@@ -159,6 +161,8 @@ export function OrchestrationPanel({
   }
 
   async function run(operation: () => Promise<unknown>): Promise<boolean> {
+    if (pending) return false;
+    rememberMutationFocus();
     setPending(true);
     setError(undefined);
     try {
@@ -259,6 +263,8 @@ export function OrchestrationPanel({
     definitionId: string,
     flow: CanonicalFlow,
   ): Promise<number | undefined> {
+    if (pending) return undefined;
+    rememberMutationFocus();
     setPending(true);
     setError(undefined);
     try {

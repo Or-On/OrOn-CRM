@@ -28,6 +28,57 @@ const userId = "20000000-0000-4000-8000-000000000001";
 
 class ExpectedRollback extends Error {}
 
+describe.skipIf(databaseUrl === undefined)(
+  "inbound contact name provenance",
+  () => {
+    it("preserves an operator-corrected name on fresh Meta messages and replay", async () => {
+      await isolated(async (transaction) => {
+        const account = `name-${randomUUID()}`;
+        await transaction`INSERT INTO messaging.channels(tenant_id,kind,provider,provider_account_id,display_address,status) VALUES(platform.current_tenant_id(),'whatsapp','meta',${account},'Fictional name channel','active')`;
+        const input = {
+          providerAccountId: account,
+          providerEventId: `${account}-event`,
+          providerMessageId: `${account}-message`,
+          from: "+12025550098",
+          profileName: "Initial profile name",
+          text: "Fictional first message",
+        };
+        await transaction`SET LOCAL ROLE platform_messaging`;
+        const first = await ingestWhatsAppInbound(transaction, input);
+        await transaction`SET LOCAL ROLE platform_web`;
+        await transaction`UPDATE crm.contacts SET name='Operator corrected name' WHERE id=${first.contactId}::uuid`;
+        await transaction`SET LOCAL ROLE platform_messaging`;
+        const next = {
+          ...input,
+          providerEventId: `${account}-next-event`,
+          providerMessageId: `${account}-next-message`,
+          profileName: "Untrusted changed name",
+        };
+        await ingestWhatsAppInbound(transaction, next);
+        await ingestWhatsAppInbound(transaction, next);
+        await transaction`SET LOCAL ROLE platform_web`;
+        const names = await transaction<
+          { name: string }[]
+        >`SELECT name FROM crm.contacts WHERE id=${first.contactId}::uuid`;
+        expect(names[0]?.name).toBe("Operator corrected name");
+        await transaction`UPDATE crm.contacts SET name=' ' WHERE id=${first.contactId}::uuid`;
+        await transaction`SET LOCAL ROLE platform_messaging`;
+        await ingestWhatsAppInbound(transaction, {
+          ...next,
+          providerEventId: `${account}-blank-event`,
+          providerMessageId: `${account}-blank-message`,
+          profileName: "Filled missing name",
+        });
+        await transaction`SET LOCAL ROLE platform_web`;
+        const filled = await transaction<
+          { name: string }[]
+        >`SELECT name FROM crm.contacts WHERE id=${first.contactId}::uuid`;
+        expect(filled[0]?.name).toBe("Filled missing name");
+      });
+    });
+  },
+);
+
 async function isolated(
   work: (transaction: postgres.TransactionSql) => Promise<void>,
 ) {

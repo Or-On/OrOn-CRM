@@ -97,7 +97,7 @@
 }
 .successBadge {
   border-color: color-mix(in srgb, var(--or-positive) 30%, var(--or-border));
-  color: var(--or-positive);
+  color: color-mix(in srgb, var(--or-positive) 85%, var(--or-text));
   background: color-mix(in srgb, var(--or-positive) 8%, transparent);
 }
 .secondaryButton {
@@ -297,7 +297,7 @@
   background: color-mix(in srgb, var(--or-critical) 8%, transparent);
 }
 .success {
-  color: var(--or-positive);
+  color: color-mix(in srgb, var(--or-positive) 85%, var(--or-text));
   background: color-mix(in srgb, var(--or-positive) 8%, transparent);
 }
 .preferenceCard {

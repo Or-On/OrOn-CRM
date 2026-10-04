@@ -18,7 +18,7 @@ Start by reading applicable repository instructions, including any `AGENTS.md` a
 
 Use small, reviewable implementation batches with regression tests. Reuse existing domain services, authorization, components and workers. Keep provider calls and privileged operations on the server. Do not fix tests by weakening assertions, removing failing scenarios, disabling authorization or fabricating successful responses.
 
-Local code changes and safe isolated verification are in scope. Publishing images, pushing `main`, changing cloud/IAM/DNS/secrets, running shared-environment migrations or performing a deployment require explicit release authority. This repository currently deploys DEV automatically on a push to `main`; a push is not merely source housekeeping. Read-only deployed inspection is useful when access exists. Resolve only genuinely missing credentials, controlled recipients or release decisions; continue independent safe work while blocked.
+Local code changes and safe isolated verification are in scope. Publishing images, pushing `main`, changing cloud/IAM/DNS/secrets, running shared-environment migrations or performing a deployment require explicit release authority. A push to `main` runs CI checks; DEV image publication and deployment require a manual workflow run on `main` with `deploy_dev=true`. Verify this gate before publishing rather than assuming that a push has no infrastructure effects. Read-only deployed inspection is useful when access exists. Resolve only genuinely missing credentials, controlled recipients or release decisions; continue independent safe work while blocked.
 
 ## 2. Establish the real baseline
 

@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   AuthService,
@@ -66,6 +66,37 @@ function repository(login?: LoginRecord) {
 }
 
 describe("AuthService", () => {
+  it("rejects a locked account without extending its active lock", async () => {
+    const repo = repository({
+      email: "operator@example.test",
+      displayName: "Fixture Operator",
+      failedAttempts: 5,
+      isSuperuser: false,
+      lockedUntil: new Date("2030-01-01T00:15:00Z"),
+      passwordHash: encodedPassword,
+      status: "active",
+      userId: "20000000-0000-4000-8000-000000000001",
+    });
+    const failure = vi.fn(() => Promise.resolve());
+    repo.value.recordLoginFailure = failure;
+    const service = new AuthService(repo.value, {
+      dummyPasswordHash: encodedPassword,
+      now: () => new Date("2030-01-01T00:05:00Z"),
+      tokenPepper: pepper,
+    });
+    for (const password of ["wrong", "correct horse battery staple"]) {
+      await expect(
+        service.login({
+          email: "operator@example.test",
+          password,
+          requestId: "locked",
+        }),
+      ).rejects.toBeInstanceOf(InvalidCredentialsError);
+    }
+    expect(failure).not.toHaveBeenCalled();
+    expect(repo.created).toBeUndefined();
+  });
+
   it("issues opaque session material while persisting only digests", async () => {
     const repo = repository({
       email: "operator@example.test",

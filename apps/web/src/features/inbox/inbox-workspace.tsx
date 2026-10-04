@@ -174,7 +174,9 @@ export function InboxWorkspace({
   const [loadingMoreConversations, setLoadingMoreConversations] =
     useState(false);
   const [selectedId, setSelectedId] = useState(initialId);
-  const [mobileThread, setMobileThread] = useState(initialThreadOpen);
+  const [mobileThread, setMobileThread] = useState(
+    initialThreadOpen && initialConversationId !== undefined,
+  );
   const [contextOpen, setContextOpen] = useState(false);
   const [channelsCollapsed, setChannelsCollapsed] = useState(false);
   const [channelsOpen, setChannelsOpen] = useState(false);
@@ -238,6 +240,12 @@ export function InboxWorkspace({
     setSearchInput(initialSearch);
   }, [initialSearch]);
   useEffect(() => setFilter(initialFilter), [initialFilter]);
+  useEffect(() => {
+    if (initialThreadOpen && initialConversationId !== undefined) {
+      setSelectedId(initialConversationId);
+      setMobileThread(true);
+    } else setMobileThread(false);
+  }, [initialThreadOpen, initialConversationId]);
   useEffect(() => {
     if (selected === undefined || selected.unreadCount === 0) return;
     const controller = new AbortController();
@@ -929,7 +937,12 @@ export function InboxWorkspace({
               <X aria-hidden="true" size={14} />
             </button>
           ) : null}
-          <button className="sr-only" type="submit">
+          <button
+            aria-hidden="true"
+            className="sr-only"
+            tabIndex={-1}
+            type="submit"
+          >
             {t("inbox.search")}
           </button>
         </form>
@@ -952,6 +965,7 @@ export function InboxWorkspace({
               : filterFallback(option.id, locale);
             return (
               <button
+                inert={advanced && !advancedFiltersOpen}
                 aria-pressed={channelFilter === "all" && filter === option.id}
                 className={`inbox-filter ${advanced ? "inbox-filter--advanced" : ""} ${advancedFiltersOpen ? "inbox-filter--advanced-open" : ""} ${channelFilter === "all" && filter === option.id ? "inbox-filter--active" : ""}`}
                 disabled={option.disabled}
@@ -1178,6 +1192,7 @@ export function InboxWorkspace({
                 </p>
               </div>
             </details>
+
           </div>
         </aside>
       )}

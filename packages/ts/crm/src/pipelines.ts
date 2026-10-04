@@ -1,5 +1,7 @@
 import type postgres from "postgres";
 
+import { requireTenantFeature } from "./tenant-features.js";
+
 import type { Deal, PipelineBoard, PipelineStage } from "./types.js";
 
 interface PipelineRow {
@@ -31,6 +33,7 @@ interface DealRow {
 export async function listPipelineBoards(
   sql: postgres.TransactionSql,
 ): Promise<readonly PipelineBoard[]> {
+  await requireTenantFeature(sql, "pipeline");
   const pipelines = await sql<PipelineRow[]>`
     SELECT id, name FROM crm.pipelines ORDER BY is_default DESC, name
   `;
@@ -82,6 +85,7 @@ export async function moveDeal(
   dealId: string,
   stageId: string,
 ): Promise<boolean> {
+  await requireTenantFeature(sql, "pipeline");
   const rows = await sql<{ id: string }[]>`
     UPDATE crm.deals d SET stage_id = s.id, updated_at = CURRENT_TIMESTAMP
     FROM crm.pipeline_stages s

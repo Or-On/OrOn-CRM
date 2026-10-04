@@ -79,7 +79,14 @@ describe("field-service report finalization", () => {
     expect(finalization).toContain("platform.current_tenant_name()");
     expect(finalization).not.toContain("public.tenants");
     expect(finalization).toContain(
-      "settings.tenant_id = platform.current_tenant_id()",
+      "report.tenant_id = platform.current_tenant_id()",
+    );
+    expect(finalization).toContain(
+      "LEFT JOIN crm.tenant_settings settings ON settings.tenant_id = report.tenant_id",
+    );
+    expect(finalization).toContain("'locale', coalesce(settings.locale, 'en')");
+    expect(finalization).toContain(
+      "'timezone', coalesce(settings.timezone, 'UTC')",
     );
     expect(finalization).toContain("'signedDocument', jsonb_build_object(");
     expect(finalization).toContain("'customerName', customer.name");

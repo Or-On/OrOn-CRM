@@ -15,7 +15,9 @@ import {
 import { useLocale } from "next-intl";
 import { useRouter } from "next/navigation";
 import {
+  useEffect,
   useMemo,
+  useRef,
   useState,
   type CSSProperties,
   type SyntheticEvent,
@@ -189,6 +191,19 @@ export function ProfileWorkspace({
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<ProfileTab>("overview");
   const [pending, setPending] = useState(false);
+  const submitterRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    if (pending) return;
+    const submitter = submitterRef.current;
+    submitterRef.current = null;
+    if (
+      submitter?.isConnected &&
+      !submitter.matches(":disabled") &&
+      document.activeElement === document.body
+    ) {
+      submitter.focus();
+    }
+  }, [pending]);
   const [feedback, setFeedback] = useState<{
     readonly tone: "error" | "success";
     readonly text: string;
@@ -205,6 +220,13 @@ export function ProfileWorkspace({
 
   async function saveProfile(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (pending) return;
+    const submitter = (event.nativeEvent as SubmitEvent).submitter;
+    submitterRef.current =
+      submitter instanceof HTMLButtonElement &&
+      document.activeElement === submitter
+        ? submitter
+        : null;
     const data = new FormData(event.currentTarget);
     setPending(true);
     setFeedback(undefined);
@@ -232,12 +254,19 @@ export function ProfileWorkspace({
 
   async function savePassword(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (pending) return;
     const form = event.currentTarget;
     const data = new FormData(form);
     if (data.get("newPassword") !== data.get("confirmPassword")) {
       setFeedback({ tone: "error", text: c.mismatch });
       return;
     }
+    const submitter = (event.nativeEvent as SubmitEvent).submitter;
+    submitterRef.current =
+      submitter instanceof HTMLButtonElement &&
+      document.activeElement === submitter
+        ? submitter
+        : null;
     setPending(true);
     setFeedback(undefined);
     try {
@@ -326,7 +355,9 @@ export function ProfileWorkspace({
       <div aria-label={c.profile} className={styles.tabs} role="group">
         {tabs.map((tab) => (
           <button
-            aria-controls={`profile-panel-${tab.id}`}
+            aria-controls={
+              activeTab === tab.id ? `profile-panel-${tab.id}` : undefined
+            }
             aria-pressed={activeTab === tab.id}
             id={`profile-tab-${tab.id}`}
             key={tab.id}
