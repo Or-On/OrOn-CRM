@@ -356,6 +356,7 @@ export interface AgentProfileSummary {
    * configuration baseline without an approved workflow binding).
    */
   readonly whatsAppAssignableVersionId: string | null;
+  readonly whatsAppAssignableVersion: number | null;
   /** The reviewed field list the newest version is pinned to, by name. */
   readonly leadFieldSchema: {
     readonly id: string;
@@ -404,6 +405,7 @@ interface AgentProfileRow {
   published_version_id: string | null;
   published_channel_capabilities: SupportedChannel[] | null;
   whatsapp_assignable_version_id: string | null;
+  whatsapp_assignable_version: number | null;
   implicit_ticketing: boolean | null;
   schema_id: string | null;
   schema_name: string | null;
@@ -439,6 +441,7 @@ export async function listAgentProfiles(
            live.version AS published_version, live.id AS published_version_id,
            live.channel_capabilities AS published_channel_capabilities,
            whatsapp.id AS whatsapp_assignable_version_id,
+           whatsapp.version AS whatsapp_assignable_version,
            COALESCE(settings.whatsapp_ai_agent_profile_id = profile.id, false)
              AS is_default_whatsapp,
            schema.id AS schema_id, schema.name AS schema_name,
@@ -460,8 +463,7 @@ export async function listAgentProfiles(
       ORDER BY candidate.version DESC LIMIT 1
     ) version ON true
     LEFT JOIN LATERAL (
-      -- The live version, stated exactly as every runtime gate reads it, so a
-      -- screen that offers it cannot offer a version assignment would refuse.
+      -- Latest publication across channels; runtime approval is a separate fact.
       SELECT candidate.id, candidate.version, candidate.channel_capabilities
       FROM agents.agent_profile_versions candidate
       WHERE candidate.agent_profile_id = profile.id
@@ -472,7 +474,7 @@ export async function listAgentProfiles(
     LEFT JOIN LATERAL (
       -- The version WhatsApp assignment accepts: the same rule as the worker's
       -- default assignment and trg_approved_conversation_agent.
-      SELECT candidate.id
+      SELECT candidate.id, candidate.version
       FROM agents.agent_profile_versions candidate
       WHERE candidate.agent_profile_id = profile.id
         AND candidate.published_at IS NOT NULL
@@ -488,7 +490,7 @@ export async function listAgentProfiles(
       -- Conversations an AI currently answers with some version of this agent.
       -- Human-owned ones are not assignments of the agent at all.
       SELECT count(*) AS conversations,
-             count(*) FILTER (WHERE pinned.id <> live.id) AS stale
+             count(*) FILTER (WHERE pinned.id <> whatsapp.id) AS stale
       FROM messaging.conversations conversation
       JOIN agents.agent_profile_versions pinned
         ON pinned.id = conversation.ai_agent_profile_version_id
@@ -555,6 +557,7 @@ export async function listAgentProfiles(
       publishedVersionId: row.published_version_id,
       publishedChannels: row.published_channel_capabilities ?? [],
       whatsAppAssignableVersionId: row.whatsapp_assignable_version_id,
+      whatsAppAssignableVersion: row.whatsapp_assignable_version,
       leadFieldSchema:
         schema === null
           ? null
@@ -579,7 +582,7 @@ export async function listAgentProfiles(
 }
 
 /**
- * Move this agent's AI-owned conversations onto its newest published version.
+ * Move this agent's AI-owned conversations to its newest approved WhatsApp version.
  *
  * Explicit on purpose: publishing a revision changes nothing that is already
  * running. `expectedVersionId` is the version the operator saw, so a publish
@@ -595,11 +598,20 @@ export async function rebindAgentConversations(
   expectedVersionId: string,
 ): Promise<{ readonly versionId: string; readonly rebound: number } | null> {
   await requireTenantFeature(sql, "agents");
+  await requireTenantFeature(sql, "whatsapp");
+  await sql`
+    SELECT pg_advisory_xact_lock(hashtextextended(
+      platform.current_tenant_id()::text || ':agent-profile:' || ${profileId}, 11
+    ))
+  `;
   const live = await sql<{ id: string }[]>`
-    SELECT id FROM agents.agent_profile_versions
-    WHERE agent_profile_id=${profileId}::uuid AND published_at IS NOT NULL
-      AND validation_status='valid'
-    ORDER BY version DESC LIMIT 1
+    SELECT version.id FROM agents.agent_profile_versions version
+    JOIN agents.agent_profiles profile ON profile.id=version.agent_profile_id
+    WHERE profile.id=${profileId}::uuid AND profile.archived_at IS NULL
+      AND version.published_at IS NOT NULL AND version.validation_status='valid'
+      AND version.channel_capabilities @> ARRAY['whatsapp']::text[]
+      AND platform.approved_agent_for_channel(version.id, 'whatsapp')
+    ORDER BY version.version DESC LIMIT 1
   `;
   const target = live[0]?.id;
   if (target === undefined) return null;
@@ -677,11 +689,12 @@ export async function setDefaultWhatsAppAgent(
           AND version.published_at IS NOT NULL
           AND version.validation_status='valid'
           AND version.channel_capabilities @> ARRAY['whatsapp']::text[]
+          AND platform.approved_agent_for_channel(version.id, 'whatsapp')
     )
     LIMIT 1
   `;
   if (rows[0] === undefined)
-    throw new TypeError("a published WhatsApp agent is required");
+    throw new TypeError("an approved published WhatsApp agent is required");
   const updated = await sql<{ tenant_id: string }[]>`
     UPDATE crm.tenant_settings
     SET whatsapp_ai_agent_profile_id=${profileId}::uuid,
