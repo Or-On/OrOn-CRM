@@ -13,6 +13,7 @@ import type { AgentProfileSummary } from "@or-on/crm";
 
 import {
   AgentRegister,
+  OrchestrationPanel,
   businessSoftwarePreset,
   emptyLeadConfiguration,
   leadRequestFields,
@@ -50,6 +51,7 @@ function coordinator(
     publishedVersionId: v2,
     publishedChannels: ["voice", "whatsapp"],
     whatsAppAssignableVersionId: v2,
+    whatsAppAssignableVersion: 2,
     leadFieldSchema: {
       id: "schema-1",
       name: "Business software enquiry",
@@ -117,6 +119,131 @@ const survey: AgentProfileSummary = coordinator({
 });
 
 describe("agent capabilities on the publish screen", () => {
+  it("rebinds stale WhatsApp conversations to the eligible version while showing the newer publication separately", () => {
+    const rebind = vi.fn().mockResolvedValue(true);
+    render(
+      localized(
+        <AgentRegister
+          agents={[
+            coordinator({
+              publishedVersion: 3,
+              publishedVersionId: "33333333-3333-4333-8333-333333333333",
+              publishedChannels: ["voice"],
+            }),
+          ]}
+          canEdit
+          pending={false}
+          publish={vi.fn()}
+          rebind={rebind}
+        />,
+      ),
+    );
+    expect(screen.getByText("Published v3")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Rebind to v2" }));
+    expect(rebind).toHaveBeenCalledWith("coordinator", v2);
+  });
+
+  it.each([true, false])(
+    "offers the WhatsApp default action only for an approved assignable version (eligible=%s)",
+    (eligible) => {
+      const setDefault = vi.fn().mockResolvedValue(true);
+      render(
+        localized(
+          <AgentRegister
+            agents={[
+              coordinator({
+                version: 3,
+                versionId: "33333333-3333-4333-8333-333333333333",
+                published: false,
+                channels: ["voice"],
+                publishedChannels: ["voice"],
+                whatsAppAssignableVersionId: eligible ? v2 : null,
+                whatsAppAssignableVersion: eligible ? 2 : null,
+              }),
+            ]}
+            canEdit
+            pending={false}
+            publish={vi.fn()}
+            setDefault={setDefault}
+          />,
+        ),
+      );
+      const action = screen.queryByRole("button", {
+        name: "Use for new WhatsApp conversations",
+      });
+      if (eligible) {
+        expect(action).not.toBeNull();
+        if (!action) throw new Error("Eligible default action missing");
+        fireEvent.click(action);
+        expect(setDefault).toHaveBeenCalledWith("coordinator");
+      } else {
+        expect(action).toBeNull();
+        expect(setDefault).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  it("keeps the published agent available for new flows while a newer draft changes channels", () => {
+    render(
+      localized(
+        <OrchestrationPanel
+          agents={[
+            coordinator({
+              version: 3,
+              versionId: "33333333-3333-4333-8333-333333333333",
+              published: false,
+              channels: ["voice"],
+            }),
+          ]}
+          initialTab="flows"
+          activity={[]}
+          conversations={[]}
+          flows={[]}
+          handoffs={[]}
+          voiceOutcomes={[]}
+          usage={{
+            agentEvents: 0,
+            inputTokens: 0,
+            outputTokens: 0,
+            averageLatencyMs: null,
+            voiceSessions: 0,
+            messagingJobs: 0,
+            unpricedEvents: 0,
+            estimatedCostUsd: null,
+          }}
+        />,
+      ),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Create cross-channel draft" }),
+    );
+    const flowVersion = screen.getByLabelText<HTMLInputElement>(
+      "Published voice flow version",
+    );
+    expect(flowVersion.value).toBe("");
+    expect(flowVersion.required).toBe(true);
+    expect(
+      screen
+        .getByRole("link", {
+          name: "Review voice flow versions (opens a new tab)",
+        })
+        .getAttribute("href"),
+    ).toBe("/flows");
+    const selects = [
+      screen.getByLabelText<HTMLSelectElement>("WhatsApp agent version"),
+      screen.getByLabelText<HTMLSelectElement>("Voice agent version"),
+    ];
+    for (const select of selects) {
+      const option = within(select).getByRole("option", {
+        name: "Fictional lead coordinator · v2",
+      });
+      expect((option as HTMLOptionElement).value).toBe(v2);
+      expect(select.textContent).not.toContain("v3");
+      fireEvent.change(select, { target: { value: v2 } });
+      expect(select.value).toBe(v2);
+    }
+  });
+
   it("separates draft, published, assigned and running, and rebinds only when asked", () => {
     const rebind = vi.fn().mockResolvedValue(true);
     render(

@@ -332,8 +332,6 @@ function VoiceBindingStatus({
   // Pinning is intentional: this only reports which version new calls use and
   // what must be published to change it. Nothing here rebinds a flow.
   const latestPublished = versions.find((version) => version.publishedAt);
-  const boundVersions = bindings.map((binding) => binding.agentVersion);
-  const newestBound = boundVersions.length ? Math.max(...boundVersions) : null;
   return (
     <section aria-label={copy.voiceStatus}>
       <h5>{copy.voiceStatus}</h5>
@@ -353,20 +351,19 @@ function VoiceBindingStatus({
               {binding.callable ? null : (
                 <p role="alert">{copy.voiceNotCallable}</p>
               )}
+              {latestPublished &&
+              latestPublished.version > binding.agentVersion ? (
+                <p role="alert">
+                  {fill(copy.voiceBehind, {
+                    latest: latestPublished.version,
+                    agent: binding.agentVersion,
+                  })}
+                </p>
+              ) : null}
             </li>
           ))}
         </ul>
       )}
-      {latestPublished &&
-      newestBound !== null &&
-      latestPublished.version > newestBound ? (
-        <p role="alert">
-          {fill(copy.voiceBehind, {
-            latest: latestPublished.version,
-            agent: newestBound,
-          })}
-        </p>
-      ) : null}
     </section>
   );
 }

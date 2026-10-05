@@ -629,6 +629,7 @@ describe("Inbox interaction safety (no provider network)", () => {
     publishedVersionId: "00000000-0000-4000-8000-000000000091",
     publishedChannels: ["whatsapp"] as const,
     whatsAppAssignableVersionId: "00000000-0000-4000-8000-000000000091",
+    whatsAppAssignableVersion: 1,
     leadFieldSchema: null,
     implicitTicketing: false,
     review: {
@@ -735,6 +736,7 @@ describe("Inbox interaction safety (no provider network)", () => {
       publishedVersion: 3,
       publishedVersionId: "00000000-0000-4000-8000-000000000093",
       whatsAppAssignableVersionId: "00000000-0000-4000-8000-000000000091",
+      whatsAppAssignableVersion: 1,
     };
     render(
       localized(

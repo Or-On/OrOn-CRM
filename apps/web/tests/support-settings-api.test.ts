@@ -19,12 +19,15 @@ vi.mock("@or-on/crm", () => ({
 vi.mock("../src/features/auth", async () => ({
   jsonObject: (await import("../src/features/auth/request")).jsonObject,
   requestId: () => "settings-regression",
-  withCurrentTenant: (
+  withFreshCurrentTenant: (
     permission: string,
-    action: (sql: unknown) => unknown,
+    action: (
+      sql: unknown,
+      session: { tenant: { tenantId: string } },
+    ) => unknown,
   ) => {
     state.permission(permission);
-    return action({});
+    return action({}, { tenant: { tenantId: "fictional-workspace" } });
   },
 }));
 vi.mock("../src/features/crm-route", () => ({
@@ -43,6 +46,7 @@ function request(productsAndServices: readonly string[]) {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
+      expectedTenantId: "fictional-workspace",
       tenantName: "Fictional business",
       displayName: "Fictional business",
       defaultCurrency: "ILS",

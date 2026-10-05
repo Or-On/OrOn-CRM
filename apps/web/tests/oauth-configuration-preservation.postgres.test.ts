@@ -127,6 +127,40 @@ describe.skipIf(!databaseUrl)(
         EnvelopeRow[]
       >`SELECT id,ciphertext,nonce,key_version,rotated_at FROM platform.credential_records WHERE tenant_id=${state.tenantId}::uuid AND kind='email_oauth_client_google'`;
 
+    it("rejects stale business settings after another tab switches the active tenant", async () => {
+      const write = (expectedTenantId: string, name: string) =>
+        saveSettings(
+          new Request("http://localhost/api/settings", {
+            method: "PATCH",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              expectedTenantId,
+              tenantName: name,
+              displayName: name,
+              businessName: name,
+              defaultCurrency: "ILS",
+              locale: "he",
+              timezone: "Asia/Jerusalem",
+            }),
+          }),
+        );
+      state.tenantId = tenantA;
+      expect((await write(tenantA, "Fictional workspace A")).status).toBe(200);
+      state.tenantId = tenantB;
+      expect((await write(tenantB, "Fictional workspace B")).status).toBe(200);
+      const read =
+        () => admin`SELECT tenant.name,settings.business_name FROM tenants tenant
+        JOIN crm.tenant_settings settings ON settings.tenant_id=tenant.id WHERE tenant.id=${tenantB}::uuid`;
+      const before = await read();
+      const rejected = await write(
+        tenantA,
+        "Stale A changes must not affect B",
+      );
+      expect(await read()).toEqual(before);
+      expect(rejected.status).toBe(400);
+      expect(fetcher).not.toHaveBeenCalled();
+    });
+
     it("preserves existing encrypted credentials on blank/unrelated saves and reload; replaces only explicit nonempty secret", async () => {
       state.tenantId = tenantA;
       expect((await GET()).status).toBe(200);
@@ -156,6 +190,7 @@ describe.skipIf(!databaseUrl)(
           method: "PATCH",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
+            expectedTenantId: tenantA,
             tenantName: "Fictional renamed tenant",
             displayName: "Fictional display",
             defaultCurrency: "ILS",

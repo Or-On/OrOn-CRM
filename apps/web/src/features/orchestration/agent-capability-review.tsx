@@ -57,12 +57,15 @@ export function AgentCapabilityReview({
           <li>{copy.running(lifecycle.runningCalls)}</li>
         </ul>
         {lifecycle.staleConversations > 0 &&
-        agent.publishedVersion !== null &&
-        agent.publishedVersionId !== null ? (
+        agent.whatsAppAssignableVersion !== null &&
+        agent.whatsAppAssignableVersionId !== null ? (
           <div className="agent-lifecycle__stale" role="status">
             <AlertTriangle aria-hidden="true" size={16} />
             <p>
-              {copy.stale(lifecycle.staleConversations, agent.publishedVersion)}
+              {copy.stale(
+                lifecycle.staleConversations,
+                agent.whatsAppAssignableVersion,
+              )}
               <br />
               <small>{copy.rebindHint}</small>
             </p>
@@ -72,12 +75,12 @@ export function AgentCapabilityReview({
               size="small"
               variant="secondary"
               onClick={() => {
-                if (agent.publishedVersionId !== null)
-                  rebind(agent.publishedVersionId);
+                if (agent.whatsAppAssignableVersionId !== null)
+                  rebind(agent.whatsAppAssignableVersionId);
               }}
             >
               <RefreshCw aria-hidden="true" size={15} />
-              {copy.rebind(agent.publishedVersion)}
+              {copy.rebind(agent.whatsAppAssignableVersion)}
             </Button>
           </div>
         ) : null}

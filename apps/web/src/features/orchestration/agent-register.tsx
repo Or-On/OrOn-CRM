@@ -219,8 +219,7 @@ export function AgentRegister({
                     {t("orchestration.publish")}
                   </Button>
                 ) : null}
-                {selected.published &&
-                selected.channels.includes("whatsapp") ? (
+                {selected.whatsAppAssignableVersionId !== null ? (
                   <Button
                     disabled={!canEdit || pending || selected.isDefaultWhatsApp}
                     onClick={() => void setDefault(selected.id)}

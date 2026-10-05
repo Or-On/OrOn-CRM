@@ -82,6 +82,7 @@ describe("tenant AI support settings", () => {
     render(
       localized(
         <TenantSupportSettings
+          tenantId="fictional-workspace"
           settings={settings}
           tenantName="Example Workspace"
         />,
@@ -142,6 +143,7 @@ describe("tenant AI support settings", () => {
     render(
       localized(
         <TenantSupportSettings
+          tenantId="fictional-workspace"
           settings={settings}
           tenantName="Example Workspace"
         />,
@@ -178,6 +180,7 @@ describe("tenant AI support settings", () => {
     render(
       localized(
         <TenantSupportSettings
+          tenantId="fictional-workspace"
           settings={settings}
           tenantName="Example Workspace"
         />,
@@ -208,6 +211,7 @@ describe("tenant AI support settings", () => {
     render(
       localized(
         <TenantSupportSettings
+          tenantId="fictional-workspace"
           settings={settings}
           tenantName="Example Workspace"
         />,
@@ -228,6 +232,7 @@ describe("tenant AI support settings", () => {
     render(
       localized(
         <TenantSupportSettings
+          tenantId="fictional-workspace"
           settings={settings}
           tenantName="Example Workspace"
         />,

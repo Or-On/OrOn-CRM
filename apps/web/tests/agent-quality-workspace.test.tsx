@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defaultAgentQuality, type AgentQualityVersion } from "@or-on/crm";
@@ -208,6 +209,46 @@ describe("persisted agent quality workspace", () => {
     render(localized(<AgentQualityWorkspace profileId={profileId} />));
     expect(await screen.findByText(qualityCopy("en").voiceNone)).toBeDefined();
   });
+  it.each(["en", "he"] as const)(
+    "warns about each stale %s voice flow even when another flow uses the latest version",
+    async (locale) => {
+      const current = {
+        ...version,
+        version: 2,
+        publishedAt: "2026-10-01T00:00:00Z",
+      };
+      api.read.mockImplementation((url: string) =>
+        Promise.resolve(
+          url.includes("/quality")
+            ? {
+                versions: [current],
+                voiceBindings: [1, 2].map((number) => ({
+                  flowDefinitionId: `fictional-flow-${String(number)}`,
+                  flowName: `Fictional route ${String(number)}`,
+                  flowVersion: number,
+                  voiceFlowId: `fictional-voice-${String(number)}`,
+                  agentVersionId:
+                    number === 2 ? current.id : "fictional-old-version",
+                  agentVersion: number,
+                  callable: true,
+                })),
+              }
+            : { versions: [] },
+        ),
+      );
+      render(
+        localized(<AgentQualityWorkspace profileId={profileId} />, locale),
+      );
+      const status = await screen.findByRole("region", {
+        name: qualityCopy(locale).voiceStatus,
+      });
+      const warning = within(status).getByRole("alert");
+      expect(warning.textContent).toContain("v2");
+      expect(warning.textContent).toContain("v1");
+      expect(warning.closest("li")?.textContent).toContain("Fictional route 1");
+      expect(api.mutate).not.toHaveBeenCalled();
+    },
+  );
   it("does not expose management loading or mutation controls to a read-only agent inspector", () => {
     render(
       localized(
@@ -228,6 +269,7 @@ describe("persisted agent quality workspace", () => {
               publishedVersionId: version.id,
               publishedChannels: ["voice"],
               whatsAppAssignableVersionId: null,
+              whatsAppAssignableVersion: null,
               leadFieldSchema: null,
               implicitTicketing: false,
               review: {

@@ -11,7 +11,7 @@ import {
 import {
   jsonObject,
   requestId,
-  withCurrentTenant,
+  withFreshCurrentTenant,
 } from "../../../features/auth";
 import {
   assertCrmMutation,
@@ -25,6 +25,7 @@ export async function PATCH(request: Request) {
       maximumBytes: tenantSupportTextLimits.profileBytes + 16_384,
     });
     if (
+      typeof body.expectedTenantId !== "string" ||
       typeof body.defaultCurrency !== "string" ||
       typeof body.locale !== "string" ||
       typeof body.timezone !== "string" ||
@@ -57,62 +58,69 @@ export async function PATCH(request: Request) {
     ) {
       throw new TypeError("invalid workspace settings");
     }
-    const result = await withCurrentTenant("tenant:manage", async (sql) => {
-      const settings = await updateTenantSettings(sql, {
-        displayName: body.displayName as string | null,
-        defaultCurrency: body.defaultCurrency as string,
-        locale: body.locale as string,
-        timezone: body.timezone as string,
-        ...(body.businessName === undefined
-          ? {}
-          : { businessName: body.businessName as string | null }),
-        ...(body.businessEmail === undefined
-          ? {}
-          : { businessEmail: body.businessEmail as string | null }),
-        ...(body.businessPhone === undefined
-          ? {}
-          : { businessPhone: body.businessPhone as string | null }),
-        ...(body.businessAddress === undefined
-          ? {}
-          : { businessAddress: body.businessAddress as string | null }),
-        ...(body.accentToken === undefined
-          ? {}
-          : {
-              accentToken: body.accentToken as
-                | "blue"
-                | "cyan"
-                | "emerald"
-                | "violet"
-                | "amber"
-                | "rose"
-                | null,
-            }),
-        ...(body.reportHeader === undefined
-          ? {}
-          : { reportHeader: body.reportHeader as string | null }),
-        ...(body.reportFooter === undefined
-          ? {}
-          : { reportFooter: body.reportFooter as string | null }),
-        ...(body.supportProfile === undefined
-          ? {}
-          : {
-              supportProfile:
-                body.supportProfile as unknown as TenantSupportProfile,
-            }),
-        ...(body.identityVerification === undefined
-          ? {}
-          : {
-              identityVerification:
-                body.identityVerification as unknown as IdentityVerificationPolicy,
-            }),
-      });
-      const tenantName = await updateCurrentTenantName(
-        sql,
-        body.tenantName as string,
-        requestId(request),
-      );
-      return { settings, tenantName };
-    });
+    const result = await withFreshCurrentTenant(
+      "tenant:manage",
+      async (sql, session) => {
+        if (body.expectedTenantId !== session.tenant.tenantId)
+          throw new TypeError(
+            "Workspace changed. Refresh before saving its settings.",
+          );
+        const settings = await updateTenantSettings(sql, {
+          displayName: body.displayName as string | null,
+          defaultCurrency: body.defaultCurrency as string,
+          locale: body.locale as string,
+          timezone: body.timezone as string,
+          ...(body.businessName === undefined
+            ? {}
+            : { businessName: body.businessName as string | null }),
+          ...(body.businessEmail === undefined
+            ? {}
+            : { businessEmail: body.businessEmail as string | null }),
+          ...(body.businessPhone === undefined
+            ? {}
+            : { businessPhone: body.businessPhone as string | null }),
+          ...(body.businessAddress === undefined
+            ? {}
+            : { businessAddress: body.businessAddress as string | null }),
+          ...(body.accentToken === undefined
+            ? {}
+            : {
+                accentToken: body.accentToken as
+                  | "blue"
+                  | "cyan"
+                  | "emerald"
+                  | "violet"
+                  | "amber"
+                  | "rose"
+                  | null,
+              }),
+          ...(body.reportHeader === undefined
+            ? {}
+            : { reportHeader: body.reportHeader as string | null }),
+          ...(body.reportFooter === undefined
+            ? {}
+            : { reportFooter: body.reportFooter as string | null }),
+          ...(body.supportProfile === undefined
+            ? {}
+            : {
+                supportProfile:
+                  body.supportProfile as unknown as TenantSupportProfile,
+              }),
+          ...(body.identityVerification === undefined
+            ? {}
+            : {
+                identityVerification:
+                  body.identityVerification as unknown as IdentityVerificationPolicy,
+              }),
+        });
+        const tenantName = await updateCurrentTenantName(
+          sql,
+          body.tenantName as string,
+          requestId(request),
+        );
+        return { settings, tenantName };
+      },
+    );
     return NextResponse.json(result);
   } catch (error) {
     return crmErrorResponse(error);

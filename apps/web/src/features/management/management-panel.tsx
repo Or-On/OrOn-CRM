@@ -216,6 +216,7 @@ export function ManagementPanel({
       await crmMutation(
         "/api/settings",
         {
+          expectedTenantId: tenantId,
           tenantName: data.get("tenantName"),
           displayName: data.get("workspaceDisplayName"),
           defaultCurrency: data.get("defaultCurrency"),
@@ -1005,6 +1006,7 @@ export function ManagementPanel({
             <TenantSupportSettings
               settings={settings}
               tenantName={tenantName}
+              tenantId={tenantId}
             />
           </section>
         ) : null}

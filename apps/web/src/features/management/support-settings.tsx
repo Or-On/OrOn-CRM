@@ -104,9 +104,11 @@ function emptyTerm(): TenantTerminologyEntry {
 export function TenantSupportSettings({
   settings,
   tenantName,
+  tenantId,
 }: {
   readonly settings: TenantSettings;
   readonly tenantName: string;
+  readonly tenantId?: string | undefined;
 }) {
   const t = useTranslations("tenantSupportSettings");
   const translate = useTranslations();
@@ -201,6 +203,7 @@ export function TenantSupportSettings({
       await crmMutation(
         "/api/settings",
         {
+          expectedTenantId: tenantId,
           tenantName,
           displayName: settings.displayName,
           defaultCurrency: settings.defaultCurrency,

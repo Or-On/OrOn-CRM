@@ -498,6 +498,7 @@ describe("tenant settings controls", () => {
           businessEmail: "",
           businessName: "",
           businessPhone: "",
+          expectedTenantId: "fictional-tenant",
           tenantName: "Updated fictional workspace",
           displayName: "Fictional workspace",
           defaultCurrency: "ILS",
@@ -510,6 +511,32 @@ describe("tenant settings controls", () => {
       ),
     );
   });
+
+  it.each(["en", "he"] as const)(
+    "explains a stale %s workspace save and preserves the draft",
+    async (locale) => {
+      const copy = locale === "he" ? he : en;
+      state.mutate.mockRejectedValue(
+        new Error("Workspace changed. Refresh before saving its settings."),
+      );
+      render(localized(<ManagementPanel {...props} />, locale));
+      const workspace = tab(copy.management.workspaceTab);
+      const name = workspace.getByLabelText<HTMLInputElement>(
+        copy.management.tenantName,
+      );
+      fireEvent.change(name, {
+        target: { value: "Preserved fictional workspace draft" },
+      });
+      fireEvent.click(
+        workspace.getByRole("button", { name: copy.management.save }),
+      );
+      expect(
+        await screen.findByText(copy.management.settingsContextChanged),
+      ).toBeTruthy();
+      expect(name.value).toBe("Preserved fictional workspace draft");
+      expect(state.refresh).not.toHaveBeenCalled();
+    },
+  );
 
   it("exposes the same real appearance and security categories in Hebrew", () => {
     render(localized(<ManagementPanel {...props} />, "he"));

@@ -127,7 +127,7 @@ export function OrchestrationPanel({
   const [creationLeads, setCreationLeads] =
     useState<LeadCapabilityConfiguration>(emptyLeadConfiguration());
   const hasPublishedAgent = agents.some(
-    (agent) => agent.published && agent.versionId,
+    (agent) => agent.publishedVersionId !== null,
   );
 
   function openCreation(kind: "agents" | "flows") {
@@ -869,14 +869,17 @@ export function OrchestrationPanel({
                   required
                 />
                 <Input
-                  defaultValue="1"
                   id="flow-voice-version"
                   label={t("orchestration.flowVersion")}
+                  hint={t("orchestration.flowVersionHint")}
                   min="1"
                   name="voiceFlowVersion"
                   required
                   type="number"
                 />
+                <Link href="/flows" target="_blank" rel="noopener noreferrer">
+                  {t("orchestration.reviewVoiceFlows")}
+                </Link>
                 <Select
                   id="flow-agent"
                   label={t("orchestration.whatsappAgentVersion")}
@@ -887,14 +890,16 @@ export function OrchestrationPanel({
                   {agents
                     .filter(
                       (agent) =>
-                        agent.published &&
-                        agent.versionId &&
-                        agent.channels.includes("whatsapp") &&
-                        agent.channels.includes("voice"),
+                        agent.publishedVersionId &&
+                        agent.publishedChannels.includes("whatsapp") &&
+                        agent.publishedChannels.includes("voice"),
                     )
                     .map((agent) => (
-                      <option key={agent.id} value={agent.versionId ?? ""}>
-                        {agent.name} · v{agent.version}
+                      <option
+                        key={agent.id}
+                        value={agent.publishedVersionId ?? ""}
+                      >
+                        {agent.name} · v{agent.publishedVersion}
                       </option>
                     ))}
                 </Select>
@@ -910,13 +915,15 @@ export function OrchestrationPanel({
                   {agents
                     .filter(
                       (agent) =>
-                        agent.published &&
-                        agent.versionId &&
-                        agent.channels.includes("voice"),
+                        agent.publishedVersionId &&
+                        agent.publishedChannels.includes("voice"),
                     )
                     .map((agent) => (
-                      <option key={agent.id} value={agent.versionId ?? ""}>
-                        {agent.name} · v{agent.version}
+                      <option
+                        key={agent.id}
+                        value={agent.publishedVersionId ?? ""}
+                      >
+                        {agent.name} · v{agent.publishedVersion}
                       </option>
                     ))}
                 </Select>
