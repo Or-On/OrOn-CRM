@@ -1,5 +1,5 @@
 {
-  "alembic_head": "e9c5b8d2a401",
+  "alembic_head": "b162a7e4d903",
   "expected_functions": [
     "agents.activate_reviewed_memory",
     "agents.alert_exhausted_memory_summary",
@@ -167,6 +167,7 @@
     "platform.opening_menu_business_generation_bound",
     "platform.opening_menu_business_job_allowed",
     "platform.opening_menu_channel_credential",
+    "platform.opening_menu_legacy_session",
     "platform.opening_menu_scope",
     "platform.opening_menu_tool_allowed",
     "platform.outbound_execution_authorized",
@@ -204,6 +205,8 @@
     "platform.settle_memory_summary_attempt",
     "platform.settle_opening_menu_attempt",
     "platform.sms_reserve",
+    "platform.stamp_opening_menu_activation",
+    "platform.tenant_administration_allowed",
     "platform.tenant_feature_enabled_for",
     "platform.update_current_tenant_name",
     "platform.update_current_user_profile",
@@ -541,7 +544,8 @@
       "whatsapp_opening_menu_state",
       "whatsapp_opening_menu_operations",
       "whatsapp_opening_menu_business_claims",
-      "whatsapp_template_policy"
+      "whatsapp_template_policy",
+      "whatsapp_opening_menu_legacy_sessions"
     ],
     "public": [
       "api_keys",
@@ -766,6 +770,7 @@
     "platform.whatsapp_opening_menu_configuration",
     "platform.whatsapp_opening_menu_state",
     "platform.whatsapp_opening_menu_operations",
+    "platform.whatsapp_opening_menu_legacy_sessions",
     "platform.whatsapp_opening_menu_business_claims",
     "messaging.whatsapp_auto_greetings",
     "platform.whatsapp_template_policy",

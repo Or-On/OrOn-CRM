@@ -6,7 +6,8 @@ const state = vi.hoisted(() => ({
   sql: undefined as TransactionSql | undefined,
   failure: undefined as Error | undefined,
 }));
-vi.mock("@or-on/crm", () => ({
+vi.mock("@or-on/crm", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
   getContact: () =>
     Promise.resolve({
       lifecycleStatus: "active",
@@ -45,6 +46,7 @@ vi.mock("../src/features/auth", () => ({
   },
 }));
 import { POST } from "../src/app/api/voice/real-calls/route";
+import { listCallableVoiceFlows } from "@or-on/crm";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 class RollbackFixture extends Error {}
@@ -185,6 +187,15 @@ describe.skipIf(!databaseUrl)(
         await f.approved();
         expect((await f.invoke()).status).toBe(200);
         expectVersion(3);
+        expect(await listCallableVoiceFlows(_sql)).toEqual([
+          expect.objectContaining({
+            flow_id: f.retainedId,
+            agent_version: 4,
+            latest_version: 3,
+            flow_version: 3,
+            agent_version_id: f.agentId,
+          }),
+        ]);
       }));
     it("uses the exact approved process pin despite a newer published canonical version", async () =>
       isolated(async (_sql, f) => {

@@ -4,6 +4,7 @@ const state = vi.hoisted(() => ({
   assertMutation: vi.fn(),
   deleteTenant: vi.fn(),
   superuser: true,
+  activeTenantId: "00000000-0000-0000-0000-000000000001",
 }));
 
 vi.mock("@or-on/crm", () => ({
@@ -19,7 +20,13 @@ vi.mock("../src/features/auth", async (importOriginal) => {
       operation: (...arguments_: unknown[]) => unknown,
     ) => {
       if (permission !== "platform:read") throw new Error("wrong permission");
-      return operation({}, { isSuperuser: state.superuser });
+      return operation(
+        {},
+        {
+          isSuperuser: state.superuser,
+          tenant: { tenantId: state.activeTenantId },
+        },
+      );
     },
   };
 });
@@ -41,6 +48,7 @@ describe("tenant deletion API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     state.superuser = true;
+    state.activeTenantId = "00000000-0000-0000-0000-000000000001";
     state.deleteTenant.mockResolvedValue(true);
   });
 
@@ -87,5 +95,26 @@ describe("tenant deletion API", () => {
     );
 
     expect(response.status).toBe(404);
+  });
+
+  it("refuses a global administrator while working in a customer workspace", async () => {
+    state.activeTenantId = tenantId;
+    const response = await DELETE(
+      new Request(`http://localhost/api/tenants/${tenantId}`, {
+        method: "DELETE",
+      }),
+      context,
+    );
+    expect(response.status).toBe(403);
+    expect(state.deleteTenant).not.toHaveBeenCalled();
+  });
+
+  it("never deletes the main management workspace", async () => {
+    const response = await DELETE(
+      new Request("http://localhost/api/tenants/main", { method: "DELETE" }),
+      { params: Promise.resolve({ id: state.activeTenantId }) },
+    );
+    expect(response.status).toBe(403);
+    expect(state.deleteTenant).not.toHaveBeenCalled();
   });
 });

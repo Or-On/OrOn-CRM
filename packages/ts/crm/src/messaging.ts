@@ -1770,6 +1770,23 @@ export async function setConversationOwnership(
         AND removed_from_inbox_at IS NULL
       RETURNING id
     `;
+    if (rows.length === 1) {
+      // Returning control to AI withdraws the former request for a human.
+      // Keep its history and any service ticket; this does not resolve the issue.
+      const cancelled = await sql<{ id: string }[]>`
+        UPDATE automation.handoffs SET status='cancelled',
+          resolved_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
+        WHERE tenant_id=platform.current_tenant_id()
+          AND conversation_id=${conversationId}::uuid
+          AND source_channel='whatsapp' AND status IN ('pending','accepted')
+        RETURNING id
+      `;
+      await sql`
+        INSERT INTO audit.records(tenant_id,actor_user_id,action,target_type,target_id,metadata)
+        VALUES(platform.current_tenant_id(),${actorUserId}::uuid,'conversation.ai_resumed',
+          'conversation',${conversationId}::uuid,${sql.json({ agentVersionId: bound.id, cancelledHandoffIds: cancelled.map((row) => row.id) })})
+      `;
+    }
     return rows.length === 1;
   }
 

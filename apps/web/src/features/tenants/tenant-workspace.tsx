@@ -1,6 +1,7 @@
 "use client";
 
 import type { PlatformTenantSummary } from "@or-on/crm";
+import { MAIN_TENANT_ID } from "../tenant-administration";
 import {
   AnimatedNumber,
   Badge,
@@ -324,20 +325,26 @@ export function TenantWorkspace({
                     </IconButton>
                     <IconButton
                       disabled={
-                        tenant.id === currentTenantId || records.length <= 1
+                        tenant.id === MAIN_TENANT_ID ||
+                        tenant.id === currentTenantId ||
+                        records.length <= 1
                       }
                       label={
-                        tenant.id === currentTenantId
+                        tenant.id === MAIN_TENANT_ID
                           ? he
-                            ? "יש לעבור לסביבה אחרת לפני המחיקה"
-                            : "Switch to another tenant before deleting this one"
-                          : records.length <= 1
+                            ? "לא ניתן למחוק את סביבת הניהול הראשית"
+                            : "The main management workspace cannot be deleted"
+                          : tenant.id === currentTenantId
                             ? he
-                              ? "לא ניתן למחוק את הסביבה הפעילה האחרונה"
-                              : "The final active tenant cannot be deleted"
-                            : he
-                              ? `מחיקת ${tenant.name}`
-                              : `Delete ${tenant.name}`
+                              ? "יש לעבור לסביבה אחרת לפני המחיקה"
+                              : "Switch to another tenant before deleting this one"
+                            : records.length <= 1
+                              ? he
+                                ? "לא ניתן למחוק את הסביבה הפעילה האחרונה"
+                                : "The final active tenant cannot be deleted"
+                              : he
+                                ? `מחיקת ${tenant.name}`
+                                : `Delete ${tenant.name}`
                       }
                       onClick={() => {
                         setDeleteTarget(tenant);

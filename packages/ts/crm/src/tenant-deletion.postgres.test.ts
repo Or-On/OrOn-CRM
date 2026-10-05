@@ -10,13 +10,14 @@ import {
 } from "./tenants.js";
 
 const databaseUrl = process.env.UI_TEST_DATABASE_URL;
-const currentTenantId = "10000000-0000-4000-8000-000000000001";
+const currentTenantId = "00000000-0000-0000-0000-000000000001";
 const superadminId = "20000000-0000-4000-8000-000000000001";
 
 class ExpectedRollback extends Error {}
 
 async function isolated(
   work: (transaction: postgres.TransactionSql) => Promise<void>,
+  ordinaryAdministrator = false,
 ) {
   if (databaseUrl === undefined)
     throw new Error("Use the isolated UI PostgreSQL preview test runner");
@@ -30,11 +31,16 @@ async function isolated(
   try {
     await expect(
       sql.begin(async (transaction) => {
+        const actor = ordinaryAdministrator ? randomUUID() : superadminId;
+        if (ordinaryAdministrator) {
+          await transaction`INSERT INTO public.users(id,email,status) VALUES(${actor}::uuid,${`${actor}@example.invalid`},'active')`;
+          await transaction`INSERT INTO public.memberships(tenant_id,user_id,role) VALUES(${currentTenantId}::uuid,${actor}::uuid,'admin')`;
+        }
         await transaction`SET LOCAL ROLE platform_web`;
         await transaction`
           SELECT set_config('app.current_tenant', ${currentTenantId}, true),
-                 set_config('app.current_user', ${superadminId}, true),
-                 set_config('app.current_role', 'owner', true)
+                 set_config('app.current_user', ${actor}, true),
+                 set_config('app.current_role', ${ordinaryAdministrator ? "admin" : "owner"}, true)
         `;
         await work(transaction);
         throw new ExpectedRollback("roll back tenant deletion fixtures");
@@ -48,6 +54,51 @@ async function isolated(
 describe.skipIf(databaseUrl === undefined)(
   "guarded platform tenant deletion",
   () => {
+    it("hides the directory and rejects cross-tenant mutations outside the main workspace", async () => {
+      await isolated(async (transaction) => {
+        await transaction`SELECT set_config('app.current_tenant', '10000000-0000-4000-8000-000000000001', true)`;
+        expect(await listPlatformTenants(transaction)).toEqual([]);
+        for (const operation of [
+          (sql: postgres.TransactionSql) =>
+            deleteTenantForAdministrator(
+              sql,
+              currentTenantId,
+              "foreign-main-delete",
+            ),
+          (sql: postgres.TransactionSql) =>
+            createTenantWithDefaults(sql, {
+              name: "Fictional denied tenant",
+              slug: `denied-${randomUUID()}`,
+              currency: "USD",
+              locale: "en",
+              timezone: "UTC",
+            }),
+          (sql: postgres.TransactionSql) =>
+            sql`SELECT platform.set_tenant_feature_entitlement(${currentTenantId}::uuid, false, 'foreign-entitlement')`,
+        ]) {
+          await expect(
+            transaction.savepoint(async (sql) => {
+              await operation(sql);
+            }),
+          ).rejects.toMatchObject({
+            code: "42501",
+          });
+        }
+      });
+    });
+
+    it("does not grant global authority to an ordinary administrator in the main workspace", async () => {
+      await isolated(async (transaction) => {
+        expect(await listPlatformTenants(transaction)).toEqual([]);
+        await expect(
+          deleteTenantForAdministrator(
+            transaction,
+            "10000000-0000-4000-8000-000000000001",
+            "ordinary-admin-delete",
+          ),
+        ).rejects.toMatchObject({ code: "42501" });
+      }, true);
+    });
     it("removes a different tenant from the active directory", async () => {
       await isolated(async (transaction) => {
         const slug = `delete-fixture-${randomUUID()}`;

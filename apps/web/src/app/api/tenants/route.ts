@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { canManageTenants } from "../../../features/tenant-administration";
 import {
   createTenantWithDefaults,
   listPlatformTenants,
@@ -22,7 +23,8 @@ export async function GET() {
   try {
     return NextResponse.json({
       tenants: await withCurrentTenant("platform:read", (sql, session) => {
-        if (!session.isSuperuser) throw new ForbiddenError("Forbidden");
+        if (!canManageTenants(session.isSuperuser, session.tenant.tenantId))
+          throw new ForbiddenError("Forbidden");
         return listPlatformTenants(sql);
       }),
     });
@@ -45,7 +47,8 @@ export async function POST(request: Request) {
     const id = await withCurrentTenant(
       "platform:read",
       async (sql, session) => {
-        if (!session.isSuperuser) throw new ForbiddenError("Forbidden");
+        if (!canManageTenants(session.isSuperuser, session.tenant.tenantId))
+          throw new ForbiddenError("Forbidden");
         const tenantId = await createTenantWithDefaults(sql, {
           name: typeof body.name === "string" ? body.name : "",
           slug: typeof body.slug === "string" ? body.slug : "",

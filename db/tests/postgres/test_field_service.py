@@ -7,6 +7,8 @@ from uuid import UUID, uuid4
 import asyncpg
 import pytest
 
+from db.tests.postgres.test_platform_administration import _main_workspace
+
 pytestmark = [pytest.mark.postgres, pytest.mark.integration, pytest.mark.rls]
 
 
@@ -512,7 +514,12 @@ async def test_platform_admin_can_manage_existing_tenant_entitlement(
         "UPDATE users SET is_superuser=true WHERE id=$1",
         administrator_tenant.user_id,
     )
+    main = await _main_workspace(pg)
     await _as_web(pg, administrator_tenant)
+    assert not await pg.fetch(
+        "SELECT * FROM platform.list_tenant_field_service_entitlements_for_administrator()"
+    )
+    await pg.execute("SELECT set_config('app.current_tenant',$1,true)", str(main))
 
     initial = {
         row["tenant_id"]: (row["available"], row["enabled"])

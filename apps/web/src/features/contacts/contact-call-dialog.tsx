@@ -2,12 +2,11 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import type { ContactDetail } from "@or-on/crm";
-import type { FlowSummary } from "@or-on/api-client";
 import { Button, ConfirmDialog, Dialog, Select } from "@or-on/ui";
 import { useCapability } from "../access";
-import { voiceMutation } from "../voice";
+import { voiceMutation, callFlowLabel, type CallingFlow } from "../voice";
 import { errorMessage } from "../../i18n/error-message";
 
 export function ContactCallDialog({
@@ -19,11 +18,12 @@ export function ContactCallDialog({
 }: {
   readonly contact: ContactDetail;
   readonly enabled: boolean;
-  readonly flows: readonly FlowSummary[];
+  readonly flows: readonly CallingFlow[];
   readonly open: boolean;
   readonly onClose: () => void;
 }) {
   const t = useTranslations();
+  const he = useLocale().startsWith("he");
   const router = useRouter();
   const canCall = useCapability("voice:operate");
   const [pending, setPending] = useState(false);
@@ -131,11 +131,16 @@ export function ContactCallDialog({
             ) : (
               flows.map((flow) => (
                 <option key={flow.flow_id} value={flow.flow_id}>
-                  {flow.name} · v{flow.latest_version}
+                  {callFlowLabel(flow, he)}
                 </option>
               ))
             )}
           </Select>
+          <p className="public-note">
+            {he
+              ? "גרסת הסוכן וגרסת התסריט נפרדות. השיחה תשתמש בשיוך המאושר המוצג כאן."
+              : "Agent and script versions are separate. This call uses the approved binding shown here."}
+          </p>
           <Select
             id="real-call-address-form"
             label={t("contacts.callerAddressForm")}

@@ -670,6 +670,18 @@ export function enforceStandaloneCallbackConsent(
     : decision;
 }
 
+/** Missing knowledge is an offer of human help, not permission to end AI handling.
+ * Apply only to model decisions; server-side identity and safety holds remain intact.
+ */
+export function deferUnconfirmedContextHandoff(
+  decision: WhatsAppAiDecision,
+): WhatsAppAiDecision {
+  return decision.action === "handoff" &&
+    decision.reasonCode === "insufficient_context"
+    ? { action: "reply", replyCode: "knowledge_unavailable", text: "" }
+    : decision;
+}
+
 /** Only durable server receipts may select these acknowledgements. */
 export function actionReceiptReply(
   operation: "callback" | "handoff" | "ticket",

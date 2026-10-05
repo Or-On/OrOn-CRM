@@ -10,6 +10,7 @@ const dependencies = vi.hoisted(() => ({
   settings: vi.fn(),
   voiceClient: vi.fn(),
   flows: vi.fn(),
+  callableFlows: vi.fn(),
   tenant: vi.fn(),
   redirect: vi.fn(),
 }));
@@ -20,6 +21,7 @@ vi.mock("@or-on/crm", () => ({
   getTenantSettings: dependencies.settings,
   listContactActivity: dependencies.activity,
   listCustomerClassifications: dependencies.classifications,
+  listCallableVoiceFlows: dependencies.callableFlows,
 }));
 vi.mock("../src/features/auth", () => ({
   ForbiddenError: class ForbiddenError extends Error {},
@@ -88,6 +90,7 @@ describe("contact page optional dependency isolation", () => {
       listVoiceFlows: dependencies.flows,
     });
     dependencies.flows.mockResolvedValue({ ok: true, data: { items: [] } });
+    dependencies.callableFlows.mockResolvedValue([]);
     dependencies.redirect.mockImplementation(() => {
       throw new Error("redirected");
     });

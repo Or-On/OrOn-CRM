@@ -29,7 +29,7 @@ import type {
   JsonValue,
   ServiceCaseSummary,
 } from "@or-on/crm";
-import type { FlowSummary } from "@or-on/api-client";
+import type { CallingFlow } from "../voice";
 import {
   Badge,
   Button,
@@ -158,7 +158,7 @@ export function ContactDetailPanel({
   readonly serviceCases?: readonly ServiceCaseSummary[];
   readonly timezone?: string;
   readonly voiceAvailable?: boolean;
-  readonly voiceFlows?: readonly FlowSummary[];
+  readonly voiceFlows?: readonly CallingFlow[];
 }) {
   const t = useTranslations();
   const canEdit = useCapability("crm:write");

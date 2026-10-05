@@ -29,6 +29,16 @@ import { tenantDateFormatter } from "../../i18n/tenant-date-time";
 import { csrfToken } from "../crm";
 import { InquiryPanel } from "../tickets";
 import { useVisibleRefresh } from "../live-refresh";
+import {
+  ArrowUpRight,
+  CalendarDays,
+  CheckCheck,
+  ClipboardList,
+  Inbox,
+  MessageCircle,
+  PhoneIncoming,
+  Wrench,
+} from "lucide-react";
 import styles from "./service-manager.module.css";
 
 const statuses: Record<ServiceInquiryStatus, readonly [string, string]> = {
@@ -63,10 +73,14 @@ export function ServiceManagerOverview({
   tenantName,
   metrics,
   period,
+  recentInquiries = [],
+  timezone = "UTC",
 }: {
   readonly tenantName: string;
   readonly metrics: ServiceManagerMetrics;
   readonly period: ServiceOverviewPeriod;
+  readonly recentInquiries?: readonly ServiceInquiry[];
+  readonly timezone?: string;
 }) {
   const locale = useLocale();
   const he = locale.startsWith("he");
@@ -76,69 +90,187 @@ export function ServiceManagerOverview({
   // These bounds are calendar dates, not instants in the tenant timezone.
   const date = tenantDateFormatter(locale, "UTC", { dateStyle: "medium" });
   return (
-    <main className="page">
-      <PageHeader
-        title={tenantName}
-        eyebrow={he ? "סקירה" : "Overview"}
-        description={he ? "פעילות השירות של העסק" : "Your service activity"}
-      />
-      <nav
-        className={styles.periods}
-        aria-label={he ? "טווח תאריכים" : "Date range"}
-      >
-        {(
-          [
-            ["today", "Today", "היום"],
-            ["week", "Last 7 days", "7 ימים אחרונים"],
-            ["month", "This month", "החודש"],
-          ] as const
-        ).map(([key, en, heb]) => (
-          <Link
-            key={key}
-            aria-current={period === key ? "page" : undefined}
-            href={`/?period=${key}`}
-          >
-            {he ? heb : en}
-          </Link>
-        ))}
-      </nav>
-      <p className={styles.periodRange}>
-        <time dateTime={metrics.since}>
-          <bdi>{date.format(new Date(metrics.since))}</bdi>
-        </time>
-        <span aria-hidden="true">–</span>
-        <time dateTime={metrics.until}>
-          <bdi>{date.format(new Date(metrics.until))}</bdi>
-        </time>
-      </p>
-      <div className={styles.metrics}>
-        {(
-          [
-            [metrics.incomingCalls, "Incoming calls", "שיחות שהתקבלו"],
-            [metrics.incomingMessages, "Incoming messages", "הודעות שהתקבלו"],
-            [metrics.opened, "Requests opened", "קריאות שירות שנפתחו"],
-            [metrics.closed, "Requests closed", "קריאות שירות שנסגרו"],
-          ] as const
-        ).map(([value, en, heb]) => (
-          <Surface as="article" level="raised" key={en}>
-            <span>{he ? heb : en}</span>
-            <strong>{value.toLocaleString(locale)}</strong>
-          </Surface>
-        ))}
-      </div>
-      <div className={styles.links}>
+    <main className={["page", styles.overview].join(" ")}>
+      <div className={styles.overviewHeading}>
+        <PageHeader
+          title={tenantName}
+          eyebrow={he ? "סקירה" : "Overview"}
+          description={he ? "פעילות השירות של העסק" : "Your service activity"}
+        />
         <Link
           className="or-button or-button--primary or-button--medium"
           href="/tickets"
         >
-          {he ? "כל הפניות" : "All inquiries"}
+          <ClipboardList size={17} aria-hidden="true" />
+          {he ? "פתיחת הפניות" : "View inquiries"}
         </Link>
-        <Link
-          className="or-button or-button--secondary or-button--medium"
-          href="/field-service"
+      </div>
+      <div className={styles.periodBar}>
+        <nav
+          className={styles.periods}
+          aria-label={he ? "טווח תאריכים" : "Date range"}
         >
-          {he ? "שירות שטח" : "Field service"}
-        </Link>
+          {(
+            [
+              ["today", "Today", "היום"],
+              ["week", "Last 7 days", "7 ימים אחרונים"],
+              ["month", "This month", "החודש"],
+            ] as const
+          ).map(([key, en, heb]) => (
+            <Link
+              key={key}
+              aria-current={period === key ? "page" : undefined}
+              href={`/?period=${key}`}
+            >
+              {he ? heb : en}
+            </Link>
+          ))}
+        </nav>
+        <p className={styles.periodRange}>
+          <time dateTime={metrics.since}>
+            <bdi>{date.format(new Date(metrics.since))}</bdi>
+          </time>
+          <span aria-hidden="true">–</span>
+          <time dateTime={metrics.until}>
+            <bdi>{date.format(new Date(metrics.until))}</bdi>
+          </time>
+        </p>
+      </div>
+      <div className={styles.metrics}>
+        {(
+          [
+            [
+              metrics.incomingCalls,
+              "Incoming calls",
+              "שיחות שהתקבלו",
+              PhoneIncoming,
+            ],
+            [
+              metrics.incomingMessages,
+              "Incoming messages",
+              "הודעות שהתקבלו",
+              MessageCircle,
+            ],
+            [
+              metrics.opened,
+              "Requests opened",
+              "קריאות שירות שנפתחו",
+              ClipboardList,
+            ],
+            [
+              metrics.closed,
+              "Requests closed",
+              "קריאות שירות שנסגרו",
+              CheckCheck,
+            ],
+          ] as const
+        ).map(([value, en, heb, Icon]) => (
+          <Surface as="article" level="raised" key={en}>
+            <span className={styles.metricLabel}>
+              <Icon size={18} aria-hidden="true" />
+              {he ? heb : en}
+            </span>
+            <strong>{value.toLocaleString(locale)}</strong>
+          </Surface>
+        ))}
+      </div>
+      <div className={styles.overviewGrid}>
+        <Surface className={styles.recent} level="raised" as="section">
+          <header className={styles.sectionHeading}>
+            <div>
+              <p>{he ? "סביבת העבודה שלך" : "Your work queue"}</p>
+              <h2>{he ? "פניות אחרונות" : "Recent inquiries"}</h2>
+            </div>
+            <Link href="/tickets">
+              {he ? "כל הפניות" : "All inquiries"}
+              <ArrowUpRight size={16} aria-hidden="true" />
+            </Link>
+          </header>
+          {recentInquiries.length ? (
+            <ul className={styles.recentList}>
+              {recentInquiries.map((item) => (
+                <li key={item.id}>
+                  <Link href={`/tickets/${item.id}`}>
+                    <span className={styles.inquiryMark}>
+                      <ClipboardList size={19} aria-hidden="true" />
+                    </span>
+                    <span className={styles.recentText}>
+                      <strong dir="auto">{item.subject}</strong>
+                      <span>
+                        <bdi>{item.customer}</bdi>
+                        <span aria-hidden="true"> · </span>
+                        <bdi>{item.reference}</bdi>
+                      </span>
+                    </span>
+                    <span className={styles.recentStatus}>
+                      <Status value={item.status} he={he} />
+                      <time dateTime={item.openedAt}>
+                        {tenantDateFormatter(locale, timezone, {
+                          dateStyle: "medium",
+                        }).format(new Date(item.openedAt))}
+                      </time>
+                    </span>
+                    <ArrowUpRight size={16} aria-hidden="true" />
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className={styles.empty}>
+              <Inbox size={30} aria-hidden="true" />
+              <h3>
+                {he ? "הפנייה הבאה תופיע כאן" : "Your next inquiry starts here"}
+              </h3>
+              <p>
+                {he
+                  ? "לאחר הגשת טופס השירות, הפנייה תופיע כאן ותהיה מוכנה לטיפול."
+                  : "Submitted service requests will appear here, ready for your team to handle."}
+              </p>
+            </div>
+          )}
+        </Surface>
+        <aside
+          className={styles.shortcuts}
+          aria-label={he ? "פעולות שימושיות" : "Useful shortcuts"}
+        >
+          <h2>{he ? "ממשיכים לטפל" : "Keep work moving"}</h2>
+          <Link href="/field-service">
+            <span className={styles.shortcutIcon}>
+              <Wrench size={21} aria-hidden="true" />
+            </span>
+            <span>
+              <strong>{he ? "שירות שטח" : "Field service"}</strong>
+              <small>
+                {he
+                  ? "קריאות, ביקורים ועבודת הטכנאים"
+                  : "Cases, visits and technician work"}
+              </small>
+            </span>
+            <ArrowUpRight size={17} aria-hidden="true" />
+          </Link>
+          <Link href="/calendar">
+            <span className={styles.shortcutIcon}>
+              <CalendarDays size={21} aria-hidden="true" />
+            </span>
+            <span>
+              <strong>{he ? "לוח השנה" : "Calendar"}</strong>
+              <small>
+                {he
+                  ? "הביקורים והפגישות של הצוות"
+                  : "Your team's visits and appointments"}
+              </small>
+            </span>
+            <ArrowUpRight size={17} aria-hidden="true" />
+          </Link>
+          <div className={styles.intakeNote}>
+            <span>{he ? "תהליך השירות" : "Service intake"}</span>
+            <p>
+              {he
+                ? "שיחת טלפון ← טופס דיגיטלי ← קריאה מוכנה לטיפול"
+                : "Phone call → digital form → service request"}
+            </p>
+          </div>
+        </aside>
       </div>
     </main>
   );
@@ -509,167 +641,218 @@ export function ServiceInquiryDetail({
         canMarkEmergency={canMarkEmergency}
         tenantTimeZone={timezone}
       />
-      <Surface level="raised">
-        <h2>{he ? "פרטי הפנייה" : "Inquiry details"}</h2>
-        <dl className={styles.facts}>
-          <div>
-            <dt>{he ? "לקוח" : "Customer"}</dt>
-            <dd>{item.customer}</dd>
-          </div>
-          <div>
-            <dt>{he ? "אתר" : "Site"}</dt>
-            <dd>{item.location ?? inquiry?.fields.serviceAddress ?? "—"}</dd>
-          </div>
-          <div>
-            <dt>{he ? "תאריך פתיחה" : "Opened"}</dt>
-            <dd>{formatter.format(new Date(item.openedAt))}</dd>
-          </div>
-          <div>
-            <dt>{he ? "תואם טכנאי ליום" : "Technician appointment"}</dt>
-            <dd>
-              {item.appointmentAt
-                ? `${formatter.format(new Date(item.appointmentAt))}${item.appointmentEnd ? ` — ${formatter.format(new Date(item.appointmentEnd))}` : ""}`
-                : he
-                  ? "טרם תואם"
-                  : "Not scheduled"}
-              {item.technician ? (
-                <>
-                  <br />
-                  {item.technician}
-                </>
+      <div className={styles.detailGrid}>
+        <div className={styles.detailMain}>
+          <Surface level="raised">
+            <h2>
+              <ClipboardList size={20} aria-hidden="true" />
+              {he ? "פרטי הפנייה" : "Inquiry details"}
+            </h2>
+            <dl className={styles.facts}>
+              <div>
+                <dt>{he ? "לקוח" : "Customer"}</dt>
+                <dd>{item.customer}</dd>
+              </div>
+              <div>
+                <dt>{he ? "אתר" : "Site"}</dt>
+                <dd>
+                  {item.location ?? inquiry?.fields.serviceAddress ?? "—"}
+                </dd>
+              </div>
+              <div>
+                <dt>{he ? "תאריך פתיחה" : "Opened"}</dt>
+                <dd>{formatter.format(new Date(item.openedAt))}</dd>
+              </div>
+              <div>
+                <dt>{he ? "תואם טכנאי ליום" : "Technician appointment"}</dt>
+                <dd>
+                  {item.appointmentAt
+                    ? `${formatter.format(new Date(item.appointmentAt))}${item.appointmentEnd ? ` — ${formatter.format(new Date(item.appointmentEnd))}` : ""}`
+                    : he
+                      ? "טרם תואם"
+                      : "Not scheduled"}
+                  {item.technician ? (
+                    <>
+                      <br />
+                      {item.technician}
+                    </>
+                  ) : null}
+                </dd>
+              </div>
+              {inquiry?.fields.customerPhone ? (
+                <div>
+                  <dt>{he ? "טלפון" : "Phone"}</dt>
+                  <dd>
+                    <a href={`tel:${inquiry.fields.customerPhone}`}>
+                      <bdi dir="ltr">{inquiry.fields.customerPhone}</bdi>
+                    </a>
+                  </dd>
+                </div>
               ) : null}
-            </dd>
-          </div>
-          {inquiry?.fields.customerPhone ? (
-            <div>
-              <dt>{he ? "טלפון" : "Phone"}</dt>
-              <dd>
-                <a href={`tel:${inquiry.fields.customerPhone}`}>
-                  <bdi dir="ltr">{inquiry.fields.customerPhone}</bdi>
-                </a>
-              </dd>
-            </div>
-          ) : null}
-        </dl>
-        <h3>{he ? "תיאור הבעיה" : "Problem description"}</h3>
-        <p className={styles.problem} dir="auto">
-          {item.faultDescription ??
-            (he
-              ? "טרם התקבל תיאור הבעיה"
-              : "Problem description not received yet")}
-        </p>
-        {inquiry?.fields.exactFailure &&
-        inquiry.fields.exactFailure !== item.faultDescription ? (
-          <p className={styles.problem} dir="auto">
-            {inquiry.fields.exactFailure}
-          </p>
-        ) : null}
-        {item.caseId ? (
-          <Link href={`/field-service/cases/${item.caseId}`}>
-            {he
-              ? "תיאום טכנאי ופרטי עבודת השירות"
-              : "Scheduling and field work"}
-          </Link>
-        ) : null}
-      </Surface>
-      <Surface level="raised">
-        <h2>{he ? "תמונות והודעות הלקוח" : "Customer photos and messages"}</h2>
-        <div className={styles.photos}>
-          {customerAttachments.map((attachment) => (
-            <Photo
-              key={attachment.id}
-              url={`/api/field-service/attachments/${attachment.objectId}`}
-              image={attachment.contentType.startsWith("image/")}
-              label={
-                attachment.caption ??
-                (he ? "תמונת לקוח" : "Customer attachment")
-              }
-            />
-          ))}
-          {customerMessages
-            .filter(
-              (message) =>
-                message.hasMedia &&
-                !customerAttachments.some(
-                  (attachment) => attachment.objectId === message.objectId,
-                ),
-            )
-            .map((message) => (
-              <Photo
-                key={message.messageId}
-                url={`/api/messaging/messages/${message.messageId}/media`}
-                image={message.contentType === "image"}
-                label={he ? "קובץ מהלקוח" : "Customer attachment"}
-              />
-            ))}
-        </div>
-        {customerMessages
-          .filter((message) => message.text)
-          .map((message) => (
-            <p key={message.messageId} className={styles.problem} dir="auto">
-              {message.text}
+            </dl>
+            <h3>{he ? "תיאור הבעיה" : "Problem description"}</h3>
+            <p className={styles.problem} dir="auto">
+              {item.faultDescription ??
+                (he
+                  ? "טרם התקבל תיאור הבעיה"
+                  : "Problem description not received yet")}
             </p>
-          ))}
-        {customerAttachments.length === 0 && customerMessages.length === 0 ? (
-          <p>
-            {he
-              ? "טרם התקבלו הודעות או תמונות"
-              : "No messages or photos received yet"}
-          </p>
-        ) : null}
-        {inquiry?.repliesToLink.length ? (
-          <details>
-            <summary>
-              {he ? "הודעות שצריך לשייך לפנייה" : "Replies needing assignment"}
-            </summary>
-            <InquiryPanel
-              ticket={ticket}
-              inquiry={inquiry}
-              emergencyLabel={null}
-              canMarkEmergency={false}
-              tenantTimeZone={timezone}
-            />
-          </details>
-        ) : null}
-      </Surface>
-      <Surface level="raised">
-        <h2>{he ? "תמונות הטכנאי" : "Technician photos"}</h2>
-        <div className={styles.photos}>
-          {technicianAttachments.map((attachment) => (
-            <Photo
-              key={attachment.id}
-              url={`/api/field-service/attachments/${attachment.objectId}`}
-              image={attachment.contentType.startsWith("image/")}
-              label={`${attachment.caption ?? (attachment.category === "before_photo" ? (he ? "לפני טיפול" : "Before work") : attachment.category === "after_photo" ? (he ? "אחרי טיפול" : "After work") : he ? "צילום טכנאי" : "Technician attachment")} · ${formatter.format(new Date(attachment.createdAt))}`}
-            />
-          ))}
+            {inquiry?.fields.exactFailure &&
+            inquiry.fields.exactFailure !== item.faultDescription ? (
+              <p className={styles.problem} dir="auto">
+                {inquiry.fields.exactFailure}
+              </p>
+            ) : null}
+            {item.caseId ? (
+              <Link
+                className={styles.caseLink}
+                href={`/field-service/cases/${item.caseId}`}
+              >
+                <Wrench size={17} aria-hidden="true" />
+                {he
+                  ? "תיאום טכנאי ופרטי עבודת השירות"
+                  : "Scheduling and field work"}
+              </Link>
+            ) : null}
+          </Surface>
+          <Surface level="raised">
+            <h2>
+              <CalendarDays size={20} aria-hidden="true" />
+              {he ? "השלב הבא" : "Next step"}
+            </h2>
+            <p>
+              {item.status === "open"
+                ? he
+                  ? "בדקו את פרטי הפנייה והחליטו אם נדרש ביקור טכנאי או טיפול טלפוני."
+                  : "Review the request and decide whether it needs a technician visit or telephone support."
+                : item.status === "scheduled"
+                  ? he
+                    ? "הביקור תואם. פרטי העבודה, התמונות ודוח הטכנאי נמצאים בתיק השירות."
+                    : "A technician visit is scheduled. Follow the work, photos and technician report in the service case."
+                  : he
+                    ? "הטיפול בפנייה הסתיים. הפרטים והתיעוד נשמרים כאן לעיון."
+                    : "This inquiry is complete. Its details and evidence remain available here."}
+            </p>
+          </Surface>
         </div>
-        {technicianAttachments.length === 0 ? (
+        <div className={styles.evidenceColumn}>
+          <Surface level="raised">
+            <h2>
+              <MessageCircle size={20} aria-hidden="true" />
+              {he ? "תמונות והודעות הלקוח" : "Customer photos and messages"}
+            </h2>
+            <div className={styles.photos}>
+              {customerAttachments.map((attachment) => (
+                <Photo
+                  key={attachment.id}
+                  url={`/api/field-service/attachments/${attachment.objectId}`}
+                  image={attachment.contentType.startsWith("image/")}
+                  label={
+                    attachment.caption ??
+                    (he ? "תמונת לקוח" : "Customer attachment")
+                  }
+                />
+              ))}
+              {customerMessages
+                .filter(
+                  (message) =>
+                    message.hasMedia &&
+                    !customerAttachments.some(
+                      (attachment) => attachment.objectId === message.objectId,
+                    ),
+                )
+                .map((message) => (
+                  <Photo
+                    key={message.messageId}
+                    url={`/api/messaging/messages/${message.messageId}/media`}
+                    image={message.contentType === "image"}
+                    label={he ? "קובץ מהלקוח" : "Customer attachment"}
+                  />
+                ))}
+            </div>
+            {customerMessages
+              .filter((message) => message.text)
+              .map((message) => (
+                <p
+                  key={message.messageId}
+                  className={styles.problem}
+                  dir="auto"
+                >
+                  {message.text}
+                </p>
+              ))}
+            {customerAttachments.length === 0 &&
+            customerMessages.length === 0 ? (
+              <p>
+                {he
+                  ? "טרם התקבלו הודעות או תמונות"
+                  : "No messages or photos received yet"}
+              </p>
+            ) : null}
+            {inquiry?.repliesToLink.length ? (
+              <details>
+                <summary>
+                  {he
+                    ? "הודעות שצריך לשייך לפנייה"
+                    : "Replies needing assignment"}
+                </summary>
+                <InquiryPanel
+                  ticket={ticket}
+                  inquiry={inquiry}
+                  emergencyLabel={null}
+                  canMarkEmergency={false}
+                  tenantTimeZone={timezone}
+                />
+              </details>
+            ) : null}
+          </Surface>
+          <Surface level="raised">
+            <h2>{he ? "תמונות הטכנאי" : "Technician photos"}</h2>
+            <div className={styles.photos}>
+              {technicianAttachments.map((attachment) => (
+                <Photo
+                  key={attachment.id}
+                  url={`/api/field-service/attachments/${attachment.objectId}`}
+                  image={attachment.contentType.startsWith("image/")}
+                  label={`${attachment.caption ?? (attachment.category === "before_photo" ? (he ? "לפני טיפול" : "Before work") : attachment.category === "after_photo" ? (he ? "אחרי טיפול" : "After work") : he ? "צילום טכנאי" : "Technician attachment")} · ${formatter.format(new Date(attachment.createdAt))}`}
+                />
+              ))}
+            </div>
+            {technicianAttachments.length === 0 ? (
+              <p>
+                {he
+                  ? "טרם הועלו תמונות טכנאי"
+                  : "No technician photos uploaded yet"}
+              </p>
+            ) : null}
+          </Surface>
+          {otherAttachments.length ? (
+            <Surface level="raised">
+              <h2>{he ? "מסמכים נוספים" : "Other documents"}</h2>
+              <div className={styles.photos}>
+                {otherAttachments.map((attachment) => (
+                  <Photo
+                    key={attachment.id}
+                    url={`/api/field-service/attachments/${attachment.objectId}`}
+                    image={attachment.contentType.startsWith("image/")}
+                    label={
+                      attachment.caption ?? (he ? "קובץ מצורף" : "Attachment")
+                    }
+                  />
+                ))}
+              </div>
+            </Surface>
+          ) : null}
+        </div>
+      </div>
+      {canResolve && (item.status === "open" || item.status === "scheduled") ? (
+        <Surface className={styles.resolutionPanel} level="raised">
+          <h2>{he ? "סיום טיפול" : "Complete inquiry"}</h2>
           <p>
             {he
-              ? "טרם הועלו תמונות טכנאי"
-              : "No technician photos uploaded yet"}
+              ? "בסיום העבודה, תעדו מה בוצע וכיצד אושר שהתקלה טופלה."
+              : "When the work is finished, record the resolution and how it was confirmed."}
           </p>
-        ) : null}
-      </Surface>
-      {otherAttachments.length ? (
-        <Surface level="raised">
-          <h2>{he ? "מסמכים נוספים" : "Other documents"}</h2>
-          <div className={styles.photos}>
-            {otherAttachments.map((attachment) => (
-              <Photo
-                key={attachment.id}
-                url={`/api/field-service/attachments/${attachment.objectId}`}
-                image={attachment.contentType.startsWith("image/")}
-                label={attachment.caption ?? (he ? "קובץ מצורף" : "Attachment")}
-              />
-            ))}
-          </div>
-        </Surface>
-      ) : null}
-      {canResolve && (item.status === "open" || item.status === "scheduled") ? (
-        <Surface level="raised">
-          <h2>{he ? "סיום טיפול" : "Complete inquiry"}</h2>
           <form
             onSubmit={(event) => void resolve(event)}
             className={styles.resolution}

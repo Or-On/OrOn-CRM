@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   actionReceiptReply,
+  deferUnconfirmedContextHandoff,
   enforceStandaloneCallbackConsent,
   explicitlyRequestsImmediateCall,
   groundAiReply,
@@ -26,6 +27,32 @@ const selection = {
 };
 
 describe("WhatsApp deterministic grounding (typed fixtures, no provider evaluation)", () => {
+  it("offers human help without surrendering ownership when the model lacks context", () => {
+    const decision = deferUnconfirmedContextHandoff({
+      action: "handoff",
+      reasonCode: "insufficient_context",
+      text: "",
+    });
+    expect(decision).toEqual({
+      action: "reply",
+      replyCode: "knowledge_unavailable",
+      text: "",
+    });
+    expect(groundAiReply(decision, [], "en").text).toContain(
+      "Would you like an operator",
+    );
+  });
+
+  it.each([
+    "human_requested",
+    "emergency",
+    "safety",
+    "regulated_decision",
+  ] as const)("preserves a %s handoff", (reasonCode) => {
+    const decision = { action: "handoff" as const, reasonCode, text: "" };
+    expect(deferUnconfirmedContextHandoff(decision)).toBe(decision);
+  });
+
   it("turns model-classified compound callback text into a standalone confirmation request", () => {
     const classified = {
       action: "request_call" as const,

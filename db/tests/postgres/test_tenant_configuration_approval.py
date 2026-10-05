@@ -6,6 +6,8 @@ from uuid import uuid4
 import asyncpg
 import pytest
 
+from db.tests.postgres.test_platform_administration import _main_workspace
+
 pytestmark = [pytest.mark.postgres, pytest.mark.integration, pytest.mark.rls]
 
 
@@ -190,9 +192,17 @@ async def test_release_history_is_tenant_isolated(pg):
 
 async def test_legacy_service_settings_cannot_bypass_reviewed_activation(pg):
     tenant, admin, _ = await setup(pg)
-    await pg.execute(
-        "SELECT platform.set_tenant_feature_entitlement($1,true,'fixture-entitlement')", tenant
-    )
+    await pg.execute("RESET ROLE")
+    main = await _main_workspace(pg)
+
+    async def entitlement(enabled, request_id):
+        await scope(pg, main, admin)
+        await pg.execute(
+            "SELECT platform.set_tenant_feature_entitlement($1,$2,$3)", tenant, enabled, request_id
+        )
+        await scope(pg, tenant, admin)
+
+    await entitlement(True, "fixture-entitlement")
     with pytest.raises(asyncpg.PostgresError, match="approved workspace"):
         async with pg.transaction():
             await pg.execute(
@@ -223,13 +233,9 @@ async def test_legacy_service_settings_cannot_bypass_reviewed_activation(pg):
                 "SELECT service.configure_current_tenant("
                 "false,false,false,false,false,true,'none',NULL,'legacy-disable')"
             )
-    await pg.execute(
-        "SELECT platform.set_tenant_feature_entitlement($1,true,'repeat-grant')", tenant
-    )
+    await entitlement(True, "repeat-grant")
     assert await pg.fetchval("SELECT platform.current_tenant_feature_enabled('field_service')")
-    await pg.execute(
-        "SELECT platform.set_tenant_feature_entitlement($1,false,'emergency-revoke')", tenant
-    )
+    await entitlement(False, "emergency-revoke")
     assert not await pg.fetchval("SELECT platform.current_tenant_feature_enabled('field_service')")
     with pytest.raises(asyncpg.PostgresError):
         async with pg.transaction():
@@ -237,8 +243,6 @@ async def test_legacy_service_settings_cannot_bypass_reviewed_activation(pg):
                 "SELECT service.configure_current_tenant("
                 "true,false,false,false,false,true,'none',NULL,'revoked-enable')"
             )
-    await pg.execute(
-        "SELECT platform.set_tenant_feature_entitlement($1,true,'restore-entitlement')", tenant
-    )
+    await entitlement(True, "restore-entitlement")
     # Regrant is not itself activation: the operator must restore the approved setup.
     assert not await pg.fetchval("SELECT platform.current_tenant_feature_enabled('field_service')")

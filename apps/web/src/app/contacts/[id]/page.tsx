@@ -6,6 +6,7 @@ import { notFound, redirect } from "next/navigation";
 import { isAuthorized } from "@or-on/auth";
 import {
   getContactDetail,
+  listCallableVoiceFlows,
   getCustomerDossier,
   getFieldServiceFeatureState,
   getTenantSettings,
@@ -28,7 +29,17 @@ async function optionalVoiceFlows() {
     const result = await client.listVoiceFlows();
     if (!result.ok || !Array.isArray(result.data.items))
       return { available: false, items: [] };
-    return { available: true, items: result.data.items };
+    const bindings = await withCurrentTenant("voice:read", (sql) =>
+      listCallableVoiceFlows(sql),
+    );
+    return {
+      available: true,
+      items: bindings.filter(
+        (flow) =>
+          bindings.filter((other) => other.flow_id === flow.flow_id).length ===
+          1,
+      ),
+    };
   } catch (error) {
     // Session expiry still redirects. Optional calling failure must not turn an
     // otherwise authorized contact record into an unavailable CRM page.

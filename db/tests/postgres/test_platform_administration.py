@@ -11,6 +11,18 @@ from db.tests.postgres.test_authentication import _identity
 pytestmark = [pytest.mark.postgres, pytest.mark.integration, pytest.mark.rls]
 
 
+async def _main_workspace(pg: asyncpg.Connection) -> UUID:
+    """Create the management identity in this rollback-only test transaction."""
+    tenant = UUID("00000000-0000-0000-0000-000000000001")
+    await pg.execute(
+        "INSERT INTO tenants(id,name,slug,status) "
+        "VALUES($1,'Fictional main workspace','fixture-main-workspace','active') "
+        "ON CONFLICT(id) DO NOTHING",
+        tenant,
+    )
+    return tenant
+
+
 async def _context(pg: asyncpg.Connection, tenant: UUID | None, user: UUID | None) -> None:
     await pg.execute(
         "SELECT set_config('app.current_tenant', $1, true), "
@@ -45,7 +57,7 @@ async def test_superadmin_can_create_tenant_with_generated_identifier(
         superadmin,
         f"{superadmin}@example.test",
     )
-    await _context(pg, None, superadmin)
+    await _context(pg, await _main_workspace(pg), superadmin)
     await pg.execute("SET LOCAL ROLE platform_web")
 
     slug = f"tenant-{uuid4()}"
@@ -79,7 +91,7 @@ async def test_superadmin_can_guardedly_delete_an_inactive_context_tenant(
         superadmin,
         f"{superadmin}@example.test",
     )
-    _current_owner, current_tenant = await _identity(pg)
+    current_tenant = await _main_workspace(pg)
     _target_owner, target_tenant = await _identity(pg)
     await pg.execute(
         "INSERT INTO messaging.channels(tenant_id,kind,provider,status) "
@@ -121,7 +133,7 @@ async def test_superadmin_can_guardedly_delete_an_inactive_context_tenant(
     )
 
 
-async def test_tenant_deletion_requires_superadmin_and_a_different_active_context(
+async def test_tenant_deletion_requires_main_superadmin_and_never_deletes_main(
     pg: asyncpg.Connection,
 ) -> None:
     owner, tenant = await _identity(pg)
@@ -140,12 +152,24 @@ async def test_tenant_deletion_requires_superadmin_and_a_different_active_contex
     await pg.execute("RESET ROLE")
     await pg.execute("UPDATE users SET is_superuser = true WHERE id = $1", owner)
     await pg.execute("SET LOCAL ROLE platform_web")
+    assert not await pg.fetch("SELECT * FROM platform.list_tenants_for_administrator()")
+    with pytest.raises(asyncpg.InsufficientPrivilegeError):
+        async with pg.transaction():
+            await pg.fetchval(
+                "SELECT platform.delete_tenant_for_administrator($1,$2)",
+                other_tenant,
+                "foreign-context-superadmin-denied",
+            )
+    await pg.execute("RESET ROLE")
+    main = await _main_workspace(pg)
+    await _context(pg, main, owner)
+    await pg.execute("SET LOCAL ROLE platform_web")
     with pytest.raises(asyncpg.InvalidParameterValueError):
         async with pg.transaction():
             await pg.fetchval(
                 "SELECT platform.delete_tenant_for_administrator($1,$2)",
-                tenant,
-                "current-tenant-delete-denied",
+                main,
+                "main-tenant-delete-denied",
             )
     await pg.execute("RESET ROLE")
 

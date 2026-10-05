@@ -4,6 +4,10 @@ import {
   setFieldServiceEntitlement,
 } from "@or-on/crm";
 import { NextResponse } from "next/server";
+import {
+  canManageTenants,
+  MAIN_TENANT_ID,
+} from "../../../../features/tenant-administration";
 
 import {
   ForbiddenError,
@@ -30,7 +34,8 @@ export async function PATCH(
     const tenant = await withCurrentTenant(
       "platform:read",
       async (sql, session) => {
-        if (!session.isSuperuser) throw new ForbiddenError("Forbidden");
+        if (!canManageTenants(session.isSuperuser, session.tenant.tenantId))
+          throw new ForbiddenError("Forbidden");
         await setFieldServiceEntitlement(
           sql,
           id,
@@ -61,7 +66,11 @@ export async function DELETE(
     await assertCrmMutation(request);
     const { id } = await context.params;
     const deleted = await withCurrentTenant("platform:read", (sql, session) => {
-      if (!session.isSuperuser) throw new ForbiddenError("Forbidden");
+      if (
+        !canManageTenants(session.isSuperuser, session.tenant.tenantId) ||
+        id === MAIN_TENANT_ID
+      )
+        throw new ForbiddenError("Forbidden");
       return deleteTenantForAdministrator(sql, id, requestId(request));
     });
     if (!deleted)

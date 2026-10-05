@@ -7,13 +7,15 @@ import {
   withCurrentTenant,
 } from "../../features/auth";
 import { TenantWorkspace } from "../../features/tenants";
+import { canManageTenants } from "../../features/tenant-administration";
 
 export default async function TenantsPage() {
   try {
     const data = await withCurrentTenant(
       "platform:read",
       async (sql, session) => {
-        if (!session.isSuperuser) throw new ForbiddenError("Forbidden");
+        if (!canManageTenants(session.isSuperuser, session.tenant.tenantId))
+          throw new ForbiddenError("Forbidden");
         return {
           currentTenantId: session.tenant.tenantId,
           tenants: await listPlatformTenants(sql),

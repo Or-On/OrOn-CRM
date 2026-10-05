@@ -19,7 +19,10 @@ vi.mock("next/navigation", () => ({
   useRouter: () => navigation,
 }));
 vi.mock("../src/features/crm", () => ({ crmMutation: transport.mutate }));
-vi.mock("../src/features/voice", () => ({ voiceMutation: transport.mutate }));
+vi.mock("../src/features/voice", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  voiceMutation: transport.mutate,
+}));
 import { ContactDetailPanel, ContactManager } from "../src/features/contacts";
 import { FormValidation } from "../src/i18n/form-validation";
 import { OperationsPanel } from "../src/features/operations";
@@ -506,7 +509,8 @@ describe("form recovery and permission presentation", () => {
             {
               flow_id: "702a2dd8-24d9-4d54-a571-89c69978d48a",
               language: "he",
-              latest_version: 1,
+              latest_version: 3,
+              agent_version: 4,
               name: "Published conversation",
               packaged: false,
             },
@@ -524,6 +528,11 @@ describe("form recovery and permission presentation", () => {
     ).getByRole<HTMLButtonElement>("button", {
       name: en.tenantPrimary.call,
     });
+    expect(
+      screen.getByRole("option", {
+        name: "Published conversation · Agent v4 · Script v3",
+      }),
+    ).toBeTruthy();
     expect(call.disabled).toBe(true);
     fireEvent.change(screen.getByLabelText(en.contacts.callerAddressForm), {
       target: { value: "male" },

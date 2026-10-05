@@ -2567,6 +2567,61 @@ describe.skipIf(sourceUrl === undefined)(
         ).toBe("human");
         await resetCallbackAi();
         const foreignSecret = `FOREIGN_PRIVATE_FACT_${randomUUID()}`;
+        // An explicit return to AI withdraws prior human requests. Subsequent
+        // missing-context decisions must still produce a reply, not a handoff loop.
+        const resumedHandoffs = await admin<{ status: string }[]>`
+          SELECT status FROM automation.handoffs
+          WHERE tenant_id=${tenantId}::uuid AND conversation_id=${conversationId}::uuid
+            AND source_channel='whatsapp'
+        `;
+        expect(resumedHandoffs.length).toBeGreaterThan(0);
+        expect(
+          resumedHandoffs.every(
+            (handoff) => !["pending", "accepted"].includes(handoff.status),
+          ),
+        ).toBe(true);
+        expect(
+          resumedHandoffs.some((handoff) => handoff.status === "cancelled"),
+        ).toBe(true);
+        const sentBeforeResume = callbackSend.mock.calls.length;
+        const decisionsBeforeResume = callbackDecide.mock.calls.length;
+        callbackDecide.mockResolvedValueOnce({
+          action: "handoff",
+          reasonCode: "insufficient_context",
+          text: "",
+        });
+        callbackDecide.mockResolvedValueOnce({
+          action: "handoff",
+          reasonCode: "insufficient_context",
+          text: "",
+        });
+        await callbackInbound(
+          `wamid.resume-help-${randomUUID()}`,
+          "My TV has a problem. Can you help?",
+        );
+        await callbackInbound(
+          `wamid.resume-detail-${randomUUID()}`,
+          "It flickers after I turn it on.",
+        );
+        expect(callbackDecide).toHaveBeenCalledTimes(decisionsBeforeResume + 2);
+        expect(callbackSend).toHaveBeenCalledTimes(sentBeforeResume + 2);
+        const [resumed] = await admin<
+          {
+            ownership_mode: string;
+            handoff_reason_safe: string | null;
+            active_handoffs: number;
+          }[]
+        >`
+          SELECT ownership_mode, handoff_reason_safe,
+            (SELECT count(*)::int FROM automation.handoffs h WHERE h.conversation_id=c.id
+              AND h.status IN ('pending','accepted')) AS active_handoffs
+          FROM messaging.conversations c WHERE id=${conversationId}::uuid
+        `;
+        expect(resumed).toMatchObject({
+          ownership_mode: "ai",
+          handoff_reason_safe: null,
+          active_handoffs: 0,
+        });
         let foreignDocument = "";
         await admin.begin(async (tx) => {
           await tx`INSERT INTO memberships(tenant_id,user_id,role) VALUES(${unrelatedTenant}::uuid,${userId}::uuid,'owner') ON CONFLICT DO NOTHING`;

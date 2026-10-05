@@ -5,7 +5,10 @@ const dependencies = vi.hoisted(() => ({
   issueDispatcherGrant: vi.fn(),
 }));
 
-vi.mock("@or-on/crm", () => ({ getContact: dependencies.getContact }));
+vi.mock("@or-on/crm", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  getContact: dependencies.getContact,
+}));
 vi.mock("../src/features/auth", () => ({
   assertAuthenticatedMutation: vi.fn().mockResolvedValue({
     tenant: { role: "owner", tenantId: "tenant-id" },

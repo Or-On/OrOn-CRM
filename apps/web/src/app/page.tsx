@@ -11,6 +11,7 @@ import {
   getTenantSettings,
   usesServiceManagerExperience,
   serviceManagerMetrics,
+  listServiceInquiries,
   type ServiceOverviewPeriod,
 } from "@or-on/crm";
 import { isAuthorized } from "@or-on/auth";
@@ -68,6 +69,10 @@ export default async function OverviewPage({
               period,
             ),
             period,
+            recentInquiries: (
+              await listServiceInquiries(sql, { timezone: settings.timezone })
+            ).inquiries.slice(0, 6),
+            timezone: settings.timezone,
           };
         }
         const metrics = await overviewMetrics(sql);
@@ -97,6 +102,8 @@ export default async function OverviewPage({
           tenantName={data.tenantName}
           metrics={data.serviceMetrics}
           period={data.period}
+          recentInquiries={data.recentInquiries}
+          timezone={data.timezone}
         />
       );
     return <Overview {...data} />;

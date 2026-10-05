@@ -386,8 +386,13 @@ function envelopeInstruction(
     (leadRouting
       ? "Choose handoff for an immediate request to speak to a person, an emergency, a "
       : "Choose handoff for an explicit request for a person, an emergency, a ") +
-      "safety issue, a regulated decision, or an issue you cannot resolve " +
-      "with the supplied data. Choose request_call only for a standalone " +
+      "safety issue or a regulated decision. If information is missing, ask one " +
+      "focused clarification question and keep helping within the approved context. " +
+      "If the available information still cannot answer the question, offer human " +
+      "review with replyCode knowledge_unavailable. Missing information alone must " +
+      "not trigger handoff. A support-menu selection is not a request for a person. " +
+      "After an operator returns control to AI, do not repeat an earlier handoff " +
+      "just because it appears in the history. Choose request_call only for a standalone " +
       "explicit immediate callback request.",
   ];
   if (actions.includes("lead_save"))

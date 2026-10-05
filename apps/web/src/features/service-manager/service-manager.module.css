@@ -2,6 +2,301 @@
   display: grid;
   gap: 1.25rem;
   min-width: 0;
+  width: 100%;
+  max-width: 92rem;
+  margin-inline: auto;
+}
+.register :is(th, td) {
+  padding: 1rem;
+  text-align: start;
+  vertical-align: top;
+}
+.register td:first-child {
+  min-inline-size: 12rem;
+}
+.register td > small {
+  display: block;
+  margin-block-start: 0.35rem;
+}
+.overview {
+  max-width: 92rem;
+  margin-inline: auto;
+  display: grid;
+  gap: 1.5rem;
+}
+.overviewHeading,
+.periodBar,
+.sectionHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+}
+.overviewHeading :global(.or-page-header) {
+  margin: 0;
+}
+.overviewHeading h1 {
+  font-size: clamp(1.8rem, 3vw, 2.4rem);
+}
+.overviewHeading > a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.periodBar {
+  border-block: 1px solid var(--or-border);
+  padding-block: 0.75rem;
+}
+.periodBar .periods,
+.periodBar .periodRange {
+  margin: 0;
+}
+.overviewGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 21rem;
+  gap: 1.25rem;
+  align-items: start;
+}
+.recent {
+  overflow: hidden;
+  min-width: 0;
+  border-radius: 1rem;
+}
+.sectionHeading {
+  padding: 1.4rem;
+  border-block-end: 1px solid var(--or-border);
+}
+.sectionHeading p {
+  margin: 0 0 0.4rem;
+  color: var(--or-text-muted);
+  font-size: 0.75rem;
+}
+.sectionHeading h2,
+.shortcuts h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+.sectionHeading a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+}
+.recentList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.recentList li + li {
+  border-block-start: 1px solid var(--or-border);
+}
+.recentList a {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  padding: 1.2rem 1.4rem;
+  text-decoration: none;
+  transition: background 0.15s;
+}
+.recentList a:hover {
+  background: var(--or-accent-soft);
+}
+.inquiryMark,
+.shortcutIcon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 2.75rem;
+  block-size: 2.75rem;
+  border: 1px solid var(--or-border);
+  border-radius: 0.8rem;
+  color: var(--or-accent);
+  background: var(--or-accent-soft);
+}
+.recentText {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 0.45rem;
+}
+.recentText strong {
+  font-size: 0.95rem;
+  overflow-wrap: anywhere;
+}
+.recentText > span,
+.recentStatus time {
+  color: var(--or-text-muted);
+  font-size: 0.78rem;
+}
+.recentStatus {
+  display: grid;
+  justify-items: end;
+  gap: 0.5rem;
+}
+.empty {
+  display: grid;
+  justify-items: center;
+  padding: 3.5rem 1.5rem;
+  text-align: center;
+}
+.empty > svg {
+  color: var(--or-accent);
+  margin-bottom: 0.75rem;
+}
+.empty h3 {
+  font-size: 1.05rem;
+  margin: 0.5rem 0;
+}
+.empty p {
+  color: var(--or-text-muted);
+  line-height: 1.7;
+  max-width: 26rem;
+  margin: 0.25rem 0;
+}
+.shortcuts {
+  display: grid;
+  gap: 0.9rem;
+}
+.shortcuts h2 {
+  padding: 0.25rem;
+}
+.shortcuts > a {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 1.15rem;
+  border: 1px solid var(--or-border);
+  border-radius: 1rem;
+  text-decoration: none;
+  background: var(--or-bg-raised);
+}
+.shortcuts > a:hover {
+  border-color: var(--or-accent);
+}
+.shortcuts > a > span:nth-child(2) {
+  display: grid;
+  flex: 1;
+  gap: 0.4rem;
+}
+.shortcuts strong {
+  font-size: 0.95rem;
+}
+.shortcuts small {
+  color: var(--or-text-muted);
+  line-height: 1.6;
+}
+.intakeNote {
+  border-inline-start: 2px solid var(--or-accent);
+  margin-block-start: 0.3rem;
+  padding: 0.4rem 1rem;
+}
+.intakeNote span {
+  font-size: 0.72rem;
+  color: var(--or-text-muted);
+}
+.intakeNote p {
+  font-size: 0.85rem;
+  margin: 0.45rem 0;
+  line-height: 1.7;
+}
+.metricLabel {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  color: var(--or-text-muted);
+  font-size: 0.875rem;
+}
+.metricLabel svg {
+  color: var(--or-accent);
+}
+.workspace :global(.or-page-header) {
+  margin-bottom: 0.4rem;
+}
+.workspace > :global(.or-surface),
+.detailMain > :global(.or-surface),
+.evidenceColumn > :global(.or-surface) {
+  padding: clamp(1.1rem, 2vw, 1.75rem);
+  border-radius: 1rem;
+}
+.detailGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(18rem, 0.8fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+.detailMain,
+.evidenceColumn {
+  display: grid;
+  min-width: 0;
+  gap: 1.25rem;
+}
+.detailMain h2,
+.evidenceColumn h2 {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.detailMain h2 svg,
+.evidenceColumn h2 svg {
+  color: var(--or-accent);
+}
+.detailMain h3 {
+  margin-top: 1.5rem;
+  font-size: 0.85rem;
+  color: var(--or-text-muted);
+}
+.detailMain .problem {
+  padding: 1rem;
+  border-inline-start: 3px solid var(--or-accent);
+  border-radius: 0.5rem;
+  background: var(--or-accent-soft);
+}
+.detailMain .facts {
+  border-block: 1px solid var(--or-border);
+  padding-block: 1.1rem;
+  gap: 1.35rem;
+}
+.detailMain .facts dd {
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.caseLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-block-start: 0.65rem;
+  font-size: 0.9rem;
+}
+.evidenceColumn p {
+  color: var(--or-text-muted);
+  font-size: 0.85rem;
+  line-height: 1.7;
+}
+.resolutionPanel {
+  padding: 1.5rem;
+  border: 1px solid var(--or-border);
+  border-radius: 1rem;
+  background: var(--or-bg-raised);
+}
+.resolutionPanel h2 {
+  margin-bottom: 0.6rem;
+}
+.resolutionPanel > p {
+  color: var(--or-text-muted);
+  font-size: 0.85rem;
+  line-height: 1.6;
+  margin-bottom: 1.4rem;
+}
+.register {
+  border: 1px solid var(--or-border);
+  border-radius: 1rem;
+  overflow: hidden;
+}
+.filters {
+  padding: 1.1rem;
+  border: 1px solid var(--or-border);
+  border-radius: 1rem;
+  background: var(--or-bg-raised);
 }
 .workspace > * {
   min-width: 0;
@@ -24,7 +319,9 @@
 }
 .periods a[aria-current] {
   font-weight: 700;
-  background: var(--or-bg-raised);
+  background: var(--or-accent-soft);
+  color: var(--or-accent);
+  border-color: var(--or-accent);
 }
 .periodRange {
   display: flex;
@@ -44,10 +341,11 @@
 .metrics article {
   display: grid;
   gap: 0.75rem;
-  padding: 1.5rem;
+  padding: 1.3rem;
+  border-radius: 1rem;
 }
 .metrics strong {
-  font-size: 2.5rem;
+  font-size: 2.15rem;
   line-height: 1.2;
 }
 .filters {
@@ -97,7 +395,7 @@
 .photo img {
   width: 100%;
   height: 160px;
-  object-fit: contain;
+  object-fit: cover;
   border-radius: 0.25rem;
 }
 .resolution {
@@ -105,7 +403,43 @@
   gap: 1rem;
   max-width: 42rem;
 }
+@media (max-width: 1080px) {
+  .overviewGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .shortcuts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .shortcuts h2,
+  .intakeNote {
+    grid-column: 1 / -1;
+  }
+  .detailGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 @media (max-width: 720px) {
+  .overviewHeading > a {
+    width: 100%;
+    justify-content: center;
+  }
+  .shortcuts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .recentList a {
+    flex-wrap: wrap;
+    gap: 0.7rem;
+    padding: 1rem;
+  }
+  .recentStatus {
+    flex-basis: 100%;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .recentList a > svg {
+    display: none;
+  }
   .register :global(.or-data-table) {
     overflow: visible;
   }
@@ -159,8 +493,21 @@
     grid-template-columns: 1fr;
   }
 }
+@media (prefers-reduced-motion: reduce) {
+  .recentList a {
+    transition: none;
+  }
+}
 @media (max-width: 400px) {
-  .metrics {
-    grid-template-columns: 1fr;
+  .metrics > * {
+    padding: 1rem;
+  }
+  .metricLabel {
+    align-items: start;
+    gap: 0.4rem;
+    font-size: 0.8rem;
+  }
+  .metricLabel svg {
+    flex-shrink: 0;
   }
 }

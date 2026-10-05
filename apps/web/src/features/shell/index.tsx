@@ -1,6 +1,7 @@
 "use client";
 
 import type { PublicSession } from "@or-on/auth";
+import { canManageTenants } from "../tenant-administration";
 import {
   Button,
   Dialog,
@@ -331,7 +332,11 @@ export function AppShell({
         (item) =>
           session?.permissions.includes(destinationPermission(item.href)) &&
           featureEnabled(item.href) &&
-          (item.href !== "/tenants" || session.user.isSuperuser),
+          (item.href !== "/tenants" ||
+            canManageTenants(
+              session.user.isSuperuser,
+              session.tenant.tenantId,
+            )),
       )
       .map((item) => ({
         href: item.href,
@@ -722,7 +727,11 @@ export function AppShell({
                 (item) =>
                   item.group === group &&
                   featureEnabled(item.href) &&
-                  (item.href !== "/tenants" || session.user.isSuperuser) &&
+                  (item.href !== "/tenants" ||
+                    canManageTenants(
+                      session.user.isSuperuser,
+                      session.tenant.tenantId,
+                    )) &&
                   session.permissions.includes(
                     destinationPermission(item.href),
                   ),
@@ -736,7 +745,11 @@ export function AppShell({
                     (item) =>
                       item.group === group &&
                       featureEnabled(item.href) &&
-                      (item.href !== "/tenants" || session.user.isSuperuser) &&
+                      (item.href !== "/tenants" ||
+                        canManageTenants(
+                          session.user.isSuperuser,
+                          session.tenant.tenantId,
+                        )) &&
                       session.permissions.includes(
                         destinationPermission(item.href),
                       ),

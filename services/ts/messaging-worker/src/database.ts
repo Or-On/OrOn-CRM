@@ -163,6 +163,7 @@ import {
   actionReceiptReply,
   conversationReplyCodes,
   enforceStandaloneCallbackConsent,
+  deferUnconfirmedContextHandoff,
   explicitlyRequestsImmediateCall,
   factDigest,
   groundAiReply,
@@ -5248,7 +5249,8 @@ async function processWhatsAppAiReply(
                     },
                   );
                   const action = leadActionName(proposed);
-                  if (action === undefined) return proposed;
+                  if (action === undefined)
+                    return deferUnconfirmedContextHandoff(proposed);
                   if (last)
                     throw new WhatsAppAiProviderError(
                       "ai_invalid_output",

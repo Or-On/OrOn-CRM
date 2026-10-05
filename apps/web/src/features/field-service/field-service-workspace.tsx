@@ -541,7 +541,9 @@ export function FieldServiceWorkspace({
   }
 
   return (
-    <div className="field-service-workspace">
+    <div
+      className={`field-service-workspace${serviceManager ? " field-service-workspace--manager" : ""}`}
+    >
       <header className="platform-admin-hero field-service-hero">
         <div className="platform-admin-hero__copy">
           <span className="eyebrow">

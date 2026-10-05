@@ -638,7 +638,9 @@ export function ServiceCaseWorkspace({
   }
 
   return (
-    <div className="service-case-workspace">
+    <div
+      className={`service-case-workspace${serviceManager ? " service-case-workspace--manager" : ""}`}
+    >
       <Link className="service-case-back" href="/field-service">
         <ArrowLeft aria-hidden="true" size={15} />
         {he ? "חזרה לשירות שטח" : "Back to Field Service"}
@@ -677,6 +679,20 @@ export function ServiceCaseWorkspace({
         <InlineFeedback description={error} tone="critical" />
       ) : null}
 
+      <nav
+        className="service-case-section-links"
+        aria-label={he ? "חלקי תיק השירות" : "Service case sections"}
+      >
+        <a href="#technician-briefing-heading">
+          <ClipboardList size={16} aria-hidden="true" />
+          {he ? "פרטי הקריאה" : "Case details"}
+        </a>
+        <a href="#service-case-field-work">
+          <Clock3 size={16} aria-hidden="true" />
+          {he ? "ביקורים ועבודה" : "Visits & work"}
+          <span>{dossier.visits.length}</span>
+        </a>
+      </nav>
       <Surface
         aria-labelledby="technician-briefing-heading"
         className="technician-briefing"
@@ -695,8 +711,8 @@ export function ServiceCaseWorkspace({
             </h2>
             <p>
               {he
-                ? "סיכום מובנה מהתיק, בלי להציג תמלול מלא."
-                : "Structured case context without an unfiltered transcript."}
+                ? "הלקוח, התקלה והביקור הבא — במקום אחד."
+                : "The customer, the issue and the next visit, in one place."}
             </p>
           </div>
           <PreparationPrompt
@@ -785,134 +801,158 @@ export function ServiceCaseWorkspace({
             )}
           </section>
         </div>
-        <div className="technician-briefing__context">
-          <section>
-            <h3>WhatsApp</h3>
-            <p dir="auto">
-              {briefing.whatsappSummary ??
-                (he
-                  ? "אין סיכום WhatsApp זמין."
-                  : "No WhatsApp summary available.")}
-            </p>
-          </section>
-          {canReadVoice ? (
+        <details
+          className="technician-briefing__additional"
+          open={!serviceManager}
+        >
+          <summary>
+            {he ? "תקשורת והיסטוריית שירות" : "Communication & service history"}
+          </summary>
+          <div className="technician-briefing__context">
             <section>
-              <h3>{he ? "סיכום שיחה" : "Voice summary"}</h3>
+              <h3>WhatsApp</h3>
               <p dir="auto">
-                {briefing.voiceSummary ??
-                  (he ? "אין סיכום שיחה זמין." : "No voice summary available.")}
+                {briefing.whatsappSummary ??
+                  (he
+                    ? "אין סיכום WhatsApp זמין."
+                    : "No WhatsApp summary available.")}
               </p>
             </section>
-          ) : null}
-        </div>
-        <section className="technician-briefing__history">
-          <h3>
-            {he ? "היסטוריית שירות רלוונטית" : "Relevant service history"}
-          </h3>
-          {briefing.previousService.length === 0 ? (
-            <p>
-              {he
-                ? "לא נמצאו ביקורים קודמים למוצר או ללקוח הזה."
-                : "No relevant previous service visits were found."}
-            </p>
-          ) : (
-            <ol>
-              {briefing.previousService.map((item) => (
-                <li key={`${item.caseReference}:${String(item.visitNumber)}`}>
-                  <div>
-                    <strong dir="auto">
-                      {item.caseReference} · {item.caseTitle}
-                    </strong>
-                    <span>
-                      {new Intl.DateTimeFormat(locale, {
-                        dateStyle: "medium",
-                        timeZone: timezone,
-                      }).format(new Date(item.servicedAt))}
-                      {" · "}
-                      <bdi dir="auto">{item.technicianName}</bdi>
-                    </span>
-                  </div>
-                  <p dir="auto">
-                    {[item.diagnosis, item.workPerformed]
-                      .filter(Boolean)
-                      .join(" · ") ||
-                      (he
-                        ? "לא נשמר סיכום עבודה."
-                        : "No work summary recorded.")}
-                  </p>
-                  {item.replacementPartDetails ? (
-                    <small dir="auto">
-                      {he ? "חלק" : "Part"}: {item.replacementPartDetails}
-                    </small>
-                  ) : null}
-                </li>
-              ))}
-            </ol>
-          )}
-        </section>
+            {canReadVoice ? (
+              <section>
+                <h3>{he ? "סיכום שיחה" : "Voice summary"}</h3>
+                <p dir="auto">
+                  {briefing.voiceSummary ??
+                    (he
+                      ? "אין סיכום שיחה זמין."
+                      : "No voice summary available.")}
+                </p>
+              </section>
+            ) : null}
+          </div>
+          <section className="technician-briefing__history">
+            <h3>
+              {he ? "היסטוריית שירות רלוונטית" : "Relevant service history"}
+            </h3>
+            {briefing.previousService.length === 0 ? (
+              <p>
+                {he
+                  ? "לא נמצאו ביקורים קודמים למוצר או ללקוח הזה."
+                  : "No relevant previous service visits were found."}
+              </p>
+            ) : (
+              <ol>
+                {briefing.previousService.map((item) => (
+                  <li key={`${item.caseReference}:${String(item.visitNumber)}`}>
+                    <div>
+                      <strong dir="auto">
+                        {item.caseReference} · {item.caseTitle}
+                      </strong>
+                      <span>
+                        {new Intl.DateTimeFormat(locale, {
+                          dateStyle: "medium",
+                          timeZone: timezone,
+                        }).format(new Date(item.servicedAt))}
+                        {" · "}
+                        <bdi dir="auto">{item.technicianName}</bdi>
+                      </span>
+                    </div>
+                    <p dir="auto">
+                      {[item.diagnosis, item.workPerformed]
+                        .filter(Boolean)
+                        .join(" · ") ||
+                        (he
+                          ? "לא נשמר סיכום עבודה."
+                          : "No work summary recorded.")}
+                    </p>
+                    {item.replacementPartDetails ? (
+                      <small dir="auto">
+                        {he ? "חלק" : "Part"}: {item.replacementPartDetails}
+                      </small>
+                    ) : null}
+                  </li>
+                ))}
+              </ol>
+            )}
+          </section>
+        </details>
       </Surface>
 
       <div className="service-case-layout">
         <div className="service-case-main">
           <Surface className="service-case-section" level="raised">
-            <header>
-              <div>
-                <span className="eyebrow">
-                  {he ? "קובץ לקוח" : "Customer dossier"}
-                </span>
-                <h2 dir="auto">{serviceCase.customerName}</h2>
+            <details
+              className="service-customer-details"
+              open={!serviceManager}
+            >
+              <summary>
+                {he
+                  ? "פרטי לקוח ומוצר נוספים"
+                  : "More customer & product details"}
+              </summary>
+              <header>
+                <div>
+                  <span className="eyebrow">
+                    {he ? "קובץ לקוח" : "Customer dossier"}
+                  </span>
+                  <h2 dir="auto">{serviceCase.customerName}</h2>
+                </div>
+                {isTechnician ? null : (
+                  <Link href={`/contacts/${serviceCase.customerContactId}`}>
+                    {he ? "פתיחת לקוח" : "Open contact"}
+                  </Link>
+                )}
+              </header>
+              <dl className="service-case-details">
+                <div>
+                  <dt>{he ? "מזהה לאומי" : "National ID"}</dt>
+                  <dd dir="ltr">
+                    {dossier.customer.nationalIdMasked ??
+                      (he ? "לא סופק" : "Not supplied")}
+                  </dd>
+                </div>
+                <div>
+                  <dt>{he ? "אחריות" : "Warranty"}</dt>
+                  <dd>{warrantyStatusLabel(serviceCase.warrantyStatus, he)}</dd>
+                </div>
+                <div>
+                  <dt>{he ? "דגם" : "Model"}</dt>
+                  <dd>
+                    <bdi dir="auto">{serviceCase.productModel ?? "—"}</bdi>
+                  </dd>
+                </div>
+                <div>
+                  <dt>{he ? "מספר סידורי" : "Serial"}</dt>
+                  <dd>
+                    <bdi dir="auto">{serviceCase.serialNumber ?? "—"}</bdi>
+                  </dd>
+                </div>
+              </dl>
+              <p className="service-case-fault" dir="auto">
+                {serviceCase.faultDescription}
+              </p>
+              <div className="service-case-classifications">
+                {dossier.customer.classifications.length === 0 ? (
+                  <span>{he ? "ללא סיווג" : "No classification"}</span>
+                ) : (
+                  dossier.customer.classifications.map((item) => (
+                    <Badge
+                      dir="auto"
+                      key={item.id}
+                      label={item.name}
+                      tone="neutral"
+                    />
+                  ))
+                )}
               </div>
-              {isTechnician ? null : (
-                <Link href={`/contacts/${serviceCase.customerContactId}`}>
-                  {he ? "פתיחת לקוח" : "Open contact"}
-                </Link>
-              )}
-            </header>
-            <dl className="service-case-details">
-              <div>
-                <dt>{he ? "מזהה לאומי" : "National ID"}</dt>
-                <dd dir="ltr">
-                  {dossier.customer.nationalIdMasked ??
-                    (he ? "לא סופק" : "Not supplied")}
-                </dd>
-              </div>
-              <div>
-                <dt>{he ? "אחריות" : "Warranty"}</dt>
-                <dd>{warrantyStatusLabel(serviceCase.warrantyStatus, he)}</dd>
-              </div>
-              <div>
-                <dt>{he ? "דגם" : "Model"}</dt>
-                <dd>
-                  <bdi dir="auto">{serviceCase.productModel ?? "—"}</bdi>
-                </dd>
-              </div>
-              <div>
-                <dt>{he ? "מספר סידורי" : "Serial"}</dt>
-                <dd>
-                  <bdi dir="auto">{serviceCase.serialNumber ?? "—"}</bdi>
-                </dd>
-              </div>
-            </dl>
-            <p className="service-case-fault" dir="auto">
-              {serviceCase.faultDescription}
-            </p>
-            <div className="service-case-classifications">
-              {dossier.customer.classifications.length === 0 ? (
-                <span>{he ? "ללא סיווג" : "No classification"}</span>
-              ) : (
-                dossier.customer.classifications.map((item) => (
-                  <Badge
-                    dir="auto"
-                    key={item.id}
-                    label={item.name}
-                    tone="neutral"
-                  />
-                ))
-              )}
-            </div>
+            </details>
           </Surface>
 
-          <Surface className="service-case-section" level="raised">
+          <Surface
+            id="service-case-field-work"
+            className="service-case-section"
+            level="raised"
+          >
             <header>
               <div>
                 <span className="eyebrow">

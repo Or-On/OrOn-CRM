@@ -3,11 +3,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const state = vi.hoisted(() => ({
   assertMutation: vi.fn(),
   list: vi.fn(),
+  create: vi.fn(),
   setEntitlement: vi.fn(),
   superuser: true,
+  activeTenantId: "00000000-0000-0000-0000-000000000001",
 }));
 
-vi.mock("@or-on/crm", () => ({
+vi.mock("@or-on/crm", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  createTenantWithDefaults: state.create,
   deleteTenantForAdministrator: vi.fn(),
   listPlatformTenants: state.list,
   setFieldServiceEntitlement: state.setEntitlement,
@@ -25,11 +29,20 @@ vi.mock("../src/features/auth", () => ({
     permission: string,
     operation: (
       sql: unknown,
-      session: { readonly isSuperuser: boolean },
+      session: {
+        readonly isSuperuser: boolean;
+        readonly tenant: { readonly tenantId: string };
+      },
     ) => unknown,
   ) => {
     expect(permission).toBe("platform:read");
-    return operation({}, { isSuperuser: state.superuser });
+    return operation(
+      {},
+      {
+        isSuperuser: state.superuser,
+        tenant: { tenantId: state.activeTenantId },
+      },
+    );
   },
 }));
 vi.mock("../src/features/crm-route", () => ({
@@ -45,6 +58,7 @@ vi.mock("../src/features/crm-route", () => ({
 }));
 
 import { PATCH } from "../src/app/api/tenants/[id]/route";
+import { GET, POST } from "../src/app/api/tenants/route";
 
 const tenantId = "30000000-0000-4000-8000-000000000001";
 const context = { params: Promise.resolve({ id: tenantId }) };
@@ -59,6 +73,7 @@ describe("platform tenant capability boundary", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     state.superuser = true;
+    state.activeTenantId = "00000000-0000-0000-0000-000000000001";
     state.assertMutation.mockResolvedValue(undefined);
     state.setEntitlement.mockResolvedValue(undefined);
     state.list.mockResolvedValue([
@@ -69,6 +84,30 @@ describe("platform tenant capability boundary", () => {
       },
     ]);
   });
+
+  it.each([false, true])(
+    "denies customer-workspace directory and tenant creation (superuser %s)",
+    async (superuser) => {
+      state.superuser = superuser;
+      state.activeTenantId = tenantId;
+      expect((await GET()).status).toBe(403);
+      expect(
+        (
+          await POST(
+            new Request("http://localhost/api/tenants", {
+              method: "POST",
+              body: JSON.stringify({
+                name: "Fictional tenant",
+                slug: "fictional",
+              }),
+            }),
+          )
+        ).status,
+      ).toBe(403);
+      expect(state.list).not.toHaveBeenCalled();
+      expect(state.create).not.toHaveBeenCalled();
+    },
+  );
 
   it("requires a platform super administrator before changing entitlement", async () => {
     state.superuser = false;
@@ -86,6 +125,13 @@ describe("platform tenant capability boundary", () => {
     state.assertMutation.mockResolvedValue(undefined);
     expect((await PATCH(request("true"), context)).status).toBe(400);
     expect(state.setEntitlement).not.toHaveBeenCalled();
+  });
+
+  it("refuses cross-tenant entitlements from a customer workspace", async () => {
+    state.activeTenantId = tenantId;
+    expect((await PATCH(request(true), context)).status).toBe(403);
+    expect(state.setEntitlement).not.toHaveBeenCalled();
+    expect(state.list).not.toHaveBeenCalled();
   });
 
   it("persists the entitlement and returns the separately disabled activation state", async () => {

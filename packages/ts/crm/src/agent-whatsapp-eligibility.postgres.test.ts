@@ -136,6 +136,63 @@ async function revision(
 describe.skipIf(databaseUrl === undefined)(
   "approved WhatsApp versions under actual RLS",
   () => {
+    it("withdraws human handoffs on AI resume only in the active tenant", async () => {
+      const database = ownedDatabase();
+      try {
+        const own = await fixture(database);
+        const foreign = await fixture(database);
+        for (const record of [own, foreign]) {
+          await database.begin(async (sql) => {
+            await context(sql, record);
+            expect(
+              await setConversationOwnership(
+                sql,
+                record.conversationId,
+                record.userId,
+                "human",
+              ),
+            ).toBe(true);
+          });
+        }
+        await database.begin(async (sql) => {
+          await context(sql, own);
+          expect(
+            await setConversationOwnership(
+              sql,
+              foreign.conversationId,
+              own.userId,
+              "ai",
+              own.versionId,
+            ),
+          ).toBe(false);
+          expect(
+            await setConversationOwnership(
+              sql,
+              own.conversationId,
+              own.userId,
+              "ai",
+              own.versionId,
+            ),
+          ).toBe(true);
+          const handoffs = await sql<{ status: string; resolved: boolean }[]>`
+            SELECT status,resolved_at IS NOT NULL AS resolved FROM automation.handoffs
+            WHERE conversation_id=${own.conversationId}::uuid
+          `;
+          expect(handoffs).toEqual([{ status: "cancelled", resolved: true }]);
+        });
+        await database.begin(async (sql) => {
+          await context(sql, foreign);
+          const handoffs = await sql<{ status: string; resolved: boolean }[]>`
+            SELECT status,resolved_at IS NOT NULL AS resolved FROM automation.handoffs
+            WHERE conversation_id=${foreign.conversationId}::uuid
+          `;
+          expect(handoffs).toEqual([{ status: "accepted", resolved: false }]);
+        });
+      } finally {
+        await database.end({ timeout: 2 });
+      }
+    });
+
     it("keeps the approved WhatsApp pin current when a newer publication is unapproved", async () => {
       const database = ownedDatabase();
       try {
