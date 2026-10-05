@@ -100,7 +100,10 @@ def create_app(
 
     async def handle_durable(delivery: DurableDelivery) -> None:
         assert dispatcher is not None
-        event = ParseDict(delivery.payload, WebhookEvent())
+        # Match WebhookReceiver's post-signature schema policy: Cloud can add
+        # fields before this SDK knows them (for example roomEndReason). Keep
+        # the original signed JSON in the ledger for collision checks/auditing.
+        event = ParseDict(delivery.payload, WebhookEvent(), ignore_unknown_fields=True)
         if event.event == "participant_joined":
             if participant_is_current is None:
                 raise RuntimeError("LiveKit participant liveness is not configured")

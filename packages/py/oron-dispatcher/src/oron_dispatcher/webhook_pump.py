@@ -115,7 +115,12 @@ class DurableWebhookPump:
                 await self._ledger.settle(delivery, "quarantined", "voice_admission_unavailable")
             except UnroutableInboundCall as exc:
                 await self._ledger.settle(delivery, "quarantined", exc.reason)
-            except Exception:
+            except Exception as exc:
+                # Parse/provider exceptions may embed private payload values.
+                # The class remains useful even with the plain text formatter.
+                logger.warning(
+                    "LiveKit durable event handler failed (error_type=%s)", type(exc).__name__
+                )
                 await self._ledger.settle(delivery, "failed", "dispatcher_handler_failed")
             else:
                 await self._ledger.settle(delivery, "processed", None)

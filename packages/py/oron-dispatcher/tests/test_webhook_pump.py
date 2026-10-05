@@ -114,3 +114,20 @@ async def test_terminal_result_is_durable_and_errors_are_safe(error, outcome, re
     await asyncio.wait_for(ledger.settled.wait(), 1)
     await pump.close()
     assert ledger.settlements == [(outcome, reason)]
+
+
+@pytest.mark.asyncio
+async def test_handler_failure_logs_only_visible_exception_class(caplog):
+    ledger = Ledger()
+
+    async def handle(delivery):
+        raise ValueError("private provider payload and credentials must remain absent")
+
+    pump = DurableWebhookPump(ledger, handle, poll_seconds=0.001)
+    pump.start()
+    await asyncio.wait_for(ledger.settled.wait(), 1)
+    await pump.close()
+    assert "error_type=ValueError" in caplog.text
+    assert "private provider" not in caplog.text
+    assert "Traceback" not in caplog.text
+    assert ledger.settlements == [("failed", "dispatcher_handler_failed")]
