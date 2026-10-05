@@ -37,7 +37,7 @@ import {
   LayoutTemplate,
   Workflow,
 } from "lucide-react";
-import { useLocale } from "next-intl";
+import { useLocale, useTimeZone } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useState, type SyntheticEvent } from "react";
 import { crmMutation } from "../crm";
@@ -176,6 +176,7 @@ export function BusinessConfiguration({
   readonly initialGovernance?: TenantConfigurationState;
 }) {
   const locale = useLocale();
+  const timeZone = useTimeZone() ?? "UTC";
   const he = locale.startsWith("he");
   const copy = (en: string, hebrew: string) => (he ? hebrew : en);
   const featureLabel = (key: TenantFeatureKey) =>
@@ -1373,10 +1374,12 @@ export function BusinessConfiguration({
                       <p>
                         {release.approvedAt
                           ? new Intl.DateTimeFormat(locale, {
+                              timeZone,
                               dateStyle: "medium",
                               timeStyle: "short",
                             }).format(new Date(release.approvedAt))
                           : new Intl.DateTimeFormat(locale, {
+                              timeZone,
                               dateStyle: "medium",
                             }).format(new Date(release.createdAt))}
                       </p>

@@ -11,7 +11,10 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const locale = vi.hoisted(() => ({ value: "en" }));
-vi.mock("next-intl", () => ({ useLocale: () => locale.value }));
+vi.mock("next-intl", () => ({
+  useLocale: () => locale.value,
+  useTimeZone: () => "Asia/Jerusalem",
+}));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock("../src/features/crm", () => ({ crmMutation: vi.fn() }));
 
