@@ -41,7 +41,9 @@ def test_graph_has_preserved_oron_root_and_one_target_head() -> None:
     # 141 adds the default-off automatic WhatsApp greeting; 142 the short phone
     # intake's WhatsApp form and the repaired follow-up template validator.
     # 143 restricts templates to eligible tenants and requires explicit digital submission.
-    assert report.revision_count == 143
+    # 144 confines tenant administration to main; 145 preserves verified ongoing
+    # conversations at opening-menu activation without exempting new sessions.
+    assert report.revision_count == 145
 
 
 def test_lead_workflow_guard_is_present_in_the_final_configuration_validator() -> None:

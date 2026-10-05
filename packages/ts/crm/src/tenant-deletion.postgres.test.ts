@@ -27,7 +27,22 @@ async function isolated(
     !/^\/oron_ui_preview_[a-f0-9]+$/.test(target.pathname)
   )
     throw new Error("Only owned fictional databases are permitted");
-  const sql = postgres(databaseUrl, { max: 1, prepare: false });
+  // UI_TEST_DATABASE_URL deliberately has only runtime grants in CI. Creating
+  // the ordinary actor needs the same disposable database's setup connection;
+  // the authorization assertions below still execute as platform_web.
+  const fixtureUrl = ordinaryAdministrator
+    ? process.env.CRM_TEST_DATABASE_URL
+    : databaseUrl;
+  if (fixtureUrl === undefined)
+    throw new Error("Disposable fixture setup connection required");
+  const fixtureTarget = new URL(fixtureUrl);
+  if (
+    fixtureTarget.hostname !== target.hostname ||
+    fixtureTarget.port !== target.port ||
+    fixtureTarget.pathname !== target.pathname
+  )
+    throw new Error("Fixture setup must use the same owned preview database");
+  const sql = postgres(fixtureUrl, { max: 1, prepare: false });
   try {
     await expect(
       sql.begin(async (transaction) => {
