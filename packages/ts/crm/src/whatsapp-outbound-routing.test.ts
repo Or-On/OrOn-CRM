@@ -52,6 +52,27 @@ function manualInput() {
 }
 
 describe("WhatsApp manual outbound routing", () => {
+  it.each([false, undefined])(
+    "refuses tenant-disabled templates before even reading an idempotent request (%s)",
+    async (enabled) => {
+      const fixture = transaction([[{ enabled }]]);
+      await expect(
+        queueWhatsAppOutbound(
+          fixture.sql,
+          {
+            ...manualInput(),
+            kind: "template",
+            templateName: "service_followup",
+            language: "he",
+            parameters: [],
+          },
+          configuredSecondSender,
+        ),
+      ).rejects.toThrow("templates are unavailable");
+      expect(fixture.statements).toHaveLength(1);
+      expect(fixture.statements[0]).toContain("whatsapp_templates_enabled");
+    },
+  );
   it("does not expose an idempotent outbound result after Inbox removal", async () => {
     const fixture = transaction([[]]);
 

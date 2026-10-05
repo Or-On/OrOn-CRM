@@ -84,3 +84,57 @@ describe("phone inquiry WhatsApp follow-up", () => {
     ]);
   });
 });
+
+describe("short call digital form", () => {
+  const form: IntakeFollowupPlan = {
+    ...plan,
+    followUp: { enabled: true, mode: "form" },
+  };
+  const url =
+    "https://service.example.invalid/service-request#tenant=11111111-1111-4111-8111-111111111111&token=" +
+    "a".repeat(64);
+  it("requires a real form link and makes submission explicit without accepting a chat reply", () => {
+    expect(() => renderIntakeFollowup(form, "Fixture")).toThrow(
+      "link is required",
+    );
+    const text = renderIntakeFollowup(form, "פרו טאץ'", url);
+    expect(text).toContain(url);
+    expect(text).toContain("ללחוץ על שליחה");
+    expect(text).not.toContain("השיבו להודעה");
+    expect(text).not.toContain("T-2026-");
+    expect(text).not.toContain("שם החנות:");
+  });
+  it("renders the English form instruction without exposing intake answers", () => {
+    const text = renderIntakeFollowup(
+      { ...form, hebrew: false },
+      "Fixture",
+      url,
+    );
+    expect(text).toContain("press Submit");
+    expect(text).toContain(url);
+    expect(text).not.toContain("דנה");
+    expect(text).not.toContain("המקרר");
+  });
+  it("never substitutes a template outside the window even if one was configured", () => {
+    const configured = {
+      ...form,
+      followUp: { ...plan.followUp, mode: "form" },
+    };
+    expect(followupDelivery(configured, "meta", false)).toEqual({
+      kind: "blocked",
+      reason: "blocked_window",
+    });
+    expect(followupDelivery(configured, "meta", true)).toEqual({
+      kind: "text",
+    });
+  });
+  it.each([
+    "javascript:alert(1)",
+    "https://user:secret@example.invalid/service-request#token=x",
+    "https://example.invalid/other#token=x",
+  ])("rejects an invalid link %s", (link) => {
+    expect(() => renderIntakeFollowup(form, "Fixture", link)).toThrow(
+      "link is invalid",
+    );
+  });
+});

@@ -1,0 +1,60 @@
+# WhatsApp review of the ProTouch form changes
+
+Local review and repair, 2026-10-05. No provider messages, registration,
+subscriptions, customer calls, or deployment were performed by this work.
+
+The reviewed requirements are tenant-scoped templates for Or-On only, and a
+real ProTouch web form whose explicit submission opens the service case.
+
+## Repairs
+
+- Template queue admission, catalog reads, automatic-greeting reads/writes,
+  and dispatch immediately before the provider attempt check the database
+  template policy. The conversation projection exposes `templatesEnabled`;
+  a missing value does not enable the UI. The migration enables the policy
+  only for the bootstrap Or-On tenant. Test allowances are confined to
+  fictional fixture tenants.
+- Automatic-greeting publication reauthorizes the same session, user, tenant,
+  and exact channel credential binding after all provider catalog reads and
+  in the transaction that saves the setting.
+- Form follow-up is text containing a generated `/service-request` URL. The
+  bearer token is in the fragment and its database record contains a hash.
+  The instruction requires the customer to complete and submit the form.
+  It contains no fill-in WhatsApp labels and never substitutes a template
+  outside the customer-service window.
+- Plain WhatsApp replies and incoming media do not submit the form, rewrite
+  its answers, or open a case. The legacy plaintext parser and automatic
+  case-opening helpers were removed. Pending forms suppress AI extraction,
+  automated replies/calls, post-call business actions and media projection;
+  previously queued work is cancelled with `digital_form_pending`.
+- A verified original caller reopening the service window can resume a
+  blocked form delivery. This preserves one canonical follow-up job and its
+  outbound idempotency key, handles an initial missing job and an already
+  completed blocked job, and checks tenant, channel, contact and the pinned
+  voice caller identity. Ambiguous intakes and other identities do not
+  receive a link. The case remains unopened until public form submission.
+
+## Local evidence
+
+- `.artifacts/poc-rescue-local/claude-wa-final-focused.log`: 21 tests passed,
+  including actual PostgreSQL ingress/worker execution with a recording fake
+  provider, both blocked-window resume paths, same-contact wrong-identity
+  denial, burst deduplication, unchanged intake answers, no case creation,
+  no pending AI work, and policy revocation before provider transmission.
+- `.artifacts/poc-rescue-local/claude-crm-verified.log`: 81 files, 756 tests
+  passed, zero skips. Unsupported plaintext parser tests were removed along
+  with that parser; retained workflow-field validation remains tested.
+- Web backend catalog and final authorization boundary: 16 tests passed,
+  including changed session/user/tenant/channel after catalog I/O.
+- Production worker TypeScript build and worker typecheck passed.
+- `.artifacts/poc-rescue-local/claude-wa-full.log`: 71 files, 677 tests passed;
+  one existing POSIX symlink test skipped on Windows. Scoped ESLint is clean.
+
+These receipts prove local behavior only. ProTouch provider activation remains a separate
+external prerequisite; this review does not claim a live form delivery.
+
+The previously reviewed opening-menu activation-boundary migration was
+reconstructed into `.artifacts/recovered_b162a7e4d903_opening_menu_activation_boundary.py`.
+It was not added to the active chain or enabled by this work. Its original
+additional fixtures were lost during the external branch change and require
+recovery and fresh validation before automatic-menu activation.

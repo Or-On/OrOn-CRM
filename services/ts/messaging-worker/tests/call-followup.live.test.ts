@@ -80,6 +80,8 @@ describe.skipIf(sourceUrl === undefined)("isolated call-outcome worker", () => {
     });
     admin = postgres(url.toString(), { max: 1 });
     cleanup.push(() => admin.end());
+    await admin`INSERT INTO platform.whatsapp_template_policy(tenant_id,enabled) VALUES(${tenantId}::uuid,true)
+      ON CONFLICT (tenant_id) DO UPDATE SET enabled=true`;
     await admin`
       INSERT INTO public.tenants (id, name, slug, status)
       VALUES (${otherTenantId}::uuid, 'Other fictional tenant',

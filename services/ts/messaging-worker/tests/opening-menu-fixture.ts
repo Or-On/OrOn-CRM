@@ -32,6 +32,7 @@ export async function seedOpeningMenuFixture(sql: postgres.Sql) {
     await tx`INSERT INTO public.users(id,email,status) VALUES(${user}::uuid,${`${user}@example.invalid`},'active')`;
     await tx`INSERT INTO public.memberships(tenant_id,user_id,role) VALUES(${tenant}::uuid,${user}::uuid,'owner')`;
     await tx`SELECT set_config('app.current_tenant',${tenant},true),set_config('app.current_user',${user},true),set_config('app.current_role','owner',true)`;
+    await tx`INSERT INTO platform.whatsapp_template_policy(tenant_id,enabled) VALUES(${tenant}::uuid,true)`;
     await tx`INSERT INTO crm.tenant_settings(tenant_id,locale,timezone) VALUES(${tenant}::uuid,'en','UTC')`;
     await tx`INSERT INTO messaging.channels(id,tenant_id,kind,provider,provider_account_id,display_address,status,configuration) VALUES(${channel}::uuid,${tenant}::uuid,'whatsapp','meta',${account},'Fictional','active',${tx.json({ phoneNumberId: account, wabaId: "fictional", graphApiVersion: "v26.0" })})`;
     await tx`INSERT INTO agents.agent_profiles(id,tenant_id,name,created_by_user_id) VALUES(${profile}::uuid,${tenant}::uuid,'Fictional opening menu',${user}::uuid)`;

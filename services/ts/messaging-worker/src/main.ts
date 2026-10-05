@@ -122,6 +122,9 @@ async function main(): Promise<void> {
     {
       simulatorEnabled: config.environment === "development",
       realWhatsAppEnabled: config.enableRealWhatsApp,
+      ...(config.publicSiteUrl === undefined
+        ? {}
+        : { publicSiteUrl: config.publicSiteUrl }),
       ...(resolveChannelCredential === undefined
         ? {}
         : { resolveChannelCredential }),

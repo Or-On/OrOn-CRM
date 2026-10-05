@@ -47,6 +47,8 @@ function connections() {
 
 async function fixture(admin: postgres.Sql) {
   return admin.begin(async (sql) => {
+    await sql`INSERT INTO platform.whatsapp_template_policy(tenant_id,enabled) VALUES(${tenant}::uuid,true)
+      ON CONFLICT (tenant_id) DO UPDATE SET enabled=true`;
     await sql`
       INSERT INTO public.users(id, email, status, is_superuser)
       VALUES (${user}::uuid, ${`diagnostics-${user}@example.invalid`}, 'active', false)
@@ -134,6 +136,43 @@ function store(fetcher: typeof fetch, report = vi.fn(), enabled = true) {
 describe.skipIf(!adminUrl || !runtimeUrl)(
   "isolated PostgreSQL send diagnostics (mocked HTTP only)",
   () => {
+    it.each(["queued", "before-provider"])(
+      "blocks a previously queued template when policy is revoked at %s",
+      async (phase) => {
+        const admin = connections();
+        const attempts = vi.fn();
+        if (!runtimeUrl) throw new Error("Isolated runtime URL required");
+        const worker = createMessagingStore(
+          runtimeUrl,
+          `policy-${randomUUID()}`,
+          {
+            simulator: new SimulatorWhatsAppProvider(),
+            meta: {
+              name: "meta",
+              send: async (request) => {
+                await admin`UPDATE platform.whatsapp_template_policy SET enabled=false WHERE tenant_id=${tenant}::uuid`;
+                await request.beforeAttempt?.();
+                attempts();
+                return { messageId: `wamid.fixture-${randomUUID()}` };
+              },
+            },
+          },
+        );
+        try {
+          const queued = await fixture(admin);
+          if (phase === "queued")
+            await admin`UPDATE platform.whatsapp_template_policy SET enabled=false WHERE tenant_id=${tenant}::uuid`;
+          expect(await worker.processAvailable()).toBe(1);
+          expect(attempts).not.toHaveBeenCalled();
+          const rows =
+            await admin`SELECT status FROM messaging.outbound_requests WHERE id=${queued.requestId}::uuid`;
+          expect(rows).toEqual([{ status: "failed" }]);
+        } finally {
+          await worker.close();
+          await admin.end();
+        }
+      },
+    );
     it("persists safe details, reports once, and exposes only tenant-scoped projections", async () => {
       const admin = connections();
       const report = vi.fn();

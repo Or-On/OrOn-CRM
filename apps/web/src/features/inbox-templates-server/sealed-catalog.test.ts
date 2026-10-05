@@ -28,8 +28,12 @@ function row() {
   };
 }
 function sqlFor(value: unknown) {
-  return vi.fn(() =>
-    Promise.resolve([value]),
+  return vi.fn((parts: TemplateStringsArray) =>
+    Promise.resolve(
+      parts.join("").includes("whatsapp_templates_enabled")
+        ? [{ enabled: true }]
+        : [value],
+    ),
   ) as unknown as postgres.TransactionSql;
 }
 afterEach(() => {
@@ -39,6 +43,20 @@ afterEach(() => {
 });
 
 describe("sealed human-operator template catalog", () => {
+  it("rejects a disabled tenant before decrypting credentials or requesting a catalog", async () => {
+    const fetcher = vi.fn();
+    vi.stubGlobal("fetch", fetcher);
+    const sql = vi.fn().mockResolvedValue([{ enabled: false }]);
+    const { templateAccount } = await import("./index");
+    await expect(
+      templateAccount(
+        sql as unknown as postgres.TransactionSql,
+        "conversation",
+      ),
+    ).rejects.toMatchObject({ code: "42501" });
+    expect(sql).toHaveBeenCalledTimes(1);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
   it("decrypts only the canonical channel envelope and detects re-sealing unchanged plaintext", async () => {
     vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", key.toString("base64"));
     const { templateAccount } = await import("./index");

@@ -41,6 +41,11 @@ import {
   requireNoNewerPendingInbound,
 } from "./inbound-debounce.js";
 import { acknowledgeCommittedInbound } from "./inbound-typing.js";
+import { queueAutoGreeting } from "./auto-greeting.js";
+import {
+  digitalServiceFormPending,
+  resumeDigitalFormFollowup,
+} from "./digital-form-guard.js";
 import {
   unsupportedInboundMedia,
   unsupportedMediaReply,
@@ -94,6 +99,7 @@ import {
   skipPostCallAnalysis,
   queueWhatsAppAutomaticCall,
   queueWhatsAppOutbound,
+  issueDigitalServiceForm,
   assignDefaultWhatsAppAi,
   createInboundConversationNotifications,
   captureWhatsAppServiceIntakeMessage,
@@ -253,6 +259,7 @@ export interface MessagingStore {
 }
 
 export interface MessagingAutomationOptions {
+  readonly publicSiteUrl?: string;
   readonly memorySummaryProvider?: MemorySummaryProvider;
   /** Trusted test/server transport; absent uses native HTTPS fetch. */
   readonly memorySummaryFetch?: typeof fetch;
@@ -393,6 +400,18 @@ async function processInbound(
             await assignDefaultWhatsAppAi(transaction, result.conversationId);
           if (aiEnabled && realWhatsAppEnabled)
             await transaction`SELECT platform.enqueue_opening_menu_for_inbound(${result.messageId}::uuid)`;
+          // Queued before any AI work so the greeting is the first reply.
+          if (realWhatsAppEnabled)
+            await queueAutoGreeting(transaction, result.messageId);
+          // Plain messages and media are retained as conversation data. They
+          // cannot submit a web form or open its case, even before a link has
+          // been delivered (for example, when the service window is closed).
+          const formReply = await digitalServiceFormPending(
+            transaction,
+            result.conversationId,
+          );
+          if (formReply && realWhatsAppEnabled)
+            await resumeDigitalFormFollowup(transaction, result.messageId);
           const unsupportedStorage = unsupportedInboundMedia(envelope);
           if (
             (unsupportedStorage || envelope.contentType === "video") &&
@@ -405,7 +424,7 @@ async function processInbound(
                   : { agentMediaStatus: "unsupported" },
               )}::jsonb
               WHERE id=${result.messageId}::uuid`;
-            if (aiEnabled && realWhatsAppEnabled)
+            if (aiEnabled && realWhatsAppEnabled && !formReply)
               await transaction`
               INSERT INTO ops.jobs(tenant_id,queue,job_type,reference_type,reference_id,payload,
                 idempotency_key,max_attempts,priority)
@@ -498,7 +517,7 @@ async function processInbound(
               AND entitlement.feature_key='field_service'
               AND entitlement.available AND configuration.enabled
               AND configuration.whatsapp_intake_enabled
-              AND ${fieldServiceAiAvailable && envelope.contentType !== "audio" && envelope.contentType !== "video"}
+              AND ${fieldServiceAiAvailable && !formReply && envelope.contentType !== "audio" && envelope.contentType !== "video"}
               AND EXISTS(SELECT 1 FROM messaging.conversations c JOIN agents.agent_profile_versions a ON a.tenant_id=c.tenant_id AND a.id=c.ai_agent_profile_version_id
                 WHERE c.id=${result.conversationId}::uuid AND c.tenant_id=entitlement.tenant_id AND c.ownership_mode='ai'
                   AND a.published_at IS NOT NULL AND a.validation_status='valid' AND a.tool_permissions ? 'service.intake'
@@ -519,7 +538,7 @@ async function processInbound(
                    jsonb_build_object('conversationId', ${result.conversationId}::uuid,
                      'messageId', ${result.messageId}::uuid),
                    ${`support-postcall-reply:${result.messageId}`}, 3, 30
-            WHERE EXISTS (
+            WHERE ${!formReply} AND EXISTS (
               SELECT 1 FROM support.tickets ticket
               WHERE ticket.tenant_id = platform.current_tenant_id()
                 AND ticket.source_conversation_id = ${result.conversationId}::uuid
@@ -529,6 +548,7 @@ async function processInbound(
           `;
           const debounced =
             aiEnabled &&
+            !formReply &&
             envelope.contentType !== "audio" &&
             envelope.contentType !== "video"
               ? await queueDebouncedReply(transaction, {
@@ -537,7 +557,7 @@ async function processInbound(
                   eventId: event.id,
                 })
               : { handled: false };
-          if (!debounced.handled)
+          if (!debounced.handled && !formReply)
             await transaction`
             INSERT INTO ops.jobs
               (tenant_id, queue, job_type, reference_type, reference_id, payload,
@@ -825,6 +845,15 @@ async function processFieldServiceIntake(
         await finishJob(transaction, job, workerId);
         return;
       }
+      if (await digitalServiceFormPending(transaction, work.conversationId)) {
+        await cancelJobForDisabledFeature(
+          transaction,
+          job,
+          workerId,
+          "digital_form_pending",
+        );
+        return;
+      }
       const current = await findOpenWhatsAppServiceIntake(
         transaction,
         work.conversationId,
@@ -1068,6 +1097,8 @@ async function linkWhatsAppMediaToFieldService(
   await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
     await setTenantContext(transaction, job.tenant_id);
     await requireOwnedJob(transaction, workerId, job);
+    if (await digitalServiceFormPending(transaction, work.conversationId))
+      return;
     if (!(await whatsappMediaFieldServiceProjectionEnabled(transaction)))
       return;
     await transaction`
@@ -2336,9 +2367,22 @@ async function processPostCall(
         const loaded = await loadPostCallWork(transaction, attemptId);
         if (loaded === undefined)
           throw new TypeError("post_call_attempt_missing");
+        if (
+          loaded.conversationId !== null &&
+          (await digitalServiceFormPending(transaction, loaded.conversationId))
+        ) {
+          await cancelJobForDisabledFeature(
+            transaction,
+            job,
+            workerId,
+            "digital_form_pending",
+          );
+          return undefined;
+        }
         return loaded;
       },
     );
+    if (work === undefined) return;
     if (work.stage === "complete") {
       await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
         await setTenantContext(transaction, job.tenant_id);
@@ -2620,6 +2664,15 @@ async function processPostCallFollowup(
       }
       if (plan.provider === "simulator" && automation.simulatorEnabled !== true)
         throw new TypeError("simulation_disabled");
+      if (await digitalServiceFormPending(transaction, plan.conversationId)) {
+        await cancelJobForDisabledFeature(
+          transaction,
+          job,
+          workerId,
+          "digital_form_pending",
+        );
+        return;
+      }
       if (plan.provider === "meta" && automation.realWhatsAppEnabled !== true)
         throw new TypeError("real_whatsapp_disabled");
       const actorUserId = await postCallActor(transaction);
@@ -2747,6 +2800,15 @@ async function processPostCallReply(
       await setTenantContext(transaction, job.tenant_id);
       await requireOwnedJob(transaction, workerId, job);
       const ticket = await awaitingCustomerTicket(transaction, conversationId);
+      if (await digitalServiceFormPending(transaction, conversationId)) {
+        await cancelJobForDisabledFeature(
+          transaction,
+          job,
+          workerId,
+          "digital_form_pending",
+        );
+        return;
+      }
       if (ticket === undefined) {
         await finishJob(transaction, job, workerId);
         return;
@@ -2916,13 +2978,21 @@ async function processIntakeFollowup(
         senderType: "system" as const,
         voiceFollowUpIntakeId: intakeId,
       };
+      const formUrl =
+        plan.followUp?.mode === "form"
+          ? await issueDigitalServiceForm(
+              transaction,
+              intakeId,
+              automation.publicSiteUrl ?? "",
+            )
+          : undefined;
       const outbound = await queueWhatsAppOutbound(
         transaction,
         delivery.kind === "text"
           ? {
               ...common,
               kind: "text",
-              text: renderIntakeFollowup(plan, businessName),
+              text: renderIntakeFollowup(plan, businessName, formUrl),
             }
           : {
               ...common,
@@ -2973,6 +3043,41 @@ async function processJob(
   automation: MessagingAutomationOptions,
 ): Promise<void> {
   let openingMenuRoute: OpeningMenuRoute | undefined;
+  if (
+    [
+      "whatsapp.ai.reply",
+      "whatsapp.ai.call",
+      "whatsapp.audio.transcribe",
+      "whatsapp.unsupported.reply",
+      "field_service.intake.extract",
+      "support.postcall.reply",
+    ].includes(job.job_type)
+  ) {
+    const conversationId =
+      record(job.payload).conversationId ??
+      (job.job_type.startsWith("whatsapp.") ? job.reference_id : undefined);
+    if (uuid(conversationId)) {
+      const blocked = await withOwnedJobTransaction(
+        sql,
+        workerId,
+        job,
+        async (tx) => {
+          await setTenantContext(tx, job.tenant_id);
+          await requireOwnedJob(tx, workerId, job);
+          if (!(await digitalServiceFormPending(tx, conversationId)))
+            return false;
+          await cancelJobForDisabledFeature(
+            tx,
+            job,
+            workerId,
+            "digital_form_pending",
+          );
+          return true;
+        },
+      );
+      if (blocked) return;
+    }
+  }
   if (
     [
       "field_service.ocr",
@@ -3202,6 +3307,21 @@ async function processJob(
           AND ch.status='active' AND ch.provider IN ('meta','simulator')
           AND platform.messaging_ai_actor_authorized(c.ai_enabled_by_user_id)`;
         const candidate = candidates[0];
+        if (
+          candidate !== undefined &&
+          (await digitalServiceFormPending(
+            transaction,
+            candidate.conversation_id,
+          ))
+        ) {
+          await cancelJobForDisabledFeature(
+            transaction,
+            job,
+            workerId,
+            "digital_form_pending",
+          );
+          return;
+        }
         if (
           candidate === undefined ||
           (candidate.provider === "meta" &&
@@ -5497,6 +5617,8 @@ async function requireAiTurnOwnership(
   transaction: postgres.TransactionSql,
   work: AiWork,
 ): Promise<void> {
+  if (await digitalServiceFormPending(transaction, work.conversationId))
+    throw new TypeError("digital_form_pending");
   await transaction`SELECT set_config('app.current_user',${work.authorizedUserId},true)`;
   const owned = await transaction<{ id: string }[]>`
     SELECT c.id FROM messaging.conversations c
@@ -6556,6 +6678,7 @@ async function revalidateOutboundAttempt(
       JOIN crm.contact_channel_identities identity ON identity.id=request.recipient_identity_id
       JOIN crm.contacts contact ON contact.id=conversation.contact_id
       WHERE request.id=${work.requestId}::uuid AND request.status='sending'
+        AND (request.message_kind<>'template' OR platform.whatsapp_templates_enabled())
         AND request.message_id=${work.messageId}::uuid
         AND channel.status='active' AND channel.provider=request.provider
         AND request.provider=${work.provider}
@@ -6625,6 +6748,7 @@ async function loadOutboundWork(
         AND request.recipient_identity_id = identity.id
         AND request.recipient_address = identity.normalized_value
         AND request.status = 'queued'
+        AND (request.message_kind<>'template' OR platform.whatsapp_templates_enabled())
         AND request.conversation_id = conversation.id AND message.conversation_id = conversation.id
         AND request.channel_id = channel.id AND conversation.channel_id = channel.id
         AND channel.status = 'active' AND channel.provider = request.provider

@@ -103,6 +103,8 @@ export interface ConversationSummary {
   readonly handoffReasonSafe?: string | null;
   readonly channelKind: string;
   readonly provider: string;
+  /** Explicit tenant policy; absent means templates are unavailable. */
+  readonly templatesEnabled?: boolean;
   readonly senderAddress: string | null;
   readonly providerAccountId: string | null;
   readonly recipientAddress: string | null;

@@ -20,6 +20,8 @@ export interface IntakeFollowupPlan {
   readonly requestPhoto: boolean;
   readonly followUp: {
     readonly enabled?: boolean;
+    readonly mode?: string;
+    readonly formFields?: readonly string[];
     readonly templateName?: string;
     readonly templateLanguage?: string;
     readonly templateParameters?: readonly string[];
@@ -99,6 +101,21 @@ function compose(
   return lines.join("\n");
 }
 
+/** The actual web form is the only submission surface for this request. */
+function composeForm(
+  plan: IntakeFollowupPlan,
+  businessName: string,
+  formUrl: string,
+): string {
+  return plan.hebrew
+    ? `שלום,
+תודה שפנית ל${businessName}. כדי לפתוח קריאת שירות, יש למלא את הטופס בקישור וללחוץ על שליחה:
+${formUrl}`
+    : `Hello,
+Thank you for contacting ${businessName}. To open a service request, complete the form at this link and press Submit:
+${formUrl}`;
+}
+
 /**
  * Render the follow-up. If anything the caller said would make the summary
  * fail the scope validator, the customer-text lines are dropped rather than
@@ -107,9 +124,24 @@ function compose(
 export function renderIntakeFollowup(
   plan: IntakeFollowupPlan,
   businessName: string | null,
+  formUrl?: string,
 ): string {
   const business =
     text(businessName, 120) ?? (plan.hebrew ? "העסק" : "the business");
+  if (plan.followUp?.mode === "form") {
+    if (formUrl === undefined)
+      throw new TypeError("Digital service form link is required");
+    const url = new URL(formUrl);
+    if (
+      !["https:", "http:"].includes(url.protocol) ||
+      url.username ||
+      url.password ||
+      url.pathname !== "/service-request" ||
+      !url.hash
+    )
+      throw new TypeError("Digital service form link is invalid");
+    return composeForm(plan, business, url.toString());
+  }
   const full = compose(plan, business, true);
   if (validateAgentOutput(full).allowed) return full;
   return compose(plan, business, false);
@@ -146,6 +178,8 @@ export function followupDelivery(
   windowOpen: boolean,
 ): FollowupDelivery {
   if (provider === "simulator" || windowOpen) return { kind: "text" };
+  if (plan.followUp?.mode === "form")
+    return { kind: "blocked", reason: "blocked_window" };
   const name = plan.followUp?.templateName;
   const language = plan.followUp?.templateLanguage;
   if (typeof name === "string" && typeof language === "string")

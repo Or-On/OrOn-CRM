@@ -3,42 +3,52 @@ import type postgres from "postgres";
 
 import { normalizeE164 } from "./phone.js";
 
-export type WhatsAppOutboundInput =
-  | {
-      readonly conversationId: string;
-      readonly explicitlyConfirmed: boolean;
-      readonly idempotencyKey: string;
-      readonly kind: "text";
-      readonly provider: "simulator" | "meta";
-      readonly realProviderEnabled: boolean;
-      readonly recipientAddress?: string;
-      readonly recipientIdentityId?: string;
-      readonly senderUserId: string;
-      readonly senderType?: "user" | "agent" | "system";
-      readonly text: string;
-      /**
-       * A phone intake's follow-up. The recipient must then be the intake's
-       * pinned telephony caller number (or its WhatsApp twin), verified in
-       * PostgreSQL, instead of the latest inbound WhatsApp origin.
-       */
-      readonly voiceFollowUpIntakeId?: string;
-    }
-  | {
-      readonly conversationId: string;
-      readonly explicitlyConfirmed: boolean;
-      readonly idempotencyKey: string;
-      readonly kind: "template";
-      readonly language: string;
-      readonly parameters: readonly string[];
-      readonly provider: "simulator" | "meta";
-      readonly realProviderEnabled: boolean;
-      readonly recipientAddress?: string;
-      readonly recipientIdentityId?: string;
-      readonly senderUserId: string;
-      readonly senderType?: "user" | "agent" | "system";
-      readonly templateName: string;
-      readonly voiceFollowUpIntakeId?: string;
-    };
+interface WhatsAppOutboundBehaviour {
+  /**
+   * False for automatic messages nobody read the thread for, such as a new
+   * conversation's greeting: the customer's messages stay unread.
+   */
+  readonly acknowledgesInbound?: boolean;
+}
+
+export type WhatsAppOutboundInput = WhatsAppOutboundBehaviour &
+  (
+    | {
+        readonly conversationId: string;
+        readonly explicitlyConfirmed: boolean;
+        readonly idempotencyKey: string;
+        readonly kind: "text";
+        readonly provider: "simulator" | "meta";
+        readonly realProviderEnabled: boolean;
+        readonly recipientAddress?: string;
+        readonly recipientIdentityId?: string;
+        readonly senderUserId: string;
+        readonly senderType?: "user" | "agent" | "system";
+        readonly text: string;
+        /**
+         * A phone intake's follow-up. The recipient must then be the intake's
+         * pinned telephony caller number (or its WhatsApp twin), verified in
+         * PostgreSQL, instead of the latest inbound WhatsApp origin.
+         */
+        readonly voiceFollowUpIntakeId?: string;
+      }
+    | {
+        readonly conversationId: string;
+        readonly explicitlyConfirmed: boolean;
+        readonly idempotencyKey: string;
+        readonly kind: "template";
+        readonly language: string;
+        readonly parameters: readonly string[];
+        readonly provider: "simulator" | "meta";
+        readonly realProviderEnabled: boolean;
+        readonly recipientAddress?: string;
+        readonly recipientIdentityId?: string;
+        readonly senderUserId: string;
+        readonly senderType?: "user" | "agent" | "system";
+        readonly templateName: string;
+        readonly voiceFollowUpIntakeId?: string;
+      }
+  );
 
 export interface WhatsAppChannelConfiguration {
   readonly graphApiVersion: string;
@@ -131,6 +141,13 @@ export async function queueWhatsAppOutbound(
   channelConfiguration?: WhatsAppChannelConfiguration,
 ): Promise<QueuedWhatsAppOutbound> {
   validateInput(input);
+  if (input.kind === "template") {
+    const policy = await sql<{ enabled: boolean }[]>`
+      SELECT platform.whatsapp_templates_enabled() AS enabled
+    `;
+    if (policy[0]?.enabled !== true)
+      throw new TypeError("WhatsApp templates are unavailable for this tenant");
+  }
   if (input.provider === "meta" && channelConfiguration === undefined)
     throw new TypeError("real WhatsApp channel is not configured");
   const fingerprint = createHash("sha256")
@@ -398,7 +415,10 @@ export async function queueWhatsAppOutbound(
   // again, so the badge represents new customer activity after this reply.
   await sql`
     UPDATE messaging.conversations
-    SET status = 'open', unread_count = 0, updated_at = CURRENT_TIMESTAMP
+    SET status = 'open',
+        unread_count = CASE WHEN ${input.acknowledgesInbound !== false}
+          THEN 0 ELSE unread_count END,
+        updated_at = CURRENT_TIMESTAMP
     WHERE id = ${contact.conversation_id}::uuid
   `;
   await sql`

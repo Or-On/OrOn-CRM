@@ -6,6 +6,7 @@ import {
   createChannelCredentialResolver,
 } from "@or-on/auth";
 import { loadConfig } from "@or-on/config";
+import type { WhatsAppTemplate } from "../inbox-templates";
 import {
   createTemplateCatalog,
   type TemplateAccount,
@@ -17,6 +18,13 @@ export async function templateAccount(
   sql: postgres.TransactionSql,
   conversationId: string,
 ): Promise<TemplateAccount> {
+  const policy = await sql<{ enabled: boolean }[]>`
+    SELECT platform.whatsapp_templates_enabled() AS enabled
+  `;
+  if (policy[0]?.enabled !== true)
+    throw Object.assign(new Error("WhatsApp templates are unavailable"), {
+      code: "42501",
+    });
   const rows = await sql<
     {
       tenant_id: string;
@@ -46,7 +54,8 @@ export async function templateAccount(
       AND conversation.removed_from_inbox_at IS NULL
       AND channel.kind='whatsapp' AND channel.provider='meta' AND channel.status='active'
       AND channel.configuration->>'phoneNumberId'=channel.provider_account_id
-      AND platform.current_tenant_feature_enabled('whatsapp')`;
+      AND platform.current_tenant_feature_enabled('whatsapp')
+    FOR SHARE OF conversation, channel`;
   const row = rows[0];
   if (!row)
     throw Object.assign(new Error("Conversation unavailable"), {
@@ -127,4 +136,20 @@ export async function listConversationTemplates(
   if (JSON.stringify(current) !== JSON.stringify(account))
     throw new Error("Template catalog binding changed");
   return page;
+}
+
+/** Every catalog page, bounded, for decisions that need the whole catalog. */
+export async function listAllConversationTemplates(
+  resolveAccount: () => Promise<TemplateAccount>,
+  maximumPages = 10,
+): Promise<readonly WhatsAppTemplate[]> {
+  const templates: WhatsAppTemplate[] = [];
+  let after: string | null = null;
+  for (let page = 0; page < maximumPages; page++) {
+    const result = await listConversationTemplates(resolveAccount, after);
+    templates.push(...result.templates);
+    if (result.after === null) return templates;
+    after = result.after;
+  }
+  throw new Error("Template catalog is too large to read completely");
 }

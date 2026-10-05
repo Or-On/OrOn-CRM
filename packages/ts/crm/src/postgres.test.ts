@@ -76,6 +76,9 @@ describe.skipIf(databaseUrl === undefined)(
               SELECT id, name FROM tenants WHERE id = ${tenantId}::uuid
             `;
             expect(seededTenant).toHaveLength(1);
+            // This rollback-only fictional tenant exercises the template path.
+            await transaction`INSERT INTO platform.whatsapp_template_policy(tenant_id,enabled)
+              VALUES(${tenantId}::uuid,true) ON CONFLICT (tenant_id) DO UPDATE SET enabled=true`;
             expect(seededTenant[0]?.name.trim()).not.toBe("");
 
             const pipelineId = randomUUID();

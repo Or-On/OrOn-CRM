@@ -43,6 +43,7 @@ interface ConversationRow {
   whatsapp_consent: string;
   whatsapp_opted_out_at: Date | null;
   customer_service_window_expires_at: Date | null;
+  templates_enabled: boolean;
   cursor_last_message_at: string | null;
 }
 
@@ -271,6 +272,7 @@ function mapConversation(row: ConversationRow): ConversationSummary {
     handoffReasonSafe: row.handoff_reason_safe,
     channelKind: row.channel_kind,
     provider: row.provider,
+    templatesEnabled: row.templates_enabled === true,
     senderAddress: row.sender_address,
     providerAccountId: row.provider_account_id,
     recipientAddress: row.recipient_address,
@@ -388,6 +390,7 @@ export async function listConversationPage(
             recipient.normalized_value AS recipient_address,
             contact.whatsapp_consent, contact.whatsapp_opted_out_at,
             c.customer_service_window_expires_at,
+            platform.whatsapp_templates_enabled() AS templates_enabled,
             CASE WHEN c.last_message_at IS NULL THEN NULL ELSE
               to_char(c.last_message_at AT TIME ZONE 'UTC',
                 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
