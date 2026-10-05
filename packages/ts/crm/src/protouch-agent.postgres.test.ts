@@ -18,7 +18,7 @@ interface Draft {
     readonly description: string;
     readonly locale: string;
     readonly channels: readonly ("voice" | "whatsapp")[];
-    readonly toolPermissions: readonly ("service.intake" | "ticket.open")[];
+    readonly toolPermissions: readonly "service.intake"[];
     readonly systemPrompt: string;
   };
 }
@@ -80,10 +80,7 @@ describe.skipIf(databaseUrl === undefined)(
               manifest.agent.systemPrompt,
             );
             expect(versions[0]?.locale).toBe("he");
-            expect(versions[0]?.tool_permissions).toEqual([
-              "service.intake",
-              "ticket.open",
-            ]);
+            expect(versions[0]?.tool_permissions).toEqual(["service.intake"]);
             expect(versions[0]?.published_at).toBeInstanceOf(Date);
             expect(await listAgentProfiles(sql)).toEqual([
               expect.objectContaining({
