@@ -30,9 +30,12 @@ COPY packages/py/oron-sessions packages/py/oron-sessions
 COPY services/py/control-api services/py/control-api
 COPY services/py/dispatcher services/py/dispatcher
 COPY services/py/voice-agent services/py/voice-agent
+COPY scripts/check_voice_text_runtime.py /tmp/check_voice_text_runtime.py
 RUN uv sync --frozen --no-dev --package or-on-control-api --extra voice \
     && uv pip uninstall nltk \
     && python -c "import control_api.app; import oron_agent.agent_evaluation" \
+    && python /tmp/check_voice_text_runtime.py --require-nltk-absent \
+    && rm /tmp/check_voice_text_runtime.py \
     && addgroup --system platform \
     && adduser --system --ingroup platform --home /app platform \
     && chown -R platform:platform /app

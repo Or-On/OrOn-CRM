@@ -38,9 +38,12 @@ explicit production acceptance. A successful OAuth callback is not a mail client
 The full voice dependency graph contains transitive NLTK 3.10.3
 `PYSEC-2026-3740`/`GHSA-8mgp-746c-j5xp`. The
 [maintainer advisory](https://github.com/nltk/nltk/security/advisories/GHSA-8mgp-746c-j5xp)
-still reports no patched version. The platform and retained Pipecat runtime do
-not import NLTK, and the deployable dispatcher image removes it after locked
-dependency installation. A 30-day audit exception covers the development
+still reports no patched version. Dispatcher and control-api images remove
+NLTK after locked dependency installation. Pipecat's default sentence aggregator
+and token sequencer do lazily import NLTK; application-owned per-instance
+sentence handling replaces those paths in the voice runtime. Both image builds
+exercise actual sentence and token processing with NLTK absent, rather than
+relying only on import checks. A 30-day audit exception covers the development
 environment only and expires 2026-10-13; this is a mitigation, not a clean
 upstream resolution. Fresh final-image vulnerability scans remain mandatory.
 
@@ -264,8 +267,9 @@ until their boundary validates identity, integrity, authorization, type, and siz
 The 2026-09-13 dependency review confirms high-severity
 `GHSA-8mgp-746c-j5xp` in transitive `nltk==3.10.3`, with no patched release
 available. The affected model-artifact APIs are not called by the platform and
-no caller-controlled NLTK model path is accepted. The runtime dispatcher image
-also uninstalls the unused package. This is a time-bounded non-exploitability
+no caller-controlled NLTK model path is accepted. Runtime dispatcher and
+control-api images uninstall the package, with provider-free sentence and token
+smoke checks verifying the application-owned replacement. This is a time-bounded non-exploitability
 exception for development tooling, not a clean upstream scan: review weekly and
 upgrade as soon as a patched stable release is compatible. Exception expiry:
 2026-10-13; exception owner: platform security.

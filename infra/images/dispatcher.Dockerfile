@@ -20,10 +20,13 @@ COPY --from=uv-bin /uv /usr/local/bin/uv
 COPY pyproject.toml uv.lock ./
 COPY packages/py packages/py
 COPY services/py services/py
+COPY scripts/check_voice_text_runtime.py /tmp/check_voice_text_runtime.py
 
 RUN uv sync --frozen --no-dev --package or-on-dispatcher-runtime --extra voice \
     && uv pip uninstall nltk \
     && python -c "import dispatcher_runtime.main" \
+    && python /tmp/check_voice_text_runtime.py --require-nltk-absent \
+    && rm /tmp/check_voice_text_runtime.py \
     && addgroup --system platform \
     && adduser --system --ingroup platform --home /app platform \
     && chown -R platform:platform /app

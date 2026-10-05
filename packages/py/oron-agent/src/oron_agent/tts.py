@@ -30,7 +30,7 @@ from pipecat.utils.tracing.service_decorators import traced_tts
 from websockets.exceptions import ConnectionClosed
 from websockets.protocol import State
 
-from oron_agent.tts_clause import FirstClauseAggregator
+from oron_agent.tts_clause import FirstClauseAggregator, SentenceAggregator, SentenceFrameSequencer
 
 __all__ = ["TtsProvider", "build_tts", "SonioxUnpointedContextTTSService"]
 
@@ -328,13 +328,14 @@ def build_tts(
             text_aggregation_mode=text_aggregation_mode,
             settings=settings,
         )
-    if first_clause:
-        # TTSService builds its aggregator in __init__ and exposes no setter, so
-        # this is the only seam. Checked against pipecat 1.7.0 tts_service.py:309.
-        # The mode is passed on, or installing this would silently disable it.
-        # pyrefly: ignore[bad-assignment]  # the slot's inferred type is the concrete
-        # default; the contract it actually calls is BaseTextAggregator.
-        service._text_aggregator = FirstClauseAggregator(  # noqa: SLF001
-            aggregation_type=text_aggregation_mode
-        )
+    # Pipecat 1.11 lazily loads NLTK both here and in TOKEN sentence sequencing.
+    # Runtime images intentionally omit that vulnerable, unused model package.
+    # Replace only these service instances; keep the SDK's frame/audio lifecycle.
+    aggregator_type = FirstClauseAggregator if first_clause else SentenceAggregator
+    service._text_aggregator = aggregator_type(  # noqa: SLF001
+        aggregation_type=text_aggregation_mode
+    )
+    service._aggregated_frame_sequencer = SentenceFrameSequencer(  # noqa: SLF001
+        name=str(service), streaming=service._is_streaming_tokens
+    )
     return service

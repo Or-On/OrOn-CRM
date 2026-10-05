@@ -53,3 +53,19 @@ availability. A fresh real call after the exact revision is deployed is the
 remaining acceptance check. No provider credentials, tenant bindings, scripts,
 agent versions, paid subscriptions or customer conversations are changed by
 this runtime repair.
+
+## Additional image-runtime gap found before deployment
+
+The locked voice SDK lazily uses NLTK for sentence splitting and for regrouping
+streamed TTS tokens. Runtime images intentionally remove NLTK because its model
+artifact APIs have an unresolved advisory. The previous image smoke only
+imported the application, so it did not exercise that lazy path. An isolated
+run with NLTK imports denied reproduced `ModuleNotFoundError` while processing
+ordinary multi-sentence speech. This is separate from the observed socket loss.
+
+The voice factory now installs application-owned sentence handling and a
+per-instance token sequencer. It preserves streaming text, interruption and
+audio ordering without downloading tokenizer data or restoring NLTK. Both
+voice-capable image builds execute a provider-free sentence/token smoke test
+after removing NLTK, including Hebrew and length-changing text transformation.
+The build must fail if those runtime paths fail.
