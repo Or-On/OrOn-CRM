@@ -669,7 +669,8 @@ async def test_form_queue_requires_both_durable_facts_and_cannot_save_an_empty_i
         c.kwargs["confirmed"] is False for c in sessions.capture_service_intake.await_args_list
     )
     sessions.request_service_followup.assert_awaited_once_with(context, customer_agreed=True)
-    assert "הועברה לתור" in result["closing"] and "המסירה עדיין לא אושרה" in result["closing"]
+    assert "ביקשתי לשלוח קישור" in result["closing"]
+    assert "עדיין אין אישור שההודעה הגיעה" in result["closing"]
     assert "לחיצה על שליחה" in result["closing"]
     assert safe_spoken_text(result["closing"], "he") == (result["closing"], False)
     assert validate_output(result["closing"]).allowed

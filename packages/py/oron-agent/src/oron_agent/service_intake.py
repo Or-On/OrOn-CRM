@@ -65,10 +65,10 @@ _DEFAULT_FORM_FIELDS = ("serviceLocation", "storeName", "customerName")
 
 # A queued request is not evidence of delivery. Only the web submit opens a case.
 _FORM_QUEUED = {
-    "he": "הבקשה להודעת וואטסאפ עם קישור לטופס הועברה לתור. המסירה עדיין לא אושרה. "
+    "he": "ביקשתי לשלוח קישור לטופס בווצאפ. עדיין אין אישור שההודעה הגיעה. "
     "קריאת שירות תיפתח רק אחרי מילוי הטופס ולחיצה על שליחה. תודה ולהתראות.",
-    "en": "The request for a WhatsApp message with a form link is queued. Delivery is not "
-    "confirmed. A service case opens only after you complete the web form and press Submit. "
+    "en": "I've requested a WhatsApp message with the form link. I don't yet have confirmation "
+    "that it arrived. A service case opens only after you complete the form and press Submit. "
     "Thank you and goodbye.",
 }
 _FORM_CAPTURE_FIELDS = ("customerName", "faultDescription")
