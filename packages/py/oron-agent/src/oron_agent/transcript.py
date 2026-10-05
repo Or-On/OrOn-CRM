@@ -7,6 +7,7 @@ aggregated an utterance by then, so there is no fragment reassembly to get wrong
 
 import asyncio
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 from loguru import logger
@@ -42,14 +43,15 @@ class TranscriptHandler:
         async with self._lock:
             self.messages.append(message)
             line = self._line(message)
-            logger.info("Transcript turn persisted locally")
             try:
-                await asyncio.to_thread(self._append_line, line)
+                await self._complete_write(lambda: self._append_line(line))
             except OSError:
                 # A transcript write must never take the call down with it.
                 logger.error("Transcript turn could not be persisted locally")
+            else:
+                logger.info("Transcript turn persisted locally")
 
-    async def finalize(self) -> None:
+    async def finalize(self) -> bool:
         """Write the completed transcript in event-time order.
 
         Pipecat can deliver a user turn event after an idle/assistant event even
@@ -65,9 +67,27 @@ class TranscriptHandler:
             )
             lines = [self._line(message) for _, message in ordered]
             try:
-                await asyncio.to_thread(self._replace_lines, lines)
+                await self._complete_write(lambda: self._replace_lines(lines))
             except OSError:
                 logger.error("Transcript could not be finalized chronologically")
+                return False
+            return True
+
+    @staticmethod
+    async def _complete_write(write: Callable[[], None]) -> None:
+        # Cancelling to_thread does not stop its filesystem operation. Keep the
+        # transcript lock until that operation actually settles, otherwise a
+        # final rewrite/upload can race an append that is still running.
+        task = asyncio.create_task(asyncio.to_thread(write))
+        cancelled = False
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                cancelled = True
+        task.result()
+        if cancelled:
+            raise asyncio.CancelledError
 
     @staticmethod
     def _line(message: TranscriptMessage) -> str:

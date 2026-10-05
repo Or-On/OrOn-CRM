@@ -16,7 +16,7 @@ from oron_sessions import SessionsClient, SessionStatus
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.flows import FlowManager
-from pipecat.frames.frames import LLMMessagesAppendFrame
+from pipecat.frames.frames import ErrorFrame, LLMMessagesAppendFrame
 from pipecat.observers.base_observer import BaseObserver
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -107,7 +107,7 @@ from oron_agent.tracing import conversation_span_attributes, setup_process_traci
 from oron_agent.transcript import TranscriptHandler, TranscriptMessage
 from oron_agent.transfer import make_emergency_transfer, make_transfer_action
 from oron_agent.transport import build_transport_params
-from oron_agent.tts import TtsProvider, build_tts
+from oron_agent.tts import SonioxUnpointedContextTTSService, TtsProvider, build_tts
 from oron_agent.tts_trim import TrimLeadingSilence
 from oron_agent.turn_planner import HebrewTurnPlanner
 from oron_agent.turn_taking import TurnTaking, TurnTakingObserver
@@ -259,6 +259,7 @@ async def run_bot(
     drain_requested: asyncio.Event | None = None,
     on_drain: Callable[[], Awaitable[None]] | None = None,
     on_failure: Callable[[], Awaitable[None]] | None = None,
+    on_recovery: Callable[[], Awaitable[None]] | None = None,
 ):
     # `room`, never `st.livekit_room`: the dispatcher runs every call in-process
     # against one shared Settings, so that field holds a deployment-wide default
@@ -811,6 +812,12 @@ async def run_bot(
     # disconnect during the pickup wait. Inbound keeps its existing unknown state.
     pickup: dict[str, bool] = {"answered": False} if ctx.direction is Direction.OUTBOUND else {}
     closing = asyncio.Event()
+
+    def mark_closing() -> None:
+        if not closing.is_set():
+            call_clock["ended"] = time.monotonic()
+            closing.set()
+
     finalize_lock = asyncio.Lock()
     drain_audio_lock = asyncio.Lock()
     drain_audio_attempted = False
@@ -986,12 +993,15 @@ async def run_bot(
             if finalized:
                 return True
             if (joined := call_clock.get("joined")) is not None:
-                usage.call_seconds = time.monotonic() - joined
+                usage.call_seconds = call_clock.get("ended", time.monotonic()) - joined
             # stop_recording triggers on_audio_data; give it a moment to land before
             # the upload walks the directory (jpost does the same).
             await audiobuffer.stop_recording()
             await asyncio.sleep(2)
-            await transcript_handler.finalize()
+            if not await transcript_handler.finalize():
+                # Keep staging for the retry; a failed final write must not
+                # publish an incomplete journal and then remove its recovery copy.
+                return False
             if text_diagnostics is not None:
                 try:
                     await text_diagnostics.finalize(quality_observer.snapshot())
@@ -1059,15 +1069,14 @@ async def run_bot(
             return finalized
 
     async def finalize(status: SessionStatus) -> bool:
-        """Shield every teardown source, including transport callback tasks.
+        """Commit artifacts after the runner has drained its producer callbacks.
 
-        The dispatcher, participant-left callback and pipeline-finished callback
-        can all race. Shielding only ``runner.run()`` left callback-owned
-        finalization cancellable before artifact pointers reached Postgres.
+        The call owner alone publishes the finished artifact. Repeated room
+        cancellation cannot interrupt its filesystem upload or database commit.
         """
         # Wake a ringing join handler before artifact I/O, so teardown cannot
         # race an answer timeout into a late greeting or restart its talk clock.
-        closing.set()
+        mark_closing()
         return await finish_after_cancellation(lambda: finalize_once(status))
 
     # Canonical LiveKit handlers: start when the first human joins; tear down on disconnect.
@@ -1169,7 +1178,7 @@ async def run_bot(
         async def enforce_session_budget():
             await asyncio.sleep(max(60, min(3600, max_session_seconds)))
             logger.info("voice session duration budget reached (session={})", ctx.session_id)
-            await finalize(SessionStatus.ENDED)
+            mark_closing()
             await hangup_room(
                 room,
                 url=st.livekit_url,
@@ -1194,21 +1203,48 @@ async def run_bot(
     async def on_participant_left(transport, participant_id, reason):
         # These identities are minted only by the dispatcher for fixed local
         # lifecycle audio. Their disconnect must not end the caller's session.
-        if participant_id in {"oron-busy", "oron-goodbye", "oron-failure", "oron-unavailable"}:
+        if participant_id in {
+            "oron-busy",
+            "oron-goodbye",
+            "oron-failure",
+            "oron-unavailable",
+            "oron-recovery",
+        }:
             return
-        # Outside the two internal lifecycle identities, the SIP caller remains
+        # Outside these internal lifecycle identities, the SIP caller remains
         # the only admitted remote participant. Observer/browser token issuance
         # is still unreachable in production and guarded by the source canary.
         logger.info(
             f"Participant left {participant_id} ({reason}), ending session={ctx.session_id}"
         )
-        await finalize(SessionStatus.ENDED)
+        # cancel() only queues CancelFrame. Aggregators emit their final turns
+        # while it drains; uploading here would miss them and remove their file.
+        mark_closing()
         await worker.cancel()
 
     async def announce_runtime_failure() -> None:
         # Setup failure before a caller joined must not create a new room leg.
-        if "joined" in call_clock and on_failure is not None:
+        if not closing.is_set() and "joined" in call_clock and on_failure is not None:
             await on_failure()
+
+    async def prepare_runtime_recovery(_frame: ErrorFrame) -> bool:
+        if closing.is_set():
+            return False
+        # The interruption barrier already discarded the old model/audio turn.
+        # A synthesis reset must not resend text whose audio may have played.
+        if isinstance(tts, SonioxUnpointedContextTTSService):
+            await tts.prepare_recovery()
+        # VoiceFailurePolicy establishes fresh capture through the controller
+        # before the repeat prompt; waiting on the old reconnect here would
+        # duplicate that work and consume the bounded recovery window.
+        return not closing.is_set()
+
+    async def announce_runtime_recovery() -> None:
+        if closing.is_set() or "joined" not in call_clock or on_recovery is None:
+            raise ConnectionError("Caller is unavailable for voice recovery")
+        await on_recovery()
+        if closing.is_set():
+            raise ConnectionError("Caller left during voice recovery")
 
     runtime_failure = VoiceFailurePolicy(
         voice_control,
@@ -1216,6 +1252,8 @@ async def run_bot(
         announce_runtime_failure,
         interrupt_reply=voice_control.interrupt_reply if voice_control is not None else None,
         providers=(stt, llm, tts),
+        prepare_recovery=prepare_runtime_recovery,
+        announce_recovery=announce_runtime_recovery if on_recovery is not None else None,
     )
 
     @worker.event_handler("on_pipeline_error")
@@ -1227,14 +1265,13 @@ async def run_bot(
     # The other way a call ends: the flow reached a terminal node and
     # end_conversation stopped the pipeline. on_participant_left never fires —
     # nobody left — so without this the agent records nothing and the SIP leg
-    # stays up with dead air until LiveKit reaps the empty room. Measured at 37s
-    # on 2026-07-27. finalize() is idempotent, so the two paths cannot conflict.
+    # stays up with dead air until LiveKit reaps the empty room. This callback
+    # precedes processor cleanup, so only the runner's owner finalizes artifacts.
     @worker.event_handler("on_pipeline_finished")
     async def on_pipeline_finished(worker, frame):
         logger.info(f"Pipeline finished, ending session={ctx.session_id}")
-        closing.set()
+        mark_closing()
         await play_shutdown_once()
-        await finalize(SessionStatus.FAILED if runtime_failure.failed else SessionStatus.ENDED)
         await hangup_room(
             room,
             url=st.livekit_url,
@@ -1247,22 +1284,51 @@ async def run_bot(
     bind_pipeline_readiness(
         worker, ready, on_failure=lambda: setattr(runtime_failure, "failed", True)
     )
+    runner_task: asyncio.Task[None] | None = None
+
+    async def drain_pipeline() -> bool:
+        # Never wait for this from a processor event: Pipecat cleanup itself
+        # awaits those handlers. The call owner waits until all aggregators and
+        # their asynchronous final-turn callbacks have completed instead.
+        if runner_task is not None and not runner_task.done():
+            await worker.cancel()
+            try:
+                await asyncio.shield(runner_task)
+            except asyncio.CancelledError:
+                if not runner_task.cancelled():
+                    raise
+            except Exception:
+                logger.error("voice pipeline cleanup failed; retaining artifact staging")
+                return False
+        if runner_task is not None and (
+            runner_task.cancelled() or runner_task.exception() is not None
+        ):
+            # Runner setup can fail after starting a worker but before entering
+            # its cleanup block. A failed task is not proof the writers drained.
+            logger.error("voice pipeline cleanup unconfirmed; retaining artifact staging")
+            return False
+        return True
+
     try:
         # Establish/acknowledge the session before pipeline startup can admit a
         # SIP leg. Joining outbound is only dialling: waiting for pickup first
         # left early departures with no recorder row and unpersistable teardown.
         # This does not start recording, report talk time, or imply an answer.
         await recorder.start(room=room)
-        await runner.run()
+        runner_task = asyncio.create_task(runner.run(), name=f"voice-pipeline-{ctx.session_id}")
+        await asyncio.shield(runner_task)
+        mark_closing()
         if runtime_failure.failed:
             raise RuntimeError("voice pipeline lost a required processor")
+        await finalize(SessionStatus.ENDED)
     except asyncio.CancelledError:
         # A room-finished webhook can cancel this task before the transport's
         # participant-left callback completes. Preserve the call's private
         # artifacts and usage before propagating cancellation to the dispatcher.
-        closing.set()
+        mark_closing()
         await finish_after_cancellation(finish_shutdown_attempt)
-        await finalize(SessionStatus.ENDED)
+        if await finish_after_cancellation(drain_pipeline):
+            await finalize(SessionStatus.ENDED)
         raise
     except Exception as error:
         # The agent knows the call failed right now. Without this the row sits at
@@ -1272,7 +1338,9 @@ async def run_bot(
         )
         # Still upload: a call that died may have produced a partial transcript
         # or recording, and that is exactly what you want when debugging it.
-        await finalize(SessionStatus.FAILED)
+        mark_closing()
+        if await finish_after_cancellation(drain_pipeline):
+            await finalize(SessionStatus.FAILED)
         raise
     finally:
         await recorder.aclose()
@@ -1290,6 +1358,7 @@ async def run_call(
     drain_requested: asyncio.Event | None = None,
     on_drain: Callable[[], Awaitable[None]] | None = None,
     on_failure: Callable[[], Awaitable[None]] | None = None,
+    on_recovery: Callable[[], Awaitable[None]] | None = None,
 ) -> None:
     """Join `room_name` as the agent and run the pipeline for one call.
 
@@ -1326,6 +1395,7 @@ async def run_call(
         drain_requested=drain_requested,
         on_drain=on_drain,
         on_failure=on_failure,
+        on_recovery=on_recovery,
     )
 
 

@@ -193,6 +193,53 @@ async def test_active_connection_loss_stops_audio_without_replaying_speech(monke
         assert not tts._stopping
 
 
+async def test_recovery_reset_is_lazy_and_preserves_the_no_replay_boundary(monkeypatch):
+    async with service(monkeypatch) as (tts, provider, errors):
+        await tts.create_audio_context("partial")
+        queue = tts._audio_contexts["partial"]
+        assert [f async for f in tts.run_tts("כבר נשמע.", "partial")] == [None]
+        async with asyncio.timeout(3):
+            assert isinstance(await queue.get(), TTSAudioRawFrame)
+        provider.connections[0].transport.abort()
+        await tts._receive_task
+        errors.assert_awaited_once()
+        await tts.prepare_recovery()
+        assert tts._websocket is None and tts._receive_task is None
+        assert not tts._stopping
+        await asyncio.sleep(0.15)  # recovery prompt/caller delay exceeds fake auth deadline
+        assert len(provider.connections) == 1
+        assert [f async for f in tts.run_tts("אסור לחזור.", "partial")] == [None]
+        assert len(provider.connections) == 1
+        await speak(tts, "fresh", "תשובה חדשה.")
+        assert [m["text"] for m in provider.messages if m.get("text")] == [
+            "כבר נשמע.",
+            "תשובה חדשה.",
+        ]
+        assert provider.timeouts == 0
+
+
+@pytest.mark.parametrize("close_code", [1001, 1011])
+async def test_close_diagnostics_include_codes_without_provider_reason(monkeypatch, close_code):
+    from loguru import logger
+
+    messages = []
+    sink = logger.add(lambda message: messages.append(str(message)), format="{message}")
+    async with service(monkeypatch) as (tts, provider, errors):
+        try:
+            await tts.create_audio_context("active")
+            assert [f async for f in tts.run_tts("בדיקה.", "active")] == [None]
+            await provider.connections[0].close(close_code, "secret-token-and-customer-text")
+            await tts._receive_task
+            records = [m for m in messages if "Voice synthesis transport failure" in m]
+            assert len(records) == 1
+            assert f"received_close_code={close_code}" in records[0]
+            assert "stage=receive" in records[0] and "speech_pending=True" in records[0]
+            assert "secret-token-and-customer-text" not in records[0]
+            assert "secret-token-and-customer-text" not in str(errors.call_args_list)
+        finally:
+            logger.remove(sink)
+
+
 async def test_ambiguous_send_is_not_replayed_but_a_new_turn_can_recover(monkeypatch):
     async with service(monkeypatch) as (tts, provider, errors):
         await speak(tts, "first")

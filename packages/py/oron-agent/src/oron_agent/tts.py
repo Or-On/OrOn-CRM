@@ -13,6 +13,8 @@ import json
 from collections.abc import AsyncGenerator, Sequence
 from typing import Any
 
+from loguru import logger
+
 # Defined with the flow schema, because a flow now names the vendor it wants and
 # oron-flows cannot import this module. Re-exported here so every existing
 # caller keeps importing it from the package that builds the service.
@@ -22,6 +24,7 @@ from pipecat.services.google.tts import GeminiTTSService
 from pipecat.services.soniox.tts import SonioxTTSService
 from pipecat.services.tts_service import TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.text.base_text_filter import BaseTextFilter
 from pipecat.utils.tracing.service_decorators import traced_tts
 from websockets.exceptions import ConnectionClosed
@@ -86,17 +89,51 @@ class SonioxUnpointedContextTTSService(SonioxTTSService):
                 )
                 await self.remove_audio_context(context_id)
         if pending and report_error:
-            await self._report_error(ErrorFrame("Soniox connection closed during speech"))
+            await self._report_error(
+                ErrorFrame(
+                    "Soniox connection closed during speech", category=ErrorCategory.CONNECTIVITY
+                )
+            )
         self._configured_contexts.clear()
+
+    def _log_transport_failure(self, stage: str, error: Exception | None = None) -> None:
+        # Close reasons and exception strings can contain provider payloads.
+        # Numeric close codes distinguish abrupt loss from a peer close safely.
+        received = error.rcvd if isinstance(error, ConnectionClosed) else None
+        sent = error.sent if isinstance(error, ConnectionClosed) else None
+        logger.warning(
+            "Voice synthesis transport failure: provider=soniox stage={} error_type={} "
+            "received_close_code={} sent_close_code={} speech_pending={}",
+            stage,
+            type(error).__name__ if error is not None else "PeerClosed",
+            received.code if received else getattr(self._websocket, "close_code", None),
+            sent.code if sent else None,
+            bool(self._configured_contexts & self._submitted_contexts),
+        )
+
+    async def prepare_recovery(self) -> None:
+        """Retire the broken stream; only a fresh turn may open another socket.
+
+        Opening an idle socket here would start Soniox's authentication deadline
+        before the caller replies. This resets local transport resources, not a
+        promise that the provider can synthesize the next turn.
+        """
+        async with self._send_lock:
+            if self._stopping or not self.is_usable:
+                raise ConnectionError("Voice synthesis is no longer available")
+            await self._retire_socket(report_error=False)
 
     async def _receive_task_handler(self, report_error):
         # Reconnecting in the background opens another unauthenticated socket
         # and can discard the next turn's audio context. Reconnect on demand.
         try:
             await self._receive_messages()
-        except ConnectionClosed:
-            pass
-        except Exception:
+            if not self._disconnecting and self._configured_contexts & self._submitted_contexts:
+                self._log_transport_failure("receive")
+        except ConnectionClosed as error:
+            self._log_transport_failure("receive", error)
+        except Exception as error:
+            self._log_transport_failure("receive", error)
             await report_error(ErrorFrame("Soniox audio receive failed"))
         finally:
             if not self._disconnecting:
@@ -166,7 +203,8 @@ class SonioxUnpointedContextTTSService(SonioxTTSService):
                 )
                 await self.start_tts_usage_metrics(text)
             yield None
-        except Exception:
+        except Exception as error:
+            self._log_transport_failure("send", error)
             # No text replay after an ambiguous send. Keep credentials/provider
             # exception payloads out of downstream error frames and logs.
             async with self._send_lock:
@@ -180,7 +218,14 @@ class SonioxUnpointedContextTTSService(SonioxTTSService):
             # tts_process_generator queues yielded errors behind audio. The
             # context now has an end sentinel, so that path would silently drop
             # this failure after partial audio. Report it out of band instead.
-            await self._report_error(ErrorFrame("Soniox speech could not be sent"))
+            await self._report_error(
+                ErrorFrame(
+                    "Soniox speech could not be sent",
+                    category=ErrorCategory.CONNECTIVITY
+                    if isinstance(error, (ConnectionClosed, ConnectionError, TimeoutError))
+                    else ErrorCategory.UNKNOWN,
+                )
+            )
             yield None
 
     async def flush_audio(self, context_id: str | None = None):

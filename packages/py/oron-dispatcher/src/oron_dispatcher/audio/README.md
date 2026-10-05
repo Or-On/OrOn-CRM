@@ -16,3 +16,9 @@ call deployment acceptance remain mandatory after an approved deployment.
 
 - `unavailable-he.wav`: השירות אינו זמין כעת. אנא נסו שוב מאוחר יותר. תודה.
   Fixed unpublished/unavailable-agent refusal, without provider synthesis.
+
+- `recovery-he.wav` (4.91s): הייתה הפרעה קצרה בקול. אפשר לחזור על המשפט האחרון?
+  Generated offline on 2026-10-05 with the same OneCore Asaf voice. Used only
+  after the first recoverable interruption has discarded the broken reply and
+  verified that caller capture is connected. It requests a fresh turn without
+  claiming that synthesis has already recovered or repeating uncertain speech.

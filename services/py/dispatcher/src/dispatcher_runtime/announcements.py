@@ -11,11 +11,11 @@ from typing import Literal
 
 from livekit import rtc
 
-Announcement = Literal["busy", "goodbye", "failure", "unavailable"]
+Announcement = Literal["busy", "goodbye", "failure", "unavailable", "recovery"]
 
 
 def announcement_pcm(kind: Announcement) -> bytes:
-    if kind not in ("busy", "goodbye", "failure", "unavailable"):
+    if kind not in ("busy", "goodbye", "failure", "unavailable", "recovery"):
         raise ValueError("unknown voice announcement")
     data = files("oron_dispatcher").joinpath("audio", f"{kind}-he.wav").read_bytes()
     with wave.open(io.BytesIO(data)) as audio:

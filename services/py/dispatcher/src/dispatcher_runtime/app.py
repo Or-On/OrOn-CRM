@@ -60,6 +60,9 @@ def compose_dispatcher(
             play_goodbye=(lambda room: play_announcement(room, "goodbye"))
             if play_announcement is not None
             else None,
+            play_recovery=(lambda room: play_announcement(room, "recovery"))
+            if play_announcement is not None
+            else None,
         ),
         resolve_phone=resolve_phone,
         hangup_room=hangup_room,

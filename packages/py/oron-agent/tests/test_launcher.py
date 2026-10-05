@@ -91,6 +91,41 @@ async def test_launcher_runs_one_cancellable_task_for_an_enabled_call() -> None:
         assert handle.task.cancelled()
 
 
+async def test_runtime_recovery_and_terminal_audio_stay_distinct_and_room_scoped() -> None:
+    settings = Settings(
+        _env_file=None,
+        ENABLE_REAL_VOICE_PROVIDERS=True,
+        LIVEKIT_URL="ws://127.0.0.1:7880",
+        LIVEKIT_API_KEY="fixture",
+        LIVEKIT_API_SECRET="fixture-secret",
+        SONIOX_API_KEY="fixture-soniox",
+        GOOGLE_CLOUD_PROJECT="fixture-project",
+    )
+    recovery, failure = AsyncMock(), AsyncMock()
+    callbacks = {}
+
+    async def running(room, *_args, **kwargs):
+        callbacks[room] = kwargs
+        kwargs["ready"].set()
+        await asyncio.Event().wait()
+
+    launch = make_launch_bot(
+        settings, preflight=AsyncMock(), play_recovery=recovery, play_failure=failure
+    )
+    handles = []
+    with patch("oron_agent.launcher.run_call", new=running):
+        try:
+            for room in ("first-call", "second-call"):
+                handles.append(await launch(room, _context()))
+            await callbacks["first-call"]["on_recovery"]()
+            await callbacks["second-call"]["on_failure"]()
+            recovery.assert_awaited_once_with("first-call")
+            failure.assert_awaited_once_with("second-call")
+        finally:
+            for handle in handles:
+                await handle.cancel()
+
+
 async def test_launcher_refuses_before_task_creation_when_llm_preflight_fails() -> None:
     settings = Settings(
         _env_file=None,

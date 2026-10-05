@@ -63,6 +63,7 @@ def make_launch_bot(
     preflight: Preflight = verify_llm_access,
     play_goodbye: Callable[[str], Awaitable[None]] | None = None,
     play_failure: Callable[[str], Awaitable[None]] | None = None,
+    play_recovery: Callable[[str], Awaitable[None]] | None = None,
 ):
     """Return the dispatcher port, preflighting providers before a paid call."""
 
@@ -101,6 +102,7 @@ def make_launch_bot(
                 drain_requested=drain_requested,
                 on_drain=(lambda: play_goodbye(room)) if play_goodbye is not None else None,
                 on_failure=(lambda: play_failure(room)) if play_failure is not None else None,
+                on_recovery=(lambda: play_recovery(room)) if play_recovery is not None else None,
             ),
             name=f"oron-agent:{context.session_id}",
         )

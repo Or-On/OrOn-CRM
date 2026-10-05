@@ -79,7 +79,7 @@ class VoiceControlGate(FrameProcessor):
             return
         # System lifecycle/metrics still propagate, but all media, context,
         # utterances and generation text stop at every affected boundary.
-        if self.control.paused and (
+        if (self.control.paused or self.control.recovering) and (
             not isinstance(frame, SystemFrame)
             or isinstance(
                 frame,
@@ -90,6 +90,7 @@ class VoiceControlGate(FrameProcessor):
                     VADUserStartedSpeakingFrame,
                     VADUserStoppedSpeakingFrame,
                     ProposedUserStartedSpeakingFrame,
+                    ProposedUserStoppedSpeakingFrame,
                 ),
             )
         ):
@@ -154,6 +155,10 @@ class VoiceController:
         self.epoch = -1
         self.generation = 0
         self.paused = True
+        self.recovering = False
+        self._recovery_epoch: int | None = None
+        self._recovery_generation: int | None = None
+        self._recovery_capture_ready = False
         self._blocked_epoch = -1
         self._read_recovery_epoch: int | None = None
         self._last_authorized_at: float | None = None
@@ -278,6 +283,10 @@ class VoiceController:
 
     async def _stop(self) -> None:
         self.paused = True
+        self.recovering = False
+        self._recovery_epoch = None
+        self._recovery_generation = None
+        self._recovery_capture_ready = False
         self.generation += 1
         if self._on_mode:
             self._on_mode(True)
@@ -294,6 +303,93 @@ class VoiceController:
             await self._barrier()
         if self._reset_utterance is not None:
             await self._reset_utterance()
+
+    def _current_recovery(self) -> bool:
+        return (
+            self.recovering
+            and not self.paused
+            and self.epoch == self._recovery_epoch
+            and self.generation == self._recovery_generation
+        )
+
+    async def begin_recovery(self, *, expected_epoch: int | None = None) -> bool:
+        """Fence conversational work without closing the reconnecting capture socket."""
+        if not await self.refresh():
+            return False
+        async with self._lock:
+            if (
+                self.paused
+                or self.recovering
+                or (expected_epoch is not None and expected_epoch != self.epoch)
+            ):
+                return False
+            self.recovering = True
+            self._recovery_epoch = self.epoch
+            self._recovery_generation = self.generation
+            self._recovery_capture_ready = False
+            if self._on_mode:
+                self._on_mode(True)
+            # Do not allow an already-started model action to finish alongside
+            # fixed recovery audio. Its external outcome is never replayed.
+            active = [task for task in self._actions if task is not asyncio.current_task()]
+            for task in active:
+                task.cancel()
+            if active:
+                _, pending = await asyncio.wait(active, timeout=2.0)
+                if pending:
+                    raise TimeoutError("Voice actions did not stop for recovery")
+            return True
+
+    async def prepare_recovery_capture(self) -> bool:
+        """Establish fresh recognition before the repeat prompt, with all gates shut.
+
+        The old socket is kept during provider reset, then retired here. A new
+        local generation prevents its delayed transcript/model/audio callbacks
+        from becoming a new caller instruction after recovery. The durable
+        ownership epoch is unchanged.
+        """
+        if not await self.refresh():
+            return False
+        async with self._lock:
+            if not self._current_recovery():
+                return False
+            self.generation += 1
+            self._recovery_generation = self.generation
+            try:
+                if self._pause_capture is not None:
+                    async with asyncio.timeout(2.0):
+                        await self._pause_capture()
+                if self._barrier is not None:
+                    await self._barrier()
+                if self._reset_utterance is not None:
+                    await self._reset_utterance()
+                if self._resume_capture is not None:
+                    async with asyncio.timeout(2.0):
+                        await self._resume_capture(self.generation)
+                async with asyncio.timeout(1.5):
+                    self._recovery_capture_ready = await self.acknowledge(self.epoch, "ai")
+                return self._recovery_capture_ready
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # Keep recovery gates closed. The policy can still announce a
+                # terminal failure under fresh ownership before ending the leg.
+                return False
+
+    async def finish_recovery(self, *, can_resume: Callable[[], bool]) -> bool:
+        """Release only the same freshly authorized recovery, without an audio gap."""
+        if not await self.refresh():
+            return False
+        async with self._lock:
+            if not self._current_recovery() or not self._recovery_capture_ready or not can_resume():
+                return False
+            self.recovering = False
+            self._recovery_epoch = None
+            self._recovery_generation = None
+            self._recovery_capture_ready = False
+            if self._on_mode:
+                self._on_mode(False)
+            return True
 
     async def interrupt_reply(self) -> None:
         """Discard current model/TTS/transport queues before fixed recovery audio.
@@ -370,7 +466,7 @@ class VoiceController:
                     self.paused = False
                     self._last_authorized_at = time.monotonic()
                     if self._on_mode:
-                        self._on_mode(False)
+                        self._on_mode(self.recovering)
                 return True
             except asyncio.CancelledError:
                 raise
@@ -388,9 +484,23 @@ class VoiceController:
 
     async def action(self, operation: Callable[..., Awaitable[Any]], *args: Any) -> Any:
         """Recheck durable ownership before existing flow work and invalidate its result."""
-        owner = self._action_owner.get()
+        return await self._authorized_action(operation, args, recovery=False)
+
+    async def recovery_action(self, operation: Callable[[], Awaitable[Any]]) -> Any:
+        """Only recovery callbacks bypass the local conversation hold, never ownership."""
+        return await self._authorized_action(operation, (), recovery=True)
+
+    async def _authorized_action(
+        self, operation: Callable[..., Awaitable[Any]], args: tuple[Any, ...], *, recovery: bool
+    ) -> Any:
+        owner = None if recovery else self._action_owner.get()
         fresh = await self.refresh()
-        if not fresh or self.paused or (owner is not None and owner != self.generation):
+        if (
+            not fresh
+            or self.paused
+            or (owner is not None and owner != self.generation)
+            or (not self._current_recovery() if recovery else self.recovering)
+        ):
             raise asyncio.CancelledError("voice action is not authorized")
         generation = self.generation
 

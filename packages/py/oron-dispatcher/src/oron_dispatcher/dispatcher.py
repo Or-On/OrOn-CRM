@@ -73,7 +73,7 @@ ResolvePhone = Callable[[str], Awaitable[PhoneResolution | None]]
 HangupRoom = Callable[[str], Awaitable[None]]
 MintToken = Callable[[str, str], str]
 PlayAnnouncement = Callable[
-    [str, Literal["busy", "goodbye", "failure", "unavailable"]], Awaitable[None]
+    [str, Literal["busy", "goodbye", "failure", "unavailable", "recovery"]], Awaitable[None]
 ]
 
 

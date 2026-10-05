@@ -5,7 +5,7 @@ import pytest
 from dispatcher_runtime import announcements
 
 
-@pytest.mark.parametrize("kind", ["busy", "goodbye", "failure", "unavailable"])
+@pytest.mark.parametrize("kind", ["busy", "goodbye", "failure", "unavailable", "recovery"])
 def test_fixed_audio_is_pcm16_mono_bounded_and_non_silent(kind):
     pcm = announcements.announcement_pcm(kind)
     assert len(pcm) % 2 == 0

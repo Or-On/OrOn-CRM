@@ -490,3 +490,113 @@ async def test_old_model_callback_cannot_start_an_action_after_resume():
     with pytest.raises(asyncio.CancelledError):
         await task
     operation.assert_not_awaited()
+
+
+async def test_recovery_keeps_socket_until_reset_and_rejects_old_callbacks_after_release(
+    monkeypatch,
+):
+    control, _, ack = controller()
+    await control.refresh()
+    old_generation, epoch = control.generation, control.epoch
+    capture_order = []
+
+    async def pause():
+        assert control.recovering and not control.paused
+        capture_order.append("old receive stopped")
+
+    async def resume(generation):
+        assert control.recovering and generation != old_generation
+        capture_order.append("fresh capture ready")
+
+    control._pause_capture = pause  # noqa: SLF001 — injected lifecycle port
+    control._resume_capture = resume  # noqa: SLF001
+    control._reset_utterance = AsyncMock()  # noqa: SLF001
+    assert await control.begin_recovery()
+    assert capture_order == []  # provider recovery can still inspect the existing socket
+    assert control.epoch == epoch
+    assert await control.prepare_recovery_capture()
+    assert capture_order == ["old receive stopped", "fresh capture ready"]
+    assert control.recovering
+    assert await control.finish_recovery(can_resume=lambda: True)
+    assert not control.recovering and not control.paused and control.epoch == epoch
+    ack.assert_awaited_with(epoch, "ai")
+
+    recognition = VoiceControlGate(control, recognition=True)
+    push = AsyncMock()
+    monkeypatch.setattr(recognition, "push_frame", push)
+    old = TranscriptionFrame("old instruction", "fixture", "", finalized=True)
+    old.metadata["ownership_generation"] = old_generation
+    await recognition.process_frame(old, FrameDirection.DOWNSTREAM)
+    push.assert_not_awaited()
+    fresh = TranscriptionFrame("fresh instruction", "fixture", "", finalized=True)
+    fresh.metadata["ownership_generation"] = control.generation
+    await recognition.process_frame(fresh, FrameDirection.DOWNSTREAM)
+    push.assert_awaited_once_with(fresh, FrameDirection.DOWNSTREAM)
+
+
+async def test_recovery_gate_blocks_caller_model_output_and_business_actions(monkeypatch):
+    from pipecat.frames.frames import LLMContextFrame, ProposedUserStoppedSpeakingFrame
+    from pipecat.processors.aggregators.llm_context import LLMContext
+
+    control, _, _ = controller()
+    await control.refresh()
+    on_mode = []
+    control._on_mode = on_mode.append  # noqa: SLF001 — injected idle suppression port
+    assert await control.begin_recovery()
+    on_mode.clear()
+    gate = VoiceControlGate(control)
+    push = AsyncMock()
+    monkeypatch.setattr(gate, "push_frame", push)
+    for frame in (
+        InputAudioRawFrame(b"\0\0", 16000, 1),
+        ProposedUserStoppedSpeakingFrame(),
+        LLMContextFrame(LLMContext([])),
+        LLMTextFrame("overlapping response"),
+        TTSAudioRawFrame(b"\0\0", 16000, 1),
+    ):
+        await gate.process_frame(frame, FrameDirection.DOWNSTREAM)
+    push.assert_not_awaited()
+    business_action = AsyncMock()
+    with pytest.raises(asyncio.CancelledError):
+        await control.action(business_action)
+    business_action.assert_not_awaited()
+    recovery_audio = AsyncMock()
+    await control.recovery_action(recovery_audio)
+    recovery_audio.assert_awaited_once()
+    assert all(on_mode)  # refresh must not unpause idle prompts during recovery
+    assert await control.prepare_recovery_capture()
+    assert await control.finish_recovery(can_resume=lambda: True)
+    assert on_mode[-1] is False
+    await control.action(business_action)
+    business_action.assert_awaited_once()
+
+
+@pytest.mark.parametrize("failure", ["capture", "ownership_ack"])
+async def test_failed_recovery_capture_cannot_release_the_conversation(failure):
+    control, _, ack = controller()
+    await control.refresh()
+    assert await control.begin_recovery()
+    if failure == "capture":
+        control._resume_capture = AsyncMock(  # noqa: SLF001
+            side_effect=ConnectionError("synthetic fresh stream failure")
+        )
+    else:
+        # refresh succeeds, then the exact-epoch acknowledgement after capture fails.
+        ack.side_effect = [True, False]
+    assert await control.prepare_recovery_capture() is False
+    assert control.recovering
+    assert not await control.finish_recovery(can_resume=lambda: True)
+    gate_action = AsyncMock()
+    with pytest.raises(asyncio.CancelledError):
+        await control.action(gate_action)
+    gate_action.assert_not_awaited()
+
+
+async def test_changed_epoch_cannot_release_old_recovery():
+    control, read, _ = controller()
+    await control.refresh()
+    assert await control.begin_recovery()
+    assert await control.prepare_recovery_capture()
+    read.return_value = VoiceControlSnapshot(1, "paused")
+    assert not await control.finish_recovery(can_resume=lambda: True)
+    assert control.paused
