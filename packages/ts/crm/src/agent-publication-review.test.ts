@@ -71,6 +71,37 @@ describe("publication review", () => {
     );
   });
 
+  it.each([
+    "Save the customer's name and fault details using capture_service_intake.",
+    "שמור רק שני פרטים אלה באמצעות capture_service_intake עם confirmed=false.",
+  ])(
+    "recognizes service-intake saving without granting lead writes: %s",
+    (prompt) => {
+      const review = reviewAgentPublication({
+        prompt,
+        capabilities: ["service.intake"],
+        leadFields: null,
+      });
+      expect(review.promptWarnings).not.toContain("lead_saving");
+      expect(review.enabledActions.map((action) => action.name)).toEqual([
+        "service_intake",
+      ]);
+      expect(review.blocking).toEqual([]);
+    },
+  );
+
+  it.each(["Save the lead details.", "Save leads.", "שמור את פרטי הליד."])(
+    "still warns about explicit lead saving with only service intake: %s",
+    (prompt) => {
+      const review = reviewAgentPublication({
+        prompt,
+        capabilities: ["service.intake"],
+        leadFields: null,
+      });
+      expect(review.promptWarnings).toContain("lead_saving");
+    },
+  );
+
   it("marks a lead agent with no reviewed field list as blocked", () => {
     expect(
       reviewAgentPublication({

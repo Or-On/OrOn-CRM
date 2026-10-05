@@ -55,7 +55,7 @@ const en = {
     "ticket.open":
       "Open or update a support ticket when escalating to a person",
     "service.intake":
-      "Collect service details and open a field-service incident",
+      "Save service details and follow the approved intake workflow; in digital-form mode, only the customer’s form submission opens a case",
   },
   roleTitle: "Role title (how the agent names its role)",
   schemaChoice: "Field list",
@@ -149,7 +149,8 @@ const he: Copy = {
     "lead.follow_up": "תיעוד שאדם צריך לחזור ללקוח",
     "lead.read": "קריאת מה שכבר נאסף",
     "ticket.open": "פתיחה או עדכון של קריאת שירות בעת העברה לאדם",
-    "service.intake": "איסוף פרטי תקלה ופתיחת אירוע לטכנאי שטח",
+    "service.intake":
+      "שמירת פרטי שירות והמשך לפי התהליך המאושר; במצב טופס דיגיטלי, רק שליחת הטופס בידי הלקוח פותחת קריאה",
   },
   roleTitle: "כינוי תפקיד (כיצד הסוכן מציג את תפקידו)",
   schemaChoice: "רשימת שדות",

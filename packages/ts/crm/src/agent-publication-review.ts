@@ -51,7 +51,7 @@ export interface AgentPublicationReview {
  */
 const promisePatterns: Readonly<Record<AgentPromptPromise, RegExp>> = {
   lead_saving:
-    /\b(?:save|record|capture|log)\b[^.!?\n]{0,40}\b(?:lead|details?|information|answers?|requirements?)\b|(?:לשמור|שמור|לרשום|רשום|תעד|לתעד)[^.!?\n]{0,30}(?:פרטים|מידע|ליד|תשובות|דרישות)/iu,
+    /\b(?:save|record|capture|log)\b[^.!?\n]{0,40}\b(?:leads?|details?|information|answers?|requirements?)\b|(?:לשמור|שמור|לרשום|רשום|תעד|לתעד)[^.!?\n]{0,30}(?:פרטים|מידע|ליד|תשובות|דרישות)/iu,
   booking:
     /\b(?:book|schedule|reserve)\b[^.!?\n]{0,30}\b(?:appointment|meeting|demo|call|visit|slot)\b|\bcalendar\b|(?:לקבוע|קבע|לתאם|תאם|להזמין)[^.!?\n]{0,30}(?:פגישה|תור|הדגמה|שיחה|ביקור)/iu,
   payment:
@@ -59,6 +59,10 @@ const promisePatterns: Readonly<Record<AgentPromptPromise, RegExp>> = {
   outbound_message:
     /\b(?:send|text|message|email)\b[^.!?\n]{0,20}\b(?:the\s+customer|them|a\s+(?:link|summary|quote|confirmation))\b|(?:לשלוח|אשלח|שלח)[^.!?\n]{0,20}(?:קישור|סיכום|הצעת\s+מחיר|אישור|הודעה)/iu,
 };
+
+// Service intake can save service details, but it does not grant lead writes.
+const explicitLeadSavingPattern =
+  /\b(?:save|record|capture|log)\b[^.!?\n]{0,40}\bleads?\b|(?:לשמור|שמור|לרשום|רשום|תעד|לתעד)[^.!?\n]{0,30}ליד/iu;
 
 /** Not a model tool: what an escalation does for a ticketing agent. */
 const ticketOnEscalation: AgentActionDescription = {
@@ -94,7 +98,7 @@ export function reviewAgentPublication(input: {
       name: "service_intake",
       capability: "service.intake",
       description:
-        "Collect the configured service details, save a confirmed ticket and service incident, and request linked photos.",
+        "Save service intake details and request the configured follow-up. In digital-form mode, only the customer's explicit web-form submission opens a service case.",
       mutating: true,
     });
   const blocking: AgentPublicationReview["blocking"][number][] = [];
@@ -107,8 +111,12 @@ export function reviewAgentPublication(input: {
   )
     .filter(([promise, pattern]) => {
       if (!pattern.test(input.prompt)) return false;
-      // Saving is the one promise a capability can make true.
-      return promise !== "lead_saving" || !hasCapability(granted, "lead.write");
+      if (promise !== "lead_saving") return true;
+      if (hasCapability(granted, "lead.write")) return false;
+      return (
+        !hasCapability(granted, "service.intake") ||
+        explicitLeadSavingPattern.test(input.prompt)
+      );
     })
     .map(([promise]) => promise);
   return {
