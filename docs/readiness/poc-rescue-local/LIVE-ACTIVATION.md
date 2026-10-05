@@ -9,27 +9,42 @@ The user subsequently declined a new paid Coexistence subscription.
 ## Deployed release
 
 The actual host `oron-dev` now runs source
-`0f003ccd0049e6c2b0bc8f19e17a80d7f339e198`, schema `af54b6c13e92`.
+`bdaa5a3244c68cc6ba1d043807d4220bb62a12c1`, schema `af54b6c13e92`.
 It includes the authenticated inbound callback, authoritative DID/rule
 admission and per-call transfer capability first deployed in79a4a84, described in
 [TWILIO-INBOUND-SIGNED-ROUTING.md](TWILIO-INBOUND-SIGNED-ROUTING.md).
-The additive schema revision accepts exactly three new safe quarantine reasons,
+The additive schema revision first deployed in0f003cc accepts exactly three new safe quarantine reasons,
 preserving prior claim, lease and privilege boundaries. The earlier79 deployment
 exposed this missing database vocabulary during the live proof described below.
+The current release also repairs durable parsing of the actual provider's new
+`roomEndReason` field, matching the SDK's existing post-signature parsing policy.
+Original signed JSON remains retained for audit and collision detection.
+The exact deployed0f payload reproduced ParseError in the old durable parser.
+Three actual PostgreSQL failures became95 passing scoped tests; four independent
+checks and four exact compiled-image PostgreSQL scenarios also passed.
 All five published image digests matched the tested images and exact revision.
 The archive SHA-256 is
-`5b6eab32f9df9f7543a1060959ad4013d050aadcb4fa585a8ce83283176cf95c`.
+`ba925063e6579bd8f8e9befd4433d698b7f9124d635585c1dacd10963233674c`.
 Deployment exited zero, all seven services were healthy, and independent checks
 passed actual image/schema, private configuration and cross-service object I/O.
 The deployment log is
-`/opt/oron-dev/protouch-inbound-settlement-0f003ccd0049e6c2b0bc8f19e17a80d7f339e198.V8X3BJ/deployment.log`.
+`/opt/oron-dev/protouch-livekit-compat-bdaa5a3244c68cc6ba1d043807d4220bb62a12c1.lXRkY4/deployment.log`.
 The exact guarded runtime resolved the expected published ProTouch agent/flow,
 had zero active sessions, and loaded the protected callback configuration.
-At deployment completion the DID still had its simulator marker, LiveKit had
-the single owned authenticated rule `SDR_qwuvuQ9waXV7`, and the carrier retained
-its original route.
+The fresh pre-deploy check at00:51:57UTC confirmed zero calls/provider rooms,
+the bound authenticated rule `SDR_qwuvuQ9waXV7`, and the complete configured
+carrier callback route. The independent bdaa postcheck also passed protected
+configuration and real private-object interoperability between services.
 Provider authentication proof and actual inbound acceptance remain separate
 from this successful deployment.
+
+The preceding authenticated-boundary repair was source
+`0f003ccd0049e6c2b0bc8f19e17a80d7f339e198`, archive SHA-256
+`5b6eab32f9df9f7543a1060959ad4013d050aadcb4fa585a8ce83283176cf95c`,
+with successful deployment log
+`/opt/oron-dev/protouch-inbound-settlement-0f003ccd0049e6c2b0bc8f19e17a80d7f339e198.V8X3BJ/deployment.log`.
+At that deployment the DID still had its simulator marker; its subsequent
+authenticated provider proof and carrier activation are recorded below.
 
 The preceding outbound voice repair deployed source
 `60f26bfe1775997da1fb5159ec9e09a08246068b` with schema `9e43a5b02d81`.
@@ -63,6 +78,9 @@ created at `/opt/oron-dev/backups/dev_oron_platform-20261004T232100Z.backup.tar.
 before preparing the authenticated inbound alternative.
 Another full backup before the durable-settlement repair is retained at
 `/opt/oron-dev/backups/dev_oron_platform-20261005T000233Z.backup.tar.gz`.
+A fresh full backup before bdaa is retained at
+`/opt/oron-dev/backups/dev_oron_platform-20261005T004022Z.backup.tar.gz`;
+the guarded deployment verified its checksum before proceeding.
 The original private configuration is retained under root-only
 `/opt/oron-dev/protouch-go-live-private-r9h5kxx6`; its deployment log records the
 exact operation. Previous releases/images remain available. Schema rollback
@@ -212,12 +230,26 @@ returned200, the other tenant received404, and anonymous access401. The
 70.6997-second WAV contains audio and the transcript one Hebrew line; those
 artifacts do not establish a human conversation. No blind redial occurred.
 The room_finished receipt later quarantined with
-`dispatcher_attempts_exhausted`; its cause is under investigation, separately
-from the already ended session and retained protected artifacts.
+`dispatcher_attempts_exhausted` after8 attempts. Exact event `EV_4hczEHMmjVZF`
+contains new top-level `roomEndReason`: the SDK accepted it after signature
+verification, but strict durable replay rejected it before invoking the handler.
+The deployed bdaa fix aligns those parsing policies and logs only the exception
+class on future failures. The original quarantined receipt remains untouched;
+the already ended session and protected artifacts were not rewritten.
+
+A fresh real-provider lifecycle proof passed on bdaa at00:55:01–00:55:06UTC.
+One owned room and one standard RTC participant produced four signed events,
+all processed on attempt1 with no safe error. The final event
+`EV_aJn9XfbENxxE`, ledger `b6aa6837-e20c-4e3f-980a-8fb5bb02ef0b`, contains the
+actual `roomEndReason` field that caused the prior failure. The proof published
+no media and created no SIP call, agent, application session or contact change.
+The owned room was deleted and provider rooms/active sessions returned to zero.
+This verifies the parser repair against LiveKit; it does not replace incoming
+PSTN/Hebrew conversation acceptance.
 
 ## WhatsApp status
 
-Fresh Graph API at00:23:55UTC and authenticated WhatsApp Manager agree that ProTouch phone
+Fresh Graph API at00:55:03UTC on bdaa and the earlier authenticated WhatsApp Manager agree that ProTouch phone
 `1284902841381185` remains `PENDING`; it is not connected to Cloud API.
 Or-On's separate phone remains `CONNECTED`/`CLOUD_API`.
 No durable ProTouch receipt exists, including since the user's earlier test.
@@ -243,3 +275,11 @@ Current release/deployment and activation receipts include
 `protouch-digest-operator-receipt.json`,
 `protouch-digest-cutover-proof-gates.json`, and
 `whatsapp-final-readonly-20261005.json`.
+The schema-compatibility release adds
+`livekit-schema-compatibility-deployment-plan.json`,
+`protouch-room-finished-parse-only.json`,
+`schema-image-bdaa5a32-canonical/receipt.json`, and
+`livekit-schema-compatibility-live-deploy.json`.
+Fresh final receipts are
+`poc-parser-proof-f88c161e26ae46e7a44ced09c86fb33a.json` and
+`whatsapp-final-readonly-20261005-bdaa5a32.json`.
