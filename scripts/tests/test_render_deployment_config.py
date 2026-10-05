@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 RENDERER = ROOT / "scripts" / "render_deployment_config.ts"
@@ -44,6 +47,7 @@ def test_private_field_and_object_configuration_is_shared_without_printing_secre
                 f"BLIND_INDEX_KEY={blind_index_key}",
                 f"WHATSAPP_ADDITIONAL_ACCOUNTS_JSON={additional_accounts}",
                 "WHATSAPP_MEMORY_SIGNATURE_PROOF_ENABLED=true",
+                "PUBLIC_SITE_URL=http://stale-origin.invalid",
                 "WHATSAPP_MEMORY_VERIFIER_DATABASE_URL=postgresql://synthetic-verifier:private-verifier@db/dev_render_contract",
             )
         )
@@ -101,6 +105,7 @@ def test_private_field_and_object_configuration_is_shared_without_printing_secre
         assert config["ARTIFACTS_LOCAL_ROOT"] == "/var/lib/oron/objects"
     for service in ("web", "messaging-worker"):
         assert services[service]["WHATSAPP_ADDITIONAL_ACCOUNTS_JSON"] == additional_accounts
+    assert services["messaging-worker"]["PUBLIC_SITE_URL"] == "https://dev.example.test"
 
     sweeper = _env(output / "config" / "sweeper.env")
     assert sweeper["DATABASE_URL"] == services["dispatcher"]["VOICE_DATABASE_URL"]
@@ -157,3 +162,61 @@ def test_nonweb_compose_overrides_cannot_inherit_signature_verifier_secrets() ->
     web = re.search(r"^  web:\n(.*?)(?=^  \S|\Z)", document, re.M | re.S)
     assert web is not None and "web.env" in web.group(1)
     assert "WHATSAPP_MEMORY_VERIFIER_DATABASE_URL" not in web.group(1)
+
+
+def test_effective_compose_worker_uses_the_canonical_public_origin(tmp_path: Path) -> None:
+    docker = shutil.which("docker")
+    if docker is None:
+        pytest.skip("Docker Compose is required for effective deployment configuration")
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    for service in (
+        "web",
+        "messaging-worker",
+        "dispatcher",
+        "control-api",
+        "migrator",
+        "bootstrap-owner",
+        "sweeper",
+    ):
+        (config_dir / f"{service}.env").write_text(
+            "PUBLIC_SITE_URL=http://stale-private-config.invalid\n", encoding="utf-8"
+        )
+    env = {
+        **os.environ,
+        "DEPLOYMENT_CONFIG_DIR": config_dir.as_posix(),
+        "DEPLOYMENT_DATA_DIR": (tmp_path / "data").as_posix(),
+        "DEPLOYMENT_DATABASE_NAME": "fictional_origin",
+        "PLATFORM_ORIGIN": "https://canonical.example.test",
+        "TLS_CONTACT_EMAIL": "fixture@example.test",
+    }
+    for key in (
+        "WEB_IMAGE",
+        "MESSAGING_WORKER_IMAGE",
+        "DISPATCHER_IMAGE",
+        "CONTROL_API_IMAGE",
+        "MIGRATOR_IMAGE",
+    ):
+        env[key] = "fictional/read-only-config@sha256:" + "a" * 64
+    result = subprocess.run(  # noqa: S603 - config rendering only; no containers or providers
+        [
+            docker,
+            "compose",
+            "--profile",
+            "workers",
+            "-f",
+            str(ROOT / "infra/compose/deployment.yaml"),
+            "config",
+            "--format",
+            "json",
+        ],
+        env=env,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    services = json.loads(result.stdout)["services"]
+    for service in ("web", "messaging-worker"):
+        assert services[service]["environment"]["PUBLIC_SITE_URL"] == env["PLATFORM_ORIGIN"]

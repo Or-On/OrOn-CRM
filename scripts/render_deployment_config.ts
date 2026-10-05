@@ -322,6 +322,7 @@ async function main(): Promise<void> {
         "platform_messaging",
         passwords.messaging,
       ),
+      PUBLIC_SITE_URL: input.origin,
       AUTH_SERVICE_SECRET: authServiceSecret,
       FIELD_CIPHER_LOCAL_KEY: fieldCipherKey,
       BLIND_INDEX_KEY: blindIndexKey,

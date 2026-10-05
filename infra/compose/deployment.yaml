@@ -198,6 +198,8 @@ services:
       PLATFORM_ENV: production
       CONTROL_API_URL: http://control-api:8000
       DISPATCHER_URL: http://dispatcher:8082
+      # Background intake follow-ups issue links on the same public site as web.
+      PUBLIC_SITE_URL: ${PLATFORM_ORIGIN:?Set the canonical HTTPS origin}
     depends_on:
       postgres: { condition: service_healthy }
     healthcheck:
