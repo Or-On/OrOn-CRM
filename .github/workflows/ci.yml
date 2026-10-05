@@ -179,6 +179,7 @@ jobs:
           tests/support-tickets.live.test.ts tests/post-call.live.test.ts
           tests/lead-capture.live.test.ts tests/inbox-removal.live.test.ts
           tests/service-form.live.test.ts
+          tests/whatsapp-audio.live.test.ts
       - name: Initialize dedicated readiness PostgreSQL
         env:
           DATABASE_URL: ${{ env.READINESS_POSTGRES_URL }}
