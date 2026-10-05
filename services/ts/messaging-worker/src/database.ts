@@ -517,6 +517,7 @@ async function processInbound(
               AND entitlement.feature_key='field_service'
               AND entitlement.available AND configuration.enabled
               AND configuration.whatsapp_intake_enabled
+              AND service.current_workflow_policy()#>>'{whatsappFollowUp,mode}' IS DISTINCT FROM 'form'
               AND ${fieldServiceAiAvailable && !formReply && envelope.contentType !== "audio" && envelope.contentType !== "video"}
               AND EXISTS(SELECT 1 FROM messaging.conversations c JOIN agents.agent_profile_versions a ON a.tenant_id=c.tenant_id AND a.id=c.ai_agent_profile_version_id
                 WHERE c.id=${result.conversationId}::uuid AND c.tenant_id=entitlement.tenant_id AND c.ownership_mode='ai'
@@ -699,6 +700,16 @@ async function loadFieldServiceIntakeWork(
       await cancelJobForDisabledFeature(transaction, job, workerId);
       return undefined;
     }
+    const workflowPolicy = await getServiceWorkflowPolicy(transaction);
+    if (workflowPolicy.whatsappFollowUp?.mode === "form") {
+      await cancelJobForDisabledFeature(
+        transaction,
+        job,
+        workerId,
+        "digital_form_phone_first",
+      );
+      return undefined;
+    }
     const context = await transaction<
       {
         locale: string;
@@ -763,7 +774,7 @@ async function loadFieldServiceIntakeWork(
       triggerMessageId,
       occurredAt: bound.occurred_at.toISOString(),
       locale: bound.locale,
-      workflowPolicy: await getServiceWorkflowPolicy(transaction),
+      workflowPolicy,
       agentVersionId: bound.agent_version_id,
       ownershipEpoch: bound.ownership_epoch,
       knownFields: sanitizeIntakeProposal(bound.known_context.knownFields),
@@ -851,6 +862,20 @@ async function processFieldServiceIntake(
           job,
           workerId,
           "digital_form_pending",
+        );
+        return;
+      }
+      // A policy can switch while the extraction provider is running. No
+      // phone-first form draft may be manufactured from that stale result.
+      if (
+        (await getServiceWorkflowPolicy(transaction)).whatsappFollowUp?.mode ===
+        "form"
+      ) {
+        await cancelJobForDisabledFeature(
+          transaction,
+          job,
+          workerId,
+          "digital_form_phone_first",
         );
         return;
       }
@@ -1248,6 +1273,7 @@ async function processAudioTranscription(
           FROM platform.tenant_feature_entitlements e JOIN service.tenant_configuration c ON c.tenant_id=e.tenant_id
           WHERE e.tenant_id=platform.current_tenant_id() AND e.feature_key='field_service' AND e.available
             AND c.enabled AND c.whatsapp_intake_enabled
+            AND service.current_workflow_policy()#>>'{whatsappFollowUp,mode}' IS DISTINCT FROM 'form'
             AND EXISTS(SELECT 1 FROM agents.agent_profile_versions a WHERE a.id=${work.agentVersionId}::uuid
               AND a.tenant_id=e.tenant_id AND a.published_at IS NOT NULL AND a.validation_status='valid'
               AND a.tool_permissions ? 'service.intake') ON CONFLICT DO NOTHING`;

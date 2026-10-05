@@ -58,3 +58,27 @@ reconstructed into `.artifacts/recovered_b162a7e4d903_opening_menu_activation_bo
 It was not added to the active chain or enabled by this work. Its original
 additional fixtures were lost during the external branch change and require
 recovery and fresh validation before automatic-menu activation.
+
+## Phone-first boundary follow-up
+
+The first standalone WhatsApp service message could still enter the legacy
+extractor while the current workflow required a phone-origin digital form.
+That created an intake without a voice source and subsequently suppressed AI
+as though an issuable form existed. A real PostgreSQL regression reproduced
+the unwanted extractor invocation in `claude-wa-standalone-red-actual.log`.
+
+Form mode now prevents legacy text/audio extraction admission, cancels an
+already queued extractor before model invocation, and rechecks the current
+policy after model completion. Ordinary AI remains eligible when no pending
+phone form exists. The reviewed agent draft explicitly treats WhatsApp as a
+continuation of an existing phone form and makes no standalone link promise.
+
+`claude-wa-phone-first-final.log` verifies 22 cases, including first-contact
+AI continuation, no orphan intake/case, queued-job cancellation, ordinary
+non-form intake, a policy flip during model execution, all existing pending
+form/reopen cases, OCR and follow-up controls. Its five audio failures were a
+pre-existing fixture dependency on another test file having published an
+agent. The audio fixture now creates its own fictional tenant/owner/agent;
+all five cases pass independently in `claude-wa-audio-independent.log`.
+Worker build/typecheck and scoped lint pass. These are local proofs; no
+provider messages or runtime configuration changes were performed.

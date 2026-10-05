@@ -8,6 +8,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { acceptWhatsAppWebhook } from "@or-on/crm";
 
 import { createMessagingStore } from "../src/database.js";
+import type { WhatsAppAiProvider } from "../src/ai-provider.js";
+import type { FieldServiceAiProvider } from "../src/field-service-provider.js";
 import {
   SimulatorWhatsAppProvider,
   type WhatsAppSendRequest,
@@ -109,9 +111,9 @@ describe.skipIf(sourceUrl === undefined)(
           SET available=true, enabled=true, configuration=EXCLUDED.configuration
       `;
       await admin`
-        INSERT INTO service.tenant_configuration (tenant_id, enabled)
-        VALUES (${tenantId}::uuid, true)
-        ON CONFLICT (tenant_id) DO UPDATE SET enabled=true
+        INSERT INTO service.tenant_configuration (tenant_id, enabled, whatsapp_intake_enabled)
+        VALUES (${tenantId}::uuid, true, true)
+        ON CONFLICT (tenant_id) DO UPDATE SET enabled=true,whatsapp_intake_enabled=true
       `;
       // The tenant's authorised automatic sender for platform replies.
       const profileId = randomUUID();
@@ -182,6 +184,10 @@ describe.skipIf(sourceUrl === undefined)(
 
     async function runWorker(
       guardForms = false,
+      overrides: {
+        aiProvider?: WhatsAppAiProvider;
+        fieldServiceProvider?: FieldServiceAiProvider;
+      } = {},
     ): Promise<WhatsAppSendRequest[]> {
       const sent: WhatsAppSendRequest[] = [];
       const store = createMessagingStore(
@@ -225,6 +231,7 @@ describe.skipIf(sourceUrl === undefined)(
                 },
               }
             : {}),
+          ...overrides,
         },
       );
       try {
@@ -264,6 +271,121 @@ describe.skipIf(sourceUrl === undefined)(
       await acceptInbound("972502345681", "Hello?");
       expect(await runWorker()).toEqual([]);
       await admin`UPDATE messaging.whatsapp_auto_greetings SET enabled=false WHERE channel_id=${channelId}::uuid`;
+    });
+
+    it("keeps a first standalone WhatsApp message out of phone-first form intake and cancels queued legacy extraction", async () => {
+      const decide = vi.fn<WhatsAppAiProvider["decide"]>().mockResolvedValue({
+        action: "reply",
+        text: "אפשר לעזור במידע כללי. הטופס להמשך טיפול נפתח לאחר שיחת השירות.",
+      });
+      const extractIntake = vi
+        .fn<FieldServiceAiProvider["extractIntake"]>()
+        .mockResolvedValue({
+          serviceIntent: true,
+          confirmed: false,
+          confidence: 1,
+          fields: { customerName: "דנה", faultDescription: "המסך לא עובד" },
+        });
+      const providers = {
+        aiProvider: { decide },
+        fieldServiceProvider: {
+          providerName: "fixture",
+          modelName: "fixture",
+          extractIntake,
+          extractProductLabel: () => Promise.reject(new Error("No OCR")),
+          summarizeEvidence: () => Promise.reject(new Error("No summary")),
+        },
+      };
+      const providerId = await acceptInbound(
+        "972502345686",
+        "שלום, המסך לא עובד",
+      );
+      await runWorker(false, providers);
+      const bindings = await admin<
+        { message_id: string; conversation_id: string; contact_id: string }[]
+      >`SELECT message.id AS message_id,message.conversation_id,conversation.contact_id
+        FROM messaging.messages message JOIN messaging.conversations conversation
+        ON conversation.id=message.conversation_id AND conversation.tenant_id=message.tenant_id
+        WHERE message.provider_message_id=${providerId}`;
+      const binding = bindings[0];
+      if (!binding) throw new Error("First inbound not retained");
+      expect(extractIntake).not.toHaveBeenCalled();
+      expect(decide).toHaveBeenCalledOnce();
+      expect(
+        await admin`SELECT id FROM service.intake_drafts WHERE conversation_id=${binding.conversation_id}::uuid`,
+      ).toEqual([]);
+      expect(
+        await admin`SELECT id FROM service.cases WHERE conversation_id=${binding.conversation_id}::uuid`,
+      ).toEqual([]);
+      expect(
+        await admin`SELECT id FROM ops.jobs WHERE reference_id=${binding.message_id}::uuid AND job_type='field_service.intake.extract'`,
+      ).toEqual([]);
+      // A legacy job admitted before switching the current tenant policy is
+      // refused before model spending and cannot manufacture an orphan draft.
+      const legacyId = randomUUID();
+      await admin`INSERT INTO ops.jobs(id,tenant_id,queue,job_type,reference_type,reference_id,payload,idempotency_key)
+        VALUES(${legacyId}::uuid,${tenantId}::uuid,'messaging','field_service.intake.extract','message',${binding.message_id}::uuid,
+          ${admin.json({ conversationId: binding.conversation_id, contactId: binding.contact_id, triggerMessageId: binding.message_id })},${`legacy-form-${legacyId}`})`;
+      await runWorker(false, providers);
+      expect(extractIntake).not.toHaveBeenCalled();
+      expect(
+        await admin`SELECT status,last_error_safe FROM ops.jobs WHERE id=${legacyId}::uuid`,
+      ).toEqual([
+        { status: "cancelled", last_error_safe: "digital_form_phone_first" },
+      ]);
+      await acceptInbound("972502345686", "תודה, אפשר מידע כללי?");
+      await runWorker(false, providers);
+      expect(decide).toHaveBeenCalledTimes(2);
+      expect(
+        await admin`SELECT id FROM service.intake_drafts WHERE conversation_id=${binding.conversation_id}::uuid`,
+      ).toEqual([]);
+      const summaryPolicy = {
+        ...formPolicy,
+        whatsappFollowUp: { ...formPolicy.whatsappFollowUp, mode: "summary" },
+      };
+      const setPolicy = async (policy: typeof formPolicy) => {
+        await admin`UPDATE platform.tenant_feature_entitlements SET configuration=${admin.json({ workflow: policy })}
+          WHERE tenant_id=${tenantId}::uuid AND feature_key='field_service'`;
+      };
+      try {
+        await setPolicy(summaryPolicy);
+        const ordinaryId = await acceptInbound("972502345687", "המסך לא עובד");
+        await runWorker(false, providers);
+        expect(extractIntake).toHaveBeenCalledOnce();
+        expect(
+          await admin`SELECT intake.id FROM service.intake_drafts intake JOIN messaging.messages message
+          ON message.conversation_id=intake.conversation_id AND message.tenant_id=intake.tenant_id
+          WHERE message.provider_message_id=${ordinaryId}`,
+        ).toHaveLength(1);
+        // Current policy is rechecked after the external model returns. The
+        // previously loaded ordinary policy cannot create a new form draft.
+        extractIntake.mockImplementationOnce(async () => {
+          await setPolicy(formPolicy);
+          return {
+            serviceIntent: true,
+            confirmed: false,
+            confidence: 1,
+            fields: { customerName: "דנה", faultDescription: "המסך לא עובד" },
+          };
+        });
+        const racingId = await acceptInbound("972502345688", "המסך לא עובד");
+        await runWorker(false, providers);
+        expect(extractIntake).toHaveBeenCalledTimes(2);
+        expect(
+          await admin`SELECT intake.id FROM service.intake_drafts intake JOIN messaging.messages message
+          ON message.conversation_id=intake.conversation_id AND message.tenant_id=intake.tenant_id
+          WHERE message.provider_message_id=${racingId}`,
+        ).toEqual([]);
+        expect(
+          await admin`SELECT job.status,job.last_error_safe FROM ops.jobs job JOIN messaging.messages message
+          ON message.id=job.reference_id AND message.tenant_id=job.tenant_id
+          WHERE message.provider_message_id=${racingId} AND job.job_type='field_service.intake.extract'`,
+        ).toEqual([
+          { status: "cancelled", last_error_safe: "digital_form_phone_first" },
+        ]);
+      } finally {
+        await setPolicy(formPolicy);
+      }
     });
 
     it.each(["admitted", "blocked_window", "queued", "blocked_existing"])(

@@ -26,11 +26,26 @@ describe.skipIf(!url)(
       const db = postgres(url, { max: 1, prepare: false });
       let fixtureRoot: string | undefined;
       try {
-        const [agent] = await db<
-          { id: string; tenant_id: string; user_id: string }[]
-        >`SELECT v.id,v.tenant_id,m.user_id FROM agents.agent_profile_versions v JOIN memberships m ON m.tenant_id=v.tenant_id AND m.role='owner' WHERE v.published_at IS NOT NULL LIMIT 1`;
-        if (!agent) throw new Error("fictional published agent required");
+        // Independent from file order: every scenario owns its fictional
+        // tenant and published agent rather than borrowing a prior suite's.
+        const agent = {
+          id: randomUUID(),
+          tenant_id: randomUUID(),
+          user_id: randomUUID(),
+        };
+        const profile = randomUUID();
+        await db`INSERT INTO tenants(id,name,slug,status) VALUES(${agent.tenant_id}::uuid,'Fictional audio tenant',${agent.tenant_id},'active')`;
+        await db`INSERT INTO users(id,email,status) VALUES(${agent.user_id}::uuid,${`${agent.user_id}@example.invalid`},'active')`;
+        await db`INSERT INTO memberships(tenant_id,user_id,role) VALUES(${agent.tenant_id}::uuid,${agent.user_id}::uuid,'owner')`;
         await db`SELECT set_config('app.current_tenant',${agent.tenant_id},false)`;
+        await db`INSERT INTO crm.tenant_settings(tenant_id,locale,timezone) VALUES(${agent.tenant_id}::uuid,'en','UTC')`;
+        await db`UPDATE platform.tenant_feature_entitlements SET available=true,enabled=true,granted_at=clock_timestamp()
+          WHERE tenant_id=${agent.tenant_id}::uuid AND feature_key IN ('agents','contacts','whatsapp')`;
+        await db`INSERT INTO agents.agent_profiles(id,tenant_id,name) VALUES(${profile}::uuid,${agent.tenant_id}::uuid,'Fictional audio agent')`;
+        await db`INSERT INTO agents.agent_profile_versions(id,tenant_id,agent_profile_id,version,system_prompt,locale,
+          channel_capabilities,tool_permissions,validation_status,published_at)
+          VALUES(${agent.id}::uuid,${agent.tenant_id}::uuid,${profile}::uuid,1,'Answer synthetic audio safely.','en',
+          ARRAY['whatsapp'],'[]'::jsonb,'valid',clock_timestamp())`;
         const contact = randomUUID(),
           channel = randomUUID(),
           conversation = randomUUID(),
