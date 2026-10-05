@@ -1,0 +1,124 @@
+.panel {
+  display: grid;
+  gap: var(--or-space-4);
+  min-inline-size: 0;
+}
+
+.loading {
+  margin: 0;
+  color: var(--or-text-muted);
+  font-size: var(--or-text-compact);
+}
+
+.summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--or-space-3);
+  padding: var(--or-space-4);
+  border: 1px solid var(--or-border);
+  border-radius: var(--or-radius-lg);
+  background: var(--or-surface-raised);
+}
+
+.summary h3 {
+  margin: 0;
+  font-size: var(--or-text-section);
+  letter-spacing: -0.01em;
+}
+
+.summary p {
+  max-inline-size: 64ch;
+  margin: 0.35rem 0 0;
+  color: var(--or-text-muted);
+  font-size: var(--or-text-compact);
+  line-height: 1.55;
+}
+
+.icon {
+  display: grid;
+  place-items: center;
+  inline-size: 2.25rem;
+  block-size: 2.25rem;
+  border-radius: var(--or-radius-round);
+  background: var(--or-accent-soft);
+  color: var(--or-accent);
+}
+
+.current {
+  margin: 0;
+  color: var(--or-text-secondary);
+  font-size: var(--or-text-compact);
+}
+
+.form {
+  display: grid;
+  gap: var(--or-space-4);
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.variants {
+  display: grid;
+  gap: var(--or-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.variants > li {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--or-border);
+  border-radius: var(--or-radius-md);
+  background: var(--or-surface-subtle);
+}
+
+.variantLanguage {
+  color: var(--or-text-muted);
+  font-size: var(--or-text-meta);
+  font-weight: 600;
+}
+
+.variantText {
+  font-size: var(--or-text-compact);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.hint,
+.note {
+  margin: 0;
+  color: var(--or-text-muted);
+  font-size: var(--or-text-compact);
+  line-height: 1.5;
+}
+
+.note {
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--or-border);
+  border-radius: var(--or-radius-sm);
+  background: var(--or-surface-subtle);
+  color: var(--or-text-secondary);
+}
+
+.error {
+  margin: 0;
+  color: var(--or-critical);
+  font-size: var(--or-text-compact);
+}
+
+.success {
+  margin: 0;
+  color: var(--or-positive);
+  font-size: var(--or-text-compact);
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+}

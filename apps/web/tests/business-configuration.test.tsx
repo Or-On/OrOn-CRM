@@ -167,7 +167,7 @@ describe("business configuration", () => {
     openSection(/^Service workflow/);
     fireEvent.click(
       screen.getByRole("checkbox", {
-        name: /Send the caller a WhatsApp summary/,
+        name: /Send a WhatsApp follow-up/,
       }),
     );
     fireEvent.change(screen.getByLabelText(/Approved template outside/), {
@@ -198,6 +198,42 @@ describe("business configuration", () => {
       "featureConfiguration.field_service.workflow.whatsappFollowUp.templateLanguage",
       "he",
     );
+  });
+  it("describes explicit web-form submission and keeps fault description free text", () => {
+    render(fieldWorkspace());
+    openSection(/^Service workflow/);
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: /Send a WhatsApp follow-up/ }),
+    );
+    fireEvent.change(screen.getByLabelText("What the call does"), {
+      target: { value: "form" },
+    });
+    expect(
+      screen.getByText(
+        /A case opens only after the customer explicitly submits that form/,
+      ),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/name and free-text fault description/),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        /does not use a template or switch to collecting the form by phone/,
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByRole("checkbox", { name: "Store name" })).toBeNull();
+    expect(screen.queryByLabelText(/Approved template outside/)).toBeNull();
+    expect(
+      screen.queryByRole("checkbox", { name: "Ask for a photo of the fault" }),
+    ).toBeNull();
+    expect(
+      screen.getByText(
+        /Photos are optional unless the photo policy requires them/,
+      ),
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("combobox", { name: "Fault description" }),
+    ).toBeNull();
   });
 
   it("keeps new incomplete document rows visible while strict save validation blocks them", async () => {

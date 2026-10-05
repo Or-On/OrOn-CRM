@@ -127,8 +127,8 @@ export function FieldOperationsSettings({
           />
           <span>
             {copy(
-              "Send the caller a WhatsApp summary written by the system, asking for a fault photo and missing details",
-              "לשלוח למתקשר סיכום ב-WhatsApp שנכתב על ידי המערכת, ובו בקשה לתמונת התקלה ולפרטים חסרים",
+              "Send a WhatsApp follow-up according to the selected mode",
+              "לשלוח הודעת המשך ב-WhatsApp בהתאם למצב שנבחר",
             )}
           </span>
         </label>
@@ -156,6 +156,51 @@ export function FieldOperationsSettings({
               </option>
             </Select>
             <Select
+              id="followup-mode"
+              label={copy("What the call does", "מה קורה בשיחה")}
+              onChange={(event) =>
+                onChange(
+                  "whatsappFollowUp",
+                  event.target.value === "form"
+                    ? {
+                        ...without(followUp, "formFields"),
+                        mode: "form",
+                      }
+                    : without(followUp, "mode", "formFields"),
+                )
+              }
+              value={followUp.mode === "form" ? "form" : "summary"}
+            >
+              <option value="summary">
+                {copy(
+                  "Collect the details by phone, then send a WhatsApp summary",
+                  "לאסוף את הפרטים בטלפון ואז לשלוח סיכום ב-WhatsApp",
+                )}
+              </option>
+              <option value="form">
+                {copy(
+                  "Ask for name and fault, then send a link to the digital form",
+                  "לאסוף שם ותקלה ולשלוח קישור לטופס הדיגיטלי",
+                )}
+              </option>
+            </Select>
+            {followUp.mode === "form" ? (
+              <>
+                <p>
+                  {copy(
+                    "The phone call collects only the customer's name and fault description. WhatsApp delivers a link to a web form for reviewing the name and free-text fault description, entering the location, and attaching photos. A case opens only after the customer explicitly submits that form. A text reply does not submit it.",
+                    "בשיחה הטלפונית נאספים רק שם הלקוח ותיאור התקלה. ב-WhatsApp נשלח קישור לטופס באתר שבו הלקוח בודק את שמו ואת תיאור התקלה בטקסט חופשי, ממלא מיקום ומצרף תמונות. קריאה נפתחת רק לאחר שליחה מפורשת של הטופס. תשובת טקסט להודעה אינה שולחת אותו.",
+                  )}
+                </p>
+                <p>
+                  {copy(
+                    "The form link uses a regular WhatsApp message while the messaging window is open. If delivery is unavailable, the inquiry stays pending for follow-up; it does not use a template or switch to collecting the form by phone.",
+                    "הקישור לטופס נשלח כהודעת WhatsApp רגילה כאשר חלון ההודעות פתוח. אם השליחה אינה זמינה, הפנייה נשארת ממתינה להמשך טיפול; לא נשלחת תבנית והשיחה אינה עוברת לאיסוף הטופס בטלפון.",
+                  )}
+                </p>
+              </>
+            ) : null}
+            <Select
               id="followup-consent"
               label={copy("Consent", "הסכמה")}
               onChange={(event) =>
@@ -179,89 +224,103 @@ export function FieldOperationsSettings({
                 )}
               </option>
             </Select>
-            <label className={styles.check}>
-              <input
-                checked={followUp.requestPhoto}
-                onChange={(event) =>
-                  onChange("whatsappFollowUp", {
-                    ...followUp,
-                    requestPhoto: event.target.checked,
-                  })
-                }
-                type="checkbox"
-              />
-              <span>
-                {copy("Ask for a photo of the fault", "לבקש תמונה של התקלה")}
-              </span>
-            </label>
-            <Input
-              id="followup-template"
-              label={copy(
-                "Approved template outside the 24-hour window (optional)",
-                "תבנית מאושרת מחוץ לחלון 24 השעות (לא חובה)",
-              )}
-              onChange={(event) => {
-                const name = event.target.value.trim();
-                const rest = without(
-                  followUp,
-                  "templateName",
-                  "templateLanguage",
-                  "templateParameters",
-                );
-                onChange(
-                  "whatsappFollowUp",
-                  name === ""
-                    ? rest
-                    : {
-                        ...rest,
-                        templateName: name,
-                        templateLanguage:
-                          followUp.templateLanguage ?? (he ? "he" : "en"),
-                        templateParameters: followUp.templateParameters ?? [],
-                      },
-                );
-              }}
-              value={followUp.templateName ?? ""}
-            />
-            {followUp.templateName === undefined ? null : (
-              <>
-                <Input
-                  id="followup-template-language"
-                  label={copy("Template language code", "קוד שפת התבנית")}
+            {followUp.mode !== "form" ? (
+              <label className={styles.check}>
+                <input
+                  checked={followUp.requestPhoto}
                   onChange={(event) =>
                     onChange("whatsappFollowUp", {
                       ...followUp,
-                      templateLanguage: event.target.value.trim(),
+                      requestPhoto: event.target.checked,
                     })
                   }
-                  value={followUp.templateLanguage ?? ""}
+                  type="checkbox"
                 />
-                <p>
-                  {copy(
-                    "Template parameters, in order",
-                    "פרמטרים לתבנית, לפי הסדר",
+                <span>
+                  {copy("Ask for a photo of the fault", "לבקש תמונה של התקלה")}
+                </span>
+              </label>
+            ) : null}
+            {followUp.mode === "form" ? (
+              <p>
+                {copy(
+                  "The form always offers photo uploads. Photos are optional unless the photo policy requires them.",
+                  "הטופס תמיד מאפשר להעלות תמונות. צירוף תמונות הוא לבחירה, אלא אם מדיניות התמונות מחייבת זאת.",
+                )}
+              </p>
+            ) : (
+              <>
+                <Input
+                  id="followup-template"
+                  label={copy(
+                    "Approved template outside the 24-hour window (optional)",
+                    "תבנית מאושרת מחוץ לחלון 24 השעות (לא חובה)",
                   )}
-                </p>
-                {templateParameters.map(([key, en, hebrew]) => (
-                  <label className={styles.check} key={key}>
-                    <input
-                      checked={(followUp.templateParameters ?? []).includes(
-                        key,
-                      )}
-                      onChange={(event) => {
-                        const current = followUp.templateParameters ?? [];
+                  onChange={(event) => {
+                    const name = event.target.value.trim();
+                    const rest = without(
+                      followUp,
+                      "templateName",
+                      "templateLanguage",
+                      "templateParameters",
+                    );
+                    onChange(
+                      "whatsappFollowUp",
+                      name === ""
+                        ? rest
+                        : {
+                            ...rest,
+                            templateName: name,
+                            templateLanguage:
+                              followUp.templateLanguage ?? (he ? "he" : "en"),
+                            templateParameters:
+                              followUp.templateParameters ?? [],
+                          },
+                    );
+                  }}
+                  value={followUp.templateName ?? ""}
+                />
+                {followUp.templateName === undefined ? null : (
+                  <>
+                    <Input
+                      id="followup-template-language"
+                      label={copy("Template language code", "קוד שפת התבנית")}
+                      onChange={(event) =>
                         onChange("whatsappFollowUp", {
                           ...followUp,
-                          templateParameters: event.target.checked
-                            ? [...current, key]
-                            : current.filter((item) => item !== key),
-                        });
-                      }}
-                      type="checkbox"
+                          templateLanguage: event.target.value.trim(),
+                        })
+                      }
+                      value={followUp.templateLanguage ?? ""}
                     />
-                    <span>{copy(en, hebrew)}</span>
-                  </label>
-                ))}
+                    <p>
+                      {copy(
+                        "Template parameters, in order",
+                        "פרמטרים לתבנית, לפי הסדר",
+                      )}
+                    </p>
+                    {templateParameters.map(([key, en, hebrew]) => (
+                      <label className={styles.check} key={key}>
+                        <input
+                          checked={(followUp.templateParameters ?? []).includes(
+                            key,
+                          )}
+                          onChange={(event) => {
+                            const current = followUp.templateParameters ?? [];
+                            onChange("whatsappFollowUp", {
+                              ...followUp,
+                              templateParameters: event.target.checked
+                                ? [...current, key]
+                                : current.filter((item) => item !== key),
+                            });
+                          }}
+                          type="checkbox"
+                        />
+                        <span>{copy(en, hebrew)}</span>
+                      </label>
+                    ))}
+                  </>
+                )}
               </>
             )}
           </>

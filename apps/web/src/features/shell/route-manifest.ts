@@ -46,6 +46,7 @@ export const applicationPageManifest = [
   { template: "/pipelines", navigationParent: "/pipelines" },
   { template: "/profile", navigationParent: "/profile" },
   { template: "/roles", navigationParent: "/roles" },
+  { template: "/service-request" },
   { template: "/settings", navigationParent: "/settings" },
   { template: "/settings/business", navigationParent: "/settings/business" },
   { template: "/start" },

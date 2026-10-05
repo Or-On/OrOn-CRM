@@ -65,6 +65,18 @@ describe("application layout session resolution", () => {
     await RootLayout({ children: null });
     expect(currentPublicSession).toHaveBeenCalledOnce();
   });
+  it.each(["workspace", "field-service"] as const)(
+    "does not load the authenticated %s shell for the public service form",
+    async (scope) => {
+      currentPublicSession.mockResolvedValue(session(scope));
+      path.value = "/service-request";
+      await expect(
+        RootLayout({ children: "Public request form" }),
+      ).resolves.toBeTruthy();
+      expect(currentPublicSession).not.toHaveBeenCalled();
+      expect(shellTenant).not.toHaveBeenCalled();
+    },
+  );
   it("returns a technician to the Field Service app on a workspace page", async () => {
     currentPublicSession.mockResolvedValue(session("field-service"));
     path.value = "/profile";

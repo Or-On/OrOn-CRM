@@ -1338,7 +1338,12 @@
 }
 
 .inbox-template-dialog {
-  inline-size: min(42rem, calc(100vw - 2rem));
+  inline-size: min(60rem, calc(100vw - 2rem));
+}
+.inbox-template-dialog__body {
+  display: grid;
+  gap: var(--or-space-4);
+  min-inline-size: 0;
 }
 .conversation-composer .composer-footer__tools {
   flex-wrap: wrap;

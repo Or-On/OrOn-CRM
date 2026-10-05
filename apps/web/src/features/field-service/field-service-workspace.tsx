@@ -48,6 +48,7 @@ import {
   instantFromDateTimeLocal,
 } from "../calendar/calendar-time";
 import { crmMutation, crmRead } from "../crm";
+import { useVisibleRefresh } from "../live-refresh";
 import {
   appointmentStatusLabel,
   casePriorityLabel,
@@ -129,6 +130,7 @@ export function FieldServiceWorkspace({
   const [nextCaseCursor, setNextCaseCursor] =
     useState<ServiceCaseCursor | null>(initialNextCaseCursor);
   const [loadingCases, setLoadingCases] = useState(false);
+  const [expandedCases, setExpandedCases] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [createCustomerId, setCreateCustomerId] = useState("");
   const [createNewCustomer, setCreateNewCustomer] = useState(false);
@@ -151,6 +153,7 @@ export function FieldServiceWorkspace({
     setCases(initialCases);
     setNextCaseCursor(initialNextCaseCursor);
     setAppliedQuery("");
+    setExpandedCases(false);
   }, [initialCases, initialNextCaseCursor]);
   useEffect(() => setContactOptions(contacts), [contacts]);
   const active = cases.filter((item) =>
@@ -184,6 +187,14 @@ export function FieldServiceWorkspace({
     manageAppointment !== undefined;
 
   const pending = pendingAction !== undefined;
+  useVisibleRefresh(
+    () => fetchCasePage({ append: false, query: appliedQuery }),
+    view === "cases" &&
+      !dialogOpen &&
+      !pending &&
+      !loadingCases &&
+      !expandedCases,
+  );
 
   async function run(action: string, operation: () => Promise<void>) {
     setPendingAction(action);
@@ -309,6 +320,7 @@ export function FieldServiceWorkspace({
         return [...merged.values()];
       });
       setAppliedQuery(options.query.trim());
+      setExpandedCases(options.append);
       setNextCaseCursor(page.nextCursor);
     } catch (reason) {
       setError(
@@ -1017,6 +1029,21 @@ export function FieldServiceWorkspace({
               </section>
             )}
 
+            {view === "cases" && expandedCases ? (
+              <p role="status">
+                {he
+                  ? "העדכון האוטומטי מושהה בזמן צפייה בתיקים ישנים. "
+                  : "Automatic updates are paused while viewing older cases. "}
+                <Button
+                  disabled={loadingCases}
+                  onClick={() =>
+                    void fetchCasePage({ append: false, query: appliedQuery })
+                  }
+                >
+                  {he ? "חזרה לתיקים האחרונים" : "Return to latest cases"}
+                </Button>
+              </p>
+            ) : null}
             {view === "cases" && nextCaseCursor !== null ? (
               <div className="field-service-load-more">
                 <Button

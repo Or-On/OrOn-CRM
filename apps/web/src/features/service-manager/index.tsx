@@ -24,10 +24,11 @@ import { useLocale } from "next-intl";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useState, type SyntheticEvent } from "react";
+import { useState, useTransition, type SyntheticEvent } from "react";
 import { tenantDateFormatter } from "../../i18n/tenant-date-time";
 import { csrfToken } from "../crm";
 import { InquiryPanel } from "../tickets";
+import { useVisibleRefresh } from "../live-refresh";
 import styles from "./service-manager.module.css";
 
 const statuses: Record<ServiceInquiryStatus, readonly [string, string]> = {
@@ -69,6 +70,9 @@ export function ServiceManagerOverview({
 }) {
   const locale = useLocale();
   const he = locale.startsWith("he");
+  const router = useRouter();
+  const [refreshing, startRefresh] = useTransition();
+  useVisibleRefresh(() => startRefresh(() => router.refresh()), !refreshing);
   // These bounds are calendar dates, not instants in the tenant timezone.
   const date = tenantDateFormatter(locale, "UTC", { dateStyle: "medium" });
   return (
@@ -157,6 +161,7 @@ export function ServiceInquiryRegister({
   });
   const [page, setPage] = useState(initialPage);
   const [busy, setBusy] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState(false);
   const [filters, setFilters] = useState({
     status: "all",
@@ -165,6 +170,7 @@ export function ServiceInquiryRegister({
     until: "",
   });
   const [applied, setApplied] = useState(filters);
+  useVisibleRefresh(() => load(false, applied), !busy && !expanded);
   async function load(append: boolean, nextFilters = applied) {
     setBusy(true);
     setError(false);
@@ -186,6 +192,7 @@ export function ServiceInquiryRegister({
           : result.inquiries,
       }));
       setApplied(nextFilters);
+      setExpanded(append);
     } catch {
       setError(true);
     } finally {
@@ -336,6 +343,16 @@ export function ServiceInquiryRegister({
         <Button disabled={busy} onClick={() => void load(true)}>
           {he ? "הצגת עוד" : "Load more"}
         </Button>
+      ) : null}
+      {expanded ? (
+        <p role="status">
+          {he
+            ? "העדכון האוטומטי מושהה בזמן צפייה בפניות ישנות. "
+            : "Automatic updates are paused while viewing older inquiries. "}
+          <Button disabled={busy} onClick={() => void load(false)}>
+            {he ? "חזרה לפניות האחרונות" : "Return to latest inquiries"}
+          </Button>
+        </p>
       ) : null}
     </section>
   );

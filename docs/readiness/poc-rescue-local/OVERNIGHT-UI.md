@@ -19,7 +19,7 @@ Current runtime facts are kept distinct: the voice workstream's read-only compil
 
 ## Route acceptance inventory
 
-There are 37 `page.tsx` patterns. Earlier owner-fixture browser evidence at seven widths is in `UI.md`; it predates these overnight changes and is not silently upgraded to a fresh live pass. The “required live check” column is a page-by-page checklist for root's browser, not a list of passed actions. Full role, tenant, mobile and mutation acceptance stays open until individually evidenced.
+There are 38 `page.tsx` patterns. Earlier owner-fixture browser evidence at seven widths is in `UI.md`; it predates these overnight changes and is not silently upgraded to a fresh live pass. The “required live check” column is a page-by-page checklist for root's browser, not a list of passed actions. Full role, tenant, mobile and mutation acceptance stays open until individually evidenced.
 
 | Route | Features / required live check | Local evidence or explicit gap |
 | --- | --- | --- |
@@ -58,6 +58,7 @@ There are 37 `page.tsx` patterns. Earlier owner-fixture browser evidence at seve
 | `/field-service/reports/[id]` | Draft/finalized state, export, signature and permission controls | Source/API tests; no prior populated browser proof |
 | `/login` | Validation, rate-limit/error, successful authorized login | Preview login previously passed; root owns supplied live admin login |
 | `/invite` | Invalid/expired token, error focus, required fields | Prior invalid-invitation mobile view |
+| `/service-request` | Fragment capability, business identity, free-text fault, location, optional/required photos, confirmation, duplicate receipt | New isolated API/filesystem/PG/browser proof in `SERVICE-REQUEST-UI.md`; no live customer submission claimed |
 | `/en` | LTR locale transition and unchanged active tenant | Prior locale redirect checked |
 | `/he` | RTL locale transition and mixed phone/date text | Prior locale redirect checked |
 

@@ -272,7 +272,7 @@ function mapConversation(row: ConversationRow): ConversationSummary {
     handoffReasonSafe: row.handoff_reason_safe,
     channelKind: row.channel_kind,
     provider: row.provider,
-    templatesEnabled: row.templates_enabled === true,
+    templatesEnabled: row.templates_enabled,
     senderAddress: row.sender_address,
     providerAccountId: row.provider_account_id,
     recipientAddress: row.recipient_address,

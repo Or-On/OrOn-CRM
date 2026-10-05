@@ -63,11 +63,11 @@ const messagesA = [message("alpha", "Alpha private fixture")];
 const messagesB = [message("beta", "Beta private fixture")];
 const conversations = [alpha, beta];
 
-function mount(real = true, canOperate = true) {
+function mount(real = true, canOperate = true, available = conversations) {
   return render(
     localized(
       <InboxWorkspace
-        conversations={conversations}
+        conversations={available}
         initialMessages={messagesA}
         quickReplies={[]}
         teamMembers={[]}
@@ -116,6 +116,31 @@ function sendMessage() {
 }
 
 describe("Inbox interaction safety (no provider network)", () => {
+  it.each([undefined, false, true])(
+    "exposes template controls only with an explicit enabled capability (%s)",
+    (enabled) => {
+      const available = [
+        {
+          ...alpha,
+          ...(enabled === undefined ? {} : { templatesEnabled: enabled }),
+        },
+      ];
+      mount(true, true, available);
+      const browser = screen.queryByRole("button", {
+        name: "WhatsApp templates",
+      });
+      const mode = screen.queryByRole("button", {
+        name: "Template",
+      });
+      expect(browser !== null).toBe(enabled === true);
+      expect(mode !== null).toBe(enabled === true);
+      expect(
+        transport.read.mock.calls.some(([url]) =>
+          String(url).includes("/templates"),
+        ),
+      ).toBe(false);
+    },
+  );
   function compactViewport() {
     vi.stubGlobal(
       "matchMedia",

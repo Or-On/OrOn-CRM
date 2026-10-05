@@ -25,6 +25,7 @@ describe("WhatsApp delivery surface", () => {
               lastMessagePreview: null,
               assignedUserId: null,
               channelKind: "whatsapp",
+              templatesEnabled: true,
               provider,
               senderAddress,
               providerAccountId: null,

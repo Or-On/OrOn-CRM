@@ -58,6 +58,8 @@ const applicationHebrew = localFont({
 });
 
 const currentShellContext = cache(async () => {
+  if ((await headers()).get("x-or-on-pathname") === "/service-request")
+    return undefined;
   const session = await currentPublicSession();
   if (session === undefined) return undefined;
   const presentation = await withCurrentShellTenant(async (sql) => {
@@ -102,6 +104,8 @@ export default async function RootLayout({
 }: {
   readonly children: ReactNode;
 }) {
+  const publicServiceRequest =
+    (await headers()).get("x-or-on-pathname") === "/service-request";
   const shellContext = await currentShellContext();
   const session = shellContext?.session;
   if (session !== undefined && session.applicationScope !== "workspace") {
@@ -130,25 +134,29 @@ export default async function RootLayout({
             <ConnectionStatus />
             <AccessProvider permissions={session?.permissions ?? []}>
               <FormValidation>
-                <AppShell
-                  environment={environment}
-                  fieldServiceEnabled={
-                    shellContext?.fieldServiceEnabled === true
-                  }
-                  serviceManager={shellContext?.serviceManager ?? false}
-                  enabledFeatures={shellContext?.enabledFeatures}
-                  session={session}
-                  {...(shellContext === undefined
-                    ? {}
-                    : {
-                        tenantBranding: {
-                          businessName: shellContext.businessName,
-                          accentToken: shellContext.accentToken,
-                        },
-                      })}
-                >
-                  {children}
-                </AppShell>
+                {publicServiceRequest ? (
+                  children
+                ) : (
+                  <AppShell
+                    environment={environment}
+                    fieldServiceEnabled={
+                      shellContext?.fieldServiceEnabled === true
+                    }
+                    serviceManager={shellContext?.serviceManager ?? false}
+                    enabledFeatures={shellContext?.enabledFeatures}
+                    session={session}
+                    {...(shellContext === undefined
+                      ? {}
+                      : {
+                          tenantBranding: {
+                            businessName: shellContext.businessName,
+                            accentToken: shellContext.accentToken,
+                          },
+                        })}
+                  >
+                    {children}
+                  </AppShell>
+                )}
               </FormValidation>
             </AccessProvider>
           </NextIntlClientProvider>

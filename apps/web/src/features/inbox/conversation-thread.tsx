@@ -2,7 +2,11 @@
 
 import { OpeningMenuContent } from "./opening-menu-content";
 import { DeliveryFailure } from "./delivery-failure";
-import { TemplateBrowser } from "../inbox-templates";
+import {
+  AutoGreetingSettings,
+  TemplateBrowser,
+  type WhatsAppTemplate,
+} from "../inbox-templates";
 import { AudioMessageContent } from "./audio-message-content";
 import { VideoMessageContent } from "./video-message-content";
 
@@ -47,6 +51,7 @@ import {
   LoadingSkeleton,
   Popover,
   Select,
+  Tabs,
   Textarea,
 } from "@or-on/ui";
 import { crmMutation, crmRead } from "../crm";
@@ -237,6 +242,7 @@ export function ConversationThread({
   const channelLabel = t(conversationChannelKey(conversation.channelKind));
   const canSendWhatsApp =
     realWhatsAppEnabled && conversation.channelKind === "whatsapp";
+  const templatesAllowed = conversation.templatesEnabled === true;
   const [page, setPage] = useState<MessagePage>(
     initialPage ?? { messages: [], nextCursor: null },
   );
@@ -253,6 +259,13 @@ export function ConversationThread({
   const [controlsOpen, setControlsOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [templatesTab, setTemplatesTab] = useState<"send" | "automatic">(
+    "send",
+  );
+  useEffect(() => {
+    if (!templatesAllowed && draft.kind === "template")
+      updateDraft({ kind: "text" });
+  }, [templatesAllowed, draft.kind, updateDraft]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -405,9 +418,63 @@ export function ConversationThread({
     }
   }
 
+  /**
+   * Queue an approved template chosen in the template dialog. The composer
+   * draft is left untouched; failures are rethrown for the dialog to show.
+   */
+  async function sendTemplate(
+    template: WhatsAppTemplate,
+    parameters: readonly string[],
+  ) {
+    if (!canOperate || !canSendWhatsApp || !templatesAllowed)
+      throw new Error(t("tenantPrimary.sendingUnavailable"));
+    const sender = conversation.providerAccountId ?? metaSenderId;
+    const snapshot: ReplyDraft = {
+      provider: "meta",
+      kind: "template",
+      text: "",
+      templateName: template.name,
+      language: template.language,
+      parameters: parameters.join(" | "),
+    };
+    let result: QueuedWhatsAppOutbound;
+    try {
+      result = await crmMutation<QueuedWhatsAppOutbound>(
+        `/api/messaging/conversations/${conversation.id}/messages`,
+        {
+          provider: "meta",
+          kind: "template",
+          templateName: template.name,
+          language: template.language,
+          parameters,
+          confirmReal: true,
+        },
+        { idempotencyKey: keys.get(conversation.id, sender, snapshot) },
+      );
+    } catch (error) {
+      throw new Error(errorMessage(error, t, "inbox.queueFailed"), {
+        cause: error,
+      });
+    }
+    keys.complete(conversation.id, sender, snapshot);
+    setTemplatesOpen(false);
+    setActionError(undefined);
+    setReceipt(
+      result.queued ? t("inbox.queueSuccess") : t("inbox.queueDuplicate"),
+    );
+    await onQueued(result);
+    latest();
+  }
+
   function submit(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!canOperate || pending || !canSendWhatsApp || draft.provider !== "meta")
+    if (
+      !canOperate ||
+      pending ||
+      !canSendWhatsApp ||
+      draft.provider !== "meta" ||
+      (draft.kind === "template" && !templatesAllowed)
+    )
       return;
     void send({ ...draft });
   }
@@ -749,7 +816,13 @@ export function ConversationThread({
           <div className="thread-empty">
             <MessagesPlaceholder />
             <h3>{t("inbox.starts")}</h3>
-            <p>{t("tenantPrimary.startsHint")}</p>
+            <p>
+              {templatesAllowed
+                ? t("tenantPrimary.startsHint")
+                : locale.startsWith("he")
+                  ? "כתבו הודעה כדי להתחיל את השיחה."
+                  : "Write a message to start the conversation."}
+            </p>
           </div>
         ) : null}
         {page.messages.length ? (
@@ -916,30 +989,69 @@ export function ConversationThread({
       </div>
       <Dialog
         className="inbox-template-dialog"
-        open={templatesOpen}
+        open={templatesAllowed && templatesOpen}
         onClose={() => setTemplatesOpen(false)}
         title={
           locale.startsWith("he") ? "תבניות WhatsApp" : "WhatsApp templates"
         }
         closeLabel={t("common.close")}
       >
-        {templatesOpen ? (
-          <TemplateBrowser
-            conversationId={conversation.id}
-            locale={locale}
-            expanded
-            onSelect={(template) => {
-              updateDraft({
-                kind: "template",
-                templateName: template.name,
-                language: template.language,
-                parameters: Array(template.draft?.parameterCount ?? 0)
-                  .fill("")
-                  .join(" | "),
-              });
-              setTemplatesOpen(false);
-            }}
-          />
+        {templatesAllowed && templatesOpen ? (
+          <div className="inbox-template-dialog__body">
+            <Tabs
+              activeId={templatesTab}
+              ariaLabel={
+                locale.startsWith("he")
+                  ? "תבניות WhatsApp"
+                  : "WhatsApp templates"
+              }
+              direction={locale.startsWith("he") ? "rtl" : "ltr"}
+              items={[
+                {
+                  id: "send",
+                  label: locale.startsWith("he")
+                    ? "שליחת תבנית"
+                    : "Send a template",
+                },
+                {
+                  id: "automatic",
+                  label: locale.startsWith("he")
+                    ? "שליחה אוטומטית"
+                    : "Automatic greeting",
+                },
+              ]}
+              onChange={(id) =>
+                setTemplatesTab(id === "automatic" ? "automatic" : "send")
+              }
+            />
+            {templatesTab === "send" ? (
+              <TemplateBrowser
+                conversationId={conversation.id}
+                locale={locale}
+                expanded
+                onSelect={(template, parameters) => {
+                  updateDraft({
+                    kind: "template",
+                    templateName: template.name,
+                    language: template.language,
+                    parameters: parameters.join(" | "),
+                  });
+                  setTemplatesOpen(false);
+                }}
+                onSend={sendTemplate}
+                {...(!canOperate
+                  ? { sendUnavailable: t("inbox.readOnly") }
+                  : !canSendWhatsApp
+                    ? { sendUnavailable: t("tenantPrimary.sendingUnavailable") }
+                    : {})}
+              />
+            ) : (
+              <AutoGreetingSettings
+                conversationId={conversation.id}
+                locale={locale}
+              />
+            )}
+          </div>
         ) : null}
       </Dialog>
       <form className="composer conversation-composer" onSubmit={submit}>
@@ -962,7 +1074,10 @@ export function ConversationThread({
               role="group"
               aria-label={t("tenantPrimary.kind")}
             >
-              {(["text", "template"] as const).map((kind) => (
+              {(templatesAllowed
+                ? (["text", "template"] as const)
+                : (["text"] as const)
+              ).map((kind) => (
                 <button
                   key={kind}
                   type="button"
@@ -983,7 +1098,7 @@ export function ConversationThread({
                 ) : null}
               </span>
             </div>
-            {draft.kind === "template" ? (
+            {templatesAllowed && draft.kind === "template" ? (
               <div className="template-fields">
                 <Input
                   id="template-name"
@@ -1039,17 +1154,19 @@ export function ConversationThread({
             )}
             <div className="composer-footer">
               <div className="composer-footer__tools">
-                <Button
-                  type="button"
-                  variant="quiet"
-                  disabled={pending}
-                  onClick={() => setTemplatesOpen(true)}
-                >
-                  <FileText aria-hidden="true" size={17} />
-                  {locale.startsWith("he")
-                    ? "תבניות WhatsApp"
-                    : "WhatsApp templates"}
-                </Button>
+                {templatesAllowed ? (
+                  <Button
+                    type="button"
+                    variant="quiet"
+                    disabled={pending}
+                    onClick={() => setTemplatesOpen(true)}
+                  >
+                    <FileText aria-hidden="true" size={17} />
+                    {locale.startsWith("he")
+                      ? "תבניות WhatsApp"
+                      : "WhatsApp templates"}
+                  </Button>
+                ) : null}
                 {draft.kind === "text" && quickReplies.length ? (
                   <Popover
                     align="start"
