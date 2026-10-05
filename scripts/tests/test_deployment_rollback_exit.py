@@ -79,7 +79,7 @@ def test_failed_preflight_restores_actual_private_files_before_application_trap(
     source = (ROOT / "scripts/deploy-dev.sh").read_text(encoding="utf-8")
     start = source.index("restore_private_configuration()")
     end = source.index("for file in \\\n", start)
-    assert end < source.index("set_private_config_value \"${DISPATCHER_CONFIG}\" TTS_FIRST_CLAUSE")
+    assert end < source.index('set_private_config_value "${DISPATCHER_CONFIG}" TTS_FIRST_CLAUSE')
     snapshot = tmp_path / "snapshot"
     (snapshot / "config").mkdir(parents=True)
     (snapshot / "config/dispatcher.env").write_text("TTS_FIRST_CLAUSE=true\n")

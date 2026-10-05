@@ -7,6 +7,7 @@ readonly RELEASES_DIR="${ORON_ROOT}/releases"
 readonly COMMIT_SHA="${1:-}"
 readonly RELEASE_ARCHIVE="${2:-}"
 readonly EXPECTED_ARCHIVE_SHA256="${3:-}"
+readonly EXPECTED_CURRENT_COMMIT="${4:-}"
 readonly LOCK_FILE="/run/lock/oron-dev-deploy.lock"
 readonly DISPATCHER_CONFIG="${SHARED_DIR}/config/dispatcher.env"
 readonly WEB_CONFIG="${SHARED_DIR}/config/web.env"
@@ -51,6 +52,14 @@ exec 9>"${LOCK_FILE}"
 if ! flock --nonblock 9; then
   echo "Another deployment is already running" >&2
   exit 1
+fi
+if [[ -n ${EXPECTED_CURRENT_COMMIT} ]]; then
+  [[ ${EXPECTED_CURRENT_COMMIT} =~ ^[0-9a-f]{40}$ &&
+     -f ${ORON_ROOT}/deployed-commit &&
+     $(cat "${ORON_ROOT}/deployed-commit") == "${EXPECTED_CURRENT_COMMIT}" ]] || {
+    echo "Current release changed; deployment refused before any mutation" >&2
+    exit 1
+  }
 fi
 available_bytes="$(df --output=avail -B1 "${ORON_ROOT}" | tail -n 1 | tr -d ' ')"
 [[ ${available_bytes} =~ ^[0-9]+$ && ${available_bytes} -ge 5368709120 ]] || {

@@ -1,5 +1,46 @@
 # GCP development deployment
 
+## Manual deployment from the operator machine
+
+`scripts/deploy_gcp_manual.py` provides the same existing-VM deployment without
+GitHub's cloud identity connection. It uses the operator's already-authorized
+Google Cloud account to impersonate the existing deployment service account.
+It does not provision resources, change IAM, or modify telephony/WhatsApp routes.
+The operator needs Git, the locked Python environment, a local Linux/amd64 Docker
+daemon, Google Cloud CLI, and the existing IAP/OS Login/registry permissions.
+
+After all changes are reviewed, verified, pushed to Main, and the **push-triggered
+CI run** succeeds, run the read-only plan with the exact commit and CI run ID:
+
+```powershell
+uv run python scripts/deploy_gcp_manual.py --revision <40-character-main-sha> --expected-current <40-character-deployed-sha> --ci-run-id <successful-push-run-id>
+```
+
+Repeat with `--execute` to deploy. The script checks the live Main tip, exact CI
+commit, workflow, and all six required jobs. It builds from `git archive`, verifies
+OCI revision labels, publishes immutable images, verifies their pulled identities,
+validates the 13-member release archive, and rechecks Main/CI before VM transfer.
+The host compares the expected previous commit **under its deployment lock before
+any configuration mutation**, then performs backup, call draining, migration,
+health checks, and the existing deployment rollback procedure. Independent
+postchecks verify actual service image IDs, revision labels, database head, and
+the public login endpoint.
+
+Logs and an incremental receipt are retained under
+`.artifacts/manual-deploy/<commit>-<run>/`. Only `verified: true` with phase
+`verified` confirms the whole procedure. A transfer/build/publish failure leaves
+the receipt at its last phase. A partial image publication is not removed; the
+script refuses to overwrite a commit tag with another digest. Review the saved
+image IDs and immutable references before retrying if a rebuilt OCI attestation
+changes its digest. Do not move the existing tag to make a retry pass.
+
+The host deployer rolls back its own failed deployment checks. Failure of the
+**independent postchecks after the deployer returns** stops this script and leaves
+`verified: false`; it does not automatically roll back an otherwise healthy
+release. Inspect the scoped deployment log and use the reviewed recovery procedure
+if necessary. Keep external provider routing compatibility in the rollback plan.
+`GITHUB_TOKEN` is optional for public GitHub reads and is never written to disk.
+
 ## Architecture decision
 
 The development environment uses the smallest production-shaped topology that
