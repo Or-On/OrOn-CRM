@@ -3,10 +3,12 @@
 import argparse
 import copy
 import json
+import os
 import shutil
 import subprocess
 import tarfile
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
@@ -108,6 +110,55 @@ def test_failed_build_retains_an_unverified_receipt(monkeypatch, tmp_path):
     assert receipt["verified"] is False
     assert receipt["phase"] == "building"
     assert receipt["images"] == {}
+
+
+def test_isolated_docker_configuration_preserves_only_installed_builder(monkeypatch, tmp_path):
+    executable = tmp_path / "cli-plugins" / "docker-buildx"
+    executable.parent.mkdir()
+    executable.touch()
+    plugins = [{"Name": "buildx", "Path": str(executable)}]
+    monkeypatch.setattr(deploy, "command", lambda *_: json.dumps(plugins))
+    configuration = deploy.isolated_docker_configuration("unix:///fictional.sock")
+    assert configuration == {
+        "credHelpers": {"me-west1-docker.pkg.dev": "gcloud"},
+        "cliPluginsExtraDirs": [str(executable.parent)],
+    }
+    executable.unlink()
+    with pytest.raises(RuntimeError, match="unavailable"):
+        deploy.isolated_docker_configuration("unix:///fictional.sock")
+    plugins.clear()
+    with pytest.raises(RuntimeError, match="must provide Buildx"):
+        deploy.isolated_docker_configuration("unix:///fictional.sock")
+
+
+def test_real_buildx_works_with_isolated_registry_configuration(tmp_path):
+    if shutil.which("docker") is None:
+        pytest.skip("Docker required for actual isolated builder proof")
+    endpoint = json.loads(
+        deploy.command(
+            ["docker", "context", "inspect", "--format", "{{json .Endpoints.docker.Host}}"]
+        )
+    )
+    assert endpoint.startswith(("npipe://", "unix://"))
+    auth = tmp_path / "isolated"
+    auth.mkdir()
+    (auth / "config.json").write_text(json.dumps(deploy.isolated_docker_configuration(endpoint)))
+    docker = ["docker", "--host", endpoint, "--config", str(auth)]
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "Dockerfile").write_text('FROM scratch\nLABEL purpose="isolated-buildx-proof"\n')
+    tag = "oron-isolated-buildx-proof:" + uuid4().hex
+    env = {**os.environ, "DOCKER_BUILDKIT": "1"}
+    deploy.command(
+        [*docker, "build", "--network=none", "--progress=plain", "--tag", tag, str(source)],
+        env=env,
+    )
+    try:
+        metadata = json.loads(deploy.command([*docker, "image", "inspect", tag], env=env))[0]
+        assert metadata["Config"]["Labels"]["purpose"] == "isolated-buildx-proof"
+    finally:
+        # Remove only the randomly named fixture tag; never force/remove shared images.
+        deploy.command([*docker, "image", "rm", tag], env=env)
 
 
 @pytest.mark.parametrize("value", ["HEAD", "a" * 39, "A" * 40, "a" * 40 + ";echo bad"])

@@ -144,6 +144,23 @@ def gcloud_binary() -> str:
     return found
 
 
+def isolated_docker_configuration(endpoint: str) -> dict[str, Any]:
+    """Keep the installed builder discoverable without copying registry credentials."""
+    plugins = json.loads(
+        command(["docker", "--host", endpoint, "info", "--format", "{{json .ClientInfo.Plugins}}"])
+    )
+    builders = [plugin for plugin in plugins if plugin.get("Name") == "buildx"]
+    if len(builders) != 1:
+        raise RuntimeError("The existing Docker installation must provide Buildx")
+    builder = Path(builders[0]["Path"])
+    if not builder.is_absolute() or not builder.is_file():
+        raise RuntimeError("The installed Buildx executable is unavailable")
+    return {
+        "credHelpers": {"me-west1-docker.pkg.dev": "gcloud"},
+        "cliPluginsExtraDirs": [str(builder.parent)],
+    }
+
+
 def assemble(source: Path, output: Path, images: dict[str, str]) -> Path:
     members = {name: (source / name).read_bytes() for name in FILES}
     members["images.env"] = "".join(
@@ -184,17 +201,19 @@ def execute(revision: str, previous: str, run_id: int, receipt: dict[str, Any]) 
     env = dict(os.environ)
     env["PATH"] = str(Path(cloud).parent) + os.pathsep + env["PATH"]
     env["CLOUDSDK_AUTH_IMPERSONATE_SERVICE_ACCOUNT"] = SERVICE_ACCOUNT
+    env["DOCKER_BUILDKIT"] = "1"
     auth = output / "docker-config"
     auth.mkdir()
-    (auth / "config.json").write_text(
-        json.dumps({"credHelpers": {"me-west1-docker.pkg.dev": "gcloud"}}), encoding="utf-8"
-    )
     endpoint = json.loads(
         command(["docker", "context", "inspect", "--format", "{{json .Endpoints.docker.Host}}"])
     )
     if not endpoint.startswith(("npipe://", "unix://")):
         raise ValueError("Manual deployment requires a local Docker daemon")
+    (auth / "config.json").write_text(
+        json.dumps(isolated_docker_configuration(endpoint)), encoding="utf-8"
+    )
     docker = ["docker", "--host", endpoint, "--config", str(auth)]
+    command([*docker, "buildx", "version"], env=env)
     images: dict[str, str] = {}
     for name, dockerfile in IMAGES.items():
         print(f"Building exact source: {name}", flush=True)
