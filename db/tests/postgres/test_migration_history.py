@@ -226,9 +226,9 @@ async def test_full_head_privacy_downgrade_refuses_and_remains_atomic(
         )
         with pytest.raises(subprocess.CalledProcessError) as failure:
             await run_alembic(isolated_postgres_url, "downgrade", "ec624ebf31a6")
-        # The newer signature-proof retention gate refuses before the historical
-        # caller-privacy revision. The entire attempted downgrade stays atomic.
-        assert "Removing signature proof requires reviewed retention" in failure.value.stderr
+        # The digital submission receipt gate now refuses before the historical
+        # signature/caller-privacy gates. The entire downgrade stays atomic.
+        assert "Digital service submission is forward-only" in failure.value.stderr
         assert await connection.fetchval("SELECT version_num FROM alembic_version") == initial_head
         after = await connection.fetch(
             "SELECT p.oid::regprocedure::text AS identity,pg_get_functiondef(p.oid) AS definition "

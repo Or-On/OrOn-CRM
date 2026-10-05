@@ -19,6 +19,7 @@ If a transaction's commit acknowledgment is lost after photo promotion, the serv
 - The full web suite passed 1,017 tests before the final visible-refresh/branding changes. Focused refresh tests passed 39 and the final form/API/settings group passed 57. Pagination remains expanded until the user explicitly returns to latest records. Workspace formatting, lint, all 11 typechecks and production build passed. Other TypeScript packages passed 108 tests without skips. These counts are not presented as a deployment check.
 - A real local browser, backed by an isolated PostgreSQL database and restricted web role, submitted a fictional form with a photo. Reload preserved reference `FS-2026-DB6D15DA`. Readback found exactly one case in `awaiting_scheduling` and one available private photo whose bytes and SHA-256 matched storage metadata. The owned preview database and role were removed afterward.
 - Form layouts at 320, 375, 390, 430, 768, 1366 and 1920 pixels had no horizontal page overflow. Screenshot receipts and bounded readback are in ignored `.artifacts/digital-form-preview/`; they contain only fictional test data.
+- Full Python plus actual PostgreSQL verification completed with 2,520 passed and 17 explicitly provider-gated evaluations skipped. Two old assertions expected the previous downgrade blocker and the removed `ticket.open` permission; both were corrected and independently passed. The reference manifest keeps provider activation off. No failed assertion was skipped or weakened into accepting an early case.
 
 ## Deployment and provider boundaries
 

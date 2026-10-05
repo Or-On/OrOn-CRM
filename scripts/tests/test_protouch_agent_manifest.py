@@ -14,7 +14,7 @@ def test_protouch_agent_manifest_keeps_provider_activation_off_and_secrets_out()
     assert config["tenantSlugHint"] == "protouch"
     assert agent["locale"] == "he"
     assert set(agent["channels"]) == {"voice", "whatsapp"}
-    assert set(agent["toolPermissions"]) == {"service.intake", "ticket.open"}
+    assert set(agent["toolPermissions"]) == {"service.intake"}
     assert "פרו טאץ'" in agent["systemPrompt"]
     assert "Or-On" not in agent["systemPrompt"]
     assert len(agent["systemPrompt"]) <= 16_000

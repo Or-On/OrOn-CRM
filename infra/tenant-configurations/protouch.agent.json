@@ -28,7 +28,7 @@
   "inheritSharedRuntime": ["LLM", "STT", "TTS"],
   "activation": {
     "realWhatsApp": false,
-    "realTelephony": true,
-    "reason": "Reference-only observed voice route; publish reviewed agent and tenant form policy separately. WhatsApp remains blocked pending supported app-preserving sender setup; never claim delivery."
+    "realTelephony": false,
+    "reason": "This draft never activates providers. The observed live voice route is documented separately; publish reviewed agent and tenant form policy through the normal application workflow. WhatsApp remains blocked pending supported app-preserving sender setup; never claim delivery."
   }
 }
