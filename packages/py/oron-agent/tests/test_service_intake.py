@@ -9,6 +9,7 @@ from oron_agent.flows.loader import initial_node_from_spec
 from oron_agent.flows.resolve import StoredFlowUnavailable
 from oron_agent.grounding import render_reply
 from oron_agent.lead_capture import AcceptedTurns
+from oron_agent.scope_policy import validate_output
 from oron_agent.service_intake import build_voice_service_intake, service_intake_instruction
 from oron_agent.spoken_safety import safe_spoken_text
 from oron_agent.support_ticket import support_ticket_function_factory
@@ -555,3 +556,275 @@ async def test_unconfigured_tenant_keeps_the_photo_request_with_platform_wording
     sessions.request_service_followup.assert_not_called()
     message = sessions.request_service_photos.await_args.kwargs["message"]
     assert "Gemini" not in message and "תמונה" in message
+
+
+def _form_sessions(*, saved=False) -> SimpleNamespace:
+    sessions = _sessions()
+    initial = sessions.get_service_intake_context.return_value
+    initial["policy"]["whatsappFollowUp"] = {
+        "enabled": True,
+        "trigger": "intake_saved",
+        "requestPhoto": True,
+        "consent": "in_call_agreement",
+        "mode": "form",
+    }
+    sessions.request_service_followup = AsyncMock()
+    if saved:
+        initial["intakeId"] = str(uuid4())
+        initial["knownFields"]["faultDescription"] = "Fictional printer stopped"
+    return sessions
+
+
+@pytest.mark.asyncio
+async def test_form_policy_only_exposes_name_fault_and_web_submission_contract():
+    sessions = _form_sessions()
+    sessions.get_service_intake_context.return_value["policy"]["emergency"] = {"enabled": True}
+    sessions.escalate_emergency = AsyncMock()
+    tools = await build_voice_service_intake(
+        sessions,
+        _context(),
+        {"capabilities": ["service.intake", "ticket.open"]},
+        AcceptedTurns(),
+        {},
+    )
+    assert tools is not None and tools.form_mode
+    assert tools.tool_names == ("capture_service_intake", "send_whatsapp_service_form")
+    prompt = service_intake_instruction(tools.initial)
+    assert "Collect ONLY the customer's name" in prompt and "brief description" in prompt
+    assert "confirmed=false" in prompt and "explicitly press Submit" in prompt
+    assert "Known Customer" in prompt and "Known Store" not in prompt
+    assert '"requiredIntakeFields":["customerName","faultDescription"]' in prompt
+    assert "by phone instead" not in prompt
+    spec = FlowSpec(
+        id=_context().flow_id,
+        version=1,
+        entry="talk",
+        nodes=[FlowNode(name="talk", task_messages=[Message(content="Help.")])],
+    )
+    node = initial_node_from_spec(spec, runtime_function_factories=tools.factories())
+    capture = next(f for f in node["functions"] if f.name == "capture_service_intake")
+    assert set(capture.properties["fields"]["properties"]) == {"customerName", "faultDescription"}
+    assert capture.properties["confirmed"]["enum"] == [False]
+    assert "open_support_ticket" not in {f.name for f in node["functions"]}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fields,confirmed",
+    [
+        ({"customerName": "Dana"}, True),
+        ({"customerName": "Dana"}, "false"),
+        ({"serviceAddress": "Fictional street"}, False),
+        ({"storeName": "Fictional"}, False),
+        ({"productModel": "Fictional"}, False),
+        ({"callbackNumber": "+15555550199"}, False),
+        ({"urgency": "urgent"}, False),
+        ({"exactFailure": "Fictional"}, False),
+        ({"customerName": " "}, False),
+        ({}, False),
+    ],
+)
+async def test_form_capture_rejects_phone_details_and_confirmation(fields, confirmed):
+    sessions, turns = _form_sessions(), AcceptedTurns()
+    turns.accept()
+    tools = await build_voice_service_intake(
+        sessions, _context(), {"capabilities": ["service.intake"]}, turns, {}
+    )
+    assert tools is not None
+    assert (await tools.capture({"fields": fields, "confirmed": confirmed}))["ok"] is False
+    sessions.capture_service_intake.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_form_queue_requires_both_durable_facts_and_cannot_save_an_empty_intake():
+    sessions, turns, context = _form_sessions(), AcceptedTurns(), _context()
+    turns.accept()
+    tools = await build_voice_service_intake(
+        sessions, context, {"capabilities": ["service.intake"]}, turns, {}
+    )
+    assert tools is not None
+    assert (await tools.send_form({"customerAgreed": True}))["ok"] is False
+    sessions.capture_service_intake.assert_not_awaited()
+    sessions.request_service_followup.assert_not_awaited()
+    intake = str(uuid4())
+    sessions.capture_service_intake.return_value = {"intakeId": intake, "status": "collecting"}
+    assert (await tools.capture({"fields": {"customerName": "Dana"}, "confirmed": False}))["ok"]
+    assert (await tools.send_form({"customerAgreed": True}))["missingFields"] == [
+        "faultDescription"
+    ]
+    sessions.request_service_followup.assert_not_awaited()
+    assert (
+        await tools.capture({"fields": {"faultDescription": "Printer stopped"}, "confirmed": False})
+    )["ok"]
+    sessions.request_service_followup.return_value = {
+        "status": "queued",
+        "jobId": str(uuid4()),
+        "intakeId": intake,
+    }
+    assert (await tools.send_form({"customerAgreed": False}))["ok"] is False
+    result = await tools.send_form({"customerAgreed": True})
+    assert result["ok"] is True
+    assert len(sessions.capture_service_intake.await_args_list) == 2
+    assert all(
+        c.kwargs["confirmed"] is False for c in sessions.capture_service_intake.await_args_list
+    )
+    sessions.request_service_followup.assert_awaited_once_with(context, customer_agreed=True)
+    assert "הועברה לתור" in result["closing"] and "המסירה עדיין לא אושרה" in result["closing"]
+    assert "לחיצה על שליחה" in result["closing"]
+    assert safe_spoken_text(result["closing"], "he") == (result["closing"], False)
+    assert validate_output(result["closing"]).allowed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "receipt",
+    [
+        {"status": "unavailable", "reason": "whatsapp_template_required"},
+        {"status": "queued"},
+        {"status": "deferred"},
+        RuntimeError("database unavailable"),
+    ],
+)
+async def test_unavailable_form_never_falls_back_to_full_phone_intake_or_claims_staff_notified(
+    receipt,
+):
+    sessions, turns = _form_sessions(saved=True), AcceptedTurns()
+    if isinstance(receipt, Exception):
+        sessions.request_service_followup.side_effect = receipt
+    else:
+        sessions.request_service_followup.return_value = receipt
+    turns.accept()
+    tools = await build_voice_service_intake(
+        sessions, _context(), {"capabilities": ["service.intake"]}, turns, {}
+    )
+    assert tools is not None
+    result = await tools.send_form({"customerAgreed": True})
+    assert result["ok"] is False and "closing" not in result
+    assert "staff follow-up is needed" in result["error"]
+    assert "Do not claim staff have been notified" in result["error"]
+    assert "Do not collect address" in result["error"]
+    assert "by phone instead" not in result["error"]
+    sessions.capture_service_intake.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_disabled_whatsapp_preserves_form_only_policy_and_no_emergency_or_early_case_escape():
+    sessions, turns = _form_sessions(saved=True), AcceptedTurns()
+    initial = sessions.get_service_intake_context.return_value
+    initial["policy"]["whatsappFollowUp"]["enabled"] = False
+    initial["policy"]["inquiry"] = {"openOnFirstContact": True}
+    initial["policy"]["emergency"] = {"enabled": True}
+    sessions.open_service_inquiry = AsyncMock()
+    sessions.escalate_emergency = AsyncMock()
+    turns.accept()
+    tools = await build_voice_service_intake(
+        sessions, _context(), {"capabilities": ["service.intake", "ticket.open"]}, turns, {}
+    )
+    assert tools is not None and tools.form_mode and not tools.emergency_enabled
+    assert "Collect ONLY" in service_intake_instruction(tools.initial)
+    assert (await tools.send_form({"customerAgreed": True}))["ok"] is False
+    assert (await tools.request_photos({"customerAgreed": True}))["ok"] is False
+    assert (await tools.escalate({"reason": "Fictional fire"}, AsyncMock()))["ok"] is False
+    sessions.open_service_inquiry.assert_not_awaited()
+    sessions.escalate_emergency.assert_not_awaited()
+    sessions.request_service_photos.assert_not_awaited()
+    sessions.request_service_followup.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_form_never_licenses_an_opened_ticket_claim_from_unexpected_receipt():
+    sessions, turns, ticket = _form_sessions(), AcceptedTurns(), {}
+    turns.accept()
+    tools = await build_voice_service_intake(
+        sessions, _context(), {"capabilities": ["service.intake"]}, turns, ticket
+    )
+    assert tools is not None
+    sessions.capture_service_intake.return_value = {
+        "intakeId": str(uuid4()),
+        "ticketId": str(uuid4()),
+        "caseId": str(uuid4()),
+    }
+    assert (await tools.capture({"fields": {"customerName": "Dana"}, "confirmed": False}))[
+        "ok"
+    ] is False
+    assert ticket == {} and not turns.receipt_for_current_turn()
+    sessions.request_service_followup.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_valid_queued_form_closes_call_but_unavailable_keeps_the_conversation():
+    sessions, turns, context = _form_sessions(saved=True), AcceptedTurns(), _context()
+    turns.accept()
+    tools = await build_voice_service_intake(
+        sessions, context, {"capabilities": ["service.intake"]}, turns, {}
+    )
+    assert tools is not None
+    spec = FlowSpec(
+        id=context.flow_id,
+        version=1,
+        entry="talk",
+        nodes=[FlowNode(name="talk", task_messages=[Message(content="Help.")])],
+    )
+    node = initial_node_from_spec(spec, runtime_function_factories=tools.factories())
+    send = next(f for f in node["functions"] if f.name == "send_whatsapp_service_form")
+    sessions.request_service_followup.return_value = {"status": "unavailable"}
+    result, stay = await send.handler({"customerAgreed": True}, SimpleNamespace(state={}))
+    assert result["ok"] is False and stay["name"] == "talk"
+    sessions.request_service_followup.return_value = {
+        "status": "queued",
+        "intakeId": sessions.get_service_intake_context.return_value["intakeId"],
+        "jobId": str(uuid4()),
+    }
+    result, closing = await send.handler({"customerAgreed": True}, SimpleNamespace(state={}))
+    assert result["ok"] is True
+    assert closing["name"] == "whatsapp_service_form_sent"
+    assert closing["respond_immediately"] is False and closing["functions"] == []
+    assert closing["pre_actions"] == [{"type": "end_conversation", "text": result["closing"]}]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"intakeId": "different-intake"},
+        {"jobId": None},
+        {"caseId": "unexpected-case"},
+        {"ticketId": "unexpected-ticket"},
+        {"status": "deferred"},
+    ],
+)
+async def test_form_queue_durable_receipt_must_match_saved_intake_and_never_contain_case(change):
+    sessions, turns = _form_sessions(saved=True), AcceptedTurns()
+    turns.accept()
+    tools = await build_voice_service_intake(
+        sessions, _context(), {"capabilities": ["service.intake"]}, turns, {}
+    )
+    assert tools is not None
+    sessions.request_service_followup.return_value = {
+        "status": "queued",
+        "jobId": str(uuid4()),
+        "intakeId": sessions.get_service_intake_context.return_value["intakeId"],
+        **change,
+    }
+    result = await tools.send_form({"customerAgreed": True})
+    assert result["ok"] is False and "closing" not in result
+
+
+@pytest.mark.asyncio
+async def test_form_failed_fact_save_cannot_unlock_message_queue():
+    sessions, turns = _form_sessions(), AcceptedTurns()
+    turns.accept()
+    tools = await build_voice_service_intake(
+        sessions, _context(), {"capabilities": ["service.intake"]}, turns, {}
+    )
+    assert tools is not None
+    sessions.capture_service_intake.side_effect = RuntimeError("fictional unavailable database")
+    result = await tools.capture(
+        {
+            "fields": {"customerName": "Dana", "faultDescription": "Fictional fault"},
+            "confirmed": False,
+        }
+    )
+    assert result["ok"] is False
+    assert (await tools.send_form({"customerAgreed": True}))["ok"] is False
+    sessions.request_service_followup.assert_not_awaited()

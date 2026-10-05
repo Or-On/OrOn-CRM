@@ -70,3 +70,26 @@ async def test_sensitive_contact_details_are_never_read_back_aloud(readback):
     assert "052" not in output
     assert "@" not in output
     assert output == "תודה, קיבלתי את הפרטים. מטעמי פרטיות לא אחזור עליהם בקול."
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "announcement",
+    [
+        "תודה דנה, אשלח לך עכשיו הודעת וואטסאפ עם טופס קצר.",
+        "שלחתי לך הודעת וואטסאפ עם טופס קצר.",
+        "הודעת וואטסאפ בדרך אליך.",
+        "מיד בסיום השיחה תגיע אליך הודעת וואטסאפ.",
+        "I will send you a WhatsApp message.",
+        "A WhatsApp message is on its way to you.",
+        "Right after this call you'll get a WhatsApp message.",
+    ],
+)
+async def test_tool_presence_does_not_license_a_whatsapp_delivery_promise(announcement):
+    assert await BusinessClaimGuardFilter(lambda: "he").filter(announcement) != announcement
+
+
+@pytest.mark.asyncio
+async def test_whatsapp_queue_receipt_wording_is_not_a_delivery_claim():
+    text = "The request for a WhatsApp form link is queued. Delivery is not confirmed."
+    assert await BusinessClaimGuardFilter(lambda: "en").filter(text) == text

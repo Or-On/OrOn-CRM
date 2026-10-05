@@ -31,6 +31,16 @@ _UNVERIFIED_BUSINESS_CLAIM_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Delivery guarantees are not licensed merely by having a send tool or queue receipt.
+_WHATSAPP_DELIVERY_PROMISE_RE = re.compile(
+    r"(?:הודעת?\s+(?:וואטסאפ|ווטסאפ)|WhatsApp)\s+[^.?!]{0,35}(?:בדרך\s+אלי[ךיכם]|תגיע|נשלחה)|"
+    r"תגיע\s+[^.?!]{0,35}(?:הודעת?\s+(?:וואטסאפ|ווטסאפ)|WhatsApp)|"
+    r"\b(?:i|we)(?:'ll|\s+will)\s+send\b[^.?!]{0,60}\b(?:whatsapp|message)\b|"
+    r"\b(?:whatsapp|message)\b[^.?!]{0,50}\b(?:on\s+(?:its|the)\s+way|will\s+arrive|has\s+been\s+sent)\b|"
+    r"\byou(?:'ll|\s+will)\s+(?:get|receive)\b[^.?!]{0,50}\b(?:whatsapp|message)\b",
+    re.IGNORECASE,
+)
+
 _TICKET_CLAIM_RE = re.compile(
     r"(?:"
     r"(?:פתחתי|אפתח)\s+[^.?!]{0,60}קריאת\s+שירות|"
@@ -106,6 +116,7 @@ def safe_spoken_text(
     """
 
     sanitized = sanitize_tts_markup(text)
+    blocked_announcement = _WHATSAPP_DELIVERY_PROMISE_RE.search(sanitized) is not None
     blocked_identity_request = (
         not allow_identity_collection and _IDENTITY_COLLECTION_RE.search(sanitized) is not None
     )
@@ -119,6 +130,7 @@ def safe_spoken_text(
         and not blocked_ticket_claim
         and not blocked_sensitive_readback
         and not unreceipted_save
+        and not blocked_announcement
         and not _UNVERIFIED_BUSINESS_CLAIM_RE.search(sanitized)
     ):
         return sanitized, False

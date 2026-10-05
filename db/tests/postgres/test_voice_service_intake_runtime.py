@@ -6,6 +6,8 @@ from uuid import UUID, uuid4
 import pytest
 import pytest_asyncio
 from dispatcher_runtime.persistence import PostgresVoiceRuntime, _async_database_url
+from oron_agent.lead_capture import AcceptedTurns
+from oron_agent.service_intake import build_voice_service_intake
 from oron_common import CallContext, Direction
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
@@ -37,6 +39,22 @@ async def service_runtime(postgres_url, request):
                 "selfAssignmentEnabled": True,
                 "requiredReportFields": ["diagnosis", "workPerformed"],
             }
+            options = getattr(request, "param", True)
+            form_options = options if isinstance(options, dict) else None
+            if form_options is not None:
+                policy.update(
+                    {
+                        "inquiry": {"openOnFirstContact": True},
+                        "emergency": {"enabled": True, "fallback": "notify_staff"},
+                        "whatsappFollowUp": {
+                            "enabled": form_options["enabled"],
+                            "mode": "form",
+                            "trigger": "intake_saved",
+                            "consent": "in_call_agreement",
+                            "requestPhoto": True,
+                        },
+                    }
+                )
             await execute(
                 connection,
                 "INSERT INTO tenants(id,name,slug) VALUES(:tenant,:name,:slug)",
@@ -78,7 +96,8 @@ async def service_runtime(postgres_url, request):
                 tenant=tenant,
                 contact=contact,
             )
-            agent = UUID(await seed_agent(connection, tenant, ["service.intake"]))
+            permissions = ["service.intake", "ticket.open"] if form_options else ["service.intake"]
+            agent = UUID(await seed_agent(connection, tenant, permissions))
             session = await seed_call(connection, tenant, contact)
             runtime = object.__new__(PostgresVoiceRuntime)
             runtime._sessionmaker = async_sessionmaker(
@@ -743,3 +762,168 @@ async def test_runtime_retains_exact_compiled_voice_flow_and_rejects_retry_drift
             session=fresh_session,
         )
     ).scalar_one() == 1
+
+
+@pytest.mark.parametrize("service_runtime", [{"enabled": True}, {"enabled": False}], indirect=True)
+async def test_form_database_guard_accepts_free_text_but_denies_phone_confirmation_and_extra_fields(
+    service_runtime,
+):
+    runtime, context, connection, _ = service_runtime
+    fault = "תקלה חופשית שלא נבחרה מרשימה: המסך מהבהב רק לאחר עשרים דקות.\nגם שירות חדש מבוקש."
+    draft = await runtime.capture_service_intake(
+        context,
+        fields={"customerName": "Fictional Dana", "faultDescription": fault},
+        confirmed=False,
+    )
+    assert draft["caseId"] is None and draft["ticketId"] is None
+    assert draft["knownFields"]["faultDescription"] == fault
+    for fields, confirmed in (
+        ({"faultDescription": fault}, True),
+        ({"serviceAddress": "Fictional address"}, False),
+        ({"storeName": "Fictional branch"}, False),
+        ({"exactFailure": "Fictional detail"}, False),
+        ({"productModel": "Fictional equipment"}, False),
+        ({"callbackNumber": "+15555550199"}, False),
+        ({"urgency": "urgent"}, False),
+    ):
+        with pytest.raises(DBAPIError, match="only name and fault"):
+            await runtime.capture_service_intake(context, fields=fields, confirmed=confirmed)
+    assert (await runtime.get_service_intake_context(context))["knownFields"][
+        "faultDescription"
+    ] == fault
+    await connection.execute(text("RESET ROLE"))
+    assert (
+        await execute(
+            connection,
+            "SELECT (SELECT count(*) FROM service.cases WHERE tenant_id=:tenant) + "
+            "(SELECT count(*) FROM support.tickets WHERE tenant_id=:tenant)",
+            tenant=context.tenant_id,
+        )
+    ).scalar_one() == 0
+
+
+@pytest.mark.parametrize("service_runtime", [{"enabled": True}, {"enabled": False}], indirect=True)
+async def test_form_database_denies_early_inquiry_emergency_and_generic_ticket_escape(
+    service_runtime,
+):
+    runtime, context, connection, _ = service_runtime
+    assert (await runtime.open_service_inquiry(context))["status"] == "not_configured"
+    assert (await runtime.escalate_emergency(context, reason="Fictional urgent outage"))[
+        "status"
+    ] == "not_configured"
+    # This fixture's published agent explicitly has ticket.open: refusal must
+    # come from the digital-form policy rather than a missing capability.
+    with pytest.raises(DBAPIError, match="digital service form"):
+        await runtime.open_support_ticket(
+            context, subject="Fictional issue", summary="Phone report"
+        )
+    assert (await runtime.get_service_intake_context(context))["intakeId"] is None
+    await connection.execute(text("RESET ROLE"))
+    assert (
+        await execute(
+            connection,
+            "SELECT (SELECT count(*) FROM service.cases WHERE tenant_id=:tenant) + "
+            "(SELECT count(*) FROM support.tickets WHERE tenant_id=:tenant)",
+            tenant=context.tenant_id,
+        )
+    ).scalar_one() == 0
+
+
+@pytest.mark.parametrize("service_runtime", [{"enabled": True}], indirect=True)
+async def test_form_runtime_and_agent_refuse_queue_without_both_facts_or_open_window(
+    service_runtime,
+):
+    runtime, context, connection, _ = service_runtime
+    missing = await runtime.request_service_followup(context, customer_agreed=True)
+    assert missing == {"status": "unavailable", "reason": "name_and_fault_required"}
+    turns = AcceptedTurns()
+    turns.accept()
+    tools = await build_voice_service_intake(
+        runtime, context, {"capabilities": ["service.intake", "ticket.open"]}, turns, {}
+    )
+    assert tools is not None
+    assert (
+        await tools.capture({"fields": {"customerName": "Fictional Dana"}, "confirmed": False})
+    )["ok"]
+    assert (await runtime.request_service_followup(context, customer_agreed=True))["reason"] == (
+        "name_and_fault_required"
+    )
+    assert (await tools.send_form({"customerAgreed": True}))["ok"] is False
+    assert (
+        await tools.capture(
+            {
+                "fields": {"faultDescription": "A completely free-text service request"},
+                "confirmed": False,
+            }
+        )
+    )["ok"]
+    unavailable = await runtime.request_service_followup(context, customer_agreed=True)
+    assert unavailable["status"] == "unavailable"
+    assert unavailable["reason"] == "whatsapp_template_required"
+    spoken = await tools.send_form({"customerAgreed": True})
+    assert spoken["ok"] is False and "closing" not in spoken
+    assert "staff follow-up is needed" in spoken["error"]
+    assert "Do not claim staff have been notified" in spoken["error"]
+    assert "Do not collect address" in spoken["error"]
+    await connection.execute(text("RESET ROLE"))
+    assert (
+        await execute(
+            connection,
+            "SELECT (SELECT count(*) FROM service.cases WHERE tenant_id=:tenant) + "
+            "(SELECT count(*) FROM support.tickets WHERE tenant_id=:tenant) + "
+            "(SELECT count(*) FROM ops.jobs WHERE tenant_id=:tenant "
+            "AND job_type='field_service.intake_followup')",
+            tenant=context.tenant_id,
+        )
+    ).scalar_one() == 0
+
+
+@pytest.mark.parametrize("service_runtime", [{"enabled": True}], indirect=True)
+async def test_form_link_queue_uses_real_durable_job_but_does_not_open_case(service_runtime):
+    runtime, context, connection, _ = service_runtime
+    await connection.execute(text("RESET ROLE"))
+    await execute(
+        connection,
+        "UPDATE messaging.conversations SET customer_service_window_expires_at=clock_timestamp() "
+        "+ INTERVAL '2 hours' WHERE tenant_id=:tenant AND contact_id=:contact",
+        tenant=context.tenant_id,
+        contact=context.contact_id,
+    )
+    await connection.execute(text("SET LOCAL ROLE platform_voice"))
+    turns = AcceptedTurns()
+    turns.accept()
+    tools = await build_voice_service_intake(
+        runtime, context, {"capabilities": ["service.intake", "ticket.open"]}, turns, {}
+    )
+    assert tools is not None
+    assert (
+        await tools.capture(
+            {
+                "fields": {"customerName": "Fictional Dana", "faultDescription": "Free-text fault"},
+                "confirmed": False,
+            }
+        )
+    )["ok"]
+    queued = await tools.send_form({"customerAgreed": True})
+    assert queued["ok"] and queued["receipt"]["status"] == "queued"
+    assert "המסירה עדיין לא אושרה" in queued["closing"]
+    repeated = await tools.send_form({"customerAgreed": True})
+    assert repeated["receipt"]["jobId"] == queued["receipt"]["jobId"]
+    await connection.execute(text("RESET ROLE"))
+    job = (
+        await execute(
+            connection,
+            "SELECT job_type FROM ops.jobs WHERE tenant_id=:tenant AND id=:job",
+            tenant=context.tenant_id,
+            job=UUID(queued["receipt"]["jobId"]),
+        )
+    ).scalar_one()
+    assert job == "field_service.intake_followup"
+    assert (
+        await execute(
+            connection,
+            "SELECT (SELECT count(*) FROM service.cases WHERE tenant_id=:tenant) + "
+            "(SELECT count(*) FROM support.tickets WHERE tenant_id=:tenant)",
+            tenant=context.tenant_id,
+        )
+    ).scalar_one() == 0
