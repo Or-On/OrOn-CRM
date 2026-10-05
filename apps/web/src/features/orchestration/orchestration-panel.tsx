@@ -447,9 +447,11 @@ export function OrchestrationPanel({
               agents={agents}
               canEdit={canEdit}
               pending={pending}
-              publish={(id) =>
+              publish={(id, expectedVersionId) =>
                 void run(() =>
-                  crmMutation(`/api/orchestration/agents/${id}/publish`, {}),
+                  crmMutation(`/api/orchestration/agents/${id}/publish`, {
+                    expectedVersionId,
+                  }),
                 )
               }
               rename={(id, name) =>

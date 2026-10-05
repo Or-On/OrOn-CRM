@@ -41,7 +41,7 @@ export function AgentRegister({
   readonly agents: readonly AgentProfileSummary[];
   readonly canEdit: boolean;
   readonly pending: boolean;
-  readonly publish: (id: string) => void;
+  readonly publish: (id: string, expectedVersionId: string) => void;
   readonly rename?: (id: string, name: string) => Promise<boolean>;
   readonly remove?: (id: string) => Promise<boolean>;
   readonly setDefault?: (id: string) => Promise<boolean>;
@@ -211,10 +211,17 @@ export function AgentRegister({
                 {!selected.published ? (
                   <Button
                     busy={pending}
-                    disabled={!canEdit || selected.validationStatus !== "valid"}
+                    disabled={
+                      !canEdit ||
+                      selected.validationStatus !== "valid" ||
+                      selected.versionId === null
+                    }
                     size="small"
                     variant="secondary"
-                    onClick={() => publish(selected.id)}
+                    onClick={() => {
+                      if (selected.versionId !== null)
+                        publish(selected.id, selected.versionId);
+                    }}
                   >
                     {t("orchestration.publish")}
                   </Button>

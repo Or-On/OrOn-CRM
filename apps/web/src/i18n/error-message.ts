@@ -39,6 +39,8 @@ const knownErrors: Readonly<Record<string, string>> = {
     "inbox.aiNotApproved",
   "Move active conversations to human ownership before deleting this agent.":
     "orchestration.agentHasActiveConversations",
+  "Agent version changed; refresh before publishing":
+    "orchestration.agentVersionChanged",
   "conversation has no valid WhatsApp recipient": "errors.phone",
   "This conversation still has queued or in-progress work. Wait for it to finish before deleting.":
     "inbox.deleteInProgress",

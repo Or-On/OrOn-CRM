@@ -1211,6 +1211,7 @@
     "reviewAgents": "Review agents",
     "failed": "Operation failed",
     "agentHasActiveConversations": "This agent still owns an active conversation. Switch that conversation to a human operator, then delete the agent again.",
+    "agentVersionChanged": "The agent version changed. Refresh this page and review the latest draft before publishing.",
     "reason": "Simulation complete. A team member's follow-up is needed.",
     "required": "kind is required",
     "usage": "Cross-channel usage summary",

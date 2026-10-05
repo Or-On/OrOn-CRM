@@ -1009,10 +1009,18 @@ export async function createAgentProfileRevision(
   return { versionId: row.id, version: row.version };
 }
 
+export class AgentProfileVersionConflictError extends Error {
+  constructor() {
+    super("Agent version changed; refresh before publishing");
+    this.name = "AgentProfileVersionConflictError";
+  }
+}
+
 export async function publishAgentProfile(
   sql: postgres.TransactionSql,
   actorUserId: string,
   profileId: string,
+  expectedVersionId?: string,
 ): Promise<boolean> {
   await requireTenantFeature(sql, "agents");
   await assertKnowledgeManager(sql);
@@ -1037,6 +1045,10 @@ export async function publishAgentProfile(
     ORDER BY version DESC LIMIT 1 FOR UPDATE
   `;
   const draft = drafts[0];
+  // The same profile lock serializes revision creation. Compare only after
+  // acquiring it, so a concurrent editor cannot publish an unreviewed version.
+  if (expectedVersionId !== undefined && draft?.id !== expectedVersionId)
+    throw new AgentProfileVersionConflictError();
   if (draft?.published_at !== null || draft.validation_status !== "valid")
     return false;
   for (const feature of new Set(
