@@ -144,7 +144,7 @@ async def review_or_apply(plan, carrier, sip, *, password: str, apply: bool, rec
     if not apply:
         return summary
     identity = hashlib.sha256(plan.model_dump_json().encode()).hexdigest()
-    recorded = {"plan_sha256": identity, "original": state, "completed": []}
+    recorded: dict = {"plan_sha256": identity, "original": state, "completed": []}
     if await asyncio.to_thread(receipt.exists):
         recorded = json.loads(await asyncio.to_thread(receipt.read_text, encoding="utf-8"))
         if recorded.get("plan_sha256") != identity:

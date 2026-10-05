@@ -93,6 +93,23 @@ def test_plan_does_not_execute_or_construct_cloud_client(monkeypatch):
     assert deploy.main() == 0
 
 
+def test_failed_build_retains_an_unverified_receipt(monkeypatch, tmp_path):
+    monkeypatch.setattr(deploy, "ROOT", tmp_path)
+
+    def fail_archive(*_args, **_kwargs):
+        raise RuntimeError("controlled local archive failure")
+
+    monkeypatch.setattr(deploy, "command", fail_archive)
+    with pytest.raises(RuntimeError, match="controlled local archive failure"):
+        deploy.execute(SHA, "b" * 40, 1, {"revision": SHA})
+    receipts = list((tmp_path / ".artifacts/manual-deploy").glob("*/receipt.json"))
+    assert len(receipts) == 1
+    receipt = json.loads(receipts[0].read_text())
+    assert receipt["verified"] is False
+    assert receipt["phase"] == "building"
+    assert receipt["images"] == {}
+
+
 @pytest.mark.parametrize("value", ["HEAD", "a" * 39, "A" * 40, "a" * 40 + ";echo bad"])
 def test_shell_metacharacters_and_symbolic_revisions_are_rejected(value):
     with pytest.raises(argparse.ArgumentTypeError):
