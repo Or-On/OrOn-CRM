@@ -895,16 +895,32 @@ class PostgresVoiceRuntime:
                 AND (process.channel='voice' OR process.channel IS NULL)
               ORDER BY process.priority,process.id LIMIT 1
             ), candidates AS (
-              SELECT flow.*
+              SELECT flow.*,
+                dense_rank() OVER (PARTITION BY flow.flow_definition_id
+                  ORDER BY flow.version DESC) AS latest
               FROM automation.flow_versions flow
               WHERE flow.tenant_id = :tenant_id AND flow.published_at IS NOT NULL
+                AND (
+                  platform.approved_flow_for_channel(
+                    flow.id,flow.agent_profile_version_id,'voice')
+                  OR EXISTS (
+                    SELECT 1
+                    FROM jsonb_array_elements(flow.definition->'nodes') candidate_node
+                    JOIN agents.agent_profile_versions candidate_agent
+                      ON candidate_agent.tenant_id=flow.tenant_id
+                     AND candidate_agent.id::text=
+                       candidate_node#>>'{configuration,agentVersionId}'
+                    WHERE candidate_node->>'type'='voice.call'
+                      AND platform.approved_flow_for_channel(
+                        flow.id,candidate_agent.id,'voice')
+                  )
+                )
             ), eligible AS (
             SELECT agent.id, agent.system_prompt, agent.channel_configuration,
               agent.tool_permissions,
               node #>> '{configuration,flowVersion}' AS voice_version,
               binding.id AS binding_id,
-              dense_rank() OVER (PARTITION BY flow.flow_definition_id
-                ORDER BY flow.version DESC) AS latest
+              flow.latest
             FROM candidates flow
             LEFT JOIN process_binding binding ON true
             CROSS JOIN LATERAL jsonb_array_elements(flow.definition->'nodes') node

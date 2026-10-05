@@ -299,6 +299,93 @@ async def test_voice_configuration_pins_exact_agent_and_rejects_ambiguous_bindin
         await engine.dispose()
 
 
+@pytest.mark.parametrize("successor_mode", ["removed_voice_node", "replaced_voice_node"])
+async def test_latest_published_voice_flow_cannot_resurrect_an_older_binding(
+    postgres_url, successor_mode
+):
+    engine = create_async_engine(_async_database_url(postgres_url))
+    tenant, profile, agent, successor, definition, retained = (uuid4() for _ in range(6))
+    params = {
+        "tenant": tenant,
+        "slug": f"voice-latest-{tenant}",
+        "profile": profile,
+        "agent": agent,
+        "successor": successor,
+        "definition": definition,
+        "old_nodes": json.dumps(
+            {
+                "nodes": [
+                    {
+                        "type": "voice.call",
+                        "configuration": {"flowId": str(retained), "flowVersion": 1},
+                    }
+                ]
+            }
+        ),
+        "new_nodes": json.dumps(
+            {"nodes": [{"type": "end"}]}
+            if successor_mode == "removed_voice_node"
+            else {
+                "nodes": [
+                    {
+                        "type": "voice.call",
+                        "configuration": {"flowId": str(uuid4()), "flowVersion": 1},
+                    }
+                ]
+            }
+        ),
+        "successor_status": "valid",
+    }
+    try:
+        async with engine.connect() as connection:
+            transaction = await connection.begin()
+            try:
+                for statement in (
+                    "INSERT INTO tenants(id,name,slug) "
+                    "VALUES(:tenant,'Voice latest fixture',:slug)",
+                    "INSERT INTO agents.agent_profiles(id,tenant_id,name) "
+                    "VALUES(:profile,:tenant,'Voice latest')",
+                    "INSERT INTO agents.agent_profile_versions(id,tenant_id,agent_profile_id,"
+                    "version,system_prompt,channel_capabilities,validation_status,published_at) "
+                    "VALUES(:agent,:tenant,:profile,1,'Version one',ARRAY['voice'],'valid',now())",
+                    "INSERT INTO agents.agent_profile_versions(id,tenant_id,agent_profile_id,"
+                    "version,system_prompt,channel_capabilities,validation_status,published_at) "
+                    "VALUES(:successor,:tenant,:profile,2,'Version two',ARRAY['voice'],"
+                    ":successor_status,now())",
+                    "INSERT INTO automation.flow_definitions"
+                    "(id,tenant_id,name,channel_capabilities) "
+                    "VALUES(:definition,:tenant,'Voice latest',ARRAY['voice'])",
+                    "INSERT INTO automation.flow_versions(tenant_id,flow_definition_id,version,"
+                    "schema_version,definition,validation_status,published_at,"
+                    "agent_profile_version_id) VALUES(:tenant,:definition,1,'1.0',"
+                    "CAST(:old_nodes AS jsonb),'valid',now(),:agent)",
+                    "INSERT INTO automation.flow_versions(tenant_id,flow_definition_id,version,"
+                    "schema_version,definition,validation_status,published_at,"
+                    "agent_profile_version_id) VALUES(:tenant,:definition,2,'1.0',"
+                    "CAST(:new_nodes AS jsonb),'valid',now(),:successor)",
+                ):
+                    await connection.execute(text(statement), params)
+                runtime = object.__new__(PostgresVoiceRuntime)
+                runtime._sessionmaker = async_sessionmaker(
+                    bind=connection,
+                    class_=AsyncSession,
+                    expire_on_commit=False,
+                    join_transaction_mode="create_savepoint",
+                )
+                await connection.execute(text("SET LOCAL ROLE platform_voice"))
+                with pytest.raises(ValueError, match="unavailable"):
+                    await runtime.get_voice_configuration(retained, tenant_id=tenant)
+                # A previously admitted call keeps its explicit immutable pin.
+                pinned = await runtime.get_voice_configuration(
+                    retained, tenant_id=tenant, agent_version_id=agent, flow_version=1
+                )
+                assert pinned["agentVersionId"] == str(agent)
+            finally:
+                await transaction.rollback()
+    finally:
+        await engine.dispose()
+
+
 async def test_durable_admission_replay_concurrency_and_quality_summary(isolated_postgres_url):
     from db.tests.postgres.conftest import run_alembic
 
