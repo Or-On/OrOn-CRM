@@ -346,3 +346,15 @@ Retain source revisions, image digests, schema heads, command logs and explicit
 local/live limitations in `VERIFICATION.md`, `VOICE.md`, `WHATSAPP.md` and
 `coverage.json`. Cleanup targets only exact owned fixtures after evidence review;
 never run global prune or remove original developer/production volumes.
+
+The ProTouch inbound callback was activated separately on `0f003ccd` / schema
+`af54b6c13e92` after authenticated provider and durable-admission proofs. This
+creates a rollback capability floor: at zero database calls **and** verified
+zero provider rooms, restore the exact saved Twilio number route first; then
+audited reverse-CAS the DID marker and contain only the owned digest rule;
+disable callback configuration; only then roll back application images lacking
+that callback/guard. Keep dedicated authentication on the retained trunk and
+never restore the old unsafe rule. The narrowly allowlisted recovery gate can
+operate with an unhealthy app, but still requires exact source, queryable DB,
+ownership, provider idle and full routing CAS. See
+[the scoped recovery plan](PROTOUCH-AUTHENTICATED-INBOUND-PLAN.md).

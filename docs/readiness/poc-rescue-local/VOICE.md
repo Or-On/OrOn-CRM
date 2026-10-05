@@ -372,3 +372,34 @@ At 23:13 UTC there were zero active application sessions and neither the
 acceptance room nor the earlier synthetic probe room remained. Provider
 readback still showed zero inbound dispatch rules and the original carrier
 origination; successful outbound acceptance does not resolve inbound routing.
+
+## Authenticated inbound activation after durable repair
+
+On `0f003ccd0049e6c2b0bc8f19e17a80d7f339e198` / schema `af54b6c13e92`,
+the reviewed ProTouch route now uses a signed Twilio callback and dedicated SIP
+digest authentication on retained trunk `ST_aJJSDZMGTeJ8`, with explicit rule
+`SDR_qwuvuQ9waXV7`. The original unsupported ACL test and failed `79a4a84`
+settlement test remain preserved. The new bounded positive-only proof matched
+the signed SIP attributes and durably quarantined `inbound_rule_mismatch` on
+attempt 1, with zero application session/contact or remaining provider room.
+Historical negative authentication results retain their own source provenance.
+
+Public invalid-signature/account requests returned 403; valid HMAC while unbound
+returned 503. After audited real DID binding, a signed known completed/outbound
+CallSid was rejected with 403 by the provider-call check. Only then was the exact
+Twilio number changed to the HTTPS callback/POST with TrunkSid empty. Full
+readback preserved all other routing fields and outbound configuration. Incoming
+PSTN acceptance and outbound regression after detachment remain separate tests.
+See [the reviewed plan](PROTOUCH-AUTHENTICATED-INBOUND-PLAN.md) and
+[actual proof history](PROTOUCH-DIGEST-PROOF.md).
+
+The parent then placed one authorized outbound regression: session
+`57d373de-1375-5ed8-917b-c975ab50f6d9`, Twilio
+`CA6cdfca66ac20f2d7fcca4f479353bacc`, exact `***4553` to `***7692` on the original
+Elastic trunk. It reached SIP ringing and ended `USER_UNAVAILABLE`; Twilio
+reports failed/duration0, and the application ended answered=false with
+artifacts. No human-conversation success or detachment-caused failure is claimed.
+The inbound carrier route/rule remained correct and active sessions/provider
+rooms were zero. A separate room-finished receipt exhausted eight attempts
+despite the terminal session and remains preserved for diagnosis; it has not
+been manually settled. Incoming PSTN acceptance remains pending.

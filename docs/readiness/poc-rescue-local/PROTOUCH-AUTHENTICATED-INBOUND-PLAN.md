@@ -1,8 +1,14 @@
 # ProTouch authenticated inbound operator plan
 
-Status: reviewed preparation only. The successful outbound call on `60f26bf`
-is independent evidence. No authenticated inbound provider change, SIP digest
-proof or incoming PSTN acceptance has yet been performed under this plan.
+Status: the reviewed carrier route was activated on `0f003ccd` / schema
+`af54b6c13e92` at approximately 2026-10-05 00:25 UTC. The DID is bound to the new
+authenticated rule and the exact Twilio number routes to the signed callback.
+The earlier `79a4a84` proof remains failed; after its settlement repair, a separate
+positive-only proof durably quarantined the caller on the first attempt, with no
+application session/contact or surviving room. See
+[the exact proof history](PROTOUCH-DIGEST-PROOF.md). One post-cutover outbound
+regression reached ringing but ended `USER_UNAVAILABLE`, answered=false; it is
+not a successful conversation. Incoming PSTN acceptance remains pending.
 
 LiveKit explicitly documents inbound TwiML with SIP username/password and a
 webhook as an alternative to a TwiML Bin. Elastic SIP origination cannot supply
@@ -76,11 +82,18 @@ Receipt: `.artifacts/poc-rescue-local/livekit-sip-tls-readonly.json`.
    matching remote 0600 backup before its first provider write.
 3. After the new admission guard is deployed, `--phase prepare-auth --apply
    --expected-source <full SHA>` updates only the retained trunk's dedicated
-   username/password and clears the ineffective IP allowlist. The original
+   username/password and removes the exact eight preflight-matched addresses
+   using `ListUpdate(remove=originalCIDRs)`. An offline actual-SDK serialization
+   check verifies those eight removals and no other list changes; empty-list
+   assignment is not relied on. The original
    eight CIDRs remain in the protected snapshot and incident evidence. One new
    explicit-trunk individual rule is created, with no automatic agent dispatch.
    The DID database marker still remains simulator. No parallel same-DID matcher
    or wildcard rule is allowed.
+   LiveKit readback masks the password as exactly eight asterisks. This is
+   accepted only after the recorded owned update with matching unique username
+   and protected backup hash; it is never reported as password verification.
+   Correct/wrong SIP digest evidence supplies that independent verification.
 4. The reviewed one-shot remote probe takes a stable `--probe-id`, full source
    and exact newly created rule. It sends one unauthenticated case, one wrong
    password case, and one correct digest case, at most five INVITEs including
@@ -92,18 +105,27 @@ Receipt: `.artifacts/poc-rescue-local/livekit-sip-tls-readonly.json`.
 5. Verify explicit negative rejections, correct 200, signed exact trunk/rule
    attributes, no application session/agent/contact, and actual room absence
    through LiveKit. Cleanup may remove only rooms named in the exact probe
-   receipt. Verify callback signature/routing/replay negatives separately.
+   receipt or independently matched by its exact SIP Call-ID. Before DID binding,
+   callback unsigned/tampered/foreign/invalid-signature tests must return 403,
+   and valid HMAC must return routing-unavailable 503 while the marker remains
+   simulator. That 503 does not test the provider call lookup. The local proof
+   combiner checks source/rule/probe equality and produces the `bind` phase gate.
 6. The remote binding helper rehearses, then commits, an audited exact DID CAS
    from simulator to the newly proven rule. It preserves tenant, DID and flow.
    The preflight runs the actual compiled inbound configuration resolver and
    confirms the intended effective agent and latest canonical automation, so an
    old published row merely continuing to exist does not satisfy the gate.
-7. `--phase cutover --apply --expected-source <full SHA>` requires all proofs,
+7. After audited binding and before carrier routing changes, test the known
+   completed/outbound CallSid with valid HMAC and exact configured To. Require
+   403 `invalid provider call` without XML/secrets. Do not attribute rejection
+   to one individual status/direction/number predicate. The proof combiner adds
+   this distinct receipt for the `cutover` phase; the early 503 cannot satisfy it.
+8. `--phase cutover --apply --expected-source <full SHA>` requires all proofs,
    no active calls, exact protected runtime configuration hash, and fresh
    unchanged ownership/routing. It changes only this PN's TrunkSid to empty,
    VoiceUrl to the exact callback and VoiceMethod to POST. All other routing
    fields and outbound invariants are compared before and after.
-8. Actual incoming-call acceptance remains a separate controlled human test.
+9. Actual incoming-call acceptance remains a separate controlled human test.
    Provider configuration readback is never reported as successful PSTN service.
 
 ## Recovery and idempotence
@@ -119,6 +141,18 @@ the new digest dispatch rule and confirm zero rules. Keep digest authentication
 on the retained trunk. Never recreate unsafe deleted rule
 `SDR_AcS72sUqk2ZM`. Disable callback configuration only after the DID no longer
 points to it.
+
+Only `restore-number`, binding `--mode restore`, and `contain-auth` may use the
+narrow recovery gate when an application is unhealthy. Exact deployed/image
+source, queryable PostgreSQL, schema, zero active database sessions and original
+DID tenant/flow ownership remain mandatory. A fresh read-only LiveKit room-list
+request must also prove zero rooms in the entire configured project; any room
+blocks these recovery actions, even if the database says zero. The token has
+only the room-list grant. Restoring the database marker additionally checks the
+carrier's complete original number-routing snapshot first. All activation and
+proof phases retain healthy-application and effective-runtime-binding checks.
+Offline fixtures reject attempts to use the recovery exception for prepare,
+bind, cutover, or an arbitrary readiness bypass.
 
 Once the DID uses the callback, the application has a capability floor: do not
 roll back to `60f26bf`, `0331908b`, or another version lacking this endpoint and
