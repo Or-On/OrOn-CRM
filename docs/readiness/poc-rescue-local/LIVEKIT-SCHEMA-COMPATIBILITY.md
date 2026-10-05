@@ -30,3 +30,11 @@ The new PostgreSQL fixture uses fictional data, actual `platform_voice` role, si
 The 95-case run also includes existing dispatcher lifecycle/finalization, signature, cancellation, expired/replaced claim and quarantine tests. Ruff, `git diff --check` and explicit dispatcher-source Pyrefly passed. An independent reviewer cleared the source and actual-PG proof, and separately passed four signature, duplicate, shutdown and safe-logging cases.
 
 The isolated database and its child fixtures were removed after each run; no original development or production data was modified.
+
+## Exact compiled release proof
+
+Runtime source is pinned to `bdaa5a3244c68cc6ba1d043807d4220bb62a12c1`. All five service images were built from its exact Git archive with matching OCI revision labels. The exact migrator image successfully upgraded an owned PostgreSQL 18.6 cluster from base to the unchanged `af54b6c13e92` head.
+
+The exact dispatcher image then passed four signed-ingress cases using an actual `platform_voice` login: valid admission followed by room finalization, and all three existing authoritative-binding quarantine reasons. Every subsequent `room_finished` carrying synthetic `roomEndReason` and a nested extension settled in one attempt. Raw JSON preservation, duplicate finality, changed-payload collision, signature tampering, malformed known fields and the existing REFER capability guard were checked in the compiled runtime. Provider and bot launch I/O were injected fictional adapters; no real call was made.
+
+Receipt: `.artifacts/poc-rescue-local/schema-image-bdaa5a32-canonical/receipt.json`. The cluster used an internal network without published ports. Containers, network and ephemeral credentials were removed, followed by an empty Docker inventory check for the owned prefix.
