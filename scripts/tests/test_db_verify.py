@@ -37,7 +37,11 @@ def test_graph_has_preserved_oron_root_and_one_target_head() -> None:
     # 115 also preserves retained conversation evidence and trusted model routing.
     # 137 starts a new failure window after an expired authentication lock.
     # 138 adds tenant/channel-bound Coexistence receipts without automatic replies.
-    assert report.revision_count == 138
+    # 139-140 bind receipt claims to worker capability and settle inbound quarantine.
+    # 141 adds the default-off automatic WhatsApp greeting; 142 the short phone
+    # intake's WhatsApp form and the repaired follow-up template validator.
+    # 143 restricts templates to eligible tenants and requires explicit digital submission.
+    assert report.revision_count == 143
 
 
 def test_lead_workflow_guard_is_present_in_the_final_configuration_validator() -> None:

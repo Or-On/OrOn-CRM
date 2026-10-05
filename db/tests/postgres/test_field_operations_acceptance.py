@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import base64
 import copy
+import hashlib
 import json
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -229,7 +230,7 @@ async def test_configured_field_operations_end_to_end(acceptance):
     assert protouch["name"] in approved_response("identity", "he", protouch["name"])
     assert not validate_output("אני מודל שפה גדול שאומן על ידי גוגל").allowed
 
-    # 2. Phone -> inquiry visible before any detail or photo.
+    # 2. Phone admission creates no inquiry/case before explicit web submission.
     context, turns, tools = await _call(connection, runtime, sessions, protouch, "+972502345671")
     await _as_web(connection, protouch)
     inbox = (
@@ -237,43 +238,88 @@ async def test_configured_field_operations_end_to_end(acceptance):
         .mappings()
         .all()
     )
-    assert len(inbox) == 1 and inbox[0]["source_channel"] == "voice"
+    assert inbox == []
 
-    # 3. Incremental capture, WhatsApp follow-up consent, caller hangs up.
+    # 3. Short call: the caller is identified and handed the WhatsApp form.
     await _sql(connection, "RESET ROLE")
     await _sql(connection, "SET LOCAL ROLE platform_voice")
     turns.accept()
+    assert tools.form_mode
+    assert tools.tool_names[:2] == ("capture_service_intake", "send_whatsapp_service_form")
+    saved = await tools.capture({"fields": {"customerName": "דנה"}, "confirmed": False})
+    assert saved["ok"] and saved["receipt"]["missingFields"] == ["faultDescription"]
+    incomplete = await tools.send_form({"customerAgreed": True})
+    assert not incomplete["ok"] and incomplete["missingFields"] == ["faultDescription"]
     saved = await tools.capture(
-        {
-            "fields": {
-                "customerName": "דנה",
-                "faultDescription": "המקרר לא מקרר",
-                "urgency": "high",
-            },
-            "confirmed": False,
-        }
+        {"fields": {"faultDescription": "המסך נדלק ואז כבה"}, "confirmed": False}
     )
-    assert saved["ok"] and "no incident has been opened" in saved["instruction"]
-    followup = await tools.request_photos(
-        {"customerAgreed": True, "message": "send to +972509999999"}
+    assert saved["ok"] and saved["receipt"]["missingFields"] == []
+    forbidden = await tools.capture(
+        {"fields": {"serviceAddress": "רחוב לדוגמה"}, "confirmed": True}
     )
-    assert followup["ok"] and followup["receipt"]["status"] == "deferred"
+    assert not forbidden["ok"]
+    # No approved template and no open WhatsApp window: nothing is promised,
+    # and staff follow-up is needed without more phone intake or delivery claims.
+    refused = await tools.send_form({"customerAgreed": True})
+    assert not refused["ok"] and "staff follow-up is needed" in refused["error"]
+    assert "Do not collect address" in refused["error"]
+    # The caller wrote to the business on WhatsApp within the last day.
+    await _sql(connection, "RESET ROLE")
+    channel = (
+        await _sql(
+            connection,
+            "INSERT INTO messaging.channels(tenant_id,kind,provider,provider_account_id,status) "
+            "VALUES(:t,'whatsapp','meta',:a,'active') RETURNING id",
+            t=protouch["tenant"],
+            a=f"acceptance-{uuid4()}",
+        )
+    ).scalar_one()
+    await _sql(
+        connection,
+        "INSERT INTO messaging.conversations(tenant_id,channel_id,contact_id,status,"
+        "customer_service_window_expires_at) VALUES(:t,:c,:p,'open',now()+interval '20 hours')",
+        t=protouch["tenant"],
+        c=channel,
+        p=protouch["contact"],
+    )
+    await _sql(connection, "SET LOCAL ROLE platform_voice")
+    sent = await tools.send_form({"customerAgreed": True})
+    assert sent["ok"] and sent["receipt"]["status"] == "queued"
+    assert "הועברה לתור" in sent["closing"] and "המסירה עדיין לא אושרה" in sent["closing"]
     await _sql(connection, "RESET ROLE")
     await _sql(connection, "SET LOCAL ROLE platform_voice")
     assert await runtime.finalize(context.session_id, context.tenant_id, status=SessionStatus.ENDED)
     await _sql(connection, "RESET ROLE")
-    ticket = (
+    assert (
+        await _sql(
+            connection,
+            "SELECT count(*) FROM support.tickets WHERE tenant_id=:t",
+            t=protouch["tenant"],
+        )
+    ).scalar_one() == 0
+    assert (
+        await _sql(
+            connection,
+            "SELECT count(*) FROM service.cases WHERE tenant_id=:t",
+            t=protouch["tenant"],
+        )
+    ).scalar_one() == 0
+    intake = (
         (
             await _sql(
                 connection,
-                "SELECT * FROM support.tickets WHERE attachment_key=:k",
-                k=f"voice-session:{context.session_id}",
+                "SELECT id,collected_fields,followup_status FROM service.intake_drafts "
+                "WHERE source_session_id=:s",
+                s=context.session_id,
             )
         )
         .mappings()
         .one()
     )
-    assert ticket["priority"] == "high" and ticket["next_action"] == "complete_intake"
+    assert intake["followup_status"] == "queued"
+    assert intake["collected_fields"]["customerName"] == "דנה"
+    assert intake["collected_fields"]["faultDescription"] == "המסך נדלק ואז כבה"
+    assert "serviceAddress" not in intake["collected_fields"]
     assert (
         await _sql(
             connection,
@@ -282,7 +328,71 @@ async def test_configured_field_operations_end_to_end(acceptance):
         )
     ).scalar_one() == 1
 
-    # 4. Emergency during a second call: persisted first, transfer fails, fallback recorded.
+    # The worker's database boundary issues the private capability and records
+    # admission only. Delivery is scripted; no provider is contacted in this test.
+    token_hash = hashlib.sha256(uuid4().bytes + uuid4().bytes).hexdigest()
+    await _sql(connection, "SET LOCAL ROLE platform_messaging")
+    assert (
+        await _sql(
+            connection,
+            "SELECT service.issue_digital_intake_form(:i,:h)",
+            i=intake["id"],
+            h=token_hash,
+        )
+    ).scalar_one() == protouch["tenant"]
+    await _sql(
+        connection, "SELECT service.record_intake_followup(:i,'admitted',NULL,NULL)", i=intake["id"]
+    )
+    await _as_web(connection, protouch)
+    form = (
+        await _sql(connection, "SELECT service.read_digital_intake_form(:h)", h=token_hash)
+    ).scalar_one()
+    assert form["customerName"] == "דנה" and form["faultDescription"] == "המסך נדלק ואז כבה"
+    assert form["submitted"] is False
+    with pytest.raises(Exception, match="complete and confirm"):
+        async with connection.begin_nested():
+            await _sql(
+                connection,
+                "SELECT service.submit_digital_intake_form(:h,'דנה','רחוב לדוגמה 12','המסך נדלק ואז כבה',false,'[]')",
+                h=token_hash,
+            )
+    assert (await _sql(connection, "SELECT count(*) FROM service.cases")).scalar_one() == 0
+    submitted = (
+        await _sql(
+            connection,
+            "SELECT service.submit_digital_intake_form(:h,'דנה','רחוב לדוגמה 12','המסך נדלק ואז כבה',true,'[]')",
+            h=token_hash,
+        )
+    ).scalar_one()
+    assert submitted["created"] is True
+    repeated = (
+        await _sql(
+            connection,
+            "SELECT service.submit_digital_intake_form(:h,'דנה','רחוב לדוגמה 12','המסך נדלק ואז כבה',true,'[]')",
+            h=token_hash,
+        )
+    ).scalar_one()
+    assert repeated == {"created": False, "reference": submitted["reference"]}
+    case = (
+        await _sql(
+            connection, "SELECT id FROM service.cases WHERE intake_draft_id=:i", i=intake["id"]
+        )
+    ).scalar_one()
+    assert (
+        await _sql(
+            connection, "SELECT count(*) FROM support.tickets WHERE service_case_id=:c", c=case
+        )
+    ).scalar_one() == 1
+    assert (
+        await _sql(
+            connection,
+            "SELECT count(*) FROM service.case_calls WHERE case_id=:c AND session_id=:s",
+            c=case,
+            s=context.session_id,
+        )
+    ).scalar_one() == 1
+
+    # 4. A second phone call cannot use emergency handling to bypass form submit.
     emergency_context, emergency_turns, emergency_tools = await _call(
         connection, runtime, sessions, protouch, "+972502345671"
     )
@@ -292,43 +402,21 @@ async def test_configured_field_operations_end_to_end(acceptance):
     async def speak(line: str) -> None:
         spoken.append(line)
 
-    import oron_agent.service_intake as intake_module
-
-    intake_module._TRANSFER_ANNOUNCEMENT_SECS = 0
-    # No on-call number is configured in the ProTouch file: nothing is dialled.
+    assert "escalate_emergency" not in emergency_tools.tool_names
     result = await emergency_tools.escalate({"reason": "הצפה בחדר הקירור"}, speak)
-    assert result["ok"] and result["receipt"]["transfer"] == "no_transfer_target"
+    assert not result["ok"] and "No case or escalation may be opened by phone" in result["error"]
     assert spoken == []
     await _sql(connection, "RESET ROLE")
-    urgent = (
-        (
-            await _sql(
-                connection,
-                "SELECT priority,emergency_source,next_action FROM support.tickets WHERE attachment_key=:k",
-                k=f"voice-session:{emergency_context.session_id}",
-            )
-        )
-        .mappings()
-        .one()
-    )
     assert (
-        urgent["priority"] == "urgent"
-        and urgent["emergency_source"] == "voice"
-        and urgent["next_action"] == "urgent_callback"
-    )
-
-    # 5. Manual red call by the owner on a case they created.
-    await _as_web(connection, protouch)
-    case = (
         await _sql(
             connection,
-            "INSERT INTO service.cases(tenant_id,reference,customer_contact_id,title,fault_description,created_by_user_id) "
-            "VALUES(:t,'FS-ACC-RED',:c,'Owner call','Compressor down',:u) RETURNING id",
-            t=protouch["tenant"],
-            c=protouch["contact"],
-            u=protouch["owner"],
+            "SELECT count(*) FROM support.tickets WHERE attachment_key=:k",
+            k=f"voice-session:{emergency_context.session_id}",
         )
-    ).scalar_one()
+    ).scalar_one() == 0
+
+    # 5. Manual red call by the owner on the customer's submitted case.
+    await _as_web(connection, protouch)
     red_ticket = (
         await _sql(connection, "SELECT id FROM support.tickets WHERE service_case_id=:c", c=case)
     ).scalar_one()
@@ -507,8 +595,8 @@ async def test_configured_field_operations_end_to_end(acceptance):
             "SELECT count(*) FROM support.tickets WHERE attachment_key=:k",
             k=f"voice-session:{second_context.session_id}",
         )
-    ).scalar_one() == 1
-    assert "escalate_emergency" in second_tools.tool_names
+    ).scalar_one() == 0
+    assert second_tools.form_mode and "escalate_emergency" not in second_tools.tool_names
 
     # 8. The unconfigured tenant keeps its behaviour: no early inquiry, no emergency tool.
     legacy_context, _legacy_turns, legacy_tools = await _call(

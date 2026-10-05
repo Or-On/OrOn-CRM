@@ -1,5 +1,9 @@
 import type postgres from "postgres";
 import type { IntakeRequiredField } from "./field-service-domain.js";
+import {
+  parseServiceFormFields,
+  type ServiceFormField,
+} from "./service-form.js";
 
 export const serviceIntakeFieldKeys = [
   "customerName",
@@ -46,6 +50,14 @@ export type WhatsAppFollowUpPolicy = {
   readonly trigger: "intake_saved" | "call_ended";
   readonly requestPhoto: boolean;
   readonly consent: "in_call_agreement" | "existing_only";
+  /**
+   * "form": the call captures name and fault, then requests a private web-form
+   * link. Only explicit submission of that web form can open the case.
+   * Absent or "summary" keeps the call-collected intake and its summary.
+   */
+  readonly mode?: "summary" | "form";
+  /** Legacy configuration compatibility; the public digital form has fixed fields. */
+  readonly formFields?: readonly ServiceFormField[];
   readonly templateName?: string;
   readonly templateLanguage?: string;
   readonly templateParameters?: readonly FollowUpTemplateParameter[];
@@ -263,6 +275,8 @@ function optionalPolicies(
         "trigger",
         "requestPhoto",
         "consent",
+        "mode",
+        "formFields",
         "templateName",
         "templateLanguage",
         "templateParameters",
@@ -271,6 +285,15 @@ function optionalPolicies(
     );
     if (value.trigger !== "intake_saved" && value.trigger !== "call_ended")
       throw new TypeError("Choose when the WhatsApp follow-up is sent");
+    if (
+      value.mode !== undefined &&
+      value.mode !== "summary" &&
+      value.mode !== "form"
+    )
+      throw new TypeError("Choose what the WhatsApp follow-up contains");
+    const formFields = parseServiceFormFields(value.formFields);
+    if (formFields !== undefined && value.mode !== "form")
+      throw new TypeError("Form fields apply only to the WhatsApp form");
     if (
       value.consent !== "in_call_agreement" &&
       value.consent !== "existing_only"
@@ -313,6 +336,10 @@ function optionalPolicies(
       trigger: value.trigger,
       requestPhoto: flag(value.requestPhoto, "Photo request"),
       consent: value.consent,
+      ...(value.mode === "summary" || value.mode === "form"
+        ? { mode: value.mode }
+        : {}),
+      ...(formFields === undefined ? {} : { formFields }),
       ...(typeof value.templateName === "string" &&
       typeof value.templateLanguage === "string"
         ? {

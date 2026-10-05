@@ -1,5 +1,5 @@
 {
-  "$comment": "ProTouch field-operations settings, applied ONLY through Business configuration (save draft -> submit -> platform administrator approval). This is tenant configuration data; no application code references this file or the tenant. The on-call transfer number is deliberately absent: an administrator enters emergency.transferTo in the editor. Merge `workflow` into the tenant's existing field_service workflow (keep its reviewed requiredReportFields/selfAssignmentEnabled if they differ).",
+  "$comment": "Reviewable ProTouch configuration. Publish through the normal tenant configuration approval path. Phone collects only name and fault; WhatsApp sends a private digital form link inside an open customer-service window. Customer enters name, location, free-text fault and photos, then explicitly submits to create a case. ProTouch does not use templates. If WhatsApp is unavailable, retain the draft without claiming delivery or opening a case.",
   "tenantSlugHint": "protouch",
   "features": [
     "contacts",
@@ -21,18 +21,23 @@
           "customerName",
           "customerPhone",
           "serviceLocation",
-          "faultDescription",
-          "urgency"
+          "faultDescription"
         ],
         "photoPolicy": "requested",
         "selfAssignmentEnabled": true,
-        "requiredReportFields": ["diagnosis", "workPerformed"],
-        "inquiry": { "openOnFirstContact": true },
+        "requiredReportFields": [
+          "diagnosis",
+          "workPerformed"
+        ],
+        "inquiry": {
+          "openOnFirstContact": false
+        },
         "whatsappFollowUp": {
           "enabled": true,
-          "trigger": "call_ended",
+          "trigger": "intake_saved",
           "requestPhoto": true,
-          "consent": "in_call_agreement"
+          "consent": "in_call_agreement",
+          "mode": "form"
         },
         "emergency": {
           "enabled": true,
@@ -68,9 +73,19 @@
           ]
         },
         "attachmentCategories": [
-          { "key": "rcg", "label": "RCG", "accept": ["pdf", "image"] }
+          {
+            "key": "rcg",
+            "label": "RCG",
+            "accept": [
+              "pdf",
+              "image"
+            ]
+          }
         ],
-        "evidence": { "beforePhotoRequired": true, "afterPhotoRequired": true }
+        "evidence": {
+          "beforePhotoRequired": true,
+          "afterPhotoRequired": true
+        }
       },
       "experience": "service_manager"
     }

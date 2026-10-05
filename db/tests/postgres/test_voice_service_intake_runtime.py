@@ -879,7 +879,10 @@ async def test_form_runtime_and_agent_refuse_queue_without_both_facts_or_open_wi
 
 
 @pytest.mark.parametrize("service_runtime", [{"enabled": True}], indirect=True)
-async def test_form_link_queue_uses_real_durable_job_but_does_not_open_case(service_runtime):
+@pytest.mark.parametrize("terminal_status", ["succeeded", "dead", "cancelled"])
+async def test_form_link_queue_uses_real_durable_job_but_does_not_open_case(
+    service_runtime, terminal_status
+):
     runtime, context, connection, _ = service_runtime
     await connection.execute(text("RESET ROLE"))
     await execute(
@@ -919,6 +922,18 @@ async def test_form_link_queue_uses_real_durable_job_but_does_not_open_case(serv
         )
     ).scalar_one()
     assert job == "field_service.intake_followup"
+    await execute(
+        connection,
+        "UPDATE ops.jobs SET status=:status WHERE tenant_id=:tenant AND id=:job",
+        status=terminal_status,
+        tenant=context.tenant_id,
+        job=UUID(queued["receipt"]["jobId"]),
+    )
+    await connection.execute(text("SET LOCAL ROLE platform_voice"))
+    stale = await runtime.request_service_followup(context, customer_agreed=True)
+    assert stale["status"] == "unavailable" and stale["reason"] == "followup_job_not_pending"
+    assert (await tools.send_form({"customerAgreed": True}))["ok"] is False
+    await connection.execute(text("RESET ROLE"))
     assert (
         await execute(
             connection,

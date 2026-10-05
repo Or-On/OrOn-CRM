@@ -1,5 +1,5 @@
 {
-  "alembic_head": "af54b6c13e92",
+  "alembic_head": "e9c5b8d2a401",
   "expected_functions": [
     "agents.activate_reviewed_memory",
     "agents.alert_exhausted_memory_summary",
@@ -33,6 +33,7 @@
     "messaging.adjust_broadcast_counts",
     "messaging.advance_audio_transcription",
     "messaging.assert_audio_work_claim",
+    "messaging.auto_greeting_for_inbound",
     "messaging.begin_audio_transcription",
     "messaging.current_tenant_message_media",
     "messaging.protect_audio_work_identity",
@@ -124,6 +125,7 @@
     "platform.finish_voice_memory",
     "platform.guard_tenant_slug_uniqueness",
     "platform.guard_voice_sms_unlock",
+    "platform.guard_whatsapp_template_tenant",
     "platform.initialize_tenant_configuration",
     "platform.initialize_voice_identity_verification",
     "platform.lead_bind",
@@ -217,6 +219,7 @@
     "platform.voice_sms_delivery",
     "platform.voice_sms_unavailable",
     "platform.voice_start_sms",
+    "platform.whatsapp_templates_enabled",
     "platform.write_voice_session_outcome",
     "service.acknowledge_visit_preparation",
     "service.apply_case_assignment",
@@ -248,21 +251,25 @@
     "service.enqueue_whatsapp_case_summary",
     "service.escalate_voice_emergency",
     "service.field_service_enabled",
+    "service.guard_digital_intake_case",
     "service.intake_followup_plan",
     "service.intake_has_photo",
     "service.intake_missing_fields",
+    "service.issue_digital_intake_form",
     "service.link_case_support_ticket",
     "service.link_case_ticket_intake",
     "service.list_assignment_queue",
     "service.lock_current_session_technician",
     "service.lock_current_technician_session_context",
     "service.ocr_origin_actor_authorized",
+    "service.open_form_intake_case",
     "service.open_voice_inquiry",
     "service.pin_intake_workflow",
     "service.prepare_intake_followup_recipient",
     "service.prevent_appointment_conflict",
     "service.prevent_finalized_report_mutation",
     "service.prevent_signed_visit_mutation",
+    "service.read_digital_intake_form",
     "service.record_intake_followup",
     "service.record_visit_event",
     "service.record_voice_escalation",
@@ -272,6 +279,7 @@
     "service.request_voice_intake_photos",
     "service.resolve_followup_triage",
     "service.settle_voice_inquiry",
+    "service.submit_digital_intake_form",
     "service.tenant_is_hebrew",
     "service.tenant_workflow_policy",
     "service.valid_evidence_photo_exists",
@@ -489,7 +497,8 @@
       "notifications",
       "outbound_requests",
       "quick_replies",
-      "audio_transcription_work"
+      "audio_transcription_work",
+      "whatsapp_auto_greetings"
     ],
     "objects": [
       "object_metadata"
@@ -531,7 +540,8 @@
       "whatsapp_opening_menu_configuration",
       "whatsapp_opening_menu_state",
       "whatsapp_opening_menu_operations",
-      "whatsapp_opening_menu_business_claims"
+      "whatsapp_opening_menu_business_claims",
+      "whatsapp_template_policy"
     ],
     "public": [
       "api_keys",
@@ -571,7 +581,8 @@
       "tenant_configuration",
       "visit_preparations",
       "visit_time_corrections",
-      "visits"
+      "visits",
+      "digital_intake_forms"
     ],
     "support": [
       "assurance_policies",
@@ -755,6 +766,9 @@
     "platform.whatsapp_opening_menu_configuration",
     "platform.whatsapp_opening_menu_state",
     "platform.whatsapp_opening_menu_operations",
-    "platform.whatsapp_opening_menu_business_claims"
+    "platform.whatsapp_opening_menu_business_claims",
+    "messaging.whatsapp_auto_greetings",
+    "platform.whatsapp_template_policy",
+    "service.digital_intake_forms"
   ]
 }
