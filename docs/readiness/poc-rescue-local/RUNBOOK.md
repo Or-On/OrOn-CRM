@@ -358,3 +358,13 @@ never restore the old unsafe rule. The narrowly allowlisted recovery gate can
 operate with an unhealthy app, but still requires exact source, queryable DB,
 ownership, provider idle and full routing CAS. See
 [the scoped recovery plan](PROTOUCH-AUTHENTICATED-INBOUND-PLAN.md).
+
+The current verified voice release is `bdaa5a3244c68cc6ba1d043807d4220bb62a12c1`
+on schema `af54b6c13e92`. Its real provider RTC lifecycle proof processed
+`roomEndReason` on attempt 1 without placing a phone call. Older `0f003ccd`
+retains the reproduced strict-parser failure and is not a verified substitute
+for this repair. The original exhausted event remains preserved, not replayed.
+For a future approved lifecycle probe, choose and review a new owned proof ID;
+never rerun the existing one-shot helper ID after an unknown result. Inspect
+its saved receipt and exact owned room first. See
+[the proof and readback receipts](PROTOUCH-DIGEST-PROOF.md).

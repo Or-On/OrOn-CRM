@@ -123,17 +123,57 @@ Artifacts and ringing are not evidence of a completed human conversation.
 The exact inbound number route and rule remained unchanged, with zero active
 application calls and zero provider rooms in the readback.
 
-A separate issue remains under diagnosis: room-finished event
+A separate durable parsing issue was reproduced: room-finished event
 `ceccdd53-51ec-4809-ad61-bf2d7b823a7e` / `EV_4hczEHMmjVZF` exhausted eight
 attempts and was quarantined as `dispatcher_attempts_exhausted`. Bounded
 dispatcher logs contain only a room-already-gone 404 warning, and PostgreSQL
 logs contain no error; the inner handler exception was not logged. The original
-event is preserved and was not manually replayed or settled. It is not treated
-as a benign duplicate without further reproduction.
+event is preserved and was not manually replayed or settled.
+
+A read-only parse of that exact retained payload inside the deployed `0f003ccd`
+dispatcher failed with `ParseError` on the provider's top-level `roomEndReason`
+field. The same payload parsed with `ignore_unknown_fields=True`. This invoked
+neither the dispatcher handler nor any provider API. The verified signature
+receiver already used permissive parsing; durable replay did not. Candidate
+`bdaa5a3244c68cc6ba1d043807d4220bb62a12c1` aligns durable replay with that
+receiver and has a real PostgreSQL compiled-image regression proof. This
+parser defect is separate from the unavailable destination on the outbound call.
 
 Receipts: `live-voice-postcutover-{provider,result,errors,insights}.json`,
 `protouch-room-finished-diagnostics.json`, and
-`protouch-finalization-pg-errors.json` under the same evidence directory.
+`protouch-finalization-pg-errors.json`, and
+`protouch-room-finished-parse-only.json` under the same evidence directory.
+
+## Real provider verification of the parser repair
+
+After the exact `bdaa5a3244c68cc6ba1d043807d4220bb62a12c1` release was deployed
+on schema `af54b6c13e92`, one approved non-SIP RTC lifecycle ran at
+00:55:01–00:55:06 UTC. It created and deleted only owned room
+`RM_4bZEDyLCkPc7`, with one standard participant, no media publishing or
+subscription, no agent, and no PSTN request. The immutable proof ID is
+`poc-parser-proof-f88c161e26ae46e7a44ced09c86fb33a`.
+
+Actual signed `room_started` (`EV_iPU3uPQUqSoT`), participant join/leave, and
+`room_finished` (`EV_aJn9XfbENxxE`) all processed on attempt 1 with no error.
+The new room-finished payload contains the real provider `roomEndReason` field,
+so this exercises the original parsing failure rather than only a synthetic
+fixture. Matching application sessions and active calls were zero, CRM contact
+count was unchanged, and the actual LiveKit room list was empty after cleanup.
+The original quarantined event's ID, status, attempts, error and timestamps were
+read back unchanged; it was neither replayed nor manually settled.
+
+A separate GET-only readback at 00:56:01 UTC verified the complete carrier
+callback routing, exact DID rule, dedicated authentication policy, effective
+voice binding and outbound carrier invariants. Passive inbound inspection at
+00:56:21 UTC found no incoming sessions since cutover. This proves the live
+webhook repair; human incoming PSTN acceptance remains pending.
+
+Receipts under `.artifacts/poc-rescue-local/`:
+
+- `poc-parser-proof-f88c161e26ae46e7a44ced09c86fb33a.json`
+- `parser-provider-invariants-bdaa5a3244c6.json`
+- `live-voice-postcutover-result-bdaa5a3244c6.json`
+- `protouch-original-quarantine-unchanged-bdaa5a3244c6.json`
 
 ## Recovery state
 
@@ -145,6 +185,8 @@ The application now has a capability floor: restore external number routing,
 then the DB marker/new-rule containment, before reverting to a release without
 the callback and admission guard. Never recreate deleted unsafe rule
 `SDR_AcS72sUqk2ZM`.
+The full backup immediately before the parser repair is
+`/opt/oron-dev/backups/dev_oron_platform-20261005T004022Z.backup.tar.gz`.
 
 Evidence under `.artifacts/poc-rescue-local/`:
 

@@ -159,3 +159,11 @@ roll back to `60f26bf`, `0331908b`, or another version lacking this endpoint and
 binding guard until external number routing has been restored. Initial release
 rollback before provider cutover is a different, safe phase. Restoring the old
 carrier destination restores configuration, not proven inbound availability.
+
+Current readback on deployed `bdaa5a3244c68cc6ba1d043807d4220bb62a12c1` /
+`af54b6c13e92` preserves the activated exact carrier callback, DID binding,
+dedicated digest policy and outbound configuration. A separate real non-SIP
+RTC lifecycle verified the durable `roomEndReason` parser repair without a
+phone call. This does not replace incoming PSTN acceptance; the latest passive
+inspection at 00:56:21 UTC on 2026-10-05 still found no incoming session since
+cutover. See [the actual proof history](PROTOUCH-DIGEST-PROOF.md).

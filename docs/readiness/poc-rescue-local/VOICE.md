@@ -401,5 +401,19 @@ reports failed/duration0, and the application ended answered=false with
 artifacts. No human-conversation success or detachment-caused failure is claimed.
 The inbound carrier route/rule remained correct and active sessions/provider
 rooms were zero. A separate room-finished receipt exhausted eight attempts
-despite the terminal session and remains preserved for diagnosis; it has not
-been manually settled. Incoming PSTN acceptance remains pending.
+despite the terminal session. Parsing that exact retained payload in the
+deployed dispatcher reproduced an unknown top-level `roomEndReason` field:
+strict durable protobuf parsing failed, while the signed receiver's permissive
+policy succeeded. Release `bdaa5a3244c68cc6ba1d043807d4220bb62a12c1` repairs
+that mismatch and is deployed on schema `af54b6c13e92`.
+
+At 00:55 UTC, one authorized standard RTC lifecycle with no media, SIP, agent or
+PSTN request produced actual signed room-start, participant and room-finished
+events, all processed on attempt 1. The room-finished event includes the
+provider's `roomEndReason` field. Its owned room was deleted, with zero remaining
+provider rooms/application calls and no CRM contact change. The original
+quarantine's metadata was independently read back unchanged. Full carrier,
+authentication, DID and outbound invariants remained intact at 00:56 UTC.
+Proof: `poc-parser-proof-f88c161e26ae46e7a44ced09c86fb33a.json` and
+[the detailed receipt history](PROTOUCH-DIGEST-PROOF.md). Incoming PSTN
+acceptance remains pending; no new phone call was made for this repair proof.
