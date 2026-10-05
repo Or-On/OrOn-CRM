@@ -9,7 +9,30 @@ The user subsequently declined a new paid Coexistence subscription.
 ## Deployed release
 
 The actual host `oron-dev` now runs source
-`60f26bfe1775997da1fb5159ec9e09a08246068b`, schema `9e43a5b02d81`.
+`0f003ccd0049e6c2b0bc8f19e17a80d7f339e198`, schema `af54b6c13e92`.
+It includes the authenticated inbound callback, authoritative DID/rule
+admission and per-call transfer capability first deployed in79a4a84, described in
+[TWILIO-INBOUND-SIGNED-ROUTING.md](TWILIO-INBOUND-SIGNED-ROUTING.md).
+The additive schema revision accepts exactly three new safe quarantine reasons,
+preserving prior claim, lease and privilege boundaries. The earlier79 deployment
+exposed this missing database vocabulary during the live proof described below.
+All five published image digests matched the tested images and exact revision.
+The archive SHA-256 is
+`5b6eab32f9df9f7543a1060959ad4013d050aadcb4fa585a8ce83283176cf95c`.
+Deployment exited zero, all seven services were healthy, and independent checks
+passed actual image/schema, private configuration and cross-service object I/O.
+The deployment log is
+`/opt/oron-dev/protouch-inbound-settlement-0f003ccd0049e6c2b0bc8f19e17a80d7f339e198.V8X3BJ/deployment.log`.
+The exact guarded runtime resolved the expected published ProTouch agent/flow,
+had zero active sessions, and loaded the protected callback configuration.
+At deployment completion the DID still had its simulator marker, LiveKit had
+the single owned authenticated rule `SDR_qwuvuQ9waXV7`, and the carrier retained
+its original route.
+Provider authentication proof and actual inbound acceptance remain separate
+from this successful deployment.
+
+The preceding outbound voice repair deployed source
+`60f26bfe1775997da1fb5159ec9e09a08246068b` with schema `9e43a5b02d81`.
 All five application images were published from the previously tested image
 IDs, checked by immutable registry digest and OCI revision, then deployed using
 the exact reviewed deployer. The archive SHA-256 is
@@ -38,6 +61,8 @@ An additional full backup before the voice repair is retained at
 After the successful60f call and inbound containment, another full backup was
 created at `/opt/oron-dev/backups/dev_oron_platform-20261004T232100Z.backup.tar.gz`
 before preparing the authenticated inbound alternative.
+Another full backup before the durable-settlement repair is retained at
+`/opt/oron-dev/backups/dev_oron_platform-20261005T000233Z.backup.tar.gz`.
 The original private configuration is retained under root-only
 `/opt/oron-dev/protouch-go-live-private-r9h5kxx6`; its deployment log records the
 exact operation. Previous releases/images remain available. Schema rollback
@@ -115,9 +140,9 @@ This verifies one ProTouch call, not multi-tenant concurrency or load acceptance
 Application telephony cost remains unknown/unpriced; the separate actual carrier
 receipt reports USD0.06060, without treating that as a complete application bill.
 
-Inbound remains separately pending. The existing DID row has the correct
+Before inbound activation, the DID row had the correct
 ProTouch tenant and published voice flow, but a simulator dispatch marker.
-Twilio's current origination points to the owned `oron-dev` VM, which has no
+Twilio's original origination points to the owned `oron-dev` VM, which has no
 SIP5060/5061 listener. After the user logged into LiveKit, its Console verified
 project `p_12ecwwpmj7c` and exact URI `sip:12ecwwpmj7c.sip.livekit.cloud`.
 The project webhook was configured for `https://dev.or-on.io/livekit/webhook`,
@@ -139,11 +164,63 @@ The Console shows the existing Build plan and the configured addresses, but no
 project-enablement control. Inbound activation requires verified enforcement
 or a separately reviewed authenticated alternative.
 
+The authenticated alternative was deployed in79a4a84 and prepared only on the
+retained trunk with dedicated digest credentials and rule `SDR_qwuvuQ9waXV7`.
+The DID and carrier route remained unchanged. Its one bounded provider suite
+proved rejection without credentials (407) and with a wrong password (401).
+The correct digest reached the exact signed provider trunk/rule, then the room
+was deleted and SIP returned486. The new guard's quarantine reason was missing
+from the database settlement allowlist; after a lease retry, the event became
+processed instead of quarantined. No application session/contact was created.
+The original failed proof is preserved in
+[PROTOUCH-DIGEST-PROOF.md](PROTOUCH-DIGEST-PROOF.md). The additive repair is now
+deployed in0f003cc/af54. Six pre-repair PostgreSQL failures became14 passing
+regressions; the exact built migrator and dispatcher also proved all three
+quarantine reasons on attempt one, including replay preservation and immediate
+processing of the following room event.
+
+The repaired live proof then passed on0f003cc/af54 at00:21:56–00:22:00UTC.
+Probe `poc-digest-f5da706e5f7b44308e846aba13a2b637` used exactly two INVITEs,
+407 followed by486 after deliberate room deletion. Its signed joined event
+`EV_ssdB8wwgcwsb` settled quarantined on attempt1 with
+`inbound_rule_mismatch`; the following event confirmed ROOM_DELETED, with
+zero application sessions, caller contacts or remaining provider rooms.
+Historical no-auth/wrong-password rejections were reused only for the freshly
+verified unchanged provider policy; a full suite on0f is not claimed.
+
+Fresh public callback checks rejected all four invalid cases without XML or
+secrets. After an audited CAS bound the exact ProTouch DID to
+`SDR_qwuvuQ9waXV7`, a validly signed request naming a finished outbound call
+was rejected after actual provider lookup. The complete carrier number route
+was then switched: phone `PN0a62bfdaaf8f2a393860ab1c6bc3f466` now has empty
+TrunkSid and POST VoiceUrl `https://dev.or-on.io/twilio/voice/inbound`.
+Full readback verified all other saved route fields and both outbound paths
+unchanged. Incoming routing is configured; a human inbound conversation is
+still a separate acceptance gate. The user was asked to call from the approved
+recipient to the ProTouch number after all active calls ended.
+
+One post-cutover outbound regression was submitted through normal CRM auth:
+session `57d373de-1375-5ed8-917b-c975ab50f6d9`, exact published ProTouch agent,
+on0f003cc/af54. It ended at00:28:08UTC with answered=false. Exact Twilio call
+`CA6cdfca66ac20f2d7fcca4f479353bacc` used the correct sender/recipient and
+original ProTouch Elastic trunk, but failed with zero connected seconds.
+The signed SIP participant-left event reports ringing/USER_UNAVAILABLE;
+this supports an unanswered destination, not a demonstrated caller-ID or
+detachment failure. It is not a passed post-cutover human conversation.
+Protected CRM detail, recording and transcript
+returned200, the other tenant received404, and anonymous access401. The
+70.6997-second WAV contains audio and the transcript one Hebrew line; those
+artifacts do not establish a human conversation. No blind redial occurred.
+The room_finished receipt later quarantined with
+`dispatcher_attempts_exhausted`; its cause is under investigation, separately
+from the already ended session and retained protected artifacts.
+
 ## WhatsApp status
 
-Fresh Graph API and authenticated WhatsApp Manager agree that ProTouch phone
+Fresh Graph API at00:23:55UTC and authenticated WhatsApp Manager agree that ProTouch phone
 `1284902841381185` remains `PENDING`; it is not connected to Cloud API.
 Or-On's separate phone remains `CONNECTED`/`CLOUD_API`.
+No durable ProTouch receipt exists, including since the user's earlier test.
 The ProTouch Business phone app is preserved. No ordinary `/register` retry,
 phone deletion, new provider account, subscription or new terms acceptance was
 performed. The existing Twilio account has only its shared WhatsApp sandbox.
@@ -161,3 +238,8 @@ Ignored local receipts are under `.artifacts/poc-rescue-local/`:
 `protouch-outbound-receipt.json`, `voice-provider-before.json`,
 `voice-provider-after.json`, `voice-outbound-routes.json`,
 `live-voice-profile-preflight.txt`, and `live-voice-app-preflight.json`.
+Current release/deployment and activation receipts include
+`protouch-inbound-settlement-live-deploy.json`,
+`protouch-digest-operator-receipt.json`,
+`protouch-digest-cutover-proof-gates.json`, and
+`whatsapp-final-readonly-20261005.json`.
