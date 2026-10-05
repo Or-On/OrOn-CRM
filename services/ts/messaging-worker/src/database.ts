@@ -13,6 +13,8 @@ import type { ModelAccountingSpool } from "./model-accounting-spool.js";
 import {
   AiPrincipalDeniedError,
   parsePrincipalAdmission,
+  retainPrincipalAdmission,
+  type PrincipalAdmission,
 } from "./ai-principal.js";
 import type { ChannelCredentialEnvelope } from "./channel-credentials.js";
 import { authorizeMachineTool } from "./machine-tools.js";
@@ -4894,7 +4896,26 @@ async function createAiHandoff(
               ${transaction.json({ taskId: ticket[0].id, noteId: authoredNote[0]?.id, sourceJobId: jobId, sourceClaimToken: options.sourceClaimToken })})
     `;
   }
+  // Business tools require the current AI claim. Complete the ticket and
+  // retain the one handoff acknowledgement before relinquishing that claim.
+  // Doing this after the ownership transition made every principal-backed
+  // escalation roll back with an authorization failure and no customer reply.
+  const issueTicketId = work.opensTickets
+    ? await ticketForAiAction(
+        transaction,
+        work,
+        jobId,
+        `AI handoff · ${safeReason}`,
+      )
+    : null;
   if (!preserveAiOwnership) {
+    const authority = await transaction<{ authorized: boolean }[]>`
+      SELECT platform.capture_principal_handoff_authority(
+        ${jobId}::uuid,
+        (SELECT locked_by FROM ops.jobs WHERE id=${jobId}::uuid),
+        ${options.sourceClaimToken}::uuid,${receipt[0].id}::uuid) AS authorized
+    `;
+    if (authority[0]?.authorized !== true) throw new AiPrincipalDeniedError();
     await transaction`
       UPDATE messaging.conversations
       SET ownership_mode='human', ai_agent_profile_version_id=NULL,
@@ -4912,17 +4933,11 @@ async function createAiHandoff(
   `;
   // Only a ticketing agent turns its escalation into a support issue. The
   // handoff, the task and the human ownership above happen for every agent.
-  if (!work.opensTickets) return receipt[0].id;
+  if (issueTicketId === null) return receipt[0].id;
   // The escalation now also lives on the customer's ISSUE, beside the internal
   // work item rather than instead of it: `crm.tasks` keeps carrying the
   // operator's to-do and its existing notifications, deep links and audit, and
   // the ticket carries the customer-facing history the next channel reads.
-  const issueTicketId = await ticketForAiAction(
-    transaction,
-    work,
-    jobId,
-    `AI handoff · ${safeReason}`,
-  );
   await recordTicketEvent(transaction, work.authorizedUserId, {
     ticketId: issueTicketId,
     kind: "escalation",
@@ -4954,6 +4969,7 @@ async function processWhatsAppAiReply(
   openingMenuRoute?: OpeningMenuRoute,
 ): Promise<void> {
   let admittedWork: AiWork | undefined;
+  let executionPrincipal: PrincipalAdmission | undefined;
   const recordPrincipalDenial = () =>
     withOwnedJobTransaction(sql, workerId, job, async (tx) => {
       await tx`SELECT platform.admit_messaging_execution_principal(${job.id}::uuid,${workerId},${job.claim_token}::uuid)`;
@@ -4992,9 +5008,11 @@ async function processWhatsAppAiReply(
       );
       // The transaction above committed content-free invalid-principal evidence.
       // Throwing inside it would erase the operator alert.
-      const admission = parsePrincipalAdmission(projection);
-      if (admission.mode === "denied" || admission.mode === "stale")
-        throw new AiPrincipalDeniedError();
+      const admission = retainPrincipalAdmission(
+        executionPrincipal,
+        parsePrincipalAdmission(projection),
+      );
+      executionPrincipal ??= admission;
       return admission;
     };
     await requireExecutionPrincipal();
@@ -5249,8 +5267,14 @@ async function processWhatsAppAiReply(
                     },
                   );
                   const action = leadActionName(proposed);
-                  if (action === undefined)
-                    return deferUnconfirmedContextHandoff(proposed);
+                  if (action === undefined) {
+                    const previous = work.messages.at(-2);
+                    return deferUnconfirmedContextHandoff(
+                      proposed,
+                      triggerText,
+                      previous?.role === "assistant" ? previous.text : "",
+                    );
+                  }
                   if (last)
                     throw new WhatsAppAiProviderError(
                       "ai_invalid_output",
@@ -5308,14 +5332,10 @@ async function processWhatsAppAiReply(
       // this check and those writes.
       const principalRows = await transaction<{ admission: unknown }[]>`
         SELECT platform.admit_messaging_execution_principal(${job.id}::uuid,${workerId},${job.claim_token}::uuid) AS admission`;
-      const principalAdmission = parsePrincipalAdmission(
-        principalRows[0]?.admission ?? null,
+      retainPrincipalAdmission(
+        executionPrincipal,
+        parsePrincipalAdmission(principalRows[0]?.admission ?? null),
       );
-      if (
-        principalAdmission.mode === "denied" ||
-        principalAdmission.mode === "stale"
-      )
-        throw new AiPrincipalDeniedError();
       const firstTool = work.contract.capabilities[0];
       if (firstTool !== undefined)
         await authorizeMachineTool(transaction, job, workerId, firstTool, work);
@@ -5600,16 +5620,18 @@ async function processWhatsAppAiReply(
             job,
             admittedWork,
             automation,
+            { principalAdmission: executionPrincipal },
           )
         )
           return;
       } catch (recoveryError) {
         if (
-          !(recoveryError instanceof TypeError) ||
-          ![
-            "AI conversation ownership changed",
-            "AI inbound trigger superseded",
-          ].includes(recoveryError.message)
+          !(recoveryError instanceof AiPrincipalDeniedError) &&
+          (!(recoveryError instanceof TypeError) ||
+            ![
+              "AI conversation ownership changed",
+              "AI inbound trigger superseded",
+            ].includes(recoveryError.message))
         )
           throw recoveryError;
         // A manual takeover is a terminal turn cancellation, not a failed
@@ -5770,6 +5792,7 @@ async function queueModelFailureRecovery(
   options: {
     readonly transaction?: postgres.TransactionSql;
     readonly finish?: boolean;
+    readonly principalAdmission?: PrincipalAdmission | undefined;
   } = {},
 ): Promise<boolean> {
   const perform = async (
@@ -5778,6 +5801,15 @@ async function queueModelFailureRecovery(
     if (!(await remediationEnabled(transaction, "no_silence"))) return false;
     await requireTenantFeatures(transaction, ["whatsapp"]);
     await requireAiTurnOwnership(transaction, work);
+    if (options.principalAdmission !== undefined) {
+      const rows = await transaction<{ admission: unknown }[]>`
+        SELECT platform.admit_messaging_execution_principal(
+          ${job.id}::uuid,${workerId},${job.claim_token}::uuid) AS admission`;
+      retainPrincipalAdmission(
+        options.principalAdmission,
+        parsePrincipalAdmission(rows[0]?.admission ?? null),
+      );
+    }
     const existing = await transaction<{ task_id: string }[]>`
       SELECT metadata->>'taskId' AS task_id FROM audit.records
       WHERE action='conversation.ai_model_failure' AND target_type='job'
@@ -5853,6 +5885,13 @@ async function queueModelFailureRecovery(
         })}::jsonb
       WHERE id=${outbound.messageId}::uuid
     `;
+    if (job.job_type === "whatsapp.ai.reply") {
+      const authority = await transaction<{ authorized: boolean }[]>`
+        SELECT platform.capture_outbound_execution_authority(
+          ${job.id}::uuid,${workerId},${job.claim_token}::uuid,
+          ${outbound.requestId}::uuid) AS authorized`;
+      if (authority[0]?.authorized !== true) throw new AiPrincipalDeniedError();
+    }
     if (options.finish !== false) await finishJob(transaction, job, workerId);
     return true;
   };
@@ -7121,6 +7160,7 @@ export function createMessagingStore(
  'platform.settle_memory_summary_attempt(uuid,text,uuid,uuid,boolean,integer,integer)',
             'platform.persist_memory_summary_job(uuid,text,uuid,text)',
             'platform.admit_messaging_execution_principal(uuid,text,uuid)',
+            'platform.capture_principal_handoff_authority(uuid,text,uuid,uuid)',
             'platform.messaging_media_channel_credential(uuid,text,uuid,bigint)',
             'platform.messaging_typing_channel_credential(uuid,bigint)',
             'platform.prepare_opening_menu(uuid,text,uuid)',

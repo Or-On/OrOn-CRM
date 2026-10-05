@@ -6,6 +6,23 @@ import {
 } from "./whatsapp-diagnostics.js";
 
 describe("safe WhatsApp diagnostic projection", () => {
+  it.each([
+    "ai_execution_principal_changed",
+    "machine_tool_denied",
+    "machine_tool_stale_claim",
+    "machine_tool_source_superseded",
+    "machine_tool_job_binding_changed",
+    "machine_tool_claim_binding_changed",
+    "machine_callback_capability_not_admitted",
+  ])("retains the worker's safe authorization reason: %s", (code) => {
+    expect(messageDeliveryFailure(code, null)).toEqual({
+      code,
+      diagnostic: null,
+    });
+    expect(messageDeliveryFailure(`${code}: private detail`, null)?.code).toBe(
+      "outbound_processing_failed",
+    );
+  });
   it("drops arbitrary stored fields and rejects unsafe codes", () => {
     const diagnostic = {
       version: 1,

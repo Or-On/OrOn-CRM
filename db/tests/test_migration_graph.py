@@ -59,9 +59,11 @@ def test_complete_oron_lineage_is_preserved() -> None:
     assert revisions["315710614ae5"].down_revision == "e24340ce81c8"
     # Preserve the reviewed baseline's entire ancestry and original merge,
     # followed only by the explicit serial remediation revisions below.
-    assert len(revisions) == 145
+    assert len(revisions) == 147
     assert revisions["f0a61d9e82c4"].down_revision == "e9c5b8d2a401"
     assert revisions["b162a7e4d903"].down_revision == "f0a61d9e82c4"
+    assert revisions["c8e71b4a209d"].down_revision == "b162a7e4d903"
+    assert revisions["d7b80a4c913e"].down_revision == "c8e71b4a209d"
     remediation_chain = (
         "9b2e7a4c6d18",
         "a14d0c8e2b77",

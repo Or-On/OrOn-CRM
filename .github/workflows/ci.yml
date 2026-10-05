@@ -153,6 +153,10 @@ jobs:
       # worker's complete dependency closure so this diagnostic is valid from
       # a clean checkout instead of relying on stale local build artifacts.
       - run: pnpm --filter @or-on/messaging-worker... build
+      - name: Mandatory WhatsApp principal and opening-menu acceptance (no providers, no skips)
+        env:
+          MIGRATION_DATABASE_URL: ${{ env.DATABASE_URL }}
+        run: uv run --no-sync python scripts/check_whatsapp_runtime.py
       - name: Field-service web-role acceptance (no providers)
         env:
           CRM_TEST_DATABASE_URL: postgresql://platform_migrator:ci-only-password@127.0.0.1:55480/or_on_platform_ci

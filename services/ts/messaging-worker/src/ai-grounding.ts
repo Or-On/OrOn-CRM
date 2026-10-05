@@ -670,14 +670,67 @@ export function enforceStandaloneCallbackConsent(
     : decision;
 }
 
-/** Missing knowledge is an offer of human help, not permission to end AI handling.
+function confirmsHumanHandoff(
+  customerText: string,
+  previousAssistantText: string,
+): boolean {
+  const text = customerText.normalize("NFKC").trim().toLowerCase();
+  const target = String.raw`(?:human(?: representative| agent)?|person|representative|operator|live agent|נציג(?:ה)?(?: אנושי(?:ת)?)?|בן אדם|אדם אמיתי)`;
+  // A model's classification is not consent. Negated, quoted and reported
+  // requests cannot inherit an earlier human request from the transcript.
+  if (
+    /["“”„״]/u.test(text) ||
+    /^(?:if\b|what if\b|how (?:do|can)\b|אם\s|איך\s|(?:he|she|the agent) said\b|הנציג(?:ה)? אמר(?:ה)?\s)/u.test(
+      text,
+    ) ||
+    new RegExp(
+      String.raw`(?:\b(?:do not|don't|dont)\s+(?:want|need|connect|transfer|escalate|speak|talk)\b[^.!?,\n]{0,60}|\b(?:not|never|without|no)\s+(?:(?:a|any|to)\s+)?|(?:^|\s)(?:לא|אל)\s+(?:רוצה|צריך|צריכה|מבקש|מבקשת|מעוניין|מעוניינת|תעביר|תעבירי|תעבירו|להעביר)[^.!?,\n]{0,60}|(?:^|\s)(?:בלי|לא)\s+)${target}`,
+      "iu",
+    ).test(text)
+  )
+    return false;
+  if (
+    new RegExp(
+      String.raw`^(?:${target})(?:\s+(?:please|בבקשה))?[.!?\s]*$`,
+      "iu",
+    ).test(text)
+  )
+    return true;
+  if (
+    new RegExp(
+      String.raw`\b(?:want|need|prefer|like|connect|transfer|speak|talk)\b[^.!?\n]{0,60}\b${target}\b`,
+      "iu",
+    ).test(text) ||
+    new RegExp(
+      String.raw`(?:^|\s)(?:רוצה|צריך|צריכה|מבקש|מבקשת|מעוניין|מעוניינת|מעדיף|מעדיפה|אשמח|תעביר|תעבירי|תעבירו|אפשר לדבר|אפשר לשוחח)[^.!?\n]{0,60}${target}(?:\s|[.!?,]|$)`,
+      "iu",
+    ).test(text)
+  )
+    return true;
+  // Accept a short answer only to the immediately preceding delivered,
+  // server-owned handoff offer, never to an arbitrary old assistant message.
+  return (
+    /^(?:yes|yes please|yes thanks|כן|כן בבקשה|כן תודה|בטח)[.!?\s]*$/u.test(
+      text,
+    ) &&
+    [replies.unverified_claim, replies.knowledge_unavailable].some((variants) =>
+      variants.includes(previousAssistantText.trim()),
+    )
+  );
+}
+
+/** Missing knowledge or unconfirmed model consent must not end AI handling.
  * Apply only to model decisions; server-side identity and safety holds remain intact.
  */
 export function deferUnconfirmedContextHandoff(
   decision: WhatsAppAiDecision,
+  latestCustomerText = "",
+  previousAssistantText = "",
 ): WhatsAppAiDecision {
   return decision.action === "handoff" &&
-    decision.reasonCode === "insufficient_context"
+    (decision.reasonCode === "insufficient_context" ||
+      (decision.reasonCode === "human_requested" &&
+        !confirmsHumanHandoff(latestCustomerText, previousAssistantText)))
     ? { action: "reply", replyCode: "knowledge_unavailable", text: "" }
     : decision;
 }

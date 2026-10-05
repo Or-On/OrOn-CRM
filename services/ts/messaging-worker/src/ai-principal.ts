@@ -42,10 +42,28 @@ export function parsePrincipalAdmission(value: unknown): PrincipalAdmission {
 }
 
 export class AiPrincipalDeniedError extends TypeError {
-  constructor() {
-    super("ai_execution_principal_unavailable");
+  constructor(reason = "ai_execution_principal_unavailable") {
+    super(reason);
     this.name = "AiPrincipalDeniedError";
   }
+}
+
+/** A job may lose authority, but cannot switch execution identity mid-turn. */
+export function retainPrincipalAdmission(
+  expected: PrincipalAdmission | undefined,
+  current: PrincipalAdmission,
+): Exclude<PrincipalAdmission, { mode: "denied" | "stale" }> {
+  if (current.mode === "denied" || current.mode === "stale")
+    throw new AiPrincipalDeniedError();
+  if (
+    expected !== undefined &&
+    (expected.mode !== current.mode ||
+      (expected.mode === "principal" &&
+        current.mode === "principal" &&
+        expected.principalId !== current.principalId))
+  )
+    throw new AiPrincipalDeniedError("ai_execution_principal_changed");
+  return current;
 }
 
 /** Call after the resolver transaction committed its durable invalid alert. */

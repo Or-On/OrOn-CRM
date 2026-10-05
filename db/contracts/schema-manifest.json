@@ -1,5 +1,5 @@
 {
-  "alembic_head": "b162a7e4d903",
+  "alembic_head": "d7b80a4c913e",
   "expected_functions": [
     "agents.activate_reviewed_memory",
     "agents.alert_exhausted_memory_summary",
@@ -86,6 +86,7 @@
     "platform.begin_opening_menu_attempt",
     "platform.canonical_actor_authorized",
     "platform.capture_outbound_execution_authority",
+    "platform.capture_principal_handoff_authority",
     "platform.change_current_user_password",
     "platform.claim_agent_quality_evaluation",
     "platform.commit_machine_intake_receipt",
@@ -126,6 +127,7 @@
     "platform.guard_tenant_slug_uniqueness",
     "platform.guard_voice_sms_unlock",
     "platform.guard_whatsapp_template_tenant",
+    "platform.handoff_execution_snapshot",
     "platform.initialize_tenant_configuration",
     "platform.initialize_voice_identity_verification",
     "platform.lead_bind",
@@ -174,6 +176,7 @@
     "platform.persist_memory_summary_job",
     "platform.prepare_opening_menu",
     "platform.prepare_voice_sms_verification",
+    "platform.principal_handoff_outbound_authorized",
     "platform.protect_last_tenant_owner",
     "platform.provision_tenant_features",
     "platform.quality_hash",
@@ -545,7 +548,8 @@
       "whatsapp_opening_menu_operations",
       "whatsapp_opening_menu_business_claims",
       "whatsapp_template_policy",
-      "whatsapp_opening_menu_legacy_sessions"
+      "whatsapp_opening_menu_legacy_sessions",
+      "principal_handoff_authority"
     ],
     "public": [
       "api_keys",
@@ -774,6 +778,7 @@
     "platform.whatsapp_opening_menu_business_claims",
     "messaging.whatsapp_auto_greetings",
     "platform.whatsapp_template_policy",
-    "service.digital_intake_forms"
+    "service.digital_intake_forms",
+    "platform.principal_handoff_authority"
   ]
 }

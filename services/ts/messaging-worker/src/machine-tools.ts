@@ -1,6 +1,17 @@
 import { AiPrincipalDeniedError } from "./ai-principal.js";
 import type postgres from "postgres";
 
+// Only these server-owned codes may reach job diagnostics. PostgreSQL error
+// details and arbitrary exception text can contain data and are never copied.
+const safeToolDenials = new Set([
+  "machine_tool_denied",
+  "machine_tool_stale_claim",
+  "machine_tool_source_superseded",
+  "machine_tool_job_binding_changed",
+  "machine_tool_claim_binding_changed",
+  "machine_callback_capability_not_admitted",
+]);
+
 export interface MachineToolAuthority {
   readonly principalId: string;
   readonly agentVersionId: string;
@@ -36,7 +47,13 @@ export async function authorizeMachineTool(
       "code" in error &&
       error.code === "42501"
     )
-      throw new AiPrincipalDeniedError();
+      throw new AiPrincipalDeniedError(
+        "message" in error &&
+          typeof error.message === "string" &&
+          safeToolDenials.has(error.message)
+          ? error.message
+          : undefined,
+      );
     throw error;
   }
   const value = rows[0]?.authority;

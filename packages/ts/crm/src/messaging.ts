@@ -1757,12 +1757,19 @@ export async function setConversationOwnership(
       throw new TypeError(
         "Approve this agent version in the workspace workflow before assignment",
       );
+    // Re-selecting the same consenting actor and approved AI is idempotent.
+    // Changing its timestamp would advance the ownership epoch and invalidate
+    // the current menu choice and queued work even though authority is unchanged.
     const rows = await sql<{ id: string }[]>`
       UPDATE messaging.conversations
       SET ownership_mode = 'ai',
           ai_agent_profile_version_id = ${bound.id}::uuid,
           ai_enabled_by_user_id = ${actorUserId}::uuid,
-          ai_enabled_at = CURRENT_TIMESTAMP,
+          ai_enabled_at = CASE
+            WHEN ownership_mode = 'ai'
+              AND ai_agent_profile_version_id = ${bound.id}::uuid
+              AND ai_enabled_by_user_id = ${actorUserId}::uuid
+            THEN ai_enabled_at ELSE CURRENT_TIMESTAMP END,
           assigned_user_id = NULL,
           handoff_reason_safe = NULL,
           updated_at = CURRENT_TIMESTAMP

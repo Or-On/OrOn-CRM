@@ -169,7 +169,10 @@ describe.skipIf(!url)("owned actual worker principal admission", () => {
           expect(jobs).toEqual([
             {
               status: "dead",
-              last_error_safe: "ai_execution_principal_unavailable",
+              last_error_safe:
+                scenario === "tools"
+                  ? "machine_tool_denied"
+                  : "ai_execution_principal_unavailable",
             },
           ]);
         }

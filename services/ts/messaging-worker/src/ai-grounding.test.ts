@@ -50,8 +50,87 @@ describe("WhatsApp deterministic grounding (typed fixtures, no provider evaluati
     "regulated_decision",
   ] as const)("preserves a %s handoff", (reasonCode) => {
     const decision = { action: "handoff" as const, reasonCode, text: "" };
-    expect(deferUnconfirmedContextHandoff(decision)).toBe(decision);
+    expect(
+      deferUnconfirmedContextHandoff(
+        decision,
+        "Please connect me to a human representative.",
+      ),
+    ).toBe(decision);
   });
+
+  it.each([
+    "תעביר אותי לנציג בבקשה",
+    "אני רוצה לדבר עם בן אדם",
+    "נציג",
+    "יש לי תקלה. אפשר לדבר עם נציגה?",
+    "לא עובד, תעבירו אותי לנציג",
+    "אני רוצה לדבר עם נציג, החברה שלי אבסל",
+    "Please connect me to a human representative.",
+    "I want to speak to a person.",
+    "Human please",
+  ])("honors a current explicit human request: %s", (text) => {
+    const decision = {
+      action: "handoff" as const,
+      reasonCode: "human_requested" as const,
+      text: "",
+    };
+    expect(deferUnconfirmedContextHandoff(decision, text)).toBe(decision);
+  });
+
+  it.each([
+    "יש לי תקלה בטלוויזיה, אתה יכול לעזור?",
+    "אתה כאן?",
+    "עזרה או תקלה",
+    "אני לא רוצה נציג",
+    "אל תעביר אותי לנציג",
+    "בלי נציג בבקשה",
+    "I don't want a human",
+    "Do not transfer me to a person",
+    'The customer said "I want a human"',
+    "הנציג אמר שהוא יטפל בתקלה",
+    "yes",
+    "כן",
+  ])("keeps AI handling when the model mislabels consent: %s", (text) => {
+    expect(
+      deferUnconfirmedContextHandoff(
+        { action: "handoff", reasonCode: "human_requested", text: "" },
+        text,
+      ),
+    ).toEqual({
+      action: "reply",
+      replyCode: "knowledge_unavailable",
+      text: "",
+    });
+  });
+
+  it.each(["yes please", "כן בבקשה"])(
+    "accepts %s only after the immediate approved offer",
+    (text) => {
+      const decision = {
+        action: "handoff" as const,
+        reasonCode: "human_requested" as const,
+        text: "",
+      };
+      const offer = groundAiReply(
+        { action: "reply", replyCode: "knowledge_unavailable", text: "" },
+        [],
+        "he",
+      ).text;
+      expect(deferUnconfirmedContextHandoff(decision, text, offer)).toBe(
+        decision,
+      );
+      expect(
+        deferUnconfirmedContextHandoff(
+          decision,
+          text,
+          "Would you like more details?",
+        ).action,
+      ).toBe("reply");
+      expect(
+        deferUnconfirmedContextHandoff(decision, "לא תודה", offer).action,
+      ).toBe("reply");
+    },
+  );
 
   it("turns model-classified compound callback text into a standalone confirmation request", () => {
     const classified = {

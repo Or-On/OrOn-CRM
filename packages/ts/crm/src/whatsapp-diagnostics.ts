@@ -70,6 +70,13 @@ export function parseWhatsAppSendDiagnostic(
 
 const localErrorCodes = new Set([
   "ai_execution_principal_unavailable",
+  "ai_execution_principal_changed",
+  "machine_tool_denied",
+  "machine_tool_stale_claim",
+  "machine_tool_source_superseded",
+  "machine_tool_job_binding_changed",
+  "machine_tool_claim_binding_changed",
+  "machine_callback_capability_not_admitted",
   "channel_credential_unavailable",
   "rate_limit_deferred",
   "rate_limit_delay_quarantined",
