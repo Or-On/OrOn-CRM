@@ -10,6 +10,7 @@ import copy
 import pytest
 from oron_agent.context_hygiene import OpeningTurnContext
 from oron_agent.flows.greeting import OPENING_TURN_PREFIX, create_greeting_node
+from oron_agent.grounding import VoiceEvidenceContext
 from oron_agent.llm import LlmProvider, _SingleInstructionGeminiAdapter, build_llm
 from oron_agent.provider_context import CALL_START_EVENT, fold_instructions
 from pipecat.frames.frames import LLMContextFrame
@@ -156,3 +157,57 @@ async def test_opening_instruction_survives_until_a_greeting_was_delivered():
         str(message.get("content")).startswith(OPENING_TURN_PREFIX)
         for message in context.get_messages()
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "business_actions", [(), ("capture_service_intake", "send_whatsapp_service_form")]
+)
+@pytest.mark.parametrize(
+    "caller_turn",
+    [
+        "I haven't explained the whole issue yet. What do you need to know first?",
+        "Stop the call now, please.",
+    ],
+)
+async def test_stored_objective_gets_current_completion_policy_on_the_provider_wire(
+    business_actions, caller_turn
+):
+    # Treat the published task as immutable: repair must reach existing scripts,
+    # including agents with business tools, without rewriting their objective.
+    stored_task = (
+        "Find out briefly why the caller is contacting us, and confirm you understood.\n"
+        "When that is done, you MUST call collect_reason_done."
+    )
+    history = [
+        {"role": "system", "content": stored_task},
+        {"role": "system", "content": POLICY},
+        {"role": "assistant", "content": "What exactly appears on the screen?"},
+        {"role": "user", "content": caller_turn},
+    ]
+    snapshot = copy.deepcopy(history)
+    context = LLMContext(messages=history)
+
+    async def no_records():
+        return []
+
+    await run_test(
+        VoiceEvidenceContext(
+            tenant_id="fictional-tenant",
+            language="en",
+            load_records=no_records,
+            business_actions=business_actions,
+        ),
+        frames_to_send=[LLMContextFrame(context=context)],
+    )
+    payload = _compat_llm().build_chat_completion_params({"messages": context.get_messages()})
+    instruction = payload["messages"][0]["content"]
+    assert stored_task in instruction
+    assert instruction.count("VOICE EVIDENCE AND ACTION SAFETY POLICY") == 1
+    assert "If the caller says they are not finished" in instruction
+    assert "their confirmation must come from the caller" in instruction
+    assert "explicit request to stop or end the call" in instruction
+    assert "server-owned tool result instructs the call to close" in instruction
+    assert payload["messages"][1:] == snapshot[2:]
+    for action in business_actions:
+        assert action in instruction

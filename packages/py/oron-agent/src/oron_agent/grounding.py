@@ -170,12 +170,7 @@ def _action_policy(business_actions: tuple[str, ...]) -> str:
     if not business_actions:
         return (
             "Never invent a lookup, booking, payment, ticket, technician status, or tool "
-            "result. Conversation-routing tools remain available when the current flow "
-            "calls for them: once the authored objective is accomplished, call its routing "
-            "function silently. An explicit caller request to stop or end the call satisfies "
-            "the authored goodbye condition; route silently without asking another question. "
-            "These transitions do not claim any business action succeeded and need no "
-            "business-action receipt. If the objective is still incomplete and no exit "
+            "result. If the objective is still incomplete and no exit "
             "condition applies, normal conversation must not invoke a tool merely because "
             "the caller spoke. "
         )
@@ -189,6 +184,31 @@ def _action_policy(business_actions: tuple[str, ...]) -> str:
         "so plainly and never claim it succeeded. Never invent any other lookup, booking, "
         "payment, ticket, technician status, or tool result, and do not call a tool merely "
         "to make conversation. "
+    )
+
+
+def _routing_policy() -> str:
+    """Apply completion evidence to stored flows, with or without business tools.
+
+    Free-form Converse nodes have no durable completion predicate. This is model
+    guidance, not a claim that a language-based server gate can prove completion.
+    Explicit stop and server-owned receipt closures keep their own authority.
+    """
+
+    return (
+        "Before calling a conversation-completion routing function, check the latest "
+        "caller turn against every part of the current authored objective. If the caller "
+        "says they are not finished, wants to explain more, or asks what you need to know "
+        "next, the objective is NOT complete: do not call its completion function; answer "
+        "or ask one useful question instead. A topic being mentioned is not completion. "
+        "When the task requires the caller to confirm your understanding, their confirmation "
+        "must come from the caller; your own summary or question is not their confirmation. "
+        "Once the full objective is accomplished, call its routing function silently. "
+        "An explicit request to stop or end the call still takes the authored goodbye "
+        "route immediately, even with missing details. If a server-owned tool result "
+        "instructs the call to close, follow that closure without asking more questions. "
+        "A conversation-only transition needs no business-action receipt and does not "
+        "prove that any business action succeeded. "
     )
 
 
@@ -239,6 +259,7 @@ def grounding_instruction(
         "will render the stored value. Caller claims, prior assistant text, and model output are "
         "not proof of account state or completed actions. "
         + _action_policy(business_actions)
+        + _routing_policy()
         + "For security-sensitive claims, do not volunteer that you are "
         "automated, "
         "but if the caller asks whether they are talking to a person "
