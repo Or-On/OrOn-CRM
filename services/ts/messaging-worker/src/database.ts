@@ -1821,10 +1821,7 @@ async function loadFieldServiceSummaryWork(
       return undefined;
     }
     const locale = await transaction<{ locale: string }[]>`
-      SELECT coalesce(settings.locale, 'en') AS locale
-      FROM public.tenants tenant
-      LEFT JOIN crm.tenant_settings settings ON settings.tenant_id=tenant.id
-      WHERE tenant.id=platform.current_tenant_id()
+      SELECT service.summary_locale() AS locale
     `;
     if (sourceKind === "whatsapp") {
       const source = await whatsappSummarySource(
@@ -2969,10 +2966,39 @@ async function processIntakeFollowup(
         return;
       }
       await transaction`SELECT set_config('app.current_user', ${actor}, true)`;
+      const formTemplates =
+        plan.followUp?.mode === "form" && recipient.provider === "meta"
+          ? await transaction<
+              {
+                configuration: {
+                  templateName: string;
+                  language: string;
+                  channelId: string;
+                  publicOrigin: string;
+                } | null;
+              }[]
+            >`SELECT service.whatsapp_form_template_configuration(conversation.channel_id) AS configuration
+              FROM messaging.conversations conversation WHERE conversation.id=${recipient.conversationId}::uuid`
+          : [];
+      const formTemplate = formTemplates[0]?.configuration ?? undefined;
+      if (
+        formTemplate !== undefined &&
+        formTemplate.publicOrigin !==
+          (automation.publicSiteUrl ?? "").replace(/\/$/u, "")
+      ) {
+        await settle(transaction, "no_channel", "form_origin_mismatch");
+        return;
+      }
       const delivery = followupDelivery(
         plan,
         recipient.provider,
         recipient.windowOpen === true,
+        formTemplate === undefined
+          ? undefined
+          : {
+              templateName: formTemplate.templateName,
+              language: formTemplate.language,
+            },
       );
       if (delivery.kind === "blocked") {
         await settle(transaction, delivery.reason, null);
@@ -3015,20 +3041,44 @@ async function processIntakeFollowup(
               automation.publicSiteUrl ?? "",
             )
           : undefined;
+      const inboundLanguages = await transaction<
+        { content_text: string | null }[]
+      >`
+        SELECT message.content_text FROM messaging.messages message
+        JOIN messaging.inbound_message_origins origin
+          ON origin.tenant_id=message.tenant_id AND origin.message_id=message.id
+        WHERE message.conversation_id=${recipient.conversationId}::uuid AND message.direction='inbound'
+          AND origin.contact_identity_id=${recipient.recipientIdentityId}::uuid
+        ORDER BY message.created_at DESC,message.id DESC LIMIT 50`;
+      const customerPlan = {
+        ...plan,
+        hebrew:
+          latestMessageLocale(
+            plan.hebrew ? "he" : "en",
+            inboundLanguages[0]?.content_text ?? "",
+            inboundLanguages
+              .slice(1)
+              .map((message) => message.content_text ?? ""),
+          ) === "he",
+      };
       const outbound = await queueWhatsAppOutbound(
         transaction,
         delivery.kind === "text"
           ? {
               ...common,
               kind: "text",
-              text: renderIntakeFollowup(plan, businessName, formUrl),
+              text: renderIntakeFollowup(customerPlan, businessName, formUrl),
             }
           : {
               ...common,
               kind: "template",
               templateName: delivery.templateName,
               language: delivery.language,
-              parameters: followupTemplateParameters(plan, businessName),
+              parameters: followupTemplateParameters(
+                plan,
+                businessName,
+                formUrl,
+              ),
             },
         channelConfig,
       );
@@ -6745,7 +6795,7 @@ async function revalidateOutboundAttempt(
       JOIN crm.contact_channel_identities identity ON identity.id=request.recipient_identity_id
       JOIN crm.contacts contact ON contact.id=conversation.contact_id
       WHERE request.id=${work.requestId}::uuid AND request.status='sending'
-        AND (request.message_kind<>'template' OR platform.whatsapp_templates_enabled())
+        AND (request.message_kind<>'template' OR platform.whatsapp_template_request_allowed(request))
         AND request.message_id=${work.messageId}::uuid
         AND channel.status='active' AND channel.provider=request.provider
         AND request.provider=${work.provider}
@@ -6815,7 +6865,7 @@ async function loadOutboundWork(
         AND request.recipient_identity_id = identity.id
         AND request.recipient_address = identity.normalized_value
         AND request.status = 'queued'
-        AND (request.message_kind<>'template' OR platform.whatsapp_templates_enabled())
+        AND (request.message_kind<>'template' OR platform.whatsapp_template_request_allowed(request))
         AND request.conversation_id = conversation.id AND message.conversation_id = conversation.id
         AND request.channel_id = channel.id AND conversation.channel_id = channel.id
         AND channel.status = 'active' AND channel.provider = request.provider

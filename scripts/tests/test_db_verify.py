@@ -45,7 +45,8 @@ def test_graph_has_preserved_oron_root_and_one_target_head() -> None:
     # conversations at opening-menu activation without exempting new sessions.
     # 146 starts a fresh menu at resume/reopen; 147 binds a principal's single
     # handoff acknowledgement across the same transaction's ownership change.
-    assert report.revision_count == 147
+    # 148 admits only the reviewed voice-form template exception.
+    assert report.revision_count == 148
 
 
 def test_lead_workflow_guard_is_present_in_the_final_configuration_validator() -> None:

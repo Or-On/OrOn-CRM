@@ -53,7 +53,45 @@ secret manager, never in this file or an agent prompt.
    mirroring for customer photos. Check this binding and runtime config
    together; the account-specific webhook alone does not create a channel.
 
-## Dev activation status (2026-09-30)
+## Current connection and scoped form delivery (2026-10-06)
+
+The operator confirmed that Coexistence was completed and that the phone's
+WhatsApp Business app must remain available. The new Meta account exposes phone
+ID `1375531052308611` as `CONNECTED` on WABA `2492471334563786`; app
+`2636656843431645` is subscribed. These IDs replace the historical IDs below in
+both private web/worker settings and ProTouch's existing channel. Do not run
+ordinary registration/deregistration or disconnect the mobile app.
+
+Meta approved the operator-authorized utility template
+`protouch_service_request_link_v1` (`he`, ID `2161432928062922`). Its sole BODY
+parameter is the private digital service form URL. General tenant template access
+and opening menus remain disabled for ProTouch; Or-On retains its own policy.
+
+After deploying revision `e6a91c4f208b`, an operator may enable the reviewed row in
+`service.whatsapp_form_template_policy`, bound to the ProTouch tenant, its active
+Meta channel, the exact template identifiers and `https://dev.or-on.io` origin.
+Verify the provider's approval and the channel/account binding before activation;
+record an audit event. The migration enables no exceptions automatically. Disable
+this row to revoke future template admission and queued delivery. Application
+roles cannot edit this policy.
+
+The voice agent collects only name and free-text fault, saves those caller-reported
+facts and obtains agreement to send the form to the transport-verified caller.
+Within an existing WhatsApp window the worker sends a text link; otherwise it
+uses only the scoped template. Both paths use the same intake idempotency key.
+The database verifies the exact caller, tenant, channel, template, form hash,
+expiry and system-message provenance. Submission, not the phone call or a plain
+WhatsApp reply, creates one case and linked ticket. A repeated submission returns
+the existing receipt. Name, location, free-text fault and photos remain in the form.
+
+Acceptance must cover a first-time caller with no WhatsApp conversation, a
+least-privileged voice admission, worker delivery, web-role submission and summary
+completion. Confirm real Meta delivery receipts, one dashboard ticket and photos,
+then verify the AI answers again after the pending form is submitted. Never treat
+an HTTP acceptance alone as delivered or mark the full voice path verified without
+a real call. Test traffic is limited to the operator-authorized recipient.
+
+## Historical dev activation status (2026-09-30)
 
 The ProTouch Meta account is installed in the root-owned web and
 messaging-worker runtime files. The app named **Pro Touch Agent** is subscribed

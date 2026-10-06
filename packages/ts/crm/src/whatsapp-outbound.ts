@@ -145,7 +145,16 @@ export async function queueWhatsAppOutbound(
     const policy = await sql<{ enabled: boolean }[]>`
       SELECT platform.whatsapp_templates_enabled() AS enabled
     `;
-    if (policy[0]?.enabled !== true)
+    // A system voice-form request may have a separately reviewed exception.
+    // The INSERT trigger validates the caller, template, channel, intake and
+    // exact issued capability; this shape check grants no delivery authority.
+    if (
+      policy[0]?.enabled !== true &&
+      !(
+        input.senderType === "system" &&
+        input.voiceFollowUpIntakeId !== undefined
+      )
+    )
       throw new TypeError("WhatsApp templates are unavailable for this tenant");
   }
   if (input.provider === "meta" && channelConfiguration === undefined)

@@ -1,5 +1,5 @@
 {
-  "alembic_head": "d7b80a4c913e",
+  "alembic_head": "e6a91c4f208b",
   "expected_functions": [
     "agents.activate_reviewed_memory",
     "agents.alert_exhausted_memory_summary",
@@ -126,6 +126,7 @@
     "platform.finish_voice_memory",
     "platform.guard_tenant_slug_uniqueness",
     "platform.guard_voice_sms_unlock",
+    "platform.guard_whatsapp_template_request",
     "platform.guard_whatsapp_template_tenant",
     "platform.handoff_execution_snapshot",
     "platform.initialize_tenant_configuration",
@@ -225,6 +226,7 @@
     "platform.voice_sms_delivery",
     "platform.voice_sms_unavailable",
     "platform.voice_start_sms",
+    "platform.whatsapp_template_request_allowed",
     "platform.whatsapp_templates_enabled",
     "platform.write_voice_session_outcome",
     "service.acknowledge_visit_preparation",
@@ -286,6 +288,7 @@
     "service.resolve_followup_triage",
     "service.settle_voice_inquiry",
     "service.submit_digital_intake_form",
+    "service.summary_locale",
     "service.tenant_is_hebrew",
     "service.tenant_workflow_policy",
     "service.valid_evidence_photo_exists",
@@ -301,6 +304,7 @@
     "service.voice_intake_context",
     "service.voice_session_caller_identity",
     "service.voice_session_event",
+    "service.whatsapp_form_template_configuration",
     "support.append_ticket_event",
     "support.enqueue_post_call",
     "support.mark_ticket_emergency",
@@ -590,7 +594,8 @@
       "visit_preparations",
       "visit_time_corrections",
       "visits",
-      "digital_intake_forms"
+      "digital_intake_forms",
+      "whatsapp_form_template_policy"
     ],
     "support": [
       "assurance_policies",
@@ -779,6 +784,7 @@
     "messaging.whatsapp_auto_greetings",
     "platform.whatsapp_template_policy",
     "service.digital_intake_forms",
-    "platform.principal_handoff_authority"
+    "platform.principal_handoff_authority",
+    "service.whatsapp_form_template_policy"
   ]
 }

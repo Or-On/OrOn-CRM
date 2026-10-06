@@ -128,6 +128,20 @@ describe("short call digital form", () => {
       kind: "text",
     });
   });
+  it("uses only the separately reviewed form template and the server-issued link", () => {
+    const approved = { templateName: "service_form_link", language: "he" };
+    expect(followupDelivery(form, "meta", false, approved)).toEqual({
+      kind: "template",
+      ...approved,
+    });
+    expect(followupDelivery(form, "meta", true, approved)).toEqual({
+      kind: "text",
+    });
+    expect(followupTemplateParameters(form, "Fixture", url)).toEqual([url]);
+    expect(() => followupTemplateParameters(form, "Fixture")).toThrow(
+      "link is required",
+    );
+  });
   it.each([
     "javascript:alert(1)",
     "https://user:secret@example.invalid/service-request#token=x",

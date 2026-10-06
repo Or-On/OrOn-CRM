@@ -151,7 +151,16 @@ export function renderIntakeFollowup(
 export function followupTemplateParameters(
   plan: IntakeFollowupPlan,
   businessName: string | null,
+  formUrl?: string,
 ): readonly string[] {
+  if (plan.followUp?.mode === "form") {
+    // Use only the freshly issued server capability. Customer/model text can
+    // never become an argument to the narrowly approved service template.
+    if (formUrl === undefined)
+      throw new TypeError("Digital service form link is required");
+    renderIntakeFollowup(plan, businessName, formUrl);
+    return [formUrl];
+  }
   return (plan.followUp?.templateParameters ?? []).map((key) => {
     if (key === "customerName")
       return text(plan.fields.customerName, 60) ?? "-";
@@ -176,10 +185,13 @@ export function followupDelivery(
   plan: IntakeFollowupPlan,
   provider: "meta" | "simulator",
   windowOpen: boolean,
+  formTemplate?: { readonly templateName: string; readonly language: string },
 ): FollowupDelivery {
   if (provider === "simulator" || windowOpen) return { kind: "text" };
   if (plan.followUp?.mode === "form")
-    return { kind: "blocked", reason: "blocked_window" };
+    return formTemplate === undefined
+      ? { kind: "blocked", reason: "blocked_window" }
+      : { kind: "template", ...formTemplate };
   const name = plan.followUp?.templateName;
   const language = plan.followUp?.templateLanguage;
   if (typeof name === "string" && typeof language === "string")

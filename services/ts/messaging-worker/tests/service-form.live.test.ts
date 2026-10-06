@@ -5,7 +5,12 @@ import { fileURLToPath } from "node:url";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { acceptWhatsAppWebhook } from "@or-on/crm";
+import {
+  acceptWhatsAppWebhook,
+  readDigitalServiceForm,
+  submitDigitalServiceForm,
+  queueWhatsAppOutbound,
+} from "@or-on/crm";
 
 import { createMessagingStore } from "../src/database.js";
 import type { WhatsAppAiProvider } from "../src/ai-provider.js";
@@ -517,7 +522,10 @@ describe.skipIf(sourceUrl === undefined)(
             expect(
               await admin`SELECT followup_status FROM service.intake_drafts WHERE id=${intakeId}::uuid`,
             ).toEqual([{ followup_status: "blocked_window" }]);
-            await acceptInbound(caller.slice(1), "אפשר קישור לטופס?");
+            await acceptInbound(
+              caller.slice(1),
+              "Please send the form in English",
+            );
             delivered = await runWorker(true);
           }
           const admission =
@@ -534,7 +542,9 @@ describe.skipIf(sourceUrl === undefined)(
           expect(delivery.text).toContain(
             "https://service.example.invalid/service-request#tenant=",
           );
-          expect(delivery.text).toContain("ללחוץ על שליחה");
+          expect(delivery.text).toContain(
+            followupStatus === "queued" ? "press Submit" : "ללחוץ על שליחה",
+          );
           expect(delivery.text).not.toContain("השיבו להודעה");
           const url = new URL(delivery.text.split("\n").at(-1) ?? "");
           const fragment = new URLSearchParams(url.hash.slice(1));
@@ -553,5 +563,198 @@ describe.skipIf(sourceUrl === undefined)(
         }
       },
     );
+
+    it("delivers only the reviewed form template to a first-time caller with general templates disabled", async () => {
+      // Match the published phone-first policy: location comes from the digital
+      // form; no separate store-name field is requested from this customer.
+      await admin`UPDATE platform.tenant_feature_entitlements SET configuration=${admin.json(
+        {
+          workflow: {
+            ...formPolicy,
+            requiredIntakeFields: [
+              "customerName",
+              "customerPhone",
+              "serviceLocation",
+              "faultDescription",
+            ],
+            inquiry: { openOnFirstContact: false },
+          },
+        },
+      )} WHERE tenant_id=${tenantId}::uuid AND feature_key='field_service'`;
+      const caller = "+972502345690";
+      const contactId = randomUUID();
+      const sessionId = randomUUID();
+      await admin`UPDATE platform.whatsapp_template_policy SET enabled=false WHERE tenant_id=${tenantId}::uuid`;
+      await admin`INSERT INTO service.whatsapp_form_template_policy
+        (tenant_id,channel_id,template_name,template_language,provider_template_id,public_origin,enabled)
+        VALUES(${tenantId}::uuid,${channelId}::uuid,'service_form_link','he','123456','https://service.example.invalid',true)`;
+      await admin`INSERT INTO crm.contacts(id,tenant_id,name,whatsapp_consent)
+        VALUES(${contactId}::uuid,${tenantId}::uuid,'Fixture caller','granted')`;
+      await admin`INSERT INTO crm.contact_channel_identities
+        (tenant_id,contact_id,channel,normalized_value,validation_status,is_primary)
+        VALUES(${tenantId}::uuid,${contactId}::uuid,'phone',${caller},'valid',true)`;
+      await admin`INSERT INTO sessions(session_id,provider,direction,room,status,tenant_id,flow_id,contact_id)
+        VALUES(${sessionId}::uuid,'livekit','inbound',${`room-${sessionId}`},'started',${tenantId}::uuid,${randomUUID()}::uuid,${contactId}::uuid)`;
+      await admin`INSERT INTO public.session_events(tenant_id,session_id,sequence,event_type,payload)
+        SELECT ${tenantId}::uuid,${sessionId}::uuid,0,'voice.agent.binding.v1',jsonb_build_object('caller_identity_id',id,
+          'agent_version_id',(SELECT id FROM agents.agent_profile_versions WHERE tenant_id=${tenantId}::uuid AND tool_permissions ? 'service.intake' AND published_at IS NOT NULL ORDER BY created_at DESC LIMIT 1))
+        FROM crm.contact_channel_identities WHERE tenant_id=${tenantId}::uuid AND contact_id=${contactId}::uuid AND channel='phone'`;
+      const captured = await admin.begin(async (tx) => {
+        await tx`SET LOCAL ROLE platform_voice`;
+        return tx<
+          { receipt: { intakeId: string } }[]
+        >`SELECT service.capture_service_intake(${sessionId}::uuid,
+          ${tx.json({ customerName: "דנה", faultDescription: "המסך לא נדלק" })},false) AS receipt`;
+      });
+      const intakeId = captured[0]?.receipt.intakeId;
+      if (intakeId === undefined)
+        throw new Error("Voice intake was not captured");
+      await admin`UPDATE service.whatsapp_form_template_policy SET enabled=false WHERE tenant_id=${tenantId}::uuid`;
+      const blocked = await admin.begin(async (tx) => {
+        await tx`SET LOCAL ROLE platform_voice`;
+        return tx`SELECT service.request_intake_followup(${sessionId}::uuid,true) AS receipt`;
+      });
+      expect(blocked[0]?.receipt).toMatchObject({
+        status: "unavailable",
+        reason: "whatsapp_template_required",
+      });
+      await admin`UPDATE service.whatsapp_form_template_policy SET enabled=true WHERE tenant_id=${tenantId}::uuid`;
+      const admission = await admin.begin(async (tx) => {
+        await tx`SET LOCAL ROLE platform_voice`;
+        return tx`SELECT service.request_intake_followup(${sessionId}::uuid,true) AS receipt`;
+      });
+      expect(admission[0]?.receipt).toMatchObject({
+        status: "queued",
+        intakeId,
+      });
+      const sent = await runWorker(true);
+      expect(sent).toHaveLength(1);
+      expect(sent[0]?.recipient).toBe(caller);
+      const delivery = sent[0]?.delivery;
+      if (delivery?.kind !== "template")
+        throw new Error("Expected reviewed form template");
+      expect(delivery.templateName).toBe("service_form_link");
+      expect(delivery.language).toBe("he");
+      expect(delivery.parameters).toHaveLength(1);
+      const url = new URL(delivery.parameters[0] ?? "");
+      const fragment = new URLSearchParams(url.hash.slice(1));
+      const token = fragment.get("token") ?? "";
+      expect(fragment.get("tenant")).toBe(tenantId);
+      expect(
+        await admin`SELECT platform.whatsapp_templates_enabled() AS enabled`,
+      ).toEqual([{ enabled: false }]);
+      expect(
+        await admin`SELECT id FROM service.cases WHERE intake_draft_id=${intakeId}::uuid`,
+      ).toHaveLength(0);
+      expect(await runWorker(true)).toEqual([]);
+      const requests = await admin<{ id: string; conversation_id: string }[]>`
+        SELECT id,conversation_id FROM messaging.outbound_requests WHERE idempotency_key=${`service-followup:${intakeId}`}`;
+      const request = requests[0];
+      if (request === undefined)
+        throw new Error("Follow-up request was not queued");
+      expect(
+        await admin`SELECT platform.whatsapp_template_request_allowed(r) AS allowed FROM messaging.outbound_requests r WHERE id=${request.id}::uuid`,
+      ).toEqual([{ allowed: true }]);
+      // General template access remains closed, including a manual send of the
+      // same template. Neither an arbitrary body nor a different caller is licensed.
+      await expect(
+        admin.begin(async (tx) => {
+          await tx`SET LOCAL ROLE platform_web`;
+          await queueWhatsAppOutbound(
+            tx,
+            {
+              conversationId: request.conversation_id,
+              explicitlyConfirmed: true,
+              idempotencyKey: `manual-${randomUUID()}`,
+              kind: "template",
+              language: "he",
+              parameters: delivery.parameters,
+              provider: "meta",
+              realProviderEnabled: true,
+              senderUserId: userId,
+              templateName: "service_form_link",
+            },
+            { phoneNumberId, wabaId: "12345", graphApiVersion: "v26.0" },
+          );
+        }),
+      ).rejects.toThrow("templates are unavailable");
+      for (const parameters of [
+        ["https://evil.example.invalid/service-request#token=" + token],
+        [url.toString().replace(token, "b".repeat(64))],
+      ]) {
+        await expect(
+          admin`UPDATE messaging.outbound_requests SET template_parameters=${admin.json(parameters)} WHERE id=${request.id}::uuid`,
+        ).rejects.toThrow("not authorized");
+      }
+      await expect(
+        admin`UPDATE messaging.outbound_requests SET template_name='other_template' WHERE id=${request.id}::uuid`,
+      ).rejects.toThrow("not authorized");
+      await expect(
+        admin`UPDATE messaging.outbound_requests SET recipient_address='+972502345699' WHERE id=${request.id}::uuid`,
+      ).rejects.toThrow("outbound recipient binding is immutable");
+      await admin`UPDATE service.whatsapp_form_template_policy SET enabled=false WHERE tenant_id=${tenantId}::uuid`;
+      expect(
+        await admin`SELECT platform.whatsapp_template_request_allowed(r) AS allowed FROM messaging.outbound_requests r WHERE id=${request.id}::uuid`,
+      ).toEqual([{ allowed: false }]);
+      await admin`UPDATE service.whatsapp_form_template_policy SET enabled=true WHERE tenant_id=${tenantId}::uuid`;
+      const form = await admin.begin(async (tx) => {
+        await tx`SET LOCAL ROLE platform_web`;
+        return readDigitalServiceForm(tx, token);
+      });
+      expect(form?.customerName).toBe("דנה");
+      expect(form?.faultDescription).toBe("המסך לא נדלק");
+      const submission = {
+        customerName: "דנה",
+        serviceLocation: "אתר בדיקה",
+        faultDescription: "תיאור חופשי מהטופס",
+        confirmed: true,
+        photos: [],
+      };
+      const receipt = await admin.begin(async (tx) => {
+        await tx`SET LOCAL ROLE platform_web`;
+        return submitDigitalServiceForm(tx, token, submission);
+      });
+      expect(receipt.created).toBe(true);
+      expect(
+        await admin.begin((tx) =>
+          submitDigitalServiceForm(tx, token, submission),
+        ),
+      ).toEqual({ ...receipt, created: false });
+      expect(
+        await admin`SELECT id FROM service.cases WHERE intake_draft_id=${intakeId}::uuid`,
+      ).toHaveLength(1);
+      expect(
+        await admin`SELECT id FROM support.tickets WHERE tenant_id=${tenantId}::uuid AND service_case_id IN
+          (SELECT id FROM service.cases WHERE tenant_id=${tenantId}::uuid AND intake_draft_id=${intakeId}::uuid)`,
+      ).toHaveLength(1);
+      expect(
+        await admin`SELECT platform.whatsapp_template_request_allowed(r) AS allowed FROM messaging.outbound_requests r WHERE id=${request.id}::uuid`,
+      ).toEqual([{ allowed: false }]);
+      // A real least-privileged worker must also finish the dossier summary.
+      // In production this used to fail by joining the inaccessible tenants table.
+      const summarizeEvidence = vi.fn(() => Promise.resolve("סיכום בדיקה"));
+      await runWorker(true, {
+        fieldServiceProvider: {
+          providerName: "fixture",
+          modelName: "fixture",
+          extractIntake: () =>
+            Promise.reject(new Error("No extraction after submission")),
+          extractProductLabel: () =>
+            Promise.reject(new Error("No OCR requested")),
+          summarizeEvidence,
+        },
+      });
+      expect(
+        await admin`SELECT status,error_safe FROM service.case_summaries WHERE case_id IN
+        (SELECT id FROM service.cases WHERE intake_draft_id=${intakeId}::uuid) AND source_kind='whatsapp'`,
+      ).toEqual([{ status: "completed", error_safe: null }]);
+      expect(summarizeEvidence).toHaveBeenCalled();
+      expect(summarizeEvidence).toHaveBeenCalledWith(
+        expect.objectContaining({
+          locale: "he",
+          sourceKind: "whatsapp",
+        }),
+      );
+    });
   },
 );
