@@ -860,9 +860,13 @@ async def test_form_runtime_and_agent_refuse_queue_without_both_facts_or_open_wi
     unavailable = await runtime.request_service_followup(context, customer_agreed=True)
     assert unavailable["status"] == "unavailable"
     assert unavailable["reason"] == "whatsapp_template_required"
+    assert (await tools.send_form({"customerAgreed": True}))["needsConsent"]
+    tools.consent_node({"name": "support", "task_messages": [], "functions": []})
+    turns.accept()
+    tools.record_caller_turn("כן בבקשה")
     spoken = await tools.send_form({"customerAgreed": True})
     assert spoken["ok"] is False and "closing" not in spoken
-    assert "staff follow-up is needed" in spoken["error"]
+    assert "request could not be completed" in spoken["error"]
     assert "Do not claim staff have been notified" in spoken["error"]
     assert "Do not collect address" in spoken["error"]
     await connection.execute(text("RESET ROLE"))
@@ -907,9 +911,17 @@ async def test_form_link_queue_uses_real_durable_job_but_does_not_open_case(
             }
         )
     )["ok"]
+    assert (await tools.send_form({"customerAgreed": True}))["needsConsent"]
+    tools.consent_node({"name": "support", "task_messages": [], "functions": []})
+    # Reusing the turn containing the facts must not authorize a message.
+    tools.record_caller_turn("כן")
+    assert (await tools.send_form({"customerAgreed": True}))["needsConsent"]
+    turns.accept()
+    tools.record_caller_turn("כן בבקשה")
     queued = await tools.send_form({"customerAgreed": True})
     assert queued["ok"] and queued["receipt"]["status"] == "queued"
-    assert "עדיין אין אישור שההודעה הגיעה" in queued["closing"]
+    assert "הבקשה לשליחת הקישור נקלטה" in queued["closing"]
+    assert "תיפתח אחרי מילוי הטופס" in queued["closing"]
     repeated = await tools.send_form({"customerAgreed": True})
     assert repeated["receipt"]["jobId"] == queued["receipt"]["jobId"]
     await connection.execute(text("RESET ROLE"))

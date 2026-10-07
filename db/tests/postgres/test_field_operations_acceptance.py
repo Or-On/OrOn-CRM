@@ -258,10 +258,15 @@ async def test_configured_field_operations_end_to_end(acceptance):
         {"fields": {"serviceAddress": "רחוב לדוגמה"}, "confirmed": True}
     )
     assert not forbidden["ok"]
+    # Saved facts cannot substitute for a later, explicit caller agreement.
+    assert (await tools.send_form({"customerAgreed": True}))["needsConsent"]
+    tools.consent_node({"name": "support", "task_messages": [], "functions": []})
+    turns.accept()
+    tools.record_caller_turn("כן בבקשה")
     # No approved template and no open WhatsApp window: nothing is promised,
-    # and staff follow-up is needed without more phone intake or delivery claims.
+    # and no more phone intake or delivery/staff-notification claims are made.
     refused = await tools.send_form({"customerAgreed": True})
-    assert not refused["ok"] and "staff follow-up is needed" in refused["error"]
+    assert not refused["ok"] and "request could not be completed" in refused["error"]
     assert "Do not collect address" in refused["error"]
     # The caller wrote to the business on WhatsApp within the last day.
     await _sql(connection, "RESET ROLE")
@@ -285,8 +290,8 @@ async def test_configured_field_operations_end_to_end(acceptance):
     await _sql(connection, "SET LOCAL ROLE platform_voice")
     sent = await tools.send_form({"customerAgreed": True})
     assert sent["ok"] and sent["receipt"]["status"] == "queued"
-    assert "ביקשתי לשלוח קישור" in sent["closing"]
-    assert "עדיין אין אישור שההודעה הגיעה" in sent["closing"]
+    assert "הבקשה לשליחת הקישור נקלטה" in sent["closing"]
+    assert "תיפתח אחרי מילוי הטופס" in sent["closing"]
     await _sql(connection, "RESET ROLE")
     await _sql(connection, "SET LOCAL ROLE platform_voice")
     assert await runtime.finalize(context.session_id, context.tenant_id, status=SessionStatus.ENDED)
