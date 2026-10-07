@@ -426,7 +426,7 @@ function envelopeInstruction(
   if (actions.includes("service_form"))
     lines.push(
       "For a new fault/service request or a request for the service form/link, choose service_form with text null. " +
-        "This creates and sends the real digital form in this WhatsApp conversation. No phone call or extra confirmation is required. " +
+        "This sends the real digital form in this WhatsApp conversation, reusing an outstanding form when present. A pending form never prevents ordinary replies or an explicitly requested human handoff. No phone call or extra confirmation is required. " +
         "Do not collect name, location, photos or all fault details in chat: the customer supplies them in the form. " +
         "Only the customer's explicit web submission opens the service case. Never claim a case is already open or promise a link in ordinary reply text. " +
         "Greetings, general information and questions about an existing submitted request remain ordinary replies; do not issue a new form for them. " +

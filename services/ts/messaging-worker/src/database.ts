@@ -1,5 +1,7 @@
 import {
   digitalFormReply,
+  existingDigitalForm,
+  verifiedExistingDigitalFormReply,
   startDigitalForm,
   verifiedDigitalFormReply,
 } from "./digital-service-form-action.js";
@@ -171,6 +173,7 @@ import {
   conversationReplyCodes,
   enforceStandaloneCallbackConsent,
   deferUnconfirmedContextHandoff,
+  confirmsHumanHandoff,
   explicitlyRequestsImmediateCall,
   factDigest,
   groundAiReply,
@@ -418,8 +421,13 @@ async function processInbound(
             transaction,
             result.conversationId,
           );
-          if (formReply && realWhatsAppEnabled)
-            await resumeDigitalFormFollowup(transaction, result.messageId);
+          const formResumed =
+            formReply &&
+            realWhatsAppEnabled &&
+            !confirmsHumanHandoff(envelope.text, "") &&
+            !explicitlyRequestsImmediateCall(envelope.text)
+              ? await resumeDigitalFormFollowup(transaction, result.messageId)
+              : false;
           const unsupportedStorage = unsupportedInboundMedia(envelope);
           if (
             (unsupportedStorage || envelope.contentType === "video") &&
@@ -432,7 +440,7 @@ async function processInbound(
                   : { agentMediaStatus: "unsupported" },
               )}::jsonb
               WHERE id=${result.messageId}::uuid`;
-            if (aiEnabled && realWhatsAppEnabled && !formReply)
+            if (aiEnabled && realWhatsAppEnabled && !formResumed)
               await transaction`
               INSERT INTO ops.jobs(tenant_id,queue,job_type,reference_type,reference_id,payload,
                 idempotency_key,max_attempts,priority)
@@ -557,7 +565,7 @@ async function processInbound(
           `;
           const debounced =
             aiEnabled &&
-            !formReply &&
+            !formResumed &&
             envelope.contentType !== "audio" &&
             envelope.contentType !== "video"
               ? await queueDebouncedReply(transaction, {
@@ -566,7 +574,7 @@ async function processInbound(
                   eventId: event.id,
                 })
               : { handled: false };
-          if (!debounced.handled && !formReply)
+          if (!debounced.handled && !formResumed)
             await transaction`
             INSERT INTO ops.jobs
               (tenant_id, queue, job_type, reference_type, reference_id, payload,
@@ -3137,14 +3145,9 @@ async function processJob(
 ): Promise<void> {
   let openingMenuRoute: OpeningMenuRoute | undefined;
   if (
-    [
-      "whatsapp.ai.reply",
-      "whatsapp.ai.call",
-      "whatsapp.audio.transcribe",
-      "whatsapp.unsupported.reply",
-      "field_service.intake.extract",
-      "support.postcall.reply",
-    ].includes(job.job_type)
+    ["field_service.intake.extract", "support.postcall.reply"].includes(
+      job.job_type,
+    )
   ) {
     const conversationId =
       record(job.payload).conversationId ??
@@ -5432,7 +5435,12 @@ async function processWhatsAppAiReply(
         | GroundedReply["evidence"]
         | {
             kind: "receipt";
-            operation: "handoff" | "callback" | "ticket" | "service_form";
+            operation:
+              | "handoff"
+              | "callback"
+              | "ticket"
+              | "service_form"
+              | "service_form_existing";
             resourceId: string;
             formUrl?: string;
           }
@@ -5469,6 +5477,7 @@ async function processWhatsAppAiReply(
                     triggerMessageId: work.triggerMessageId,
                   })})
         `;
+      let recordFormFollowup = false;
       if (decision.action === "service_form") {
         if (
           !work.digitalServiceFormAvailable ||
@@ -5482,19 +5491,57 @@ async function processWhatsAppAiReply(
           "service.intake",
           work,
         );
-        const form = await startDigitalForm(
+        const existing = await existingDigitalForm(
           transaction,
-          job,
-          workerId,
+          work.conversationId,
+          work.triggerMessageId,
           automation.publicSiteUrl ?? "",
         );
-        responseText = digitalFormReply(form.url, work.locale);
-        evidence = {
-          kind: "receipt",
-          operation: "service_form",
-          resourceId: form.intakeId,
-          formUrl: form.url,
-        };
+        const form = existing
+          ? { ...existing, reused: true }
+          : await transaction
+              .savepoint((tx) =>
+                startDigitalForm(
+                  tx,
+                  job,
+                  workerId,
+                  automation.publicSiteUrl ?? "",
+                ),
+              )
+              .catch((error: unknown) => {
+                if (
+                  error instanceof postgres.PostgresError &&
+                  [
+                    "an outstanding service form already exists",
+                    "name and fault are required before the form link",
+                  ].includes(error.message)
+                )
+                  return undefined;
+                throw error;
+              });
+        if (form === undefined) {
+          responseText = work.locale.startsWith("he")
+            ? "הקישור לטופס הקודם אינו זמין לשליחה למספר הזה כרגע. מה תרצה לברר לגבי הפנייה?"
+            : "The previous form link is unavailable for this number right now. What would you like to know about your request?";
+          const unavailable = groundAiReply(
+            { action: "reply", text: responseText },
+            [],
+            work.locale,
+            await recentDeliveredReplies(transaction, work.conversationId),
+            triggerText,
+          );
+          responseText = unavailable.text;
+          evidence = unavailable.evidence;
+        } else {
+          recordFormFollowup = existing === undefined;
+          responseText = digitalFormReply(form.url, work.locale);
+          evidence = {
+            kind: "receipt",
+            operation: form.reused ? "service_form_existing" : "service_form",
+            resourceId: form.intakeId,
+            formUrl: form.url,
+          };
+        }
       }
       if (decision.action === "ticket_open") {
         if (!work.opensTickets) throw new AiPrincipalDeniedError();
@@ -5669,10 +5716,7 @@ async function processWhatsAppAiReply(
           },
           work.channelConfiguration,
         );
-        if (
-          evidence.kind === "receipt" &&
-          evidence.operation === "service_form"
-        )
+        if (evidence.kind === "receipt" && recordFormFollowup)
           await transaction`SELECT service.record_intake_followup(${evidence.resourceId}::uuid,'admitted',${outbound.messageId}::uuid,NULL)`;
         const captured = await transaction<{ authorized: boolean }[]>`
           SELECT platform.capture_outbound_execution_authority(
@@ -5778,8 +5822,6 @@ async function requireAiTurnOwnership(
   transaction: postgres.TransactionSql,
   work: AiWork,
 ): Promise<void> {
-  if (await digitalServiceFormPending(transaction, work.conversationId))
-    throw new TypeError("digital_form_pending");
   await transaction`SELECT set_config('app.current_user',${work.authorizedUserId},true)`;
   const owned = await transaction<{ id: string }[]>`
     SELECT c.id FROM messaging.conversations c
@@ -6659,7 +6701,12 @@ async function requireGroundedOutbound(
   try {
     // A committed form is a durable requested action, not a stale model reply.
     // The exact form receipt, owner, consent and expiry are rechecked below.
-    if (!(evidence.kind === "receipt" && evidence.operation === "service_form"))
+    if (!(
+      evidence.kind === "receipt" &&
+      ["service_form", "service_form_existing"].includes(
+        String(evidence.operation),
+      )
+    ))
       await requireCurrentTrigger(
         transaction,
         row.conversation_id,
@@ -6780,6 +6827,18 @@ async function requireGroundedOutbound(
       typeof evidence.formUrl === "string"
     ) {
       expected = await verifiedDigitalFormReply(transaction, {
+        intakeId: evidence.resourceId,
+        conversationId: row.conversation_id,
+        triggerMessageId: metadata.triggerMessageId,
+        messageId: row.message_id,
+        url: evidence.formUrl,
+        locale: metadata.locale,
+      });
+    } else if (
+      evidence.operation === "service_form_existing" &&
+      typeof evidence.formUrl === "string"
+    ) {
+      expected = await verifiedExistingDigitalFormReply(transaction, {
         intakeId: evidence.resourceId,
         conversationId: row.conversation_id,
         triggerMessageId: metadata.triggerMessageId,

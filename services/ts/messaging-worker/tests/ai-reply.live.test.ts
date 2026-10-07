@@ -557,7 +557,7 @@ describe.skipIf(sourceUrl === undefined)(
         })
         .mockResolvedValueOnce({
           action: "reply",
-          text: "Is the router light steady or blinking?",
+          text: "Let us check the connection.\n\nIs the router light steady or blinking?",
         })
         .mockResolvedValueOnce({
           action: "request_call",
@@ -849,7 +849,7 @@ describe.skipIf(sourceUrl === undefined)(
     `;
       expect(outboundText.map((row) => row.content_text)).toEqual([
         "Opening hours: 09:00–17:00.",
-        "Is the router light steady or blinking?",
+        "Let us check the connection.\n\nIs the router light steady or blinking?",
         'To request a call, please reply in a separate message: "Please call me now."',
         "Understood. I will not place a call.",
         "I did not understand that. What problem are you seeing?",

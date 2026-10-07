@@ -25,9 +25,11 @@ export async function digitalServiceFormPending(
 export async function resumeDigitalFormFollowup(
   sql: postgres.TransactionSql,
   messageId: string,
-): Promise<void> {
-  const candidates = await sql<{ id: string; conversation_id: string }[]>`
-    SELECT intake.id, conversation.id AS conversation_id
+): Promise<boolean> {
+  const candidates = await sql<
+    { id: string; conversation_id: string; followup_status: string }[]
+  >`
+    SELECT intake.id, conversation.id AS conversation_id,intake.followup_status
     FROM messaging.messages message
     JOIN messaging.conversations conversation ON conversation.tenant_id=message.tenant_id
       AND conversation.id=message.conversation_id
@@ -49,7 +51,10 @@ export async function resumeDigitalFormFollowup(
       AND message.content_type<>'event' AND conversation.removed_from_inbox_at IS NULL
       AND conversation.customer_service_window_expires_at>clock_timestamp()
       AND intake.status IN ('collecting','awaiting_confirmation')
-      AND intake.followup_status='blocked_window' AND intake.source_session_id IS NOT NULL
+      AND (intake.followup_status='blocked_window' OR (intake.followup_status='queued' AND EXISTS(
+        SELECT 1 FROM ops.jobs followup WHERE followup.tenant_id=intake.tenant_id AND followup.reference_id=intake.id
+          AND followup.job_type='field_service.intake_followup' AND followup.status IN ('queued','running','retry'))))
+      AND intake.source_session_id IS NOT NULL
       AND intake.workflow_policy#>>'{whatsappFollowUp,mode}'='form'
       AND intake.workflow_policy#>>'{whatsappFollowUp,enabled}'='true'
       AND platform.current_tenant_feature_enabled('whatsapp')
@@ -63,7 +68,8 @@ export async function resumeDigitalFormFollowup(
   `;
   // Several outstanding inquiries require staff correlation, not several links.
   const intake = candidates.length === 1 ? candidates[0] : undefined;
-  if (intake === undefined) return;
+  if (intake === undefined) return false;
+  if (intake.followup_status === "queued") return true;
   const jobs = await sql<{ id: string }[]>`
     INSERT INTO ops.jobs(tenant_id,queue,job_type,reference_type,reference_id,payload,
       idempotency_key,max_attempts,priority)
@@ -79,11 +85,12 @@ export async function resumeDigitalFormFollowup(
         AND ops.jobs.reference_id=EXCLUDED.reference_id
     RETURNING id
   `;
-  if (jobs.length !== 1) return;
+  if (jobs.length !== 1) return false;
   await sql`UPDATE service.intake_drafts SET followup_status='queued',followup_error_safe=NULL,
     conversation_id=coalesce(conversation_id,${intake.conversation_id}::uuid),updated_at=clock_timestamp()
     WHERE id=${intake.id}::uuid AND tenant_id=platform.current_tenant_id() AND followup_status='blocked_window'`;
   await sql`INSERT INTO audit.records(tenant_id,actor_service,action,target_type,target_id,metadata)
     VALUES(platform.current_tenant_id(),'messaging-worker','field_service.intake.form_window_reopened',
       'intake_draft',${intake.id}::uuid,${sql.json({ messageId, jobId: jobs[0]?.id })})`;
+  return true;
 }

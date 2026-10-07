@@ -246,9 +246,10 @@ describe.skipIf(sourceUrl === undefined)(
             ? {
                 aiProvider: {
                   decide: () =>
-                    Promise.reject(
-                      new Error("Pending digital form must not invoke AI"),
-                    ),
+                    Promise.resolve({
+                      action: "reply" as const,
+                      text: "אפשר להמשיך כאן בשאלות על הפנייה.",
+                    }),
                 },
                 fieldServiceProvider: {
                   providerName: "fixture",
@@ -360,8 +361,13 @@ describe.skipIf(sourceUrl === undefined)(
       expect(
         await admin`SELECT id FROM support.tickets WHERE intake_draft_id=${intake.id}::uuid`,
       ).toEqual([]);
+      await acceptInbound("972502345697", "אפשר לשלוח שוב את הקישור?");
+      const resent = await runWorker(false, { aiProvider: { decide } });
+      expect(resent).toHaveLength(1);
+      expect(resent[0]?.delivery).toEqual(delivery);
       await acceptInbound("972502345697", "מאשר");
-      await runWorker(true);
+      const waitingReply = await runWorker(true);
+      expect(waitingReply).toHaveLength(1);
       expect(
         await admin`SELECT id FROM service.intake_drafts WHERE conversation_id=${intake.conversation_id}::uuid`,
       ).toHaveLength(1);
@@ -404,11 +410,69 @@ describe.skipIf(sourceUrl === undefined)(
       });
       await acceptInbound("972502345697", "קיבלתם את הטופס?");
       await runWorker(false, { aiProvider: { decide } });
-      expect(decide).toHaveBeenCalledTimes(2);
-      expect(decide.mock.calls[1]?.[0].serviceIntake?.caseReference).toBe(
+      expect(decide).toHaveBeenCalledTimes(3);
+      expect(decide.mock.calls[2]?.[0].serviceIntake?.caseReference).toBe(
         submitted.reference,
       );
     });
+
+    it.each([
+      { phone: "972502346101", existing: false },
+      { phone: "972502346102", existing: false },
+      { phone: "972502346103", existing: true },
+      { phone: "972502346104", existing: true },
+    ])(
+      "routes independent forms and follow-up replies for $phone (existing contact: $existing)",
+      async ({ phone, existing }) => {
+        const knownContact = randomUUID();
+        if (existing) {
+          await admin`INSERT INTO crm.contacts(id,tenant_id,name,whatsapp_consent) VALUES(${knownContact}::uuid,${tenantId}::uuid,'Existing fictional customer','granted')`;
+          await admin`INSERT INTO crm.contact_channel_identities(tenant_id,contact_id,channel,normalized_value,validation_status,is_primary)
+          VALUES(${tenantId}::uuid,${knownContact}::uuid,'whatsapp',${`+${phone}`},'valid',true)`;
+        }
+        const trigger = await acceptInbound(
+          phone,
+          "המסך מרצד, אפשר קישור לטופס שירות?",
+        );
+        const sent = await runWorker(false, {
+          aiProvider: {
+            decide: () => Promise.resolve({ action: "service_form" as const }),
+          },
+        });
+        expect(sent).toHaveLength(1);
+        expect(sent[0]?.recipient).toBe(`+${phone}`);
+        const source = await admin<
+          { contact_id: string; intake_id: string; token_hash: string }[]
+        >`
+        SELECT conversation.contact_id,intake.id AS intake_id,form.token_hash
+        FROM messaging.messages message JOIN messaging.conversations conversation ON conversation.id=message.conversation_id
+        JOIN service.whatsapp_form_sources source ON source.trigger_message_id=message.id
+        JOIN service.intake_drafts intake ON intake.id=source.intake_id
+        JOIN service.digital_intake_forms form ON form.intake_id=intake.id WHERE message.provider_message_id=${trigger}`;
+        expect(source).toHaveLength(1);
+        if (existing) expect(source[0]?.contact_id).toBe(knownContact);
+        expect(
+          await admin`SELECT intake_id FROM service.digital_intake_forms WHERE token_hash=${source[0]?.token_hash ?? ""}`,
+        ).toHaveLength(1);
+        expect(
+          await admin`SELECT id FROM service.cases WHERE intake_draft_id=${source[0]?.intake_id ?? ""}::uuid`,
+        ).toHaveLength(0);
+        await acceptInbound(phone, "אתה כאן? יש לי שאלה");
+        expect(await runWorker(true)).toHaveLength(1);
+        await acceptInbound(phone, "שלח שוב את הקישור");
+        const resent = await runWorker(false, {
+          aiProvider: {
+            decide: () => Promise.resolve({ action: "service_form" as const }),
+          },
+        });
+        expect(resent).toHaveLength(1);
+        expect(resent[0]?.recipient).toBe(`+${phone}`);
+        expect(resent[0]?.delivery).toEqual(sent[0]?.delivery);
+        expect(
+          await admin`SELECT id FROM service.intake_drafts WHERE reporting_contact_id=${source[0]?.contact_id ?? ""}::uuid`,
+        ).toHaveLength(1);
+      },
+    );
 
     it("does not discard an already committed form link when another message arrives before delivery", async () => {
       const decide = vi
@@ -425,8 +489,9 @@ describe.skipIf(sourceUrl === undefined)(
           }
         },
       });
-      expect(sent).toHaveLength(1);
-      expect(decide).toHaveBeenCalledOnce();
+      expect(sent.length).toBeGreaterThanOrEqual(1);
+      expect(sent[0]?.delivery.kind).toBe("text");
+      expect(decide).toHaveBeenCalledTimes(2);
     });
 
     it.each(["human", "consent", "grant"] as const)(
@@ -641,13 +706,35 @@ describe.skipIf(sourceUrl === undefined)(
             alternate.slice(1),
             "שם החנות: אין הרשאה לקבל קישור למתקשר אחר",
           );
-          expect(await runWorker(true)).toEqual([]);
+          expect(
+            (await runWorker(true)).every(
+              (item) =>
+                item.delivery.kind === "text" &&
+                !item.delivery.text.includes("https://"),
+            ),
+          ).toBe(true);
           expect(
             await admin`SELECT followup_status FROM service.intake_drafts WHERE id=${intakeId}::uuid`,
           ).toEqual([{ followup_status: "blocked_window" }]);
+          await acceptInbound(alternate.slice(1), "תשלח לי את הקישור לטופס");
+          const refusedLink = await runWorker(false, {
+            aiProvider: {
+              decide: () =>
+                Promise.resolve({ action: "service_form" as const }),
+            },
+          });
+          expect(
+            refusedLink,
+            JSON.stringify(
+              await admin`SELECT job_type,status,last_error_safe FROM ops.jobs WHERE status IN ('dead','retry','cancelled') ORDER BY created_at DESC LIMIT 8`,
+            ),
+          ).toHaveLength(1);
+          expect(
+            refusedLink[0]?.delivery.kind === "text" &&
+              refusedLink[0].delivery.text.includes("אינו זמין לשליחה"),
+          ).toBe(true);
         }
         const jobsToGuard = [
-          "whatsapp.ai.reply",
           "field_service.intake.extract",
           "support.postcall.reply",
         ];
@@ -666,7 +753,14 @@ describe.skipIf(sourceUrl === undefined)(
           { reference: string; title: string; fault_description: string }[]
         >`SELECT reference, title, fault_description FROM service.cases WHERE intake_draft_id=${intakeId}::uuid`;
         expect(cases).toEqual([]);
-        if (!followupStatus.startsWith("blocked")) expect(sent).toEqual([]);
+        if (!followupStatus.startsWith("blocked"))
+          expect(
+            sent.some(
+              (item) =>
+                item.delivery.kind === "text" &&
+                item.delivery.text.includes("אפשר להמשיך"),
+            ),
+          ).toBe(true);
         const draft = await admin<
           { status: string; collected_fields: unknown }[]
         >`
@@ -684,13 +778,17 @@ describe.skipIf(sourceUrl === undefined)(
         SELECT job_type,status,last_error_safe FROM ops.jobs
         WHERE tenant_id=${tenantId}::uuid AND reference_id=${conversationId}::uuid
           AND job_type IN ('whatsapp.ai.reply','field_service.intake.extract','support.postcall.reply')`;
-        expect(jobs).toHaveLength(3);
         expect(
-          jobs.every(
-            (job) =>
-              job.status === "cancelled" &&
-              job.last_error_safe === "digital_form_pending",
-          ),
+          jobs.filter((job) => job.job_type !== "whatsapp.ai.reply"),
+        ).toHaveLength(2);
+        expect(
+          jobs
+            .filter((job) => job.job_type !== "whatsapp.ai.reply")
+            .every(
+              (job) =>
+                job.status === "cancelled" &&
+                job.last_error_safe === "digital_form_pending",
+            ),
         ).toBe(true);
         if (followupStatus !== "admitted") {
           const eligibility = await admin<
@@ -746,7 +844,33 @@ describe.skipIf(sourceUrl === undefined)(
           expect(forms).toHaveLength(1);
           expect(forms[0]?.token_hash).not.toBe(fragment.get("token"));
           await acceptInbound(caller.slice(1), "שם החנות: מקום אחר");
-          expect(await runWorker(true)).toEqual([]);
+          expect(await runWorker(true)).toHaveLength(1);
+          await acceptInbound(caller.slice(1), "אפשר שוב את הקישור?");
+          const resend = await runWorker(false, {
+            aiProvider: {
+              decide: () =>
+                Promise.resolve({ action: "service_form" as const }),
+            },
+          });
+          expect(resend).toHaveLength(1);
+          expect(
+            resend[0]?.delivery.kind === "text" &&
+              resend[0].delivery.text.includes(url.toString()),
+          ).toBe(true);
+          // An expired link is renewed on the same intake, never a duplicate case.
+          await admin`UPDATE service.digital_intake_forms SET expires_at=now()-interval '1 minute' WHERE intake_id=${intakeId}::uuid`;
+          await acceptInbound(caller.slice(1), "הקישור פג תוקף, שלח שוב");
+          const renewed = await runWorker(false, {
+            aiProvider: {
+              decide: () =>
+                Promise.resolve({ action: "service_form" as const }),
+            },
+          });
+          expect(renewed).toHaveLength(1);
+          expect(
+            renewed[0]?.delivery.kind === "text" &&
+              renewed[0].delivery.text.includes(url.toString()),
+          ).toBe(false);
           expect(
             await admin`SELECT 1 FROM service.cases WHERE intake_draft_id=${intakeId}::uuid`,
           ).toHaveLength(0);

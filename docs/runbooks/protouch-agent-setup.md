@@ -88,7 +88,7 @@ the existing receipt. Name, location, free-text fault and photos remain in the f
 Acceptance must cover a first-time caller with no WhatsApp conversation, a
 least-privileged voice admission, worker delivery, web-role submission and summary
 completion. Confirm real Meta delivery receipts, one dashboard ticket and photos,
-then verify the AI answers again after the pending form is submitted. Never treat
+then verify the AI answers both while the form is pending and after submission. Never treat
 an HTTP acceptance alone as delivered or mark the full voice path verified without
 a real call. Test traffic is limited to the operator-authorized recipient.
 
@@ -103,6 +103,16 @@ required; the model cannot choose a recipient or provide the URL. Issuance,
 outbound admission and the intake receipt commit together. Delivery rechecks
 ownership, consent, tenant/channel authority, the exact form hash and expiry.
 A newer message cannot discard an already committed form as a stale prose reply.
+
+Revision `f3a8c2d91750` removes pending-form silence. A waiting form blocks only
+chat-based intake extraction and case submission, not ordinary AI replies, audio
+understanding or an explicitly requested handoff. A repeated link request reuses
+the latest valid form for the exact verified sender; an expired link renews that
+same eligible intake. It must never use another phone identity's link, even when
+both identities belong to one CRM contact. Window-reopening follow-up delivery is
+coalesced with AI replies so one request does not receive two competing answers.
+Test new customers, existing contacts, multiple outstanding forms, expired links,
+revocation and repeated submission; no recipient-specific exception is used.
 
 No case is created on greeting, a promise, a link request or a plain WhatsApp
 confirmation. The customer submits the existing digital form to create one

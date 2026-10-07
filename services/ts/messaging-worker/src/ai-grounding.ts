@@ -378,9 +378,13 @@ const unsupportedDeliveryPromise =
   /\b(?:will|shall|going to|about to)\s+(?:be\s+)?(?:send|sent|open|opened|create|created)\b|\b(?:I|we)['’]ll\s+(?:send|open|create)\b|(?:אשלח|נשלח|יישלח|ישלח|תישלח|תשלח|אפתח|נפתח)\s+(?:לך|לכם|אליך|אליכם|את|קישור|לינק|טופס|קריא[הת]|בקשה)|(?:שלחתי|שלחנו)|\bsent\b/iu;
 
 function passesConversationalSafety(
-  text: string,
+  value: string,
   committedRecord = false,
 ): boolean {
+  // Paragraph breaks are ordinary message formatting. Scan their words as
+  // one line so a break cannot hide a forbidden claim; all other control
+  // characters remain rejected. Keep the original formatting for delivery.
+  const text = value.replace(/\r?\n/gu, " ");
   return (
     // The platform scope boundary shared with voice: no model, provider,
     // prompt, tool, secret or other-customer disclosure reaches a customer.
@@ -389,7 +393,7 @@ function passesConversationalSafety(
     !unsupportedDeliveryPromise.test(text) &&
     (committedRecord || !recordClaimPattern.test(text)) &&
     text.length > 0 &&
-    text.length <= 1000 &&
+    value.length <= 1000 &&
     !/[\p{Cc}\p{Cf}<>`]/u.test(text) &&
     !/(?:system|developer|assistant|tool)\s*:|ignore.{0,40}(?:instructions|rules)|override|prompt|json|queue|\bLLM\b|\bAI model\b/iu.test(
       text,
@@ -676,7 +680,7 @@ export function enforceStandaloneCallbackConsent(
     : decision;
 }
 
-function confirmsHumanHandoff(
+export function confirmsHumanHandoff(
   customerText: string,
   previousAssistantText: string,
 ): boolean {
