@@ -424,7 +424,12 @@ async function processInbound(
           const formResumed =
             formReply &&
             realWhatsAppEnabled &&
-            !confirmsHumanHandoff(envelope.text, "") &&
+            !confirmsHumanHandoff(
+              envelope.text,
+              (
+                await recentDeliveredReplies(transaction, result.conversationId)
+              )[0] ?? "",
+            ) &&
             !explicitlyRequestsImmediateCall(envelope.text)
               ? await resumeDigitalFormFollowup(transaction, result.messageId)
               : false;

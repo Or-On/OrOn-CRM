@@ -10,6 +10,7 @@ import {
   readDigitalServiceForm,
   submitDigitalServiceForm,
   queueWhatsAppOutbound,
+  setConversationOwnership,
 } from "@or-on/crm";
 
 import { createMessagingStore } from "../src/database.js";
@@ -695,6 +696,46 @@ describe.skipIf(sourceUrl === undefined)(
         expect(
           await admin`SELECT id FROM messaging.channels WHERE tenant_id=${tenantId}::uuid AND kind='whatsapp' AND provider='meta' AND status='active'`,
         ).toHaveLength(1);
+        if (followupStatus === "blocked_window") {
+          await admin`INSERT INTO messaging.messages(tenant_id,conversation_id,direction,sender_type,content_type,content_text,status,created_at)
+            VALUES(${tenantId}::uuid,${conversationId}::uuid,'outbound','agent','text',
+              'המידע המאושר הזמין לי לא מספיק כדי להשיב בוודאות. האם לבקש בדיקה של נציג?','sent',clock_timestamp()-interval '5 seconds')`;
+          await acceptInbound(caller.slice(1), "כן בבקשה");
+          const transfer = vi
+            .fn<WhatsAppAiProvider["decide"]>()
+            .mockResolvedValue({
+              action: "handoff",
+              reasonCode: "human_requested",
+              text: "",
+            });
+          expect(
+            await runWorker(false, { aiProvider: { decide: transfer } }),
+          ).toHaveLength(1);
+          expect(transfer).toHaveBeenCalledOnce();
+          expect(
+            await admin`SELECT ownership_mode FROM messaging.conversations WHERE id=${conversationId}::uuid`,
+          ).toEqual([{ ownership_mode: "human" }]);
+          expect(
+            await admin`SELECT followup_status FROM service.intake_drafts WHERE id=${intakeId}::uuid`,
+          ).toEqual([{ followup_status: "blocked_window" }]);
+          // A fictional operator returns the conversation to AI before continuing the fixture.
+          const selected = await admin<
+            { id: string }[]
+          >`SELECT version.id FROM agents.agent_profile_versions version JOIN crm.tenant_settings settings ON settings.whatsapp_ai_agent_profile_id=version.agent_profile_id WHERE settings.tenant_id=${tenantId}::uuid AND version.published_at IS NOT NULL ORDER BY version.version DESC LIMIT 1`;
+          await admin.begin(async (tx) => {
+            await tx`SET LOCAL ROLE platform_web`;
+            await tx`SELECT set_config('app.current_user',${userId},true)`;
+            expect(
+              await setConversationOwnership(
+                tx,
+                conversationId,
+                userId,
+                "ai",
+                selected[0]?.id ?? "",
+              ),
+            ).toBe(true);
+          });
+        }
         if (followupStatus === "blocked_existing")
           await admin`INSERT INTO ops.jobs(tenant_id,queue,job_type,reference_type,reference_id,payload,idempotency_key,status,completed_at)
           VALUES(${tenantId}::uuid,'messaging','field_service.intake_followup','intake_draft',${intakeId}::uuid,'{}'::jsonb,${`service-followup:${intakeId}`},'succeeded',now())`;
