@@ -290,8 +290,8 @@ async def test_configured_field_operations_end_to_end(acceptance):
     await _sql(connection, "SET LOCAL ROLE platform_voice")
     sent = await tools.send_form({"customerAgreed": True})
     assert sent["ok"] and sent["receipt"]["status"] == "queued"
-    assert "הבקשה לשליחת הקישור נקלטה" in sent["closing"]
-    assert "תיפתח אחרי מילוי הטופס" in sent["closing"]
+    assert "נקלטה" not in sent["closing"]
+    assert "למלא את הטופס וללחוץ על שליחה" in sent["closing"]
     await _sql(connection, "RESET ROLE")
     await _sql(connection, "SET LOCAL ROLE platform_voice")
     assert await runtime.finalize(context.session_id, context.tenant_id, status=SessionStatus.ENDED)

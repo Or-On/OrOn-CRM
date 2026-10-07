@@ -96,6 +96,7 @@ from oron_agent.scope_guard import (
     background_event_recorder,
 )
 from oron_agent.service_intake import build_voice_service_intake, service_intake_instruction
+from oron_agent.service_intake_context import ServiceIntakeContext
 from oron_agent.session_recorder import SessionRecorder, finish_after_cancellation
 from oron_agent.spoken_safety import BusinessClaimGuardFilter
 from oron_agent.storage import build_artifact_store, save_audio_file
@@ -694,7 +695,9 @@ async def run_bot(
     caller_language_context = CallerLanguageContextProcessor(conversation_language)
     response_language = ResponseLanguageTTSProcessor(conversation_language)
     tool_call_guard = HallucinatedToolCallGuard()
-    turn_planner = HebrewTurnPlanner()
+    turn_planner = HebrewTurnPlanner(
+        defer_tool_preambles=service_intake is not None and service_intake.form_mode
+    )
     # Artifacts are staged locally during the call and uploaded at teardown.
     transcript_handler = TranscriptHandler(output_file=session_dir.transcript)
     # Stereo: caller on the left channel, agent on the right. A mixed mono file
@@ -772,6 +775,9 @@ async def run_bot(
         if voice_control
         else None,
         ownership_model=VoiceControlGate(voice_control) if voice_control else None,
+        service_intake_context=ServiceIntakeContext(service_intake)
+        if service_intake is not None and service_intake.form_mode
+        else None,
         ownership_generated=VoiceControlGate(voice_control, generated=True)
         if voice_control
         else None,

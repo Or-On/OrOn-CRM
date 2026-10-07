@@ -585,6 +585,91 @@ def _agree_to_form(tools, turns, text="כן, תשלחי לי בבקשה קישו
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("answer", ["כן. כן.", "כן, אפשר", "אפשר."])
+async def test_committed_consent_reaches_tools_before_delayed_turn_stop(answer):
+    from oron_agent.service_intake_context import ServiceIntakeContext
+    from pipecat.frames.frames import LLMContextFrame
+    from pipecat.processors.aggregators.llm_context import LLMContext
+    from pipecat.processors.frame_processor import FrameDirection
+
+    sessions, turns = _form_sessions(), AcceptedTurns()
+    tools = await build_voice_service_intake(
+        sessions, _context(), {"capabilities": ["service.intake"]}, turns, {}
+    )
+    assert tools is not None
+    processor = ServiceIntakeContext(tools)
+    processor.push_frame = AsyncMock()
+    context = LLMContext([{"role": "user", "content": "שמי דנה והמסך מרצד"}])
+
+    async def observe(*, speculation=False):
+        context.add_message({"role": "system", "content": "Refreshed approved evidence"})
+        await processor.process_frame(
+            LLMContextFrame(context, speculation=speculation), FrameDirection.DOWNSTREAM
+        )
+
+    await observe()
+    intake = str(uuid4())
+    sessions.capture_service_intake.return_value = {"intakeId": intake, "status": "collecting"}
+    saved = await tools.capture(
+        {"fields": {"customerName": "דנה", "faultDescription": "המסך מרצד"}, "confirmed": False}
+    )
+    assert saved["ok"] and turns.current is None
+    node = {"name": "talk", "task_messages": [], "functions": []}
+    first = tools.consent_node(node)
+    assert len(first["pre_actions"]) == 1 and not first["respond_immediately"]
+
+    # Tool re-entry and speculative text are not a fresh answer to consent.
+    await observe()
+    assert not (await tools.send_form({"customerAgreed": True}))["ok"]
+    replay = tools.consent_node(node)
+    assert replay["pre_actions"] == [] and not replay["respond_immediately"]
+    context.add_message({"role": "assistant", "content": first["pre_actions"][0]["text"]})
+    context.add_message({"role": "user", "content": answer})
+    await observe(speculation=True)
+    assert not (await tools.send_form({"customerAgreed": True}))["ok"]
+    sessions.request_service_followup.assert_not_awaited()
+
+    # Early inference already has the committed answer; turn-stop is still pending.
+    await observe()
+    turns.accept()
+    tools.record_caller_turn("old delayed transcript")
+    sessions.request_service_followup.return_value = {
+        "status": "queued",
+        "jobId": str(uuid4()),
+        "intakeId": intake,
+    }
+    sent = await tools.send_form({"customerAgreed": True})
+    assert sent["ok"]
+    sessions.request_service_followup.assert_awaited_once()
+    assert "נקלטה" not in sent["closing"] and "שליחה" in sent["closing"]
+    assert tools.consent_node(node)["pre_actions"] == []
+
+
+@pytest.mark.asyncio
+async def test_context_replay_cannot_turn_an_earlier_yes_into_new_consent():
+    from oron_agent.service_intake_context import ServiceIntakeContext
+    from pipecat.frames.frames import LLMContextFrame
+    from pipecat.processors.aggregators.llm_context import LLMContext
+    from pipecat.processors.frame_processor import FrameDirection
+
+    sessions, turns = _form_sessions(saved=True), AcceptedTurns()
+    tools = await build_voice_service_intake(
+        sessions, _context(), {"capabilities": ["service.intake"]}, turns, {}
+    )
+    assert tools is not None
+    processor = ServiceIntakeContext(tools)
+    processor.push_frame = AsyncMock()
+    messages = [{"role": "user", "content": "כן"}]
+    await processor.process_frame(LLMContextFrame(LLMContext(messages)), FrameDirection.DOWNSTREAM)
+    tools.consent_node({"name": "talk", "task_messages": [], "functions": []})
+    await processor.process_frame(
+        LLMContextFrame(LLMContext(list(messages))), FrameDirection.DOWNSTREAM
+    )
+    assert not (await tools.send_form({"customerAgreed": True}))["ok"]
+    sessions.request_service_followup.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_form_policy_only_exposes_name_fault_and_web_submission_contract():
     sessions = _form_sessions()
     sessions.get_service_intake_context.return_value["policy"]["emergency"] = {"enabled": True}
@@ -683,8 +768,8 @@ async def test_form_queue_requires_both_durable_facts_and_cannot_save_an_empty_i
         c.kwargs["confirmed"] is False for c in sessions.capture_service_intake.await_args_list
     )
     sessions.request_service_followup.assert_awaited_once_with(context, customer_agreed=True)
-    assert "הבקשה לשליחת הקישור נקלטה" in result["closing"]
-    assert "לחיצה על שליחה" in result["closing"]
+    assert "נקלטה" not in result["closing"]
+    assert "ללחוץ על שליחה" in result["closing"]
     assert safe_spoken_text(result["closing"], "he") == (result["closing"], False)
     assert validate_output(result["closing"]).allowed
 

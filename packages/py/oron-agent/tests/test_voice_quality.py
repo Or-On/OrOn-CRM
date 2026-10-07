@@ -32,10 +32,11 @@ async def test_reviewed_protouch_speech_has_pronunciation_hints_without_changing
         json.loads(path.read_text(encoding="utf-8"))["agent"]["quality"]
     )
     transform = make_speech_transformer(quality, lambda: None, get_language=lambda: "he")
-    text = "אפשר לשלוח בווטסאפ קישור לטופס קצר? המסך מרצד."
+    text = "אפשר לשלוח קישור לטופס קצר ב־WhatsApp? המסך מרצד."
     spoken = await transform(text, "sentence")
     assert "קִישּׁוּר" in spoken and "לְטוֹפֶס" in spoken and "מְרַצֵּד" in spoken
     assert "תרצה/תרצי" not in spoken
+    assert "WhatsApp" in spoken and "ווֹטְסְאַפּ" not in spoken
     # Keep customer speech at a modest pace; the time saving comes from fewer turns.
     assert 1.0 < quality.speakingPace <= 1.1
     assert "מסך מרצד" in _dumped(build_soniox_context(quality))["terms"]

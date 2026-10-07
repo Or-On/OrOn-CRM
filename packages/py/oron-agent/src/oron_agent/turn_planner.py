@@ -2,7 +2,9 @@
 
 The chunker waits for a sentence, a substantial clause, or a bounded amount of
 text. It never sends individual model tokens to TTS, and it does not wait for a
-complete multi-sentence answer before the first synthesis request.
+complete multi-sentence answer before the first synthesis request by default.
+Short form-intake flows can defer text until tool intent is known, preventing
+spoken acknowledgements from leaking out of otherwise silent tool turns.
 """
 
 from __future__ import annotations
@@ -35,6 +37,7 @@ class NaturalTurnChunker(FrameProcessor):
         min_clause_chars: int = 48,
         max_chunk_chars: int = 220,
         max_turn_chars: int = 8192,
+        defer_tool_preambles: bool = False,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -43,6 +46,7 @@ class NaturalTurnChunker(FrameProcessor):
         self._min_clause_chars = min_clause_chars
         self._max_chunk_chars = max_chunk_chars
         self._max_turn_chars = max_turn_chars
+        self._defer_tool_preambles = defer_tool_preambles
         self._generation = 0
         self._started_ns = 0
         self._first_token_ns: int | None = None
@@ -113,6 +117,8 @@ class NaturalTurnChunker(FrameProcessor):
         return len(text) if final else None
 
     async def _flush_ready(self, *, final: bool) -> None:
+        if self._defer_tool_preambles and not final:
+            return
         while (boundary := self._next_boundary(final=final)) is not None:
             chunk, self._buffer = self._buffer[:boundary], self._buffer[boundary:]
             chunk = chunk.strip()

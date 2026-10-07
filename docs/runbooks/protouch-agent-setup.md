@@ -92,9 +92,40 @@ then verify the AI answers again after the pending form is submitted. Never trea
 an HTTP acceptance alone as delivered or mark the full voice path verified without
 a real call. Test traffic is limited to the operator-authorized recipient.
 
-## Voice quality revision prepared on 2026-10-07
+## Voice consent revision v4 prepared on 2026-10-07
 
-`protouch.voice.json` is the retained v3 composition to validate and publish
+The latest reviewed v3 call asked permission again after the caller had already
+agreed. Pipecat had committed the caller text and started early inference before
+its asynchronous `on_user_turn_stopped` callback advanced the consent fence.
+The tool therefore rejected a real affirmative as stale. Re-entering the consent
+node then replayed its spoken question.
+
+For form-mode intake, `ServiceIntakeContext` now observes non-speculative caller
+context after the ownership gate and before inference. System evidence refreshes
+and tool re-entry do not manufacture a caller answer. The delayed turn-stop
+callback cannot overwrite that committed text. Consent is asked once; retries
+preserve its fence. Both saved facts and a fresh explicit affirmative are still
+required, and queued delivery still does not open a ticket.
+
+The form-mode turn planner also holds short model responses until tool intent is
+known, discarding even complete acknowledgements preceding a silent tool call.
+Other voice agents retain normal streaming. The closing gives only the short
+form-submission instruction and goodbye. Consent uses the Latin brand WhatsApp;
+the previous pointed Hebrew brand replacement was removed. Pace remains 1.06.
+
+Publish the reviewed agent quality and retained `protouch.voice.json` v4 together
+through the normal review path, then update only inbound/outbound voice bindings.
+Keep existing WhatsApp pins and Or-On bindings. Regression coverage includes early
+committed answers, delayed callbacks, speculative text, context replay, ordinary
+streaming and complete tool preambles. Six controlled fake-customer scenarios
+passed against the existing model. Synthesis measured consent at 2.39 seconds
+versus 4.27 seconds for the preceding wording, and the closing at 4.78 seconds.
+These are phrase durations, not end-to-end call latency or human listening
+acceptance; confirm pronunciation on the next authorized real call.
+
+## Voice quality revision v3 prepared on 2026-10-07
+
+The preceding `protouch.voice.json` was the retained v3 composition published
 alongside the voice quality in `protouch.agent.json`. Both are reviewed source
 files, not automatic live configuration. Publish a new immutable agent version,
 then bind the approved inbound/outbound voice processes to its canonical voice

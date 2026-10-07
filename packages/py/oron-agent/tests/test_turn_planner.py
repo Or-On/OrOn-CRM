@@ -47,6 +47,41 @@ async def test_first_complete_sentence_streams_before_response_end(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_form_tool_turn_discards_even_complete_preambles_before_the_tool():
+    chunker = NaturalTurnChunker(defer_tool_preambles=True)
+    chunker.push_frame = AsyncMock()
+    direction = FrameDirection.DOWNSTREAM
+    await chunker.process_frame(LLMFullResponseStartFrame(), direction)
+    await chunker.process_frame(LLMTextFrame("בסדר גמור. אני שולחת לך את הקישור. "), direction)
+    await chunker.process_frame(
+        FunctionCallsStartedFrame(
+            function_calls=[
+                FunctionCallFromLLM(
+                    function_name="send_whatsapp_service_form",
+                    tool_call_id="consent",
+                    arguments={"customerAgreed": True},
+                    context=None,
+                )
+            ]
+        ),
+        direction,
+    )
+    await chunker.process_frame(LLMTextFrame("תוספת מאוחרת."), direction)
+    await chunker.process_frame(LLMFullResponseEndFrame(), direction)
+    assert not any(
+        isinstance(c.args[0], AggregatedTextFrame) for c in chunker.push_frame.call_args_list
+    )
+    await chunker.process_frame(LLMFullResponseStartFrame(), direction)
+    await chunker.process_frame(LLMTextFrame("מה התקלה?"), direction)
+    await chunker.process_frame(LLMFullResponseEndFrame(), direction)
+    assert [
+        c.args[0].text
+        for c in chunker.push_frame.call_args_list
+        if isinstance(c.args[0], AggregatedTextFrame)
+    ] == ["מה התקלה?"]
+
+
+@pytest.mark.asyncio
 async def test_tokens_are_buffered_into_natural_chunks(monkeypatch):
     pushed = await _stream(
         monkeypatch,

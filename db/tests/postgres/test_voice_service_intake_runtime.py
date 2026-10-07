@@ -920,8 +920,8 @@ async def test_form_link_queue_uses_real_durable_job_but_does_not_open_case(
     tools.record_caller_turn("כן בבקשה")
     queued = await tools.send_form({"customerAgreed": True})
     assert queued["ok"] and queued["receipt"]["status"] == "queued"
-    assert "הבקשה לשליחת הקישור נקלטה" in queued["closing"]
-    assert "תיפתח אחרי מילוי הטופס" in queued["closing"]
+    assert "נקלטה" not in queued["closing"]
+    assert "למלא את הטופס וללחוץ על שליחה" in queued["closing"]
     repeated = await tools.send_form({"customerAgreed": True})
     assert repeated["receipt"]["jobId"] == queued["receipt"]["jobId"]
     await connection.execute(text("RESET ROLE"))

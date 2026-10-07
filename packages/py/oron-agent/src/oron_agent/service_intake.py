@@ -66,15 +66,12 @@ _DEFAULT_FORM_FIELDS = ("serviceLocation", "storeName", "customerName")
 
 # A queued request is not evidence of delivery. Only the web submit opens a case.
 _FORM_QUEUED = {
-    "he": "הבקשה לשליחת הקישור נקלטה. קריאת שירות תיפתח אחרי מילוי הטופס "
-    "ולחיצה על שליחה. תודה ולהתראות.",
-    "en": "The request to send your form link is queued. A service case opens after you "
-    "complete the form and press Submit. "
-    "Thank you and goodbye.",
+    "he": "להשלמת הפנייה, יש למלא את הטופס וללחוץ על שליחה. תודה ולהתראות.",
+    "en": "To complete your request, fill in the form and press Submit. Thank you and goodbye.",
 }
 _FORM_CONSENT = {
-    "he": "אפשר לשלוח בווטסאפ קישור לטופס קצר, להשלמת הפרטים וצירוף תמונות?",
-    "en": "May I send a WhatsApp link to a short form for the remaining details and photos?",
+    "he": "אפשר לשלוח קישור לטופס קצר ב־WhatsApp?",
+    "en": "May I send you a short form on WhatsApp?",
 }
 _FORM_DECLINED = {
     "he": "בסדר, לא אבקש לשלוח קישור. קריאת שירות לא נפתחה. תודה ולהתראות.",
@@ -142,7 +139,7 @@ def _explicit_agreement(text: str) -> bool:
             r"(?:(?:כן|בטח|בוודאי|בשמחה|בסדר)(?: (?:כן|בטח|בבקשה|תודה|גמור))*|"
             r"(?:כן |בטח |בסדר )?(?:תשלח|תשלחי|שלח|שלחי|שלחו|אפשר לשלוח)"
             r"(?: (?:לי|בבקשה|קישור|את הקישור|בווטסאפ|בוואטסאפ|טופס|את הטופס))*|"
-            r"(?:yes|sure|okay|ok)(?: please)?|(?:yes )?(?:please )?send"
+            r"(?:כן )?אפשר(?: בבקשה)?|(?:yes|sure|okay|ok)(?: please)?|(?:yes )?(?:please )?send"
             r"(?: me)?(?: the)?(?: link| form)?(?: please)?|go ahead)",
             _plain_utterance(text),
         )
@@ -310,6 +307,8 @@ class VoiceServiceIntake:
         self._intake_id = initial.get("intakeId")
         self._caller_turn: str | None = None
         self._caller_text = ""
+        self.context_authoritative = False
+        self._context_turn = 0
         self._consent_turn: str | None = None
         self._consent_asked = False
         known = initial.get("knownFields")
@@ -326,14 +325,25 @@ class VoiceServiceIntake:
 
     def record_caller_turn(self, text: str) -> None:
         """Use final accepted speech, never model arguments, for closing/turn fences."""
+        if self.context_authoritative:
+            return
         self._caller_turn = self._turns.current
         self._caller_text = text
+
+    def record_committed_context(self, text: str) -> None:
+        """A non-speculative user context reaches tools before turn-stop callbacks."""
+        self._context_turn += 1
+        self._caller_turn = f"context-{self._context_turn}"
+        self._caller_text = text
+
+    def _current_turn(self) -> str | None:
+        return self._caller_turn if self.context_authoritative else self._turns.current
 
     def _fresh_consent_answer(self) -> bool:
         return bool(
             self._consent_asked
             and self._caller_turn is not None
-            and self._caller_turn == self._turns.current
+            and self._caller_turn == self._current_turn()
             and self._caller_turn != self._consent_turn
             and not _unfinished_fact(self._caller_text)
         )
@@ -390,7 +400,7 @@ class VoiceServiceIntake:
     async def capture(self, arguments: dict) -> dict:
         fields = arguments.get("fields", {})
         confirmed = arguments.get("confirmed", False)
-        turn_at_start = self._turns.current
+        turn_at_start = self._current_turn()
         if (
             not isinstance(fields, dict)
             or any(key not in SERVICE_FIELDS for key in fields)
@@ -515,7 +525,7 @@ class VoiceServiceIntake:
         """Queue the server-owned web form link only after the two saved phone facts."""
         if not self.form_mode or not self.followup_configured:
             return {"ok": False, "error": "WhatsApp is unavailable. " + _FORM_UNAVAILABLE}
-        if arguments.get("customerAgreed") is not True or self._turns.current is None:
+        if arguments.get("customerAgreed") is not True or self._current_turn() is None:
             return {"ok": False, "error": "The customer's agreement is required first."}
         missing = [
             key for key in _FORM_CAPTURE_FIELDS if not self._form_saved_fields.get(key, "").strip()
@@ -573,7 +583,9 @@ class VoiceServiceIntake:
 
     def consent_node(self, node: NodeConfig) -> NodeConfig:
         """Ask once without another model generation or replaying entry actions."""
-        self._consent_turn = self._turns.current
+        already_asked = self._consent_asked
+        if not already_asked:
+            self._consent_turn = self._current_turn()
         self._consent_asked = True
         language = "he" if str(self._language()).startswith("he") else "en"
         return {
@@ -582,21 +594,29 @@ class VoiceServiceIntake:
                 *node.get("task_messages", []),
                 {
                     "role": "system",
-                    "content": "Both name and fault are saved. The system has asked consent. "
-                    "Wait for the customer's answer. On agreement call send_whatsapp_service_form "
+                    "content": "Both name and fault are saved. The system has asked consent once. "
+                    "Do not repeat that question or reset consent when saving facts again. "
+                    "Handle the latest answer, or wait if there is no new answer. "
+                    "On agreement call send_whatsapp_service_form "
                     "silently. If they describe or correct a fault, keep listening and save it; "
                     "a negative symptom is not refusal. "
                     "Do not repeat a recap or consent monologue.",
                 },
             ],
-            "pre_actions": [{"type": "tts_say", "text": _FORM_CONSENT[language]}],
+            "pre_actions": []
+            if already_asked
+            else [{"type": "tts_say", "text": _FORM_CONSENT[language]}],
             "post_actions": [],
-            "respond_immediately": False,
+            "respond_immediately": already_asked and self._fresh_consent_answer(),
         }
 
     async def finish_form(self, _arguments: dict) -> dict:
         """A form flow cannot hang up merely because the model says it is done."""
-        if not self.form_mode or self._caller_turn != self._turns.current:
+        if (
+            not self.form_mode
+            or self._caller_turn is None
+            or self._caller_turn != self._current_turn()
+        ):
             return {"ok": False, "error": "A final caller request to stop is required."}
         language = "he" if str(self._language()).startswith("he") else "en"
         if _explicit_stop(self._caller_text):

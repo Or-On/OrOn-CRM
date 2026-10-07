@@ -5,6 +5,14 @@ from pipecat.processors.frame_processor import FrameProcessor
 _PROCESSORS = ("tin", "stt", "ua", "llm", "tts", "tout", "aa")
 
 
+def test_intake_observes_committed_context_after_ownership_gate_before_inference():
+    processors = build_agent_processors(
+        *_PROCESSORS, ownership_model="owner", service_intake_context="intake", scope_router="scope"
+    )
+    assert processors.index("ua") < processors.index("owner") < processors.index("intake")
+    assert processors.index("intake") < processors.index("scope") < processors.index("llm")
+
+
 def test_processor_order_without_gender_classifier():
     tin, stt, ua, llm, tts, tout, aa = _PROCESSORS
     assert build_agent_processors(tin, stt, ua, llm, tts, tout, aa) == [

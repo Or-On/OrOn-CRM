@@ -28,6 +28,7 @@ def build_agent_processors(
     ownership_input=None,
     ownership_recognition=None,
     ownership_model=None,
+    service_intake_context=None,
     ownership_generated=None,
     tool_call_guard=None,
     ownership_speech=None,
@@ -89,6 +90,8 @@ def build_agent_processors(
         processors.append(evidence_context)
     if ownership_model is not None:
         processors.append(ownership_model)
+    if service_intake_context is not None:
+        processors.append(service_intake_context)
     # Last before inference and after the ownership gate: a routed caller turn
     # is answered by the approved server response and never reaches the model,
     # and nothing is spoken while a person owns the call.
