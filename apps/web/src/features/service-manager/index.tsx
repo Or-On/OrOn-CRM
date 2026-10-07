@@ -324,8 +324,8 @@ export function ServiceManagerOverview({
             <span>{he ? "תהליך השירות" : "Service intake"}</span>
             <p>
               {he
-                ? "שיחת טלפון ← טופס דיגיטלי ← קריאה מוכנה לטיפול"
-                : "Phone call → digital form → service request"}
+                ? "טלפון או WhatsApp ← הגשת טופס דיגיטלי ← קריאה מוכנה לטיפול"
+                : "Phone or WhatsApp → digital form submission → service request"}
             </p>
           </div>
         </aside>
