@@ -1,4 +1,9 @@
 import {
+  digitalFormReply,
+  startDigitalForm,
+  verifiedDigitalFormReply,
+} from "./digital-service-form-action.js";
+import {
   createMemorySummaryModelProvider,
   type SummaryModelProjection,
 } from "./memory-summary-model.js";
@@ -3736,6 +3741,7 @@ interface AiWork {
   readonly recipientAddress?: string;
   readonly recipientIdentityId?: string;
   readonly systemPrompt: string;
+  readonly digitalServiceFormAvailable: boolean;
   readonly serviceIntake?: NonNullable<
     Parameters<WhatsAppAiProvider["decide"]>[0]["serviceIntake"]
   >;
@@ -4287,6 +4293,14 @@ async function loadAiWork(
     const overridden = Object.entries(record(intake?.required_field_overrides))
       .filter(([, value]) => value === true)
       .map(([key]) => key);
+    const formAvailability = hasCapability(
+      contract.capabilities,
+      "service.intake",
+    )
+      ? await transaction<
+          { available: boolean }[]
+        >`SELECT service.whatsapp_digital_form_available() AS available`
+      : [];
     const serviceIntake =
       intake === undefined
         ? undefined
@@ -4369,6 +4383,7 @@ async function loadAiWork(
       authorizedUserId: row.ai_enabled_by_user_id,
       contactId: row.contact_id,
       systemPrompt: row.system_prompt,
+      digitalServiceFormAvailable: formAvailability[0]?.available === true,
       ...(serviceIntake === undefined ? {} : { serviceIntake }),
       contactContext: {
         contact: {
@@ -4493,6 +4508,7 @@ function aiRequestFor(
     ...(work.serviceIntake === undefined
       ? {}
       : { serviceIntake: work.serviceIntake }),
+    digitalServiceFormAvailable: work.digitalServiceFormAvailable,
     contactContext: work.contactContext,
     knowledge: work.knowledge,
     contextBudgetEnabled: work.contextBudgetEnabled,
@@ -5414,8 +5430,9 @@ async function processWhatsAppAiReply(
         | GroundedReply["evidence"]
         | {
             kind: "receipt";
-            operation: "handoff" | "callback" | "ticket";
+            operation: "handoff" | "callback" | "ticket" | "service_form";
             resourceId: string;
+            formUrl?: string;
           }
         | {
             kind: "scope_policy";
@@ -5450,6 +5467,33 @@ async function processWhatsAppAiReply(
                     triggerMessageId: work.triggerMessageId,
                   })})
         `;
+      if (decision.action === "service_form") {
+        if (
+          !work.digitalServiceFormAvailable ||
+          !hasCapability(work.contract.capabilities, "service.intake")
+        )
+          throw new AiPrincipalDeniedError();
+        await authorizeMachineTool(
+          transaction,
+          job,
+          workerId,
+          "service.intake",
+          work,
+        );
+        const form = await startDigitalForm(
+          transaction,
+          job,
+          workerId,
+          automation.publicSiteUrl ?? "",
+        );
+        responseText = digitalFormReply(form.url, work.locale);
+        evidence = {
+          kind: "receipt",
+          operation: "service_form",
+          resourceId: form.intakeId,
+          formUrl: form.url,
+        };
+      }
       if (decision.action === "ticket_open") {
         if (!work.opensTickets) throw new AiPrincipalDeniedError();
         const machine = await authorizeMachineTool(
@@ -5623,6 +5667,11 @@ async function processWhatsAppAiReply(
           },
           work.channelConfiguration,
         );
+        if (
+          evidence.kind === "receipt" &&
+          evidence.operation === "service_form"
+        )
+          await transaction`SELECT service.record_intake_followup(${evidence.resourceId}::uuid,'admitted',${outbound.messageId}::uuid,NULL)`;
         const captured = await transaction<{ authorized: boolean }[]>`
           SELECT platform.capture_outbound_execution_authority(
             ${job.id}::uuid,${workerId},${job.claim_token}::uuid,
@@ -5646,6 +5695,7 @@ async function processWhatsAppAiReply(
         if (
           decision.action === "reply" ||
           decision.action === "knowledge" ||
+          decision.action === "service_form" ||
           automaticCallQueued
         ) {
           await transaction`
@@ -6610,11 +6660,14 @@ async function requireGroundedOutbound(
     throw new WhatsAppProviderError("ai_evidence_invalid", false);
   await transaction`SELECT set_config('app.current_user', ${row.requested_by_user_id}, true)`;
   try {
-    await requireCurrentTrigger(
-      transaction,
-      row.conversation_id,
-      metadata.triggerMessageId,
-    );
+    // A committed form is a durable requested action, not a stale model reply.
+    // The exact form receipt, owner, consent and expiry are rechecked below.
+    if (!(evidence.kind === "receipt" && evidence.operation === "service_form"))
+      await requireCurrentTrigger(
+        transaction,
+        row.conversation_id,
+        metadata.triggerMessageId,
+      );
   } catch (error) {
     if (error instanceof TypeError)
       throw new WhatsAppProviderError("ai_trigger_superseded", false);
@@ -6725,7 +6778,19 @@ async function requireGroundedOutbound(
     )
       expected = approvedAgentResponse(route, metadata.locale, name);
   } else if (evidence.kind === "receipt" && uuid(evidence.resourceId)) {
-    if (evidence.operation === "ticket") {
+    if (
+      evidence.operation === "service_form" &&
+      typeof evidence.formUrl === "string"
+    ) {
+      expected = await verifiedDigitalFormReply(transaction, {
+        intakeId: evidence.resourceId,
+        conversationId: row.conversation_id,
+        triggerMessageId: metadata.triggerMessageId,
+        messageId: row.message_id,
+        url: evidence.formUrl,
+        locale: metadata.locale,
+      });
+    } else if (evidence.operation === "ticket") {
       const receipt = await transaction<
         { allowed: boolean }[]
       >`SELECT platform.machine_ticket_delivery_receipt(${row.message_id}::uuid,${evidence.resourceId}::uuid) AS allowed`;

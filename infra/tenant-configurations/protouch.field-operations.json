@@ -1,5 +1,5 @@
 {
-  "$comment": "Reviewable ProTouch configuration. Publish through the normal tenant configuration approval path. Phone collects only name and fault; WhatsApp sends a private digital form link inside an open customer-service window. Customer enters name, location, free-text fault and photos, then explicitly submits to create a case. ProTouch does not use templates. If WhatsApp is unavailable, retain the draft without claiming delivery or opening a case.",
+  "$comment": "Reviewable ProTouch configuration, published through tenant configuration approval. Phone collects only name and fault, then sends the private digital form after consent. A direct WhatsApp service request uses service_form to send the same form in its verified conversation. Only explicit customer submission creates a case. General templates remain disabled; only the separately reviewed service-link template is allowed for a consenting phone caller outside the WhatsApp service window.",
   "tenantSlugHint": "protouch",
   "features": [
     "contacts",
@@ -25,10 +25,7 @@
         ],
         "photoPolicy": "requested",
         "selfAssignmentEnabled": true,
-        "requiredReportFields": [
-          "diagnosis",
-          "workPerformed"
-        ],
+        "requiredReportFields": ["diagnosis", "workPerformed"],
         "inquiry": {
           "openOnFirstContact": false
         },
@@ -76,10 +73,7 @@
           {
             "key": "rcg",
             "label": "RCG",
-            "accept": [
-              "pdf",
-              "image"
-            ]
+            "accept": ["pdf", "image"]
           }
         ],
         "evidence": {

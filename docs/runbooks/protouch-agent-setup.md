@@ -92,6 +92,35 @@ then verify the AI answers again after the pending form is submitted. Never trea
 an HTTP acceptance alone as delivered or mark the full voice path verified without
 a real call. Test traffic is limited to the operator-authorized recipient.
 
+## Direct WhatsApp service forms (2026-10-07)
+
+The approved flow also accepts a direct WhatsApp service enquiry. Publish the
+revised WhatsApp agent prompt and its WhatsApp process binding after deploying
+`f2c7a9d41860`. Keep the separately reviewed voice v4 binding unchanged.
+The `service_form` decision is offered only with `service.intake` and the enabled
+form-mode field-service policy. An owned job and a verified inbound sender are
+required; the model cannot choose a recipient or provide the URL. Issuance,
+outbound admission and the intake receipt commit together. Delivery rechecks
+ownership, consent, tenant/channel authority, the exact form hash and expiry.
+A newer message cannot discard an already committed form as a stale prose reply.
+
+No case is created on greeting, a promise, a link request or a plain WhatsApp
+confirmation. The customer submits the existing digital form to create one
+WhatsApp-sourced case and linked ticket. Duplicate submission returns the same
+reference. General ProTouch templates remain disabled.
+
+Service managers have Inbox and Voice in their navigation. Overview exposes
+pending human requests and pending forms independently of submitted tickets.
+A human-owned conversation must be handled by staff or explicitly returned to
+AI; publishing an agent must not silently take it over. Inspect actual message
+and delivery evidence before replaying a historical request, and obtain explicit
+authorization before sending recovery messages to real customers.
+
+Acceptance uses signed fictional inbound events, the canonical machine principal,
+a recording fake provider, web-role submission, duplicate submits, delivery races
+and revocation during inference. Real customer acceptance must be reported
+separately from these provider-free checks.
+
 ## Voice consent revision v4 prepared on 2026-10-07
 
 The latest reviewed v3 call asked permission again after the caller had already

@@ -36,6 +36,43 @@ function responseFor(value: unknown): Response {
 }
 
 describe("OpenAiCompatibleChatProvider", () => {
+  it("offers a real service-form action only for the authorized form workflow", async () => {
+    const fetchMock = stubReply({
+      action: "service_form",
+      text: null,
+      reasonCode: null,
+      replyCode: null,
+      documentId: null,
+      factKey: null,
+    });
+    await expect(
+      provider().decide({
+        ...request,
+        capabilities: ["service.intake"],
+        digitalServiceFormAvailable: true,
+      }),
+    ).resolves.toEqual({ action: "service_form" });
+    expect(decisionSchemaOf(fetchMock).properties.action?.enum).toContain(
+      "service_form",
+    );
+    expect(systemMessage(fetchMock)).toContain(
+      "Only the customer's explicit web submission opens",
+    );
+    for (const input of [
+      request,
+      { ...request, capabilities: ["service.intake"] as const },
+      { ...request, digitalServiceFormAvailable: true },
+      {
+        ...request,
+        capabilities: ["service.intake"] as const,
+        digitalServiceFormAvailable: true,
+        replyOnly: true,
+      },
+    ])
+      await expect(provider().decide(input)).rejects.toBeInstanceOf(
+        WhatsAppAiProviderError,
+      );
+  });
   it("admits bounded ticket decisions only with the published capability", async () => {
     const value = {
       action: "ticket_open",

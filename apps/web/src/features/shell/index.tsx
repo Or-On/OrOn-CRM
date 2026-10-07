@@ -280,7 +280,7 @@ export function AppShell({
       if (href === "/email" && enabledFeatures !== undefined) return false;
       if (
         serviceManager &&
-        ["/inbox", "/operations", "/voice", "/flows", "/orchestration"].some(
+        ["/operations", "/flows", "/orchestration"].some(
           (hidden) => href === hidden || href.startsWith(`${hidden}/`),
         )
       )

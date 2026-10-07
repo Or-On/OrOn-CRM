@@ -66,6 +66,8 @@ export interface WhatsAppAiRequest {
     readonly content: string;
   }[];
   readonly sessionMemory?: string;
+  /** Server-authorized form workflow; never inferred from customer text. */
+  readonly digitalServiceFormAvailable?: boolean;
   readonly serviceIntake?: {
     readonly workflowPolicy?: ServiceWorkflowPolicy;
     readonly status:
@@ -181,6 +183,7 @@ export type WhatsAppAiDecision =
       readonly reasonCode: WhatsAppAiEscalationReason;
       readonly text: string;
     }
+  | { readonly action: "service_form" }
   | { readonly action: "ticket_open"; readonly subject: string }
   | {
       readonly action: "lead_save";
@@ -294,7 +297,10 @@ const conversationDecisionKeys = [
 function decisionSchemaFor(
   capabilities: readonly AgentCapability[],
   lead: WhatsAppAiRequest["lead"],
-  options: { readonly withActions?: boolean } = {},
+  options: {
+    readonly withActions?: boolean;
+    readonly digitalServiceFormAvailable?: boolean;
+  } = {},
 ): {
   readonly schema: Record<string, unknown>;
   readonly keys: readonly string[];
@@ -323,6 +329,12 @@ function decisionSchemaFor(
     },
   };
   const keys: string[] = [...conversationDecisionKeys];
+  if (
+    options.digitalServiceFormAvailable === true &&
+    capabilities.includes("service.intake") &&
+    options.withActions !== false
+  )
+    actions.push("service_form");
   if (capabilities.includes("ticket.open") && options.withActions !== false) {
     actions.push("ticket_open");
     properties.ticketSubject = {
@@ -395,6 +407,15 @@ function envelopeInstruction(
       "just because it appears in the history. Choose request_call only for a standalone " +
       "explicit immediate callback request.",
   ];
+  if (actions.includes("service_form"))
+    lines.push(
+      "For a new fault/service request or a request for the service form/link, choose service_form with text null. " +
+        "This creates and sends the real digital form in this WhatsApp conversation. No phone call or extra confirmation is required. " +
+        "Do not collect name, location, photos or all fault details in chat: the customer supplies them in the form. " +
+        "Only the customer's explicit web submission opens the service case. Never claim a case is already open or promise a link in ordinary reply text. " +
+        "Greetings, general information and questions about an existing submitted request remain ordinary replies; do not issue a new form for them. " +
+        "An explicit request for a human still uses handoff.",
+    );
   if (actions.includes("lead_save"))
     lines.push(
       "Choose lead_save to record what the customer told you, putting each " +
@@ -716,7 +737,11 @@ export class OpenAiCompatibleChatProvider implements WhatsAppAiProvider {
     const { schema: decisionSchema } = decisionSchemaFor(
       capabilities,
       request.lead,
-      { withActions: request.replyOnly !== true },
+      {
+        withActions: request.replyOnly !== true,
+        digitalServiceFormAvailable:
+          request.digitalServiceFormAvailable === true,
+      },
     );
     const actions = (
       decisionSchema.properties as { action: { enum: string[] } }
@@ -974,6 +999,8 @@ export class OpenAiCompatibleChatProvider implements WhatsAppAiProvider {
       const text = typeof parsed.text === "string" ? parsed.text.trim() : "";
       if (text.length > 4096)
         throw new WhatsAppAiProviderError("ai_invalid_output", false);
+      if (parsed.action === "service_form" && actions.includes("service_form"))
+        return { action: "service_form" };
       if (parsed.action === "lead_save" && actions.includes("lead_save")) {
         const observations = parseLeadObservations(
           parsed.leadObservations,

@@ -1,5 +1,5 @@
 {
-  "alembic_head": "e6a91c4f208b",
+  "alembic_head": "f2c7a9d41860",
   "expected_functions": [
     "agents.activate_reviewed_memory",
     "agents.alert_exhausted_memory_summary",
@@ -310,7 +310,10 @@
     "support.mark_ticket_emergency",
     "support.open_ticket_from_voice_session",
     "support.queue_post_call_from_session",
-    "support.record_ticket_escalation"
+    "support.record_ticket_escalation",
+    "service.whatsapp_digital_form_available",
+    "service.start_whatsapp_digital_intake",
+    "service.whatsapp_digital_form_receipt"
   ],
   "expected_indexes": [
     "ix_appointment_technician_time",
@@ -437,9 +440,7 @@
       "memory_reviewed_activations",
       "whatsapp_verified_receipts"
     ],
-    "audit": [
-      "records"
-    ],
+    "audit": ["records"],
     "automation": [
       "flow_definitions",
       "flow_runs",
@@ -482,9 +483,7 @@
       "tasks",
       "tenant_settings"
     ],
-    "finance": [
-      "expenses"
-    ],
+    "finance": ["expenses"],
     "live": [
       "chats",
       "messages",
@@ -510,9 +509,7 @@
       "audio_transcription_work",
       "whatsapp_auto_greetings"
     ],
-    "objects": [
-      "object_metadata"
-    ],
+    "objects": ["object_metadata"],
     "ops": [
       "idempotency_keys",
       "import_items",
@@ -595,7 +592,8 @@
       "visit_time_corrections",
       "visits",
       "digital_intake_forms",
-      "whatsapp_form_template_policy"
+      "whatsapp_form_template_policy",
+      "whatsapp_form_sources"
     ],
     "support": [
       "assurance_policies",
@@ -605,21 +603,11 @@
     ]
   },
   "extensions": {
-    "deferred": [
-      "pgcrypto"
-    ],
-    "optional": [
-      "vector"
-    ],
-    "required": [
-      "citext"
-    ]
+    "deferred": ["pgcrypto"],
+    "optional": ["vector"],
+    "required": ["citext"]
   },
-  "legacy_runtime_roles": [
-    "oron_app",
-    "oron_sessions_app",
-    "oron_tenancy_app"
-  ],
+  "legacy_runtime_roles": ["oron_app", "oron_sessions_app", "oron_tenancy_app"],
   "migration_role": "platform_migrator",
   "runtime_roles": [
     "platform_messaging",
@@ -785,6 +773,7 @@
     "platform.whatsapp_template_policy",
     "service.digital_intake_forms",
     "platform.principal_handoff_authority",
-    "service.whatsapp_form_template_policy"
+    "service.whatsapp_form_template_policy",
+    "service.whatsapp_form_sources"
   ]
 }

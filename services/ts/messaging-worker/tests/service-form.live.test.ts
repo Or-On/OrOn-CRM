@@ -100,7 +100,13 @@ describe.skipIf(sourceUrl === undefined)(
       admin = postgres(url.toString(), { max: 1 });
       await admin`SELECT set_config('app.current_tenant',${tenantId},false)`;
       cleanup.push(() => admin.end());
-      for (const feature of ["contacts", "voice", "whatsapp", "tickets"])
+      for (const feature of [
+        "agents",
+        "contacts",
+        "voice",
+        "whatsapp",
+        "tickets",
+      ])
         await admin`
           INSERT INTO platform.tenant_feature_entitlements
             (tenant_id, feature_key, available, enabled, granted_at)
@@ -135,6 +141,22 @@ describe.skipIf(sourceUrl === undefined)(
           whatsapp_ai_enabled_by_user_id=${userId}::uuid, whatsapp_ai_enabled_at=CURRENT_TIMESTAMP,locale='he'
         WHERE tenant_id=${tenantId}::uuid
       `;
+      // Exercise the same canonical principal and capability grants as production.
+      const agentRows = await admin<
+        { id: string }[]
+      >`SELECT id FROM agents.agent_profile_versions WHERE agent_profile_id=${profileId}::uuid`;
+      const agentId = agentRows[0]?.id;
+      if (!agentId) throw new Error("Fictional agent missing");
+      const definitionId = randomUUID(),
+        flowId = randomUUID(),
+        principalId = randomUUID();
+      await admin`INSERT INTO automation.flow_definitions(id,tenant_id,name,channel_capabilities) VALUES(${definitionId}::uuid,${tenantId}::uuid,'Fictional form flow',ARRAY['whatsapp'])`;
+      await admin`INSERT INTO automation.flow_versions(id,tenant_id,flow_definition_id,version,schema_version,definition,agent_profile_version_id,validation_status,published_at) VALUES(${flowId}::uuid,${tenantId}::uuid,${definitionId}::uuid,1,'1.0','{"nodes":[{"id":"crm","type":"crm.update"}]}',${agentId}::uuid,'valid',clock_timestamp())`;
+      await admin`INSERT INTO automation.tenant_processes(tenant_id,name,enabled,trigger_key,channel,agent_profile_version_id,flow_version_id) VALUES(${tenantId}::uuid,'Fictional form flow',true,'whatsapp.message','whatsapp',${agentId}::uuid,${flowId}::uuid)`;
+      await admin`INSERT INTO platform.tenant_configuration_releases(tenant_id,version,status,configuration,approved_at) VALUES(${tenantId}::uuid,20,'published','{}',clock_timestamp())`;
+      await admin`INSERT INTO platform.ai_execution_principals(tenant_id,id,role,status,membership_status) VALUES(${tenantId}::uuid,${principalId}::uuid,'conversation_model_reader_v1','active','active')`;
+      await admin`INSERT INTO platform.tenant_ai_execution_bindings(tenant_id,enabled,principal_id) VALUES(${tenantId}::uuid,true,${principalId}::uuid)`;
+      await admin`INSERT INTO platform.machine_tool_grants(tenant_id,principal_id,agent_version_id,flow_version_id,capability,enabled) VALUES(${tenantId}::uuid,${principalId}::uuid,${agentId}::uuid,${flowId}::uuid,'service.intake',true)`;
       const channels = await admin<{ id: string }[]>`
         INSERT INTO messaging.channels
           (tenant_id, kind, provider, provider_account_id, display_address, status, configuration)
@@ -196,6 +218,7 @@ describe.skipIf(sourceUrl === undefined)(
       overrides: {
         aiProvider?: WhatsAppAiProvider;
         fieldServiceProvider?: FieldServiceAiProvider;
+        beforeSend?: (request: WhatsAppSendRequest) => Promise<void>;
       } = {},
     ): Promise<WhatsAppSendRequest[]> {
       const sent: WhatsAppSendRequest[] = [];
@@ -207,6 +230,7 @@ describe.skipIf(sourceUrl === undefined)(
           meta: {
             name: "meta",
             send: vi.fn(async (request: WhatsAppSendRequest) => {
+              await overrides.beforeSend?.(request);
               await request.beforeAttempt?.();
               request.onAttemptStarted?.();
               sent.push(request);
@@ -253,6 +277,17 @@ describe.skipIf(sourceUrl === undefined)(
       return sent;
     }
 
+    async function setTestWorkflow(policy: typeof formPolicy) {
+      // Fictional fixture activation follows the same transaction binding as approval.
+      await admin.begin(async (tx) => {
+        await tx`UPDATE platform.tenant_configuration_releases
+          SET activation_xid=txid_current(),configuration=${tx.json({ features: ["field_service"], featureConfiguration: { field_service: { workflow: policy } } })}
+          WHERE tenant_id=${tenantId}::uuid AND version=20`;
+        await tx`UPDATE platform.tenant_feature_entitlements SET configuration=${tx.json({ workflow: policy })}
+          WHERE tenant_id=${tenantId}::uuid AND feature_key='field_service'`;
+      });
+    }
+
     it("greets a new conversation once, in the customer's language, and leaves it unread", async () => {
       await admin`
         INSERT INTO messaging.whatsapp_auto_greetings
@@ -282,10 +317,159 @@ describe.skipIf(sourceUrl === undefined)(
       await admin`UPDATE messaging.whatsapp_auto_greetings SET enabled=false WHERE channel_id=${channelId}::uuid`;
     });
 
-    it("keeps a first standalone WhatsApp message out of phone-first form intake and cancels queued legacy extraction", async () => {
+    it("sends a real form for a direct WhatsApp fault, creates no case before submission and submits exactly once", async () => {
+      const decide = vi
+        .fn<WhatsAppAiProvider["decide"]>()
+        .mockResolvedValue({ action: "service_form" });
+      const providerId = await acceptInbound(
+        "972502345697",
+        "המסך מרצד, תשלח לי קישור לטופס",
+      );
+      const delivered = await runWorker(false, { aiProvider: { decide } });
+      expect(decide).toHaveBeenCalledOnce();
+      expect(decide.mock.calls[0]?.[0].digitalServiceFormAvailable).toBe(true);
+      const jobs =
+        await admin`SELECT job_type,status,last_error_safe FROM ops.jobs WHERE status IN ('dead','retry')`;
+      expect(delivered, JSON.stringify(jobs)).toHaveLength(1);
+      const delivery = delivered[0]?.delivery;
+      if (delivery?.kind !== "text")
+        throw new Error("Expected actual form text");
+      expect(delivery.text).toContain("הנה הטופס");
+      const link = /https:\/\/[^\s]+/u.exec(delivery.text)?.[0];
+      if (!link) throw new Error("No real form link");
+      const token =
+        new URLSearchParams(new URL(link).hash.slice(1)).get("token") ?? "";
+      const rows = await admin<
+        {
+          id: string;
+          conversation_id: string;
+          source_session_id: string | null;
+        }[]
+      >`
+        SELECT intake.id,intake.conversation_id,intake.source_session_id FROM service.intake_drafts intake
+        JOIN service.whatsapp_form_sources source ON source.intake_id=intake.id AND source.tenant_id=intake.tenant_id
+        JOIN messaging.messages message ON message.id=source.trigger_message_id AND message.tenant_id=source.tenant_id
+        WHERE message.provider_message_id=${providerId}`;
+      expect(rows).toHaveLength(1);
+      const intake = rows[0];
+      if (!intake) throw new Error("Digital intake missing");
+      expect(intake.source_session_id).toBeNull();
+      expect(
+        await admin`SELECT id FROM service.cases WHERE intake_draft_id=${intake.id}::uuid`,
+      ).toEqual([]);
+      expect(
+        await admin`SELECT id FROM support.tickets WHERE intake_draft_id=${intake.id}::uuid`,
+      ).toEqual([]);
+      await acceptInbound("972502345697", "מאשר");
+      await runWorker(true);
+      expect(
+        await admin`SELECT id FROM service.intake_drafts WHERE conversation_id=${intake.conversation_id}::uuid`,
+      ).toHaveLength(1);
+      expect(
+        await admin`SELECT id FROM service.cases WHERE intake_draft_id=${intake.id}::uuid`,
+      ).toEqual([]);
+      const submitted = await admin.begin(async (tx) => {
+        await tx`SET LOCAL ROLE platform_web`;
+        await tx`SELECT set_config('app.current_tenant',${tenantId},true)`;
+        return submitDigitalServiceForm(tx, token, {
+          customerName: "לקוח בדיקה",
+          serviceLocation: "משרד בדיקה",
+          faultDescription: "המסך מרצד",
+          confirmed: true,
+          photos: [],
+        });
+      });
+      expect(submitted.created).toBe(true);
+      const again = await admin.begin(async (tx) => {
+        await tx`SET LOCAL ROLE platform_web`;
+        await tx`SELECT set_config('app.current_tenant',${tenantId},true)`;
+        return submitDigitalServiceForm(tx, token, {
+          customerName: "לקוח בדיקה",
+          serviceLocation: "משרד בדיקה",
+          faultDescription: "המסך מרצד",
+          confirmed: true,
+          photos: [],
+        });
+      });
+      expect(again).toEqual({ reference: submitted.reference, created: false });
+      expect(
+        await admin`SELECT source FROM service.cases WHERE intake_draft_id=${intake.id}::uuid`,
+      ).toEqual([{ source: "whatsapp" }]);
+      expect(
+        await admin`SELECT id FROM support.tickets WHERE intake_draft_id=${intake.id}::uuid`,
+      ).toHaveLength(1);
+      decide.mockResolvedValue({
+        action: "reply",
+        text: "קיבלנו את הטופס. במה עוד אפשר לעזור?",
+      });
+      await acceptInbound("972502345697", "קיבלתם את הטופס?");
+      await runWorker(false, { aiProvider: { decide } });
+      expect(decide).toHaveBeenCalledTimes(2);
+      expect(decide.mock.calls[1]?.[0].serviceIntake?.caseReference).toBe(
+        submitted.reference,
+      );
+    });
+
+    it("does not discard an already committed form link when another message arrives before delivery", async () => {
+      const decide = vi
+        .fn<WhatsAppAiProvider["decide"]>()
+        .mockResolvedValue({ action: "service_form" });
+      await acceptInbound("972502345698", "תשלח לי טופס");
+      let entered = false;
+      const sent = await runWorker(false, {
+        aiProvider: { decide },
+        beforeSend: async () => {
+          if (!entered) {
+            entered = true;
+            await acceptInbound("972502345698", "אתה שולח?");
+          }
+        },
+      });
+      expect(sent).toHaveLength(1);
+      expect(decide).toHaveBeenCalledOnce();
+    });
+
+    it.each(["human", "consent", "grant"] as const)(
+      "does not issue a form after %s is revoked while the model runs",
+      async (scenario) => {
+        const phone = {
+          human: "972502345694",
+          consent: "972502345695",
+          grant: "972502345696",
+        }[scenario];
+        const providerId = await acceptInbound(phone, "יש תקלה, אפשר טופס?");
+        const decide = vi
+          .fn<WhatsAppAiProvider["decide"]>()
+          .mockImplementation(async () => {
+            if (scenario === "human")
+              await admin`UPDATE messaging.conversations SET ownership_mode='human' WHERE id IN
+          (SELECT conversation_id FROM messaging.messages WHERE provider_message_id=${providerId})`;
+            if (scenario === "consent")
+              await admin`UPDATE crm.contacts SET whatsapp_consent='revoked' WHERE id IN
+          (SELECT contact_id FROM messaging.conversations WHERE id IN (SELECT conversation_id FROM messaging.messages WHERE provider_message_id=${providerId}))`;
+            if (scenario === "grant")
+              await admin`UPDATE platform.machine_tool_grants SET enabled=false WHERE tenant_id=${tenantId}::uuid AND capability='service.intake'`;
+            return { action: "service_form" };
+          });
+        try {
+          expect(await runWorker(false, { aiProvider: { decide } })).toEqual(
+            [],
+          );
+          expect(decide).toHaveBeenCalledOnce();
+          expect(
+            await admin`SELECT source.intake_id FROM service.whatsapp_form_sources source JOIN messaging.messages message
+          ON message.id=source.trigger_message_id AND message.tenant_id=source.tenant_id WHERE message.provider_message_id=${providerId}`,
+          ).toEqual([]);
+        } finally {
+          await admin`UPDATE platform.machine_tool_grants SET enabled=true WHERE tenant_id=${tenantId}::uuid AND capability='service.intake'`;
+        }
+      },
+    );
+
+    it("keeps ordinary replies out of form creation and cancels queued legacy extraction", async () => {
       const decide = vi.fn<WhatsAppAiProvider["decide"]>().mockResolvedValue({
         action: "reply",
-        text: "אפשר לעזור במידע כללי. הטופס להמשך טיפול נפתח לאחר שיחת השירות.",
+        text: "אפשר לעזור במידע כללי. באיזה נושא?",
       });
       const extractIntake = vi
         .fn<FieldServiceAiProvider["extractIntake"]>()
@@ -352,10 +536,7 @@ describe.skipIf(sourceUrl === undefined)(
         ...formPolicy,
         whatsappFollowUp: { ...formPolicy.whatsappFollowUp, mode: "summary" },
       };
-      const setPolicy = async (policy: typeof formPolicy) => {
-        await admin`UPDATE platform.tenant_feature_entitlements SET configuration=${admin.json({ workflow: policy })}
-          WHERE tenant_id=${tenantId}::uuid AND feature_key='field_service'`;
-      };
+      const setPolicy = setTestWorkflow;
       try {
         await setPolicy(summaryPolicy);
         const ordinaryId = await acceptInbound("972502345687", "המסך לא עובד");
@@ -390,7 +571,10 @@ describe.skipIf(sourceUrl === undefined)(
           ON message.id=job.reference_id AND message.tenant_id=job.tenant_id
           WHERE message.provider_message_id=${racingId} AND job.job_type='field_service.intake.extract'`,
         ).toEqual([
-          { status: "cancelled", last_error_safe: "digital_form_phone_first" },
+          {
+            status: "dead",
+            last_error_safe: "machine_tool_job_binding_changed",
+          },
         ]);
       } finally {
         await setPolicy(formPolicy);
@@ -573,20 +757,16 @@ describe.skipIf(sourceUrl === undefined)(
     it("delivers only the reviewed form template to a transport-bound first-time caller without WhatsApp verification", async () => {
       // Match the published phone-first policy: location comes from the digital
       // form; no separate store-name field is requested from this customer.
-      await admin`UPDATE platform.tenant_feature_entitlements SET configuration=${admin.json(
-        {
-          workflow: {
-            ...formPolicy,
-            requiredIntakeFields: [
-              "customerName",
-              "customerPhone",
-              "serviceLocation",
-              "faultDescription",
-            ],
-            inquiry: { openOnFirstContact: false },
-          },
-        },
-      )} WHERE tenant_id=${tenantId}::uuid AND feature_key='field_service'`;
+      await setTestWorkflow({
+        ...formPolicy,
+        requiredIntakeFields: [
+          "customerName",
+          "customerPhone",
+          "serviceLocation",
+          "faultDescription",
+        ],
+        inquiry: { openOnFirstContact: false },
+      });
       const caller = "+972502345690";
       const contactId = randomUUID();
       const sessionId = randomUUID();

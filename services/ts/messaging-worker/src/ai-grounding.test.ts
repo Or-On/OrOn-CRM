@@ -1023,3 +1023,22 @@ describe("shared service-agent scope policy on WhatsApp", () => {
     ).toBe(true);
   });
 });
+
+describe("unexecuted form promises", () => {
+  it.each([
+    "בסדר גמור. המערכת תשלח לך קישור לטופס בוואטסאפ.",
+    "אשלח לך קישור לטופס.",
+    "הקישור יישלח אליך בקרוב.",
+    "The system will send you a form link.",
+    "I'll send the link now.",
+    "Your form will be sent shortly.",
+  ])(
+    "rejects unsupported delivery even after an unrelated lead write: %s",
+    (text) => {
+      expect(safeConversationalReply(text)).toBe(false);
+      expect(safeConversationalReply(text, { committedRecord: true })).toBe(
+        false,
+      );
+    },
+  );
+});

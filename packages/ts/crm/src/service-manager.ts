@@ -183,6 +183,8 @@ export type ServiceOverviewPeriod = "today" | "week" | "month";
 export interface ServiceManagerMetrics {
   readonly incomingCalls: number;
   readonly incomingMessages: number;
+  readonly awaitingForms?: number;
+  readonly waitingForHuman?: number;
   readonly opened: number;
   readonly closed: number;
   readonly since: string;
@@ -206,6 +208,12 @@ export async function serviceManagerMetrics(
         ELSE date_trunc('month',now) END AT TIME ZONE ${timezone}) AS start,
       statement_timestamp() AS finish FROM local_time)
     SELECT
+      (SELECT count(*)::int FROM service.intake_drafts WHERE tenant_id=platform.current_tenant_id()
+        AND status IN ('collecting','awaiting_confirmation')
+        AND workflow_policy#>>'{whatsappFollowUp,mode}'='form') AS "awaitingForms",
+      (SELECT count(*)::int FROM messaging.conversations WHERE tenant_id=platform.current_tenant_id()
+        AND ownership_mode='human' AND handoff_reason_safe IS NOT NULL
+        AND status IN ('open','pending') AND removed_from_inbox_at IS NULL) AS "waitingForHuman",
       (SELECT count(*)::int FROM public.sessions,period WHERE tenant_id=platform.current_tenant_id()
         AND direction='inbound' AND created_at>=period.start AND created_at<=period.finish) AS "incomingCalls",
       (SELECT count(*)::int FROM messaging.messages,period WHERE tenant_id=platform.current_tenant_id()

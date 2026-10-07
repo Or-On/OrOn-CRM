@@ -62,6 +62,9 @@ export default async function OverviewPage({
           const settings = await getTenantSettings(sql);
           return {
             serviceManager: true as const,
+            enabledFeatures: Object.values(features)
+              .filter((feature) => feature.effective)
+              .map((feature) => feature.key),
             tenantName: session.tenant.tenantName,
             serviceMetrics: await serviceManagerMetrics(
               sql,
@@ -101,6 +104,7 @@ export default async function OverviewPage({
         <ServiceManagerOverview
           tenantName={data.tenantName}
           metrics={data.serviceMetrics}
+          enabledFeatures={data.enabledFeatures}
           period={data.period}
           recentInquiries={data.recentInquiries}
           timezone={data.timezone}

@@ -74,12 +74,14 @@ export function ServiceManagerOverview({
   metrics,
   period,
   recentInquiries = [],
+  enabledFeatures = [],
   timezone = "UTC",
 }: {
   readonly tenantName: string;
   readonly metrics: ServiceManagerMetrics;
   readonly period: ServiceOverviewPeriod;
   readonly recentInquiries?: readonly ServiceInquiry[];
+  readonly enabledFeatures?: readonly string[];
   readonly timezone?: string;
 }) {
   const locale = useLocale();
@@ -174,6 +176,28 @@ export function ServiceManagerOverview({
           </Surface>
         ))}
       </div>
+      {enabledFeatures.includes("whatsapp") &&
+      ((metrics.waitingForHuman ?? 0) > 0 ||
+        (metrics.awaitingForms ?? 0) > 0) ? (
+        <Surface as="section" level="raised" className={styles.recent}>
+          <header className={styles.sectionHeading}>
+            <div>
+              <h2>
+                {he ? "פניות שעדיין ממתינות" : "Requests still awaiting action"}
+              </h2>
+              <p>
+                {he
+                  ? `${(metrics.waitingForHuman ?? 0).toLocaleString(locale)} ממתינות לנציג · ${(metrics.awaitingForms ?? 0).toLocaleString(locale)} ממתינות להגשת טופס`
+                  : `${(metrics.waitingForHuman ?? 0).toLocaleString(locale)} awaiting a person · ${(metrics.awaitingForms ?? 0).toLocaleString(locale)} awaiting form submission`}
+              </p>
+            </div>
+            <Link href="/inbox">
+              {he ? "פתיחת השיחות" : "Open conversations"}
+              <ArrowUpRight size={16} aria-hidden="true" />
+            </Link>
+          </header>
+        </Surface>
+      ) : null}
       <div className={styles.overviewGrid}>
         <Surface className={styles.recent} level="raised" as="section">
           <header className={styles.sectionHeading}>
@@ -234,6 +258,40 @@ export function ServiceManagerOverview({
           aria-label={he ? "פעולות שימושיות" : "Useful shortcuts"}
         >
           <h2>{he ? "ממשיכים לטפל" : "Keep work moving"}</h2>
+          {enabledFeatures.includes("whatsapp") ? (
+            <Link href="/inbox">
+              <span className={styles.shortcutIcon}>
+                <MessageCircle size={21} aria-hidden="true" />
+              </span>
+              <span>
+                <strong>
+                  {he ? "שיחות WhatsApp" : "WhatsApp conversations"}
+                </strong>
+                <small>
+                  {he
+                    ? "התכתבויות ופניות שממתינות לנציג, גם לפני הגשת טופס"
+                    : "Conversations and requests awaiting a person, including before a form is submitted"}
+                </small>
+              </span>
+              <ArrowUpRight size={17} aria-hidden="true" />
+            </Link>
+          ) : null}
+          {enabledFeatures.includes("voice") ? (
+            <Link href="/voice">
+              <span className={styles.shortcutIcon}>
+                <PhoneIncoming size={21} aria-hidden="true" />
+              </span>
+              <span>
+                <strong>{he ? "שיחות טלפון" : "Phone calls"}</strong>
+                <small>
+                  {he
+                    ? "היסטוריית שיחות, הקלטות ותוצאות"
+                    : "Call history, recordings and outcomes"}
+                </small>
+              </span>
+              <ArrowUpRight size={17} aria-hidden="true" />
+            </Link>
+          ) : null}
           <Link href="/field-service">
             <span className={styles.shortcutIcon}>
               <Wrench size={21} aria-hidden="true" />

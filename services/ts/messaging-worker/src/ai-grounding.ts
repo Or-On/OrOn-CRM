@@ -372,6 +372,11 @@ const consequentialClaimPattern =
 const recordClaimPattern =
   /\b(?:saved|recorded|noted|logged|updated|sent)\b|(?:שמרתי|רשמתי|עדכנתי|תיעדתי|רשמנו|שלחתי|נשמר(?:ו|ה)?|נרשמ(?:ו|ה)?|נשלח)/iu;
 
+// A saved lead cannot back a send/delivery promise. Only a durable action
+// receipt supplies those words, never free model prose (including future tense).
+const unsupportedDeliveryPromise =
+  /\b(?:will|shall|going to|about to)\s+(?:be\s+)?(?:send|sent|open|opened|create|created)\b|\b(?:I|we)['’]ll\s+(?:send|open|create)\b|(?:אשלח|נשלח|יישלח|ישלח|תישלח|תשלח|אפתח|נפתח)\s+(?:לך|לכם|אליך|אליכם|את|קישור|לינק|טופס|קריא[הת]|בקשה)|(?:שלחתי|שלחנו)|\bsent\b/iu;
+
 function passesConversationalSafety(
   text: string,
   committedRecord = false,
@@ -381,6 +386,7 @@ function passesConversationalSafety(
     // prompt, tool, secret or other-customer disclosure reaches a customer.
     validateAgentOutput(text).allowed &&
     !consequentialClaimPattern.test(text) &&
+    !unsupportedDeliveryPromise.test(text) &&
     (committedRecord || !recordClaimPattern.test(text)) &&
     text.length > 0 &&
     text.length <= 1000 &&
