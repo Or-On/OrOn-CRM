@@ -154,7 +154,11 @@ describe.skipIf(sourceUrl === undefined)(
       for (const close of cleanup.reverse()) await close();
     });
 
-    async function acceptInbound(from: string, text: string): Promise<string> {
+    async function acceptInbound(
+      from: string,
+      text: string,
+      timestamp = Math.floor(Date.now() / 1000),
+    ): Promise<string> {
       const messageId = `wamid.fixture-${randomUUID()}`;
       const rawBody = Buffer.from(
         JSON.stringify({
@@ -171,7 +175,7 @@ describe.skipIf(sourceUrl === undefined)(
                         id: messageId,
                         from,
                         type: "text",
-                        timestamp: String(Math.floor(Date.now() / 1000)),
+                        timestamp: String(timestamp),
                         text: { body: text },
                       },
                     ],
@@ -525,6 +529,8 @@ describe.skipIf(sourceUrl === undefined)(
             await acceptInbound(
               caller.slice(1),
               "Please send the form in English",
+              // Receipt order, not a coarse/delayed provider timestamp, chooses language.
+              Math.floor(Date.now() / 1000) - 10,
             );
             delivered = await runWorker(true);
           }
@@ -564,7 +570,7 @@ describe.skipIf(sourceUrl === undefined)(
       },
     );
 
-    it("delivers only the reviewed form template to a first-time caller with general templates disabled", async () => {
+    it("delivers only the reviewed form template to a transport-bound first-time caller without WhatsApp verification", async () => {
       // Match the published phone-first policy: location comes from the digital
       // form; no separate store-name field is requested from this customer.
       await admin`UPDATE platform.tenant_feature_entitlements SET configuration=${admin.json(
@@ -592,7 +598,7 @@ describe.skipIf(sourceUrl === undefined)(
         VALUES(${contactId}::uuid,${tenantId}::uuid,'Fixture caller','granted')`;
       await admin`INSERT INTO crm.contact_channel_identities
         (tenant_id,contact_id,channel,normalized_value,validation_status,is_primary)
-        VALUES(${tenantId}::uuid,${contactId}::uuid,'phone',${caller},'valid',true)`;
+        VALUES(${tenantId}::uuid,${contactId}::uuid,'phone',${caller},'unverified',true)`;
       await admin`INSERT INTO sessions(session_id,provider,direction,room,status,tenant_id,flow_id,contact_id)
         VALUES(${sessionId}::uuid,'livekit','inbound',${`room-${sessionId}`},'started',${tenantId}::uuid,${randomUUID()}::uuid,${contactId}::uuid)`;
       await admin`INSERT INTO public.session_events(tenant_id,session_id,sequence,event_type,payload)
@@ -630,6 +636,13 @@ describe.skipIf(sourceUrl === undefined)(
       const sent = await runWorker(true);
       expect(sent).toHaveLength(1);
       expect(sent[0]?.recipient).toBe(caller);
+      expect(
+        await admin`SELECT channel,validation_status FROM crm.contact_channel_identities
+          WHERE contact_id=${contactId}::uuid ORDER BY channel`,
+      ).toEqual([
+        { channel: "phone", validation_status: "unverified" },
+        { channel: "whatsapp", validation_status: "unverified" },
+      ]);
       const delivery = sent[0]?.delivery;
       if (delivery?.kind !== "template")
         throw new Error("Expected reviewed form template");
@@ -655,6 +668,16 @@ describe.skipIf(sourceUrl === undefined)(
       expect(
         await admin`SELECT platform.whatsapp_template_request_allowed(r) AS allowed FROM messaging.outbound_requests r WHERE id=${request.id}::uuid`,
       ).toEqual([{ allowed: true }]);
+      for (const status of ["invalid", "revoked"]) {
+        await admin`UPDATE crm.contact_channel_identities SET validation_status=${status}
+          WHERE contact_id=${contactId}::uuid AND channel='whatsapp'`;
+        expect(
+          await admin`SELECT platform.whatsapp_template_request_allowed(r) AS allowed
+            FROM messaging.outbound_requests r WHERE id=${request.id}::uuid`,
+        ).toEqual([{ allowed: false }]);
+      }
+      await admin`UPDATE crm.contact_channel_identities SET validation_status='unverified'
+        WHERE contact_id=${contactId}::uuid AND channel='whatsapp'`;
       // General template access remains closed, including a manual send of the
       // same template. Neither an arbitrary body nor a different caller is licensed.
       await expect(

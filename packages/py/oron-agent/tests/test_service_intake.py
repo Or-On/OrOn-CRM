@@ -1,5 +1,7 @@
 """Durable voice intake and spoken receipts without calling real providers."""
 
+import json
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -15,6 +17,7 @@ from oron_agent.spoken_safety import safe_spoken_text
 from oron_agent.support_ticket import support_ticket_function_factory
 from oron_common import CallContext, Direction
 from oron_flows import FlowSpec
+from oron_flows.compose import Composition, expand
 from oron_flows.node import FlowNode, Message
 
 
@@ -575,6 +578,12 @@ def _form_sessions(*, saved=False) -> SimpleNamespace:
     return sessions
 
 
+def _agree_to_form(tools, turns, text="כן, תשלחי לי בבקשה קישור"):
+    tools.consent_node({"name": "talk", "task_messages": [], "functions": []})
+    turns.accept()
+    tools.record_caller_turn(text)
+
+
 @pytest.mark.asyncio
 async def test_form_policy_only_exposes_name_fault_and_web_submission_contract():
     sessions = _form_sessions()
@@ -588,7 +597,11 @@ async def test_form_policy_only_exposes_name_fault_and_web_submission_contract()
         {},
     )
     assert tools is not None and tools.form_mode
-    assert tools.tool_names == ("capture_service_intake", "send_whatsapp_service_form")
+    assert tools.tool_names == (
+        "capture_service_intake",
+        "send_whatsapp_service_form",
+        "finish_service_intake",
+    )
     prompt = service_intake_instruction(tools.initial)
     assert "Collect ONLY the customer's name" in prompt and "brief description" in prompt
     assert "confirmed=false" in prompt and "explicitly press Submit" in prompt
@@ -662,6 +675,7 @@ async def test_form_queue_requires_both_durable_facts_and_cannot_save_an_empty_i
         "intakeId": intake,
     }
     assert (await tools.send_form({"customerAgreed": False}))["ok"] is False
+    _agree_to_form(tools, turns)
     result = await tools.send_form({"customerAgreed": True})
     assert result["ok"] is True
     assert len(sessions.capture_service_intake.await_args_list) == 2
@@ -669,8 +683,7 @@ async def test_form_queue_requires_both_durable_facts_and_cannot_save_an_empty_i
         c.kwargs["confirmed"] is False for c in sessions.capture_service_intake.await_args_list
     )
     sessions.request_service_followup.assert_awaited_once_with(context, customer_agreed=True)
-    assert "ביקשתי לשלוח קישור" in result["closing"]
-    assert "עדיין אין אישור שההודעה הגיעה" in result["closing"]
+    assert "הבקשה לשליחת הקישור נקלטה" in result["closing"]
     assert "לחיצה על שליחה" in result["closing"]
     assert safe_spoken_text(result["closing"], "he") == (result["closing"], False)
     assert validate_output(result["closing"]).allowed
@@ -699,9 +712,10 @@ async def test_unavailable_form_never_falls_back_to_full_phone_intake_or_claims_
         sessions, _context(), {"capabilities": ["service.intake"]}, turns, {}
     )
     assert tools is not None
+    _agree_to_form(tools, turns)
     result = await tools.send_form({"customerAgreed": True})
     assert result["ok"] is False and "closing" not in result
-    assert "staff follow-up is needed" in result["error"]
+    assert "suggest contacting the business" in result["error"]
     assert "Do not claim staff have been notified" in result["error"]
     assert "Do not collect address" in result["error"]
     assert "by phone instead" not in result["error"]
@@ -769,6 +783,7 @@ async def test_valid_queued_form_closes_call_but_unavailable_keeps_the_conversat
     node = initial_node_from_spec(spec, runtime_function_factories=tools.factories())
     send = next(f for f in node["functions"] if f.name == "send_whatsapp_service_form")
     sessions.request_service_followup.return_value = {"status": "unavailable"}
+    _agree_to_form(tools, turns)
     result, stay = await send.handler({"customerAgreed": True}, SimpleNamespace(state={}))
     assert result["ok"] is False and stay["name"] == "talk"
     sessions.request_service_followup.return_value = {
@@ -807,6 +822,7 @@ async def test_form_queue_durable_receipt_must_match_saved_intake_and_never_cont
         "intakeId": sessions.get_service_intake_context.return_value["intakeId"],
         **change,
     }
+    _agree_to_form(tools, turns)
     result = await tools.send_form({"customerAgreed": True})
     assert result["ok"] is False and "closing" not in result
 
@@ -828,4 +844,125 @@ async def test_form_failed_fact_save_cannot_unlock_message_queue():
     )
     assert result["ok"] is False
     assert (await tools.send_form({"customerAgreed": True}))["ok"] is False
+    sessions.request_service_followup.assert_not_awaited()
+
+
+def _reviewed_form_node(tools):
+    source = Path(__file__).resolve().parents[4] / "infra/tenant-configurations/protouch.voice.json"
+    spec = expand(Composition.model_validate(json.loads(source.read_text(encoding="utf-8"))))
+    return initial_node_from_spec(spec, runtime_function_factories=tools.factories())
+
+
+@pytest.mark.asyncio
+async def test_reviewed_flow_saves_then_asks_once_and_sends_only_after_a_new_answer():
+    sessions, turns = _form_sessions(), AcceptedTurns()
+    tools = await build_voice_service_intake(
+        sessions, _context(), {"capabilities": ["service.intake"]}, turns, {}
+    )
+    assert tools is not None
+    node = _reviewed_form_node(tools)
+    functions = {f.name: f for f in node["functions"]}
+    # No generic goto/close function can bypass the guarded form lifecycle.
+    assert set(functions) == set(tools.tool_names)
+    intake = str(uuid4())
+    sessions.capture_service_intake.return_value = {"intakeId": intake, "status": "collecting"}
+    manager = SimpleNamespace(state={})
+    turns.accept()
+    tools.record_caller_turn("שמי דנה, המסך מרצד")
+    result, consent = await functions["capture_service_intake"].handler(
+        {"fields": {"customerName": "דנה", "faultDescription": "המסך מרצד"}, "confirmed": False},
+        manager,
+    )
+    assert result["ok"] is True
+    assert consent["respond_immediately"] is False
+    assert len(consent["pre_actions"]) == 1
+    question = consent["pre_actions"][0]
+    assert question["type"] == "tts_say" and question["text"].endswith("?")
+    assert len(question["text"].split()) <= 14 and "/" not in question["text"]
+    assert safe_spoken_text(question["text"], "he") == (question["text"], False)
+    assert (await tools.send_form({"customerAgreed": True}))["ok"] is False
+    assert (await tools.finish_form({}))["ok"] is False
+    sessions.request_service_followup.assert_not_awaited()
+    turns.accept()
+    tools.record_caller_turn("כן, תשלחי לי בבקשה קישור")
+    sessions.request_service_followup.return_value = {
+        "status": "queued",
+        "intakeId": intake,
+        "jobId": str(uuid4()),
+    }
+    result, close = await functions["send_whatsapp_service_form"].handler(
+        {"customerAgreed": True},
+        manager,
+    )
+    assert result["ok"] is True and close["respond_immediately"] is False
+    assert close["pre_actions"][0]["type"] == "end_conversation"
+    assert close["functions"] == []
+    assert len(result["closing"].split()) < 23
+    sessions.request_service_followup.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_partial_recognition_and_negative_symptom_cannot_skip_facts_or_hang_up():
+    sessions, turns = _form_sessions(), AcceptedTurns()
+    tools = await build_voice_service_intake(
+        sessions, _context(), {"capabilities": ["service.intake"]}, turns, {}
+    )
+    assert tools is not None
+    node = _reviewed_form_node(tools)
+    functions = {f.name: f for f in node["functions"]}
+    manager = SimpleNamespace(state={})
+    for field, fragment in (("customerName", "או."), ("faultDescription", "אממ, אני.")):
+        turns.accept()
+        tools.record_caller_turn(fragment)
+        result, stay = await functions["capture_service_intake"].handler(
+            {"fields": {field: fragment}, "confirmed": False},
+            manager,
+        )
+        assert result["ok"] is False
+        assert not stay.get("pre_actions") and not stay.get("post_actions")
+        assert stay["respond_immediately"] is (field == "customerName")
+    sessions.capture_service_intake.assert_not_awaited()
+    turns.accept()
+    tools.record_caller_turn("לא. לא רואה את המסך טוב. יש עליו ריצוד.")
+    result, stay = await functions["finish_service_intake"].handler({}, manager)
+    assert result["ok"] is False
+    assert stay["name"] == "support" and not stay.get("post_actions")
+    assert (await tools.send_form({"customerAgreed": True}))["ok"] is False
+    sessions.request_service_followup.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "text", ["לא. לא רואה את המסך טוב. יש עליו ריצוד.", "לא עובד לי המסך", "אממ, אני"]
+)
+async def test_fault_or_hesitation_after_consent_question_does_not_close(text):
+    sessions, turns = _form_sessions(saved=True), AcceptedTurns()
+    tools = await build_voice_service_intake(
+        sessions, _context(), {"capabilities": ["service.intake"]}, turns, {}
+    )
+    assert tools is not None
+    _agree_to_form(tools, turns, text)
+    assert (await tools.finish_form({}))["ok"] is False
+    assert (await tools.send_form({"customerAgreed": True}))["ok"] is False
+    sessions.request_service_followup.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text", ["לא", "לא תודה", "אל תשלחי לי קישור", "אני רוצה לסיים את השיחה"])
+async def test_explicit_decline_or_stop_closes_without_a_message_or_false_sent_outcome(text):
+    sessions, turns = _form_sessions(saved=True), AcceptedTurns()
+    tools = await build_voice_service_intake(
+        sessions, _context(), {"capabilities": ["service.intake"]}, turns, {}
+    )
+    assert tools is not None
+    node = _reviewed_form_node(tools)
+    _agree_to_form(tools, turns, text)
+    assert (await tools.send_form({"customerAgreed": True}))["ok"] is False
+    finish = next(f for f in node["functions"] if f.name == "finish_service_intake")
+    result, close = await finish.handler({}, SimpleNamespace(state={}))
+    assert result["ok"] is True
+    assert close["name"] == "service_intake_declined"
+    assert close["respond_immediately"] is False
+    assert close["pre_actions"][0]["type"] == "end_conversation"
+    assert safe_spoken_text(result["closing"], "he") == (result["closing"], False)
     sessions.request_service_followup.assert_not_awaited()

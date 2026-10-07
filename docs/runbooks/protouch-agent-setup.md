@@ -16,8 +16,9 @@ secret manager, never in this file or an agent prompt.
    agent assigned as the default WhatsApp agent and a published telephone
    intake flow (verified in the tenant admin session on 2026-09-30). Preserve
    them. Use `protouch.agent.json` only as an offline reference, never as a
-   replacement for those live versions. The agent has no per-tenant LLM, STT,
-   or TTS override, so deployment runtime values remain authoritative.
+   replacement for those live versions. Provider/model selection still follows
+   deployment settings. The reviewed voice quality revision below adds a bounded
+   speaking pace and pronunciation dictionary through normal agent publication.
 3. Review the actual ProTouch DID, LiveKit inbound/outbound trunk and dispatch
    bindings before enabling real calls. The caller ID, SIP domain, and username
    in the draft are references only; they do not provision a trunk, associate
@@ -90,6 +91,51 @@ completion. Confirm real Meta delivery receipts, one dashboard ticket and photos
 then verify the AI answers again after the pending form is submitted. Never treat
 an HTTP acceptance alone as delivered or mark the full voice path verified without
 a real call. Test traffic is limited to the operator-authorized recipient.
+
+## Voice quality revision prepared on 2026-10-07
+
+`protouch.voice.json` is the retained v3 composition to validate and publish
+alongside the voice quality in `protouch.agent.json`. Both are reviewed source
+files, not automatic live configuration. Publish a new immutable agent version,
+then bind the approved inbound/outbound voice processes to its canonical voice
+flow and retained script v3. Preserve unrelated configuration and the existing
+WhatsApp process/conversation pins; this is a voice revision.
+
+The previous three inbound calls exposed partial recognition saved as facts,
+negative screen symptoms mistaken for refusal, spoken gender slash forms, and
+long consent/closing explanations. The form runtime now requires a fresh explicit
+consent answer, asks its own short neutral question after durable capture, and
+ends through a guarded finish tool. The v3 composition has no unconditional
+`support_done` route. Hesitation alone cannot become a fault or name. Actual
+delivery and case creation still require their original receipts.
+
+The pronunciation dictionary preserves the underlying Hebrew words and sets
+pace to 1.06. Controlled evaluation with the existing model passed separate
+facts, partial recognition followed by a negative symptom, combined facts, and
+explicit refusal. Soniox synthesis measured the new consent line at 4.27 seconds
+versus 10.84 seconds for the old wording with its slash replaced by a spoken
+conjunction. This is a phrase-duration comparison, not a claim about end-to-end
+call latency or human listening acceptance. Local voice/flow/dispatcher tests
+passed (1,327); default provider evaluations remain opt-in.
+
+One reviewed first-time caller's template was admitted but failed worker
+eligibility because the new WhatsApp identity was `unverified`. The worker's
+load and pre-send checks now permit that state only for the narrowly authorized
+phone-origin form template with general template access disabled. They recheck
+the transport-bound recipient, consent and exact unexpired form token, and
+leave the identity unverified. Invalid/revoked identities and ordinary unverified
+template recipients remain blocked. The worker integration fixture now starts
+with an unverified phone identity, as real first-time inbound callers do.
+
+Form language follows the latest received customer preference, using inbound
+receipt order rather than provider timestamps or random message IDs. The worker
+and form integration checks passed (19), including a delayed English request,
+Hebrew defaults, first-caller delivery and rejected recipient/template changes.
+
+After deployment, verify the exact agent/script binding through the production
+resolver, then check the next real authorized call, delivery receipts and form
+submission. Do not repin an active call or replay a failed message to an
+unapproved customer as a test.
 
 ## Historical dev activation status (2026-09-30)
 

@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 import pytest
 from oron_agent.voice_quality import (
     PronunciationEntry,
@@ -20,6 +23,22 @@ def test_published_vocabulary_uses_installed_soniox_structured_terms():
 
     assert _dumped(build_soniox_context(quality)) == {"terms": ["ממיר", "HDMI"]}
     assert build_soniox_context(VoiceQualityConfig()) is None
+
+
+@pytest.mark.asyncio
+async def test_reviewed_protouch_speech_has_pronunciation_hints_without_changing_meaning():
+    path = Path(__file__).resolve().parents[4] / "infra/tenant-configurations/protouch.agent.json"
+    quality = VoiceQualityConfig.model_validate(
+        json.loads(path.read_text(encoding="utf-8"))["agent"]["quality"]
+    )
+    transform = make_speech_transformer(quality, lambda: None, get_language=lambda: "he")
+    text = "אפשר לשלוח בווטסאפ קישור לטופס קצר? המסך מרצד."
+    spoken = await transform(text, "sentence")
+    assert "קִישּׁוּר" in spoken and "לְטוֹפֶס" in spoken and "מְרַצֵּד" in spoken
+    assert "תרצה/תרצי" not in spoken
+    # Keep customer speech at a modest pace; the time saving comes from fewer turns.
+    assert 1.0 < quality.speakingPace <= 1.1
+    assert "מסך מרצד" in _dumped(build_soniox_context(quality))["terms"]
 
 
 def test_recognition_context_carries_business_orientation_and_product_names():

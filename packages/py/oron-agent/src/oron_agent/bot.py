@@ -940,6 +940,8 @@ async def run_bot(
         if message.content:
             # The turn a lead value may cite, and the turn a "saved" must answer.
             accepted_turns.accept()
+            if service_intake is not None:
+                service_intake.record_caller_turn(message.content)
             if text_diagnostics is not None:
                 text_diagnostics.record_stt(message.content, conversation_language.current)
             await transcript_handler.save_message(

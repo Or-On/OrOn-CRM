@@ -3047,9 +3047,18 @@ async function processIntakeFollowup(
         SELECT message.content_text FROM messaging.messages message
         JOIN messaging.inbound_message_origins origin
           ON origin.tenant_id=message.tenant_id AND origin.message_id=message.id
+        JOIN messaging.conversations conversation
+          ON conversation.tenant_id=message.tenant_id AND conversation.id=message.conversation_id
+        JOIN messaging.channels channel
+          ON channel.tenant_id=conversation.tenant_id AND channel.id=conversation.channel_id
+        LEFT JOIN ops.inbound_events event
+          ON event.tenant_id=message.tenant_id AND event.provider=message.provider
+          AND event.provider_account_id=channel.provider_account_id
+          AND event.payload->>'providerMessageId'=message.provider_message_id
         WHERE message.conversation_id=${recipient.conversationId}::uuid AND message.direction='inbound'
           AND origin.contact_identity_id=${recipient.recipientIdentityId}::uuid
-        ORDER BY message.created_at DESC,message.id DESC LIMIT 50`;
+        ORDER BY COALESCE(event.received_at,origin.created_at) DESC,
+          event.receipt_sequence DESC NULLS LAST,message.id DESC LIMIT 50`;
       const customerPlan = {
         ...plan,
         hebrew:
@@ -6758,6 +6767,12 @@ async function requireGroundedOutbound(
     throw new WhatsAppProviderError("ai_evidence_changed", false);
 }
 
+// A first-time phone caller has no inbound WhatsApp verification yet. Only the
+// scoped form-template proof may use that unverified identity: it rechecks the
+// transport-bound caller, consent, exact form token and system-owned message.
+// General template permission must never bypass normal recipient verification.
+// Apply the same predicate at load and again before the provider attempt; never
+// relabel the identity as verified or accept invalid/revoked identities.
 async function revalidateOutboundAttempt(
   sql: Sql,
   workerId: string,
@@ -6801,7 +6816,11 @@ async function revalidateOutboundAttempt(
         AND request.provider=${work.provider}
         AND request.recipient_address=${work.recipient}
         AND identity.normalized_value=request.recipient_address
-        AND identity.contact_id=contact.id AND identity.validation_status='valid'
+        AND identity.contact_id=contact.id
+        AND (identity.validation_status='valid' OR (
+          identity.validation_status='unverified' AND request.message_kind='template'
+          AND NOT platform.whatsapp_templates_enabled()
+          AND platform.whatsapp_template_request_allowed(request)))
         AND contact.lifecycle_status='active'
         AND platform.messaging_ai_actor_authorized(request.requested_by_user_id)
         AND (message.sender_type <> 'agent' OR request.ai_ownership_epoch=conversation.ownership_epoch)
@@ -6870,7 +6889,11 @@ async function loadOutboundWork(
         AND request.channel_id = channel.id AND conversation.channel_id = channel.id
         AND channel.status = 'active' AND channel.provider = request.provider
         AND conversation.contact_id = contact.id AND identity.contact_id = contact.id
-        AND identity.validation_status = 'valid' AND contact.lifecycle_status = 'active'
+        AND (identity.validation_status='valid' OR (
+          identity.validation_status='unverified' AND request.message_kind='template'
+          AND NOT platform.whatsapp_templates_enabled()
+          AND platform.whatsapp_template_request_allowed(request)))
+        AND contact.lifecycle_status = 'active'
         AND platform.messaging_ai_actor_authorized(request.requested_by_user_id)
         AND (message.sender_type <> 'agent' OR request.ai_ownership_epoch = conversation.ownership_epoch)
         AND (request.provider <> 'meta' OR (
