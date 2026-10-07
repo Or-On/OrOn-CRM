@@ -46,7 +46,8 @@ def test_graph_has_preserved_oron_root_and_one_target_head() -> None:
     # 146 starts a fresh menu at resume/reopen; 147 binds a principal's single
     # handoff acknowledgement across the same transaction's ownership change.
     # 148 admits only the reviewed voice-form template exception.
-    assert report.revision_count == 148
+    # 149 issues the same form from a verified, authorized WhatsApp enquiry.
+    assert report.revision_count == 149
 
 
 def test_lead_workflow_guard_is_present_in_the_final_configuration_validator() -> None:
