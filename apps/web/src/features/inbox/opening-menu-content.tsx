@@ -8,8 +8,14 @@ export function OpeningMenuContent({ message }: { readonly message: Message }) {
     <div className="template-message">
       <strong>{t("inbox.openingMenu.title")}</strong>
       <ul>
-        <li>{t("inbox.openingMenu.services")}</li>
-        <li>{t("inbox.openingMenu.support")}</li>
+        {(
+          message.openingMenu.buttons ?? [
+            t("inbox.openingMenu.services"),
+            t("inbox.openingMenu.support"),
+          ]
+        ).map((button, index) => (
+          <li key={index}>{button}</li>
+        ))}
       </ul>
       <p role="status">
         {t(`inbox.openingMenu.${message.openingMenu.outcome}`)}

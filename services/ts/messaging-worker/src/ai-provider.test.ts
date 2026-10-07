@@ -36,6 +36,55 @@ function responseFor(value: unknown): Response {
 }
 
 describe("OpenAiCompatibleChatProvider", () => {
+  it.each(["greeting", "clarify"])(
+    "keeps a service answer even when the provider also classifies it as %s",
+    async (replyCode) => {
+      const answer = "אנו מציעים סוכני שירות ואינטגרציות למערכות קיימות.";
+      const fetchMock = stubReply({
+        action: "reply",
+        text: answer,
+        replyCode,
+        reasonCode: null,
+      });
+      await expect(
+        provider().decide({
+          ...request,
+          locale: "he",
+          messages: [{ role: "user", text: "איזה שירותים אתם נותנים לעסקים?" }],
+        }),
+      ).resolves.toEqual({ action: "reply", text: answer });
+      const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+      if (typeof init.body !== "string")
+        throw new TypeError("Expected JSON body");
+      const body = JSON.parse(init.body) as {
+        response_format: {
+          json_schema: {
+            schema: { properties: { replyCode: { enum: unknown[] } } };
+          };
+        };
+      };
+      expect(
+        body.response_format.json_schema.schema.properties.replyCode.enum,
+      ).not.toContain(replyCode);
+      expect(systemMessage(fetchMock)).toContain("Answer a clear question");
+    },
+  );
+
+  it("rejects an empty generic clarification instead of discarding a clear customer request", async () => {
+    stubReply({
+      action: "reply",
+      text: null,
+      replyCode: "clarify",
+      reasonCode: null,
+    });
+    await expect(
+      provider().decide({
+        ...request,
+        messages: [{ role: "user", text: "What services do you offer?" }],
+      }),
+    ).rejects.toBeInstanceOf(WhatsAppAiProviderError);
+  });
+
   it("offers a real service-form action only for the authorized form workflow", async () => {
     const fetchMock = stubReply({
       action: "service_form",

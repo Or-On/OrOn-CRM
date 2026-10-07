@@ -30,7 +30,7 @@ describe("canonical opening-menu projection", () => {
             secret: "never-forward",
           },
         }),
-      ).toEqual({ outcome });
+      ).toEqual({ outcome, buttons: ["Services", "Support"] });
     },
   );
   it.each([
@@ -75,7 +75,10 @@ describe("canonical opening-menu projection", () => {
     const sql = (() =>
       Promise.resolve([canonical])) as unknown as postgres.TransactionSql;
     const result = await listMessagePage(sql, row.id);
-    expect(result.messages[0]?.openingMenu).toEqual({ outcome: "unknown" });
+    expect(result.messages[0]?.openingMenu).toEqual({
+      outcome: "unknown",
+      buttons: ["Services", "Support"],
+    });
     expect(result.messages[0]?.status).toBe("read");
     expect(result.messages[0]?.deliveryEvents).toEqual(
       canonical.delivery_events,

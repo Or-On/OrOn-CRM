@@ -286,8 +286,9 @@ describe("service manager", () => {
     );
     if (!navigationElement) throw new Error("Missing workspace navigation");
     const navigation = within(navigationElement);
-    expect(navigation.queryByRole("link", { name: "Voice" })).toBeNull();
-    expect(container.querySelector('a[href="/inbox"]')).toBeNull();
+    expect(navigation.queryByRole("link", { name: "Voice" })).toBeTruthy();
+    expect(container.querySelector('a[href="/inbox"]')).toBeTruthy();
+    expect(container.querySelector('a[href="/orchestration"]')).toBeNull();
     expect(container.querySelector('a[href="/tickets"]')).toBeTruthy();
     rerender(
       localized(

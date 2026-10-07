@@ -294,6 +294,13 @@ const conversationDecisionKeys = [
  * about saving leads cannot reach one, and an action the agent does not hold
  * is refused when parsing rather than merely discouraged in prose.
  */
+const modelReplyCodes = conversationReplyCodes.filter(
+  (code) =>
+    !["greeting", "clarify", "clarify_detail", "clarify_rephrase"].includes(
+      code,
+    ),
+);
+
 function decisionSchemaFor(
   capabilities: readonly AgentCapability[],
   lead: WhatsAppAiRequest["lead"],
@@ -311,7 +318,9 @@ function decisionSchemaFor(
     text: { type: ["string", "null"] },
     replyCode: {
       type: ["string", "null"],
-      enum: [...conversationReplyCodes, null],
+      // Generic greetings/clarifications are delivery fallbacks, not a shortcut
+      // that may replace an answer to a customer's already stated request.
+      enum: [...modelReplyCodes, null],
     },
     documentId: { type: ["string", "null"] },
     factKey: { type: ["string", "null"] },
@@ -392,9 +401,12 @@ function envelopeInstruction(
     "For a business fact from the approved data choose knowledge with its " +
       "documentId and factKey. For an acknowledgement or a question choose " +
       "reply, put the customer-facing wording in text, and set replyCode to " +
-      "null; use a replyCode only for a generic greeting, thanks, safe " +
-      "fallback, the callback_confirmation described above, or " +
-      "clarify_rephrase when the latest message is incoherent.",
+      "null. Write greetings and focused clarification questions in text too. " +
+      "Use a replyCode only for thanks, a safe unavailable-information response, " +
+      "or the callback_confirmation described above. Answer a clear question " +
+      "before asking for more detail; never replace it with a generic greeting " +
+      "or a question about what help is needed. Informal thanks or laughter " +
+      "are acknowledgements, not an incoherent fault report.",
     (leadRouting
       ? "Choose handoff for an immediate request to speak to a person, an emergency, a "
       : "Choose handoff for an explicit request for a person, an emergency, a ") +
@@ -1059,11 +1071,26 @@ export class OpenAiCompatibleChatProvider implements WhatsAppAiProvider {
         };
       }
       if (parsed.action === "reply" && parsed.reasonCode === null) {
+        // Some providers return both useful prose and a generic classification.
+        // Keep the prose for normal grounding rather than silently discarding it.
+        // Consequential bounded responses retain their exact server wording.
+        if (
+          text &&
+          (parsed.replyCode === null ||
+            parsed.replyCode === undefined ||
+            (typeof parsed.replyCode === "string" &&
+              [
+                "greeting",
+                "thanks",
+                "clarify",
+                "clarify_detail",
+                "clarify_rephrase",
+              ].includes(parsed.replyCode)))
+        )
+          return { action: "reply", text };
         if (
           typeof parsed.replyCode === "string" &&
-          conversationReplyCodes.includes(
-            parsed.replyCode as ConversationReplyCode,
-          )
+          modelReplyCodes.includes(parsed.replyCode as ConversationReplyCode)
         ) {
           return {
             action: "reply",

@@ -133,7 +133,10 @@ export function openingMenuSummary(row: {
       outcome !== "unknown")
   )
     return null;
-  return { outcome };
+  return {
+    outcome,
+    buttons: [String(record.buttons[0]), String(record.buttons[1])],
+  };
 }
 
 export function parseMessageCursor(

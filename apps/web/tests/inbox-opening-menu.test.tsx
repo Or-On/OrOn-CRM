@@ -16,6 +16,23 @@ const base: Message = {
   deliveryEvents: [],
 };
 describe("opening menu history", () => {
+  it("shows the actual Hebrew buttons even in an English operator interface", () => {
+    const html = renderMarkup(
+      <OpeningMenuContent
+        message={{
+          ...base,
+          openingMenu: {
+            outcome: "sent",
+            buttons: ["מידע על שירותים", "עזרה או תקלה"],
+          },
+        }}
+      />,
+      "en",
+    );
+    expect(html).toContain("מידע על שירותים");
+    expect(html).toContain("עזרה או תקלה");
+    expect(html).not.toContain("<li>Services</li>");
+  });
   it.each(["en", "he"] as const)(
     "unknown outcome is honest and noninteractive in %s",
     (locale) => {

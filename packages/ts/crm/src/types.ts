@@ -165,6 +165,7 @@ export interface Message {
   readonly template?: TemplateSummary | null;
   readonly openingMenu?: {
     readonly outcome: "sending" | "sent" | "failed" | "unknown";
+    readonly buttons?: readonly string[];
   } | null;
   /** Sanitized customer-media metadata. Provider identifiers never leave CRM. */
   readonly media?: MessageMedia | null;

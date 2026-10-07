@@ -3996,7 +3996,11 @@ async function loadAiWork(
               openingMenuRoute.allowedCapabilities.includes(capability),
             ),
             locale: openingMenuRoute.language,
-            agentPrompt: `${originalContract.agentPrompt}\nCustomer selected business route: ${openingMenuRoute.intent}. Respond in ${openingMenuRoute.language}. Use only the supplied allowed tools.`,
+            agentPrompt: `${originalContract.agentPrompt}\nCustomer selected business route: ${openingMenuRoute.intent}. Respond in ${openingMenuRoute.language}. Use only the supplied allowed tools. The opening greeting has already been sent; do not restart it. ${
+              openingMenuRoute.intent === "services"
+                ? "The services button is a request for a concise overview of this business's services. Answer it from the supplied business profile or approved knowledge before asking at most one relevant follow-up. Do not ask what support problem they have. General information alone does not authorize lead creation. On later turns answer the latest question without repeating the overview."
+                : "The support button requests help, not a human handoff. Ask for the symptom only if it has not already been supplied, then continue with the latest customer message."
+            }`,
             leadFieldSchema: openingMenuRoute.allowedCapabilities.some(
               (capability) => capability.startsWith("lead."),
             )
