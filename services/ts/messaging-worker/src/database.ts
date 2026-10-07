@@ -4843,9 +4843,7 @@ async function createAiHandoff(
   },
 ): Promise<string> {
   // Only the server's callback branches opt in; model reasons never grant it.
-  const preserveAiOwnership =
-    options.callbackOnly === true &&
-    (await remediationEnabled(transaction, "handoff_resume"));
+  const preserveAiOwnership = options.callbackOnly === true;
   const safeReason = safeEscalationReasons[reasonCode];
   const receipt = await transaction<{ id: string }[]>`
     INSERT INTO automation.handoffs
@@ -6496,13 +6494,8 @@ async function processAutomaticCall(
             `;
           }
         }
-        await transaction`
-          UPDATE messaging.conversations
-          SET ownership_mode='human', ai_agent_profile_version_id=NULL,
-              ai_enabled_by_user_id=NULL, ai_enabled_at=NULL,
-              handoff_reason_safe=${fallbackReason}, updated_at=CURRENT_TIMESTAMP
-          WHERE id=${payload.conversationId}::uuid
-        `;
+        // An operational callback failure warrants a staff task, not a silent
+        // transfer of the customer's WhatsApp conversation away from AI.
         await transaction`
           INSERT INTO audit.records
             (tenant_id, actor_user_id, action, target_type, target_id, metadata)

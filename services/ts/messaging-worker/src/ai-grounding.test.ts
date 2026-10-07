@@ -48,6 +48,7 @@ describe("WhatsApp deterministic grounding (typed fixtures, no provider evaluati
     "emergency",
     "safety",
     "regulated_decision",
+    "insufficient_context",
   ] as const)("preserves a %s handoff", (reasonCode) => {
     const decision = { action: "handoff" as const, reasonCode, text: "" };
     expect(
@@ -65,9 +66,14 @@ describe("WhatsApp deterministic grounding (typed fixtures, no provider evaluati
     "יש לי תקלה. אפשר לדבר עם נציגה?",
     "לא עובד, תעבירו אותי לנציג",
     "אני רוצה לדבר עם נציג, החברה שלי אבסל",
+    "תחברי אותי לנציגה בבקשה",
+    "תן לי לדבר עם נציג",
+    "אפשר לדבר עם מישהו מהצוות?",
+    "אני מבקשת לדבר עם מנהלת",
     "Please connect me to a human representative.",
     "I want to speak to a person.",
     "Human please",
+    "Can I speak to someone from your support?",
   ])("honors a current explicit human request: %s", (text) => {
     const decision = {
       action: "handoff" as const,
@@ -78,11 +84,37 @@ describe("WhatsApp deterministic grounding (typed fixtures, no provider evaluati
   });
 
   it.each([
+    "human_requested",
+    "insufficient_context",
+    "emergency",
+    "safety",
+    "regulated_decision",
+  ] as const)(
+    "does not infer consent from a %s classification",
+    (reasonCode) => {
+      for (const text of [
+        "המסך מקצר ומוציא עשן, מה לעשות?",
+        "אני ממש כועס שהתקלה חוזרת",
+        "אשמח לדעת איזה שירותים אתם נותנים לעסקים",
+        "I need help with a legal question",
+      ]) {
+        expect(
+          deferUnconfirmedContextHandoff(
+            { action: "handoff", reasonCode, text: "" },
+            text,
+          ).action,
+        ).toBe("reply");
+      }
+    },
+  );
+
+  it.each([
     "יש לי תקלה בטלוויזיה, אתה יכול לעזור?",
     "אתה כאן?",
     "עזרה או תקלה",
     "אני לא רוצה נציג",
     "אל תעביר אותי לנציג",
+    "אל תחברי אותי לנציג",
     "בלי נציג בבקשה",
     "I don't want a human",
     "Do not transfer me to a person",

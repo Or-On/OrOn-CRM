@@ -222,6 +222,14 @@ pass.
 
 ## Local verification
 
+WhatsApp transfers conversation ownership to a person only after a current,
+explicit customer request (including clear acceptance of the immediately
+preceding human-help offer). Missing context, faults, frustration, model
+escalation categories and failed callback attempts do not authorize a transfer.
+Callback operations can still create staff follow-up tasks while AI remains
+available in the conversation. Existing human-owned conversations require an
+operator to return control to AI; deployment does not replay their messages.
+
 With local PostgreSQL running, the `protouch` mode in the ignored local
 verification runner creates a disposable database, runs migrations, creates
 fictional tenants, publishes the profile through the normal CRM path, checks

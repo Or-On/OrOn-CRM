@@ -1787,8 +1787,8 @@ describe.skipIf(sourceUrl === undefined)(
                   message: {
                     content: JSON.stringify({
                       action: "reply",
-                      replyCode: "greeting",
-                      text: "",
+                      replyCode: null,
+                      text: "Hello, how can I help?",
                       reasonCode: null,
                     }),
                   },
@@ -2324,7 +2324,7 @@ describe.skipIf(sourceUrl === undefined)(
       } finally {
         await ingressOnly.close();
       }
-      // Callback requests retain AI only under the stored opt-in. No provider
+      // Callback requests retain AI; only an explicit person request transfers it. No provider
       // traffic: actual ingestion/jobs/receipts use isolated PostgreSQL.
       await admin`UPDATE platform.tenant_remediation_flags SET enabled=false WHERE tenant_id=${tenantId}::uuid AND flag_key='debounce'`;
       const callbackCall = vi.fn();
@@ -2388,7 +2388,10 @@ describe.skipIf(sourceUrl === undefined)(
         await resetCallbackAi();
         await admin`INSERT INTO platform.tenant_remediation_flags(tenant_id,flag_key,enabled) VALUES(${tenantId}::uuid,'handoff_resume',false) ON CONFLICT(tenant_id,flag_key) DO UPDATE SET enabled=false`;
         const legacyCallbackId = `wamid.callback-legacy-${randomUUID()}`;
-        await callbackInbound(legacyCallbackId, "Please call me now.");
+        await callbackInbound(
+          legacyCallbackId,
+          "I want a human representative.",
+        );
         expect(
           required(
             (
@@ -2464,6 +2467,15 @@ describe.skipIf(sourceUrl === undefined)(
             if (error !== rollback) throw error;
           }
         }
+        await resetCallbackAi();
+        callbackDecide.mockClear();
+        await callbackInbound(
+          `wamid.callback-no-flag-${randomUUID()}`,
+          "Please call me now.",
+        );
+        expect(
+          await admin`SELECT ownership_mode FROM messaging.conversations WHERE id=${conversationId}::uuid`,
+        ).toEqual([{ ownership_mode: "ai" }]);
         await resetCallbackAi();
         await admin`UPDATE platform.tenant_remediation_flags SET enabled=true WHERE tenant_id=${tenantId}::uuid AND flag_key='handoff_resume'`;
         const callbackId = `wamid.callback-optin-${randomUUID()}`;
@@ -2622,6 +2634,27 @@ describe.skipIf(sourceUrl === undefined)(
           handoff_reason_safe: null,
           active_handoffs: 0,
         });
+        for (const reasonCode of [
+          "emergency",
+          "safety",
+          "regulated_decision",
+        ] as const) {
+          callbackDecide.mockResolvedValueOnce({
+            action: "handoff",
+            reasonCode,
+            text: "",
+          });
+          await callbackInbound(
+            `wamid.no-consent-${randomUUID()}`,
+            "My screen has a dangerous electrical fault. What should I do?",
+          );
+          expect(
+            await admin`SELECT ownership_mode FROM messaging.conversations WHERE id=${conversationId}::uuid`,
+          ).toEqual([{ ownership_mode: "ai" }]);
+          expect(
+            await admin`SELECT id FROM automation.handoffs WHERE conversation_id=${conversationId}::uuid AND status IN ('pending','accepted')`,
+          ).toHaveLength(0);
+        }
         let foreignDocument = "";
         await admin.begin(async (tx) => {
           await tx`INSERT INTO memberships(tenant_id,user_id,role) VALUES(${unrelatedTenant}::uuid,${userId}::uuid,'owner') ON CONFLICT DO NOTHING`;
@@ -2720,6 +2753,52 @@ describe.skipIf(sourceUrl === undefined)(
           expect(maliciousSend).toHaveBeenCalled();
         } finally {
           await securityStore.close();
+        }
+        await resetCallbackAi();
+        const failedCall = vi
+          .fn()
+          .mockRejectedValue(
+            new AutomaticCallProviderError("call_http_400", false),
+          );
+        const failedCallStore = createMessagingStore(
+          workerUrl,
+          `failed-call-${randomUUID()}`,
+          {
+            simulator: new SimulatorWhatsAppProvider(),
+            meta: { name: "meta", send: callbackSend },
+          },
+          undefined,
+          {
+            aiProvider: { decide: callbackDecide },
+            automaticCallsEnabled: true,
+            automaticCallProvider: { place: failedCall },
+            realWhatsAppEnabled: true,
+          },
+        );
+        try {
+          const stamp = await admin<
+            { timestamp: string }[]
+          >`SELECT extract(epoch FROM GREATEST(clock_timestamp(),(SELECT max(created_at) FROM messaging.messages WHERE conversation_id=${conversationId}::uuid))+interval '2 seconds')::bigint::text timestamp`;
+          await acceptInbound(
+            `wamid.failed-call-${randomUUID()}`,
+            "Please call me now.",
+            required(stamp[0]).timestamp,
+          );
+          await processUntilIdle(failedCallStore);
+          expect(failedCall).toHaveBeenCalledOnce();
+          expect(
+            await admin`SELECT ownership_mode, ai_agent_profile_version_id FROM messaging.conversations WHERE id=${conversationId}::uuid`,
+          ).toEqual([
+            {
+              ownership_mode: "ai",
+              ai_agent_profile_version_id: whatsAppAgentVersionId,
+            },
+          ]);
+          expect(
+            await admin`SELECT id FROM audit.records WHERE target_id=${conversationId}::uuid AND action='conversation.call_failed' AND metadata->>'errorCode'='call_http_400'`,
+          ).toHaveLength(1);
+        } finally {
+          await failedCallStore.close();
         }
       } finally {
         await callbackStore.close();

@@ -408,9 +408,13 @@ function envelopeInstruction(
       "or a question about what help is needed. Informal thanks or laughter " +
       "are acknowledgements, not an incoherent fault report.",
     (leadRouting
-      ? "Choose handoff for an immediate request to speak to a person, an emergency, a "
-      : "Choose handoff for an explicit request for a person, an emergency, a ") +
-      "safety issue or a regulated decision. If information is missing, ask one " +
+      ? "Choose handoff for an immediate request to speak to a person only. "
+      : "Choose handoff for an explicit request for a person only. ") +
+      "Require the customer's current explicit request in their own wording, or their " +
+      "clear acceptance of the immediately preceding human-help offer. A fault, " +
+      "frustration, missing information, an emergency, a safety issue or a regulated " +
+      "question alone never authorizes transfer. Give appropriate safe guidance " +
+      "without claiming escalation. If information is missing, ask one " +
       "focused clarification question and keep helping within the approved context. " +
       "If the available information still cannot answer the question, offer human " +
       "review with replyCode knowledge_unavailable. Missing information alone must " +
