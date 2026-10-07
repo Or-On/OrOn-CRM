@@ -681,7 +681,7 @@ function confirmsHumanHandoff(
   previousAssistantText: string,
 ): boolean {
   const text = customerText.normalize("NFKC").trim().toLowerCase();
-  const target = String.raw`(?:human(?: representative| agent)?|person|representative|operator|live agent|someone from (?:your )?(?:team|support)|נציג(?:ה)?(?: אנושי(?:ת)?)?|בן אדם|אדם אמיתי|מישהו מה(?:צוות|שירות|תמיכה)|מנהל(?:ת)?)`;
+  const target = String.raw`(?:human(?: representative| agent)?|person|representative|operator|live agent|someone from (?:your )?(?:team|support)|נציג(?:ה)?(?: אנושי(?:ת)?)?|בן אדם|אדם אמיתי|מישהו אמיתי|מישהי אמיתית|מישהו מה(?:צוות|שירות|תמיכה)|מנהל(?:ת)?)`;
   // A model's classification is not consent. Negated, quoted and reported
   // requests cannot inherit an earlier human request from the transcript.
   if (
@@ -708,7 +708,7 @@ function confirmsHumanHandoff(
       "iu",
     ).test(text) ||
     new RegExp(
-      String.raw`(?:^|\s)(?:רוצה|צריך|צריכה|מבקש|מבקשת|מעוניין|מעוניינת|מעדיף|מעדיפה|אשמח|תעביר|תעבירי|תעבירו|תחבר|תחברי|תחברו|חבר|חברי|חברו|תן|תני|תנו|אפשר לדבר|אפשר לשוחח)[^.!?\n]{0,60}${target}(?:\s|[.!?,]|$)`,
+      String.raw`(?:^|\s)(?:רוצה|צריך|צריכה|מבקש|מבקשת|מעוניין|מעוניינת|מעדיף|מעדיפה|אשמח|תעביר|תעבירי|תעבירו|תחבר|תחברי|תחברו|חבר|חברי|חברו|תן|תני|תנו|אפשר לדבר|אפשר לשוחח|אפשר)[^.!?\n]{0,60}${target}(?:\s|[.!?,]|$)`,
       "iu",
     ).test(text)
   )
@@ -716,7 +716,7 @@ function confirmsHumanHandoff(
   // Accept a short answer only to the immediately preceding delivered,
   // server-owned handoff offer, never to an arbitrary old assistant message.
   return (
-    /^(?:yes|yes please|yes thanks|כן|כן בבקשה|כן תודה|בטח)[.!?\s]*$/u.test(
+    /^(?:yes|yes please|yes thanks|please connect me|כן|כן בבקשה|כן תודה|כן אשמח|כן[,]? תעביר(?:י)? אותי|תעביר(?:י)? אותי|בטח)[.!?\s]*$/u.test(
       text,
     ) &&
     [replies.unverified_claim, replies.knowledge_unavailable].some((variants) =>

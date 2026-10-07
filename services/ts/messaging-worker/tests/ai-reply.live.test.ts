@@ -2797,6 +2797,15 @@ describe.skipIf(sourceUrl === undefined)(
           expect(
             await admin`SELECT id FROM audit.records WHERE target_id=${conversationId}::uuid AND action='conversation.call_failed' AND metadata->>'errorCode'='call_http_400'`,
           ).toHaveLength(1);
+          const repliesAfterFailure = callbackSend.mock.calls.length;
+          await callbackInbound(
+            `wamid.after-failed-call-${randomUUID()}`,
+            "Can you keep helping me here?",
+          );
+          expect(callbackSend).toHaveBeenCalledTimes(repliesAfterFailure + 1);
+          expect(
+            await admin`SELECT ownership_mode FROM messaging.conversations WHERE id=${conversationId}::uuid`,
+          ).toEqual([{ ownership_mode: "ai" }]);
         } finally {
           await failedCallStore.close();
         }

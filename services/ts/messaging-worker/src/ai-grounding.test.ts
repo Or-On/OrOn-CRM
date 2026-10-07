@@ -68,6 +68,8 @@ describe("WhatsApp deterministic grounding (typed fixtures, no provider evaluati
     "אני רוצה לדבר עם נציג, החברה שלי אבסל",
     "תחברי אותי לנציגה בבקשה",
     "תן לי לדבר עם נציג",
+    "אפשר נציג אנושי?",
+    "אני מעדיף לדבר עם מישהו אמיתי",
     "אפשר לדבר עם מישהו מהצוות?",
     "אני מבקשת לדבר עם מנהלת",
     "Please connect me to a human representative.",
@@ -135,7 +137,7 @@ describe("WhatsApp deterministic grounding (typed fixtures, no provider evaluati
     });
   });
 
-  it.each(["yes please", "כן בבקשה"])(
+  it.each(["yes please", "כן בבקשה", "כן, תעביר אותי", "כן אשמח"])(
     "accepts %s only after the immediate approved offer",
     (text) => {
       const decision = {
