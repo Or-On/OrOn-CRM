@@ -21,6 +21,7 @@ describe.skipIf(!url)(
       "non-ticketing",
       "lead-only",
       "unconfirmed-human",
+      "unconfirmed-safety",
       "safety",
       "menu-continuity",
       "principal-revoked",
@@ -237,11 +238,17 @@ describe.skipIf(!url)(
           }
           decision = {
             action: "handoff",
-            reasonCode: scenario === "safety" ? "safety" : "human_requested",
+            reasonCode: scenario.endsWith("safety")
+              ? "safety"
+              : "human_requested",
             text: "",
           };
-          if (scenario === "unconfirmed-human") {
-            await inbound("יש לי תקלה בטלוויזיה, אתה יכול לעזור?");
+          if (scenario.startsWith("unconfirmed-")) {
+            await inbound(
+              scenario === "unconfirmed-safety"
+                ? "There is a burning smell from the unit."
+                : "יש לי תקלה בטלוויזיה, אתה יכול לעזור?",
+            );
             await inbound("אתה כאן?");
             expect(sent).toHaveLength(3);
             expect(
@@ -258,7 +265,7 @@ describe.skipIf(!url)(
           }
           await inbound(
             scenario === "safety"
-              ? "There is a burning smell from the unit."
+              ? "There is a burning smell from the unit. Please connect me to a human representative."
               : "Please connect me to a human representative.",
           );
           const jobs = await admin<

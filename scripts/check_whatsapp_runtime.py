@@ -208,6 +208,7 @@ async def main() -> None:
                     "vitest",
                     "run",
                     *(f"tests/{suite}" for suite in SUITES),
+                    "--reporter=default",
                     "--reporter=json",
                     f"--outputFile={report}",
                 ],
