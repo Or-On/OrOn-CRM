@@ -3,6 +3,7 @@ import {
   parseAgentCapabilities,
   effectiveCapabilities,
 } from "./agent-capabilities.js";
+import { tenantBusinessContext } from "./tenant-business-context.js";
 import { parseCanonicalFlow } from "./cross-channel.js";
 import { executablePath } from "./flow-adapters.js";
 import {
@@ -139,8 +140,7 @@ export async function loadEffectivePromptContext(
     actionNames,
     tenantDisplayName: agent.display_name,
     businessProfileAvailable:
-      agent.support_profile.businessDescription !== undefined ||
-      agent.support_profile.productsAndServices !== undefined,
+      tenantBusinessContext(agent.support_profile) !== undefined,
     surfaces: { ...(schema ? { leadCollection: true } : {}) },
     ...(missing === undefined ? {} : { missingRequiredFields: missing }),
   });
@@ -167,9 +167,7 @@ export async function loadEffectivePromptContext(
           ? "draft"
           : route?.enabled && route.agent_profile_version_id === input.versionId
             ? "active"
-            : route
-              ? "published_pending_activation"
-              : "published_pending_activation",
+            : "published_pending_activation",
     },
   };
 }

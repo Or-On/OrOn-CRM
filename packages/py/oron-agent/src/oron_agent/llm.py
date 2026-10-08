@@ -139,6 +139,7 @@ class _BoundedOpenAILLMService(OpenAILLMService):
                 reported_usage = None
                 attempt_id = str(uuid4())
                 model_token = self._attempt_model.set(model)
+                hash_token = self._instruction_hash.set(None)
                 self.set_full_model_name(model)
                 try:
                     stream = await super(_BoundedOpenAILLMService, self).get_chat_completions(
@@ -187,13 +188,15 @@ class _BoundedOpenAILLMService(OpenAILLMService):
                         raise
                 finally:
                     self._attempt_model.reset(model_token)
+                    runtime_hash = self._instruction_hash.get()
+                    self._instruction_hash.reset(hash_token)
                     if stream is not None:
                         with suppress(Exception):
                             await stream.close()
                     if self._on_attempt is not None:
                         await self._on_attempt(
                             {
-                                "runtimeInstructionHash": self._instruction_hash.get(),
+                                "runtimeInstructionHash": runtime_hash,
                                 "compositionVersion": COMPOSITION_VERSION,
                                 "attemptId": attempt_id,
                                 "model": model,
@@ -223,6 +226,7 @@ class _BoundedOpenAILLMService(OpenAILLMService):
                 await self._before_attempt()
             started, status, usage = monotonic(), "failed", None
             token = self._attempt_model.set(model)
+            hash_token = self._instruction_hash.set(None)
             try:
                 invocation = self.get_llm_adapter().get_llm_invocation_params(
                     context,
@@ -274,10 +278,12 @@ class _BoundedOpenAILLMService(OpenAILLMService):
                     raise
             finally:
                 self._attempt_model.reset(token)
+                runtime_hash = self._instruction_hash.get()
+                self._instruction_hash.reset(hash_token)
                 if self._on_attempt is not None:
                     await self._on_attempt(
                         {
-                            "runtimeInstructionHash": self._instruction_hash.get(),
+                            "runtimeInstructionHash": runtime_hash,
                             "compositionVersion": COMPOSITION_VERSION,
                             "attemptId": str(uuid4()),
                             "model": model,
