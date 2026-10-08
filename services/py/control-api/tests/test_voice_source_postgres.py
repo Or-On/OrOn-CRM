@@ -105,3 +105,45 @@ async def test_exact_source_tenant_denial_server_allocation_and_identical_retry(
             )
     finally:
         await repo.close()
+
+
+async def test_real_admission_reads_following_inbound_and_pinned_outbound_in_warm_and_second_instances():
+    import json
+    from pathlib import Path
+    from uuid import UUID
+
+    from dispatcher_runtime.persistence import PostgresVoiceRuntime
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    path = os.getenv("PUBLICATION_CONTEXT_PATH")
+    if not path:
+        pytest.skip("TS publication fixture context required")
+    context = json.loads(Path(path).read_text(encoding="utf-8"))
+    assert URL
+    engine = create_async_engine(
+        URL.replace("postgresql://", "postgresql+asyncpg://"),
+        connect_args={"server_settings": {"role": "platform_voice"}},
+    )
+    runtime = object.__new__(PostgresVoiceRuntime)
+    runtime._sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        for _ in range(2):
+            incoming = await runtime.get_voice_configuration(
+                UUID(context["voice"]), tenant_id=UUID(context["tenant"]), trigger="voice.inbound"
+            )
+            outgoing = await runtime.get_voice_configuration(
+                UUID(context["voice"]),
+                tenant_id=UUID(context["tenant"]),
+                trigger="voice.outbound_assignment",
+            )
+            assert incoming["agentVersionId"] == context["newAgent"]
+            assert outgoing["agentVersionId"] == context["base"]
+        second = object.__new__(PostgresVoiceRuntime)
+        second._sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
+        assert (
+            await second.get_voice_configuration(
+                UUID(context["voice"]), tenant_id=UUID(context["tenant"]), trigger="voice.inbound"
+            )
+        )["agentVersionId"] == context["newAgent"]
+    finally:
+        await engine.dispose()
