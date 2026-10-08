@@ -79,18 +79,31 @@ export async function GET(
         throw new Error("missing authorized read assertion");
       const assertion = loaded.assertion;
       const config = loadConfig(process.env, { service: "web" });
-      const client = new ControlApiClient(config.controlApiUrl, (target, init) => {
-        const headers = new Headers(init?.headers);
-        headers.set("authorization", `Bearer ${assertion}`);
-        return fetch(target, {
-          ...init, headers, cache: "no-store",
-          signal: AbortSignal.any([request.signal, AbortSignal.timeout(10000)]),
-        });
-      });
+      const client = new ControlApiClient(
+        config.controlApiUrl,
+        (target, init) => {
+          const headers = new Headers(init?.headers);
+          headers.set("authorization", `Bearer ${assertion}`);
+          return fetch(target, {
+            ...init,
+            headers,
+            cache: "no-store",
+            signal: AbortSignal.any([
+              request.signal,
+              AbortSignal.timeout(10000),
+            ]),
+          });
+        },
+      );
       const response = await client.getAgentEffectivePrompt({
-        agent_id: id, version_id: versionId,
-        ...(selection.retainedFlowId === null ? {} : { flow_id: selection.retainedFlowId }),
-        ...(selection.retainedFlowVersion === null ? {} : { flow_version: selection.retainedFlowVersion }),
+        agent_id: id,
+        version_id: versionId,
+        ...(selection.retainedFlowId === null
+          ? {}
+          : { flow_id: selection.retainedFlowId }),
+        ...(selection.retainedFlowVersion === null
+          ? {}
+          : { flow_version: selection.retainedFlowVersion }),
         ...(nodeId === null ? {} : { node_id: nodeId }),
       });
       if (!response.ok)
