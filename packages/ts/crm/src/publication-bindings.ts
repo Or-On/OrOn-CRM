@@ -303,8 +303,9 @@ async function propagate(
         )
           reason = "node_agent_pinned";
         if (
-          candidate.kind === "retained_voice" &&
-          cfg.flowId === candidate.resource_id &&
+          (candidate.kind === "agent" ||
+            (candidate.kind === "retained_voice" &&
+              cfg.flowId === candidate.resource_id)) &&
           parseReferencePolicy(cfg.flowReferencePolicy) === "pinned"
         )
           reason = "retained_flow_pinned";

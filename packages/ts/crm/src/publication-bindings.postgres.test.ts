@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { writeFileSync } from "node:fs";
 import postgres from "postgres";
 import { describe, expect, it } from "vitest";
 import {
+  rebindAgentConversations,
   createAgentProfileDraft,
   createAgentProfileRevision,
   createCanonicalFlowDraft,
@@ -157,6 +159,21 @@ describe.skipIf(!url)("publication bundle under application roles", () => {
     const db = postgres(url!, { max: 4 });
     try {
       const f = await fixture(db);
+      const channel = randomUUID(),
+        contact = randomUUID(),
+        removedContact = randomUUID(),
+        chat = randomUUID(),
+        removed = randomUUID(),
+        activeCall = randomUUID();
+      await db.begin(async (sql) => {
+        await sql`INSERT INTO messaging.channels(id,tenant_id,kind,provider,provider_account_id,status)VALUES(${channel}::uuid,${f.tenant}::uuid,'whatsapp','simulator',${channel},'active')`;
+        await sql`INSERT INTO crm.contacts(id,tenant_id,name)VALUES(${contact}::uuid,${f.tenant}::uuid,'Fictional existing'),(${removedContact}::uuid,${f.tenant}::uuid,'Fictional removed')`;
+        await sql`SELECT set_config('app.current_tenant',${f.tenant},true),set_config('app.current_user',${f.actor},true),set_config('app.current_role','owner',true)`;
+        await sql`INSERT INTO messaging.conversations(id,tenant_id,channel_id,contact_id,ownership_mode,ai_agent_profile_version_id,ai_enabled_by_user_id,ai_enabled_at)VALUES(${chat}::uuid,${f.tenant}::uuid,${channel}::uuid,${contact}::uuid,'ai',${f.base}::uuid,${f.actor}::uuid,now()),(${removed}::uuid,${f.tenant}::uuid,${channel}::uuid,${removedContact}::uuid,'ai',${f.base}::uuid,${f.actor}::uuid,now())`;
+        await sql`UPDATE messaging.conversations SET removed_from_inbox_at=now() WHERE id=${removed}::uuid`;
+        await sql`INSERT INTO public.sessions(session_id,tenant_id,direction,room,flow_id,provider,status)VALUES(${activeCall}::uuid,${f.tenant}::uuid,'inbound',${activeCall},${f.voice}::uuid,'livekit','started')`;
+        await sql`INSERT INTO public.session_events(tenant_id,session_id,sequence,event_type,payload)VALUES(${f.tenant}::uuid,${activeCall}::uuid,0,'voice.agent.binding.v1',${sql.json({ agent_version_id: f.base })})`;
+      });
       const draft = await db.begin(async (sql) => {
         await scope(sql, f.tenant, f.actor);
         return createAgentProfileRevision(sql, f.actor, f.profile, {
@@ -211,6 +228,34 @@ describe.skipIf(!url)("publication bundle under application roles", () => {
             await sql`SELECT agent_profile_version_id FROM automation.flow_versions WHERE id=${f.flowId}::uuid`
           )[0]?.agent_profile_version_id,
         ).toBe(f.base);
+        const [old] =
+          await sql`SELECT ai_agent_profile_version_id,ownership_epoch FROM messaging.conversations WHERE id=${chat}::uuid`;
+        expect(old?.ai_agent_profile_version_id).toBe(f.base);
+        const rebound = await rebindAgentConversations(
+          sql,
+          f.actor,
+          f.profile,
+          draft!.versionId,
+        );
+        expect(rebound?.rebound).toBe(1);
+        const [after] =
+          await sql`SELECT ai_agent_profile_version_id,ownership_epoch FROM messaging.conversations WHERE id=${chat}::uuid`;
+        expect(after?.ai_agent_profile_version_id).toBe(draft!.versionId);
+        expect(Number(after?.ownership_epoch)).toBeGreaterThan(
+          Number(old?.ownership_epoch),
+        );
+        expect(
+          (
+            await sql`SELECT ai_agent_profile_version_id FROM messaging.conversations WHERE id=${removed}::uuid`
+          )[0]?.ai_agent_profile_version_id,
+        ).toBe(f.base);
+        await sql`SET LOCAL ROLE platform_voice`;
+        expect(
+          (
+            await sql`SELECT payload->>'agent_version_id' AS version FROM public.session_events WHERE session_id=${activeCall}::uuid AND event_type='voice.agent.binding.v1'`
+          )[0]?.version,
+        ).toBe(f.base);
+        await sql`SET LOCAL ROLE platform_web`;
         await expect(
           saveCanonicalFlowDraft(sql, f.actor, f.definition, f.flow, 1),
         ).rejects.toThrow("revision changed");
@@ -291,4 +336,167 @@ describe.skipIf(!url)("publication bundle under application roles", () => {
       await db.end();
     }
   }, 30000);
+  it("rejects a pending review without partially publishing", async () => {
+    const db = postgres(url!, { max: 2 });
+    try {
+      const f = await fixture(db);
+      const draft = await db.begin(async (sql) => {
+        await scope(sql, f.tenant, f.actor);
+        return createAgentProfileRevision(sql, f.actor, f.profile, {
+          baseVersionId: f.base,
+          systemPrompt: "New draft",
+          channels: ["voice", "whatsapp"],
+        });
+      });
+      await db.begin(async (sql) => {
+        await scope(sql, f.tenant, f.actor);
+        const state = await getTenantConfigurationState(sql);
+        await saveTenantConfigurationDraft(
+          sql,
+          state.active!.configuration,
+          null,
+          randomUUID(),
+        );
+      });
+      await expect(
+        db.begin(async (sql) => {
+          await scope(sql, f.tenant, f.actor);
+          return publishAgentWithBindings(sql, f.actor, f.profile, {
+            expectedVersionId: draft!.versionId,
+            requestId: randomUUID(),
+            activate: true,
+          });
+        }),
+      ).rejects.toThrow("existing configuration review");
+      await db.begin(async (sql) => {
+        await scope(sql, f.tenant, f.actor);
+        expect(
+          (
+            await sql`SELECT published_at FROM agents.agent_profile_versions WHERE id=${draft!.versionId}::uuid`
+          )[0]?.published_at,
+        ).toBeNull();
+        expect(
+          (
+            await sql`SELECT count(*)::int AS count FROM automation.flow_versions WHERE flow_definition_id=${f.definition}::uuid`
+          )[0]?.count,
+        ).toBe(1);
+      });
+    } finally {
+      await db.end();
+    }
+  });
+  it("leaves ordinary managers pending and denies their crafted approval without partial activation", async () => {
+    const db = postgres(url!, { max: 2 });
+    try {
+      const f = await fixture(db);
+      await db`UPDATE public.users SET is_superuser=false WHERE id=${f.actor}::uuid`;
+      const result = await db.begin(async (sql) => {
+        await scope(sql, f.tenant, f.actor);
+        const draft = await createAgentProfileRevision(
+          sql,
+          f.actor,
+          f.profile,
+          {
+            baseVersionId: f.base,
+            systemPrompt: "Reviewed by owner",
+            channels: ["voice", "whatsapp"],
+          },
+        );
+        return publishAgentWithBindings(sql, f.actor, f.profile, {
+          expectedVersionId: draft!.versionId,
+          requestId: randomUUID(),
+          activate: true,
+        });
+      });
+      expect(result.status).toBe("published_pending_activation");
+      await expect(
+        db.begin(async (sql) => {
+          await scope(sql, f.tenant, f.actor);
+          return activateRetainedPublication(
+            sql,
+            f.actor,
+            result.operationId,
+            true,
+          );
+        }),
+      ).rejects.toThrow("configuration review denied");
+      await db.begin(async (sql) => {
+        await scope(sql, f.tenant, f.actor);
+        expect(
+          (
+            await getTenantConfigurationState(sql)
+          ).active!.configuration.processes.every(
+            (p) => p.agentProfileVersionId === f.base,
+          ),
+        ).toBe(true);
+      });
+    } finally {
+      await db.end();
+    }
+  });
+  it("an inbound follower advances while the separate outbound pin and runtime fixtures stay exact", async () => {
+    const db = postgres(url!, { max: 2 });
+    try {
+      const f = await fixture(db);
+      const result = await db.begin(async (sql) => {
+        await scope(sql, f.tenant, f.actor);
+        const state = await getTenantConfigurationState(sql);
+        const config = {
+          ...state.active!.configuration,
+          processes: state.active!.configuration.processes.map((p) =>
+            p.trigger === "voice.outbound_assignment"
+              ? { ...p, bindingPolicy: "pinned" }
+              : p,
+          ),
+        };
+        await saveTenantConfigurationDraft(sql, config, null, randomUUID());
+        let pending = (await getTenantConfigurationState(sql)).draft!;
+        await transitionTenantConfiguration(
+          sql,
+          "submit",
+          pending.revision,
+          "explicit pin",
+          randomUUID(),
+        );
+        pending = (await getTenantConfigurationState(sql)).draft!;
+        await transitionTenantConfiguration(
+          sql,
+          "approve",
+          pending.revision,
+          "explicit pin",
+          randomUUID(),
+        );
+        const draft = await createAgentProfileRevision(
+          sql,
+          f.actor,
+          f.profile,
+          {
+            baseVersionId: f.base,
+            systemPrompt: "New active opening",
+            channels: ["voice", "whatsapp"],
+          },
+        );
+        return publishAgentWithBindings(sql, f.actor, f.profile, {
+          expectedVersionId: draft!.versionId,
+          requestId: randomUUID(),
+          activate: true,
+        });
+      });
+      const incoming = result.impacts.find(
+          (i) => i.trigger === "voice.inbound",
+        )!,
+        outgoing = result.impacts.find(
+          (i) => i.trigger === "voice.outbound_assignment",
+        )!;
+      expect(incoming.newAgentVersionId).not.toBe(f.base);
+      expect(outgoing.newAgentVersionId).toBe(f.base);
+      if (process.env.PUBLICATION_CONTEXT_PATH)
+        writeFileSync(
+          process.env.PUBLICATION_CONTEXT_PATH,
+          JSON.stringify({ ...f, newAgent: incoming.newAgentVersionId }),
+        );
+    } finally {
+      await db.end();
+    }
+  });
 });
