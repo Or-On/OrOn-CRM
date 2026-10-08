@@ -193,8 +193,12 @@ async def scenario_run(model, key, scenario, instructions):
                     ),
                 )
                 messages.append(message)
+                # The live adapter speaks text chunks even when the same model
+                # turn also calls tools. Apply the boundary before those tools
+                # commit, so a later receipt cannot license an earlier claim.
+                if message.get("content"):
+                    replies.append(await guard.filter(message["content"]))
                 if not message.get("tool_calls"):
-                    replies.append(await guard.filter(message.get("content") or ""))
                     break
                 for call in message["tool_calls"]:
                     actions.append(call["function"]["name"])
@@ -257,6 +261,7 @@ async def scenario_run(model, key, scenario, instructions):
         "fields": list(store.fields.values()),
         "finals": store.finals,
         "attempts": attempts,
+        "transcript": messages[1:],
     }
 
 

@@ -387,3 +387,67 @@ export async function activatePreparedAgentReset(
     VALUES(platform.current_tenant_id(),${actor}::uuid,'agent.reset.activated','agent_reset',${plan.operationId}::uuid,${sql.json(JSON.parse(JSON.stringify(report)) as JsonValue)})`;
   return report;
 }
+
+/** Restore the captured configuration as a new release; never rewrite history or chats. */
+export async function rollbackPreparedAgentReset(
+  sql: postgres.TransactionSql,
+  actor: string,
+  plan: AgentResetPlan,
+  expectedActiveReleaseId: string,
+  rollbackOperationId: string,
+) {
+  await assertKnowledgeManager(sql);
+  await sql`SELECT pg_advisory_xact_lock(hashtextextended(platform.current_tenant_id()::text || ':agent-reset',0))`;
+  if (
+    plan.tenantId !==
+    (await sql`SELECT platform.current_tenant_id() AS id`)[0]?.id
+  )
+    throw new TypeError("Resolved rollback tenant mismatch");
+  const digest = resetDigest({
+    plan,
+    expectedActiveReleaseId,
+    rollbackOperationId,
+  });
+  const [prior] = await sql<{ metadata: Record<string, JsonValue> }[]>`
+    SELECT metadata FROM audit.records WHERE action='agent.reset.rolled_back' AND target_id=${rollbackOperationId}::uuid`;
+  if (prior) {
+    if (prior.metadata.rollbackDigest !== digest)
+      throw new TypeError("Rollback operation content changed");
+    return prior.metadata;
+  }
+  const [activation] = await sql<{ metadata: Record<string, JsonValue> }[]>`
+    SELECT metadata FROM audit.records WHERE action='agent.reset.activated' AND target_id=${plan.operationId}::uuid`;
+  const [preparation] = await sql<{ metadata: Record<string, JsonValue> }[]>`
+    SELECT metadata FROM audit.records WHERE action='agent.reset.prepared' AND target_id=${plan.operationId}::uuid`;
+  if (!activation || preparation?.metadata.planDigest !== resetDigest(plan))
+    throw new TypeError("Matching activated reset required for rollback");
+  const state = await getTenantConfigurationState(sql);
+  if (state.draft || state.active?.id !== expectedActiveReleaseId)
+    throw new TypeError("Configuration changed before rollback; review again");
+  await saveTenantConfigurationDraft(
+    sql,
+    activation.metadata.rollbackConfiguration,
+    null,
+    `${rollbackOperationId}:save`,
+  );
+  for (const action of ["submit", "approve"] as const) {
+    const next = await getTenantConfigurationState(sql);
+    if (!next.draft) throw new TypeError("Rollback draft missing");
+    await transitionTenantConfiguration(
+      sql,
+      action,
+      next.draft.revision,
+      "Restore reviewed pre-reset configuration",
+      `${rollbackOperationId}:${action}`,
+    );
+  }
+  const report = {
+    rollbackDigest: digest,
+    state: await getTenantConfigurationState(sql),
+    existingConversationsRebound: false,
+    activeCallsRebound: false,
+  };
+  await sql`INSERT INTO audit.records(tenant_id,actor_user_id,action,target_type,target_id,metadata)
+    VALUES(platform.current_tenant_id(),${actor}::uuid,'agent.reset.rolled_back','agent_reset',${rollbackOperationId}::uuid,${sql.json(JSON.parse(JSON.stringify(report)) as JsonValue)})`;
+  return report;
+}

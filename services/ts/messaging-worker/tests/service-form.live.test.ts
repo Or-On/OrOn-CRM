@@ -27,6 +27,10 @@ import {
 // Explicit opt-in. Creates/drops only its own UUID-named database; fictional
 // data; a recording fake stands in for Meta — nothing leaves the machine.
 const sourceUrl = process.env.CROSS_CHANNEL_TEST_DATABASE_URL;
+// These tests drive several durable jobs per case against real PostgreSQL.
+// A five-second unit-test budget can abandon a still-running worker and let it
+// claim the next case's fixture. This is not a provider latency benchmark.
+vi.setConfig({ testTimeout: 30_000 });
 const root = fileURLToPath(new URL("../../../../", import.meta.url));
 const tenantId = "10000000-0000-4000-8000-000000000001";
 const userId = "20000000-0000-4000-8000-000000000001";

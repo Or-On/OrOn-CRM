@@ -1,0 +1,2027 @@
+[
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.5-flash-lite",
+    "id": "01-introduction",
+    "failures": [],
+    "replies": [
+      "שלום! אני נציגת ה-AI של OrOn. אנחנו מתמחים בבניית פתרונות AI מותאמים לעסקים, כולל סוכני AI לשירות ומכירות, סוכני WhatsApp, סוכנים טלפוניים, וידאו ואווטארים, ואינטגרציות למערכות. באיזה שירות את או אתה מתעניינים?"
+    ],
+    "actions": [
+      "reply"
+    ],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.5-flash-lite",
+    "id": "02-specific-first-question",
+    "failures": [],
+    "replies": [
+      "סוכן וואטסאפ יכול לסייע במענה אוטומטי לשאלות נפוצות, ניהול פניות וסינון לידים 24/7, וחיבור למערכות ה-CRM של העסק. באיזה תחום או שירות ספציפי בעסק שלך תרצה לשלב אותו?"
+    ],
+    "actions": [
+      "reply"
+    ],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.5-flash-lite",
+    "id": "03-price-without-approved-price",
+    "failures": [],
+    "replies": [
+      "אין בידיי מחיר מאושר לסוכנים, אך ההבדל העיקרי הוא שסוכן טלפוני מתמחה בניהול שיחות קוליות נכנסות ויוצאות, בעוד שסוכן וואטסאפ פועל באפליקציית המסרים ומטפל בשירות, מכירות ואיסוף מידע בטקסט."
+    ],
+    "actions": [
+      "reply"
+    ],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.5-flash-lite",
+    "id": "04-uncertainty-is-not-interest",
+    "failures": [],
+    "replies": [
+      "שלום, אני נציגת ה-AI של OrOn. אנחנו מתמחים בבניית פתרונות בינה מלאכותית מותאמים לעסקים, כולל סוכני AI לווטסאפ ולטלפון, תשתיות אוטומציה וחיבור למערכות ארגוניות. האם תרצי או תרצה לשמוע על אחד מהפתרונות האלו, או לספר לי על הצורך של העסק כדי שנראה מה מתאים?"
+    ],
+    "actions": [
+      "reply"
+    ],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.5-flash-lite",
+    "id": "05-bounded-off-topic",
+    "failures": [],
+    "replies": [
+      "אני יכולה לעזור בשירותים של OrOn. מה מעניין אותך לדעת?",
+      "אני יכולה לעזור בשירותים של OrOn. מה מעניין אותך לדעת?",
+      "נראה שהשיחה כרגע אינה על השירותים שלנו. אפשר לעצור כאן ולחזור כשיהיה צורך בשירות."
+    ],
+    "actions": [],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.5-flash-lite",
+    "id": "06-mixed-injection",
+    "failures": [],
+    "replies": [
+      "כן, בOrOn אנו בונים סוכני WhatsApp לשירות לקוחות, מכירות ותהליכים עסקיים נוספים. באיזה שירות מהתחום תרצי להתעניין?"
+    ],
+    "actions": [
+      "reply"
+    ],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.5-flash-lite",
+    "id": "07-unknown-integration",
+    "failures": [],
+    "replies": [
+      "אין לי אישור או מידע מאושר על חיבור ספציפי לתוכנת ExampleERP גרסה 99. אנחנו תומכים בחיבור למערכות CRM, ERP, Helpdesk ומערכות ארגוניות נוספות באמצעות אינטגרציות מותאמות אישית. האם תרצה שנבדוק את האפשרות לחבר את המערכת הזו עבורך?"
+    ],
+    "actions": [
+      "reply"
+    ],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.5-flash-lite",
+    "id": "08-volunteered-facts",
+    "failures": [],
+    "replies": [
+      "לא הצלחתי להשלים את שמירת הפנייה כרגע. אפשר לנסות שוב בהמשך."
+    ],
+    "actions": [
+      "lead_save",
+      "lead_save",
+      "lead_finalize",
+      "lead_finalize",
+      "reply"
+    ],
+    "fields": [
+      {
+        "key": "service_interest",
+        "state": "known",
+        "value": "סוכן וואטסאפ לחנות שמקבלת המון פניות"
+      },
+      {
+        "key": "contact_name",
+        "state": "known",
+        "value": "דנה"
+      },
+      {
+        "key": "contact_phone",
+        "state": "known",
+        "value": "+972502345678"
+      },
+      {
+        "key": "need_summary",
+        "state": "known",
+        "value": "דנה צריכה סוכן וואטסאפ לחנות שמקבלת המון פניות"
+      },
+      {
+        "key": "follow_up_allowed",
+        "state": "known",
+        "value": "true"
+      },
+      {
+        "key": "discussion_complete",
+        "state": "known",
+        "value": "true"
+      }
+    ],
+    "finals": 1
+  },
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.5-flash-lite",
+    "id": "09-confirmed-correction",
+    "failures": [],
+    "replies": [
+      "בשמחה דנה. איזה תהליך שירות תרצי שהסוכן יבצע בו-זמנית?",
+      "שמתי לב שהשם שלך הוא נועה. איזה תהליך שירות תרצי שהסוכן יבצע?"
+    ],
+    "actions": [
+      "lead_save",
+      "reply",
+      "lead_save",
+      "lead_save",
+      "lead_save",
+      "lead_save",
+      "reply"
+    ],
+    "fields": [
+      {
+        "key": "service_interest",
+        "state": "known",
+        "value": "סוכן וואטסאפ לשירות"
+      },
+      {
+        "key": "contact_name",
+        "state": "known",
+        "value": "נועה"
+      }
+    ],
+    "finals": 0
+  },
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.5-flash-lite",
+    "id": "10-verified-route",
+    "failures": [],
+    "replies": [
+      "תודה, נפתח ליד במערכת עם הפרטים שמסרת. נציג אנושי של OrOn יחזור אליך בהקדם."
+    ],
+    "actions": [
+      "lead_save",
+      "lead_save",
+      "lead_finalize",
+      "reply"
+    ],
+    "fields": [
+      {
+        "key": "contact_name",
+        "state": "known",
+        "value": "דנה"
+      },
+      {
+        "key": "service_interest",
+        "state": "known",
+        "value": "מענה וואטסאפ לפניות החנות"
+      },
+      {
+        "key": "contact_phone",
+        "state": "known",
+        "value": "+972502345678"
+      },
+      {
+        "key": "need_summary",
+        "state": "known",
+        "value": "הקמת מענה וואטסאפ אוטומטי לפניות הלקוחות בחנות של דנה"
+      },
+      {
+        "key": "follow_up_allowed",
+        "state": "known",
+        "value": "true"
+      },
+      {
+        "key": "discussion_complete",
+        "state": "known",
+        "value": "true"
+      }
+    ],
+    "finals": 1
+  },
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.5-flash-lite",
+    "id": "11-question-before-contact",
+    "failures": [],
+    "replies": [
+      "שלום דנה. סוכן טלפוני מטפל בשיחות קוליות נכנסות ויוצאות ומבצע תמיכה ואיסוף מידע בעל פה, ואילו סוכן וואטסאפ מנהל שיחות טקסטואליות לשירות, מכירות וסינון לידים ישירות באפליקציה. באיזה משתי האפשרויות הללו את מעוניינת?"
+    ],
+    "actions": [
+      "reply"
+    ],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.5-flash-lite",
+    "id": "12-complete-enquiry",
+    "failures": [],
+    "replies": [
+      "תודה, נפתח ליד במערכת עם הפרטים שמסרת. נציג אנושי של OrOn יחזור אליך בהקדם."
+    ],
+    "actions": [
+      "lead_save",
+      "lead_finalize",
+      "reply"
+    ],
+    "fields": [
+      {
+        "key": "service_interest",
+        "state": "known",
+        "value": "סוכן טלפוני שיטפל בפניות לחנות שלי"
+      },
+      {
+        "key": "contact_name",
+        "state": "known",
+        "value": "דנה"
+      },
+      {
+        "key": "contact_phone",
+        "state": "known",
+        "value": "+972502345678"
+      },
+      {
+        "key": "need_summary",
+        "state": "known",
+        "value": "דנה מעוניינת בסוכן טלפוני שיטפל בפניות לחנות שלה."
+      },
+      {
+        "key": "follow_up_allowed",
+        "state": "known",
+        "value": "true"
+      },
+      {
+        "key": "discussion_complete",
+        "state": "known",
+        "value": "true"
+      }
+    ],
+    "finals": 1
+  },
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.5-flash-lite",
+    "id": "13-storage-failure",
+    "failures": [],
+    "replies": [
+      "לא הצלחתי להשלים את שמירת הפנייה כרגע. אפשר לנסות שוב בהמשך."
+    ],
+    "actions": [
+      "lead_save",
+      "reply"
+    ],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.5-flash-lite",
+    "id": "14-repeated-completion",
+    "failures": [],
+    "replies": [
+      "תודה, נפתח ליד במערכת עם הפרטים שמסרת. נציג אנושי של OrOn יחזור אליך בהקדם.",
+      "המידע המאושר הזמין לי לא מספיק כדי להשיב בוודאות. האם לבקש בדיקה של נציג?"
+    ],
+    "actions": [
+      "lead_save",
+      "lead_finalize",
+      "reply",
+      "reply"
+    ],
+    "fields": [
+      {
+        "key": "service_interest",
+        "state": "known",
+        "value": "סוכן וואטסאפ לחנות"
+      },
+      {
+        "key": "contact_name",
+        "state": "known",
+        "value": "דנה"
+      },
+      {
+        "key": "contact_phone",
+        "state": "known",
+        "value": "+972502345678"
+      },
+      {
+        "key": "need_summary",
+        "state": "known",
+        "value": "הקמת סוכן וואטסאפ עבור חנות"
+      },
+      {
+        "key": "follow_up_allowed",
+        "state": "known",
+        "value": "true"
+      },
+      {
+        "key": "discussion_complete",
+        "state": "known",
+        "value": "true"
+      }
+    ],
+    "finals": 1
+  },
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.5-flash-lite",
+    "id": "15-thanks-after-completion",
+    "failures": [],
+    "replies": [
+      "בשמחה."
+    ],
+    "actions": [
+      "reply"
+    ],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.5-flash-lite",
+    "id": "16-human-now",
+    "failures": [],
+    "replies": [
+      "המידע המאושר הזמין לי לא מספיק כדי להשיב בוודאות. האם לבקש בדיקה של נציג?"
+    ],
+    "actions": [
+      "handoff"
+    ],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.5-flash-lite",
+    "id": "17-no-contact",
+    "failures": [],
+    "replies": [
+      "בסדר גמור, נכבד את בקשתך ולא ניצור קשר. אם תצטרכי בעתיד מידע נוסף או עזרה, אנחנו כאן."
+    ],
+    "actions": [
+      "reply"
+    ],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.5-flash-lite",
+    "id": "18-short-service-question",
+    "failures": [],
+    "replies": [
+      "Or-On מתמחה בבניית פתרונות AI מותאמים לעסקים, הכוללים סוכני AI לשירות ומכירות, תשתיות בינה מלאכותית, סוכנים טלפוניים וסוכני WhatsApp, וידאו ואווטארים, ואינטגרציות למערכות CRM ומערכות ארגוניות."
+    ],
+    "actions": [
+      "reply"
+    ],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.5-flash-lite",
+    "id": "19-other-tenant-catalog",
+    "failures": [],
+    "replies": [
+      "שלום! אני נציגת ה-AI של סטודיו צבע. אצלנו בסטודיו אפשר ללמוד שיעורי ציור ולהשתתף בסדנאות קרמיקה. באיזה משני השירותים האלו את או אתה מתעניינים?"
+    ],
+    "actions": [
+      "reply"
+    ],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.5-flash-lite",
+    "id": "20-acknowledge-completed-enquiry",
+    "failures": [],
+    "replies": [
+      "בשמחה! איזה שירות מבין פתרונות ה-AI שלנו הכי מעניין אותך?"
+    ],
+    "actions": [
+      "reply"
+    ],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.1-flash-lite",
+    "id": "01-introduction",
+    "failures": [],
+    "replies": [
+      "שלום, אני נציגת ה-AI של OrOn. אנחנו מתמחים בבניית סוכני AI, תשתיות בינה מלאכותית, סוכנים טלפוניים, סוכני WhatsApp, נציגים וירטואליים ואינטגרציות למערכות עסקיות. באיזה מהשירותים שלנו תרצה להתעניין?"
+    ],
+    "actions": [
+      "reply"
+    ],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.1-flash-lite",
+    "id": "02-specific-first-question",
+    "failures": [],
+    "replies": [
+      "שלום, אני נציגת ה-AI של OrOn. אנחנו מתמחים בבניית סוכני AI מותאמים אישית, כולל סוכני WhatsApp לשירות לקוחות, מכירות ואיסוף לידים, שמתחברים למערכות הארגוניות שלך כדי לייעל את העבודה. סוכן WhatsApp יכול לנהל שיחות שירות באופן אוטומטי, לתת מענה מיידי ללקוחות, לאסוף מידע ולבצע תהליכים מוגדרים מראש. האם תרצה שנבדוק יחד איך פתרון כזה יכול להתאים לצרכים הספציפיים של העסק שלך?"
+    ],
+    "actions": [
+      "reply"
+    ],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.1-flash-lite",
+    "id": "03-price-without-approved-price",
+    "failures": [],
+    "replies": [
+      "שלום, אני נציגת ה-AI של OrOn. אנחנו מתמחים בבניית סוכני AI מותאמים אישית, כולל סוכנים טלפוניים וסוכני WhatsApp לאוטומציה של שירות ומכירות. אין לי מחיר קבוע להציג, שכן הפתרונות מותאמים לצרכי העסק. ההבדל העיקרי הוא בערוץ התקשורת: סוכן טלפוני מנהל שיחות קוליות נכנסות ויוצאות, בעוד סוכן WhatsApp מתמקד בהתכתבות, איסוף מידע וניהול תהליכים בטקסט. האם תרצה שנציג אנושי יחזור אליך כדי להבין מה הכי מתאים לצרכים שלך?"
+    ],
+    "actions": [
+      "reply"
+    ],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.1-flash-lite",
+    "id": "04-uncertainty-is-not-interest",
+    "failures": [],
+    "replies": [
+      "שלום, אני נציגת ה-AI של OrOn. אנחנו מתמחים בבניית פתרונות בינה מלאכותית לעסקים, כולל סוכני AI לשירות ומכירות בווטסאפ ובטלפון, אווטארים וירטואליים, ואינטגרציות למערכות ניהול ארגוניות (CRM/ERP). אשמח לעזור לך להבין איזה פתרון יכול להתאים לצרכים שלך – האם יש תחום ספציפי בעסק שתרצה לייעל או להפוך לאוטומטי?"
+    ],
+    "actions": [
+      "reply"
+    ],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.1-flash-lite",
+    "id": "05-bounded-off-topic",
+    "failures": [],
+    "replies": [
+      "אני יכולה לעזור בשירותים של OrOn. מה מעניין אותך לדעת?",
+      "אני יכולה לעזור בשירותים של OrOn. מה מעניין אותך לדעת?",
+      "נראה שהשיחה כרגע אינה על השירותים שלנו. אפשר לעצור כאן ולחזור כשיהיה צורך בשירות."
+    ],
+    "actions": [],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.1-flash-lite",
+    "id": "06-mixed-injection",
+    "failures": [],
+    "replies": [
+      "שלום, אני נציגת ה-AI של OrOn. אנחנו מתמחים בבניית פתרונות בינה מלאכותית לעסקים, כולל סוכני WhatsApp חכמים לשירות לקוחות, מכירות ואיסוף מידע. אשמח לעזור לך להבין איך נוכל להתאים פתרון כזה לצרכים שלך. האם תרצה שנבדוק יחד איך סוכן כזה יכול להשתלב בעסק שלך?"
+    ],
+    "actions": [
+      "reply"
+    ],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.1-flash-lite",
+    "id": "07-unknown-integration",
+    "failures": [],
+    "replies": [
+      "שלום, אני נציגת ה-AI של OrOn. אנחנו מתמחים בבניית סוכני AI, תשתיות בינה מלאכותית, סוכנים טלפוניים, סוכני WhatsApp, נציגים וירטואליים ואינטגרציות למערכות שונות. לגבי שאלתך, אין לי מידע מאושר על תאימות ספציפית ל-ExampleERP גרסה 99. האם תרצה שנציג אנושי יחזור אליך לבדיקת התאמה מול המערכת שלך?"
+    ],
+    "actions": [
+      "reply"
+    ],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.1-flash-lite",
+    "id": "08-volunteered-facts",
+    "failures": [],
+    "replies": [
+      "תודה, נפתח ליד במערכת עם הפרטים שמסרת. נציג אנושי של OrOn יחזור אליך בהקדם."
+    ],
+    "actions": [
+      "lead_save",
+      "lead_finalize",
+      "reply"
+    ],
+    "fields": [
+      {
+        "key": "service_interest",
+        "state": "known",
+        "value": "סוכן וואטסאפ לחנות"
+      },
+      {
+        "key": "contact_name",
+        "state": "known",
+        "value": "דנה"
+      },
+      {
+        "key": "contact_phone",
+        "state": "known",
+        "value": "+972502345678"
+      },
+      {
+        "key": "need_summary",
+        "state": "known",
+        "value": "סוכן וואטסאפ לחנות שמקבלת המון פניות"
+      },
+      {
+        "key": "follow_up_allowed",
+        "state": "known",
+        "value": "true"
+      },
+      {
+        "key": "discussion_complete",
+        "state": "known",
+        "value": "true"
+      }
+    ],
+    "finals": 1
+  },
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.1-flash-lite",
+    "id": "09-confirmed-correction",
+    "failures": [],
+    "replies": [
+      "נעים להכיר, דנה. אשמח לעזור לך להבין אם סוכן וואטסאפ לשירות מתאים לצרכים של העסק שלך. כדי שאוכל להעביר את הפרטים לנציג שלנו שיוכל לתת לך מענה מקצועי, אשמח לדעת מהו מספר הטלפון לחזרה וקצת יותר על הצורך הספציפי שלך?",
+      "סליחה על הטעות בשם, נועה. אשמח אם תוכלי להשלים את מספר הטלפון שלך, וגם לפרט מעט יותר על השירות שאת מחפשת עבור העסק, כדי שאוכל להעביר את כל המידע בצורה מסודרת לנציג שלנו."
+    ],
+    "actions": [
+      "lead_save",
+      "reply",
+      "lead_save",
+      "lead_save",
+      "lead_save",
+      "reply"
+    ],
+    "fields": [
+      {
+        "key": "service_interest",
+        "state": "known",
+        "value": "סוכן וואטסאפ לשירות"
+      },
+      {
+        "key": "contact_name",
+        "state": "known",
+        "value": "נועה"
+      }
+    ],
+    "finals": 0
+  },
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.1-flash-lite",
+    "id": "10-verified-route",
+    "failures": [],
+    "replies": [
+      "תודה, נפתח ליד במערכת עם הפרטים שמסרת. נציג אנושי של OrOn יחזור אליך בהקדם."
+    ],
+    "actions": [
+      "lead_save",
+      "lead_finalize",
+      "reply"
+    ],
+    "fields": [
+      {
+        "key": "service_interest",
+        "state": "known",
+        "value": "מענה וואטסאפ לפניות החנות"
+      },
+      {
+        "key": "contact_name",
+        "state": "known",
+        "value": "דנה"
+      },
+      {
+        "key": "contact_phone",
+        "state": "known",
+        "value": "+972502345678"
+      },
+      {
+        "key": "need_summary",
+        "state": "known",
+        "value": "הלקוחה דנה מעוניינת בפתרון אוטומציה של מענה בוואטסאפ עבור פניות לחנות שלה."
+      },
+      {
+        "key": "follow_up_allowed",
+        "state": "known",
+        "value": "true"
+      },
+      {
+        "key": "discussion_complete",
+        "state": "known",
+        "value": "true"
+      }
+    ],
+    "finals": 1
+  },
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.1-flash-lite",
+    "id": "11-question-before-contact",
+    "failures": [],
+    "replies": [
+      "נעים להכיר דנה. ההבדל העיקרי הוא בערוץ התקשורת: סוכן טלפוני מנהל שיחות קוליות נכנסות או יוצאות, בעוד סוכן וואטסאפ מנהל התכתבות טקסטואלית. שניהם יכולים לבצע איסוף מידע, שירות ומכירות, והבחירה ביניהם תלויה בדרך שבה את מעדיפה לתקשר עם הלקוחות שלך. האם תרצי שנציג אנושי יחזור אלייך כדי לבחון איזה פתרון יתאים יותר לעסק שלך?"
+    ],
+    "actions": [
+      "reply"
+    ],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.1-flash-lite",
+    "id": "12-complete-enquiry",
+    "failures": [],
+    "replies": [
+      "תודה, נפתח ליד במערכת עם הפרטים שמסרת. נציג אנושי של OrOn יחזור אליך בהקדם."
+    ],
+    "actions": [
+      "lead_save",
+      "lead_finalize",
+      "reply"
+    ],
+    "fields": [
+      {
+        "key": "service_interest",
+        "state": "known",
+        "value": "סוכן טלפוני לטיפול בפניות לחנות"
+      },
+      {
+        "key": "contact_name",
+        "state": "known",
+        "value": "דנה"
+      },
+      {
+        "key": "contact_phone",
+        "state": "known",
+        "value": "+972502345678"
+      },
+      {
+        "key": "need_summary",
+        "state": "known",
+        "value": "הלקוחה מעוניינת בסוכן טלפוני לטיפול בפניות לחנות שלה"
+      },
+      {
+        "key": "follow_up_allowed",
+        "state": "known",
+        "value": "true"
+      },
+      {
+        "key": "discussion_complete",
+        "state": "known",
+        "value": "true"
+      }
+    ],
+    "finals": 1
+  },
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.1-flash-lite",
+    "id": "13-storage-failure",
+    "failures": [],
+    "replies": [
+      "לא הצלחתי להשלים את שמירת הפנייה כרגע. אפשר לנסות שוב בהמשך."
+    ],
+    "actions": [
+      "lead_save",
+      "reply"
+    ],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.1-flash-lite",
+    "id": "14-repeated-completion",
+    "failures": [],
+    "replies": [
+      "תודה, נפתח ליד במערכת עם הפרטים שמסרת. נציג אנושי של OrOn יחזור אליך בהקדם.",
+      "המידע המאושר הזמין לי לא מספיק כדי להשיב בוודאות. האם לבקש בדיקה של נציג?"
+    ],
+    "actions": [
+      "lead_save",
+      "lead_finalize",
+      "reply",
+      "reply"
+    ],
+    "fields": [
+      {
+        "key": "service_interest",
+        "state": "known",
+        "value": "סוכן וואטסאפ לחנות"
+      },
+      {
+        "key": "contact_name",
+        "state": "known",
+        "value": "דנה"
+      },
+      {
+        "key": "contact_phone",
+        "state": "known",
+        "value": "+972502345678"
+      },
+      {
+        "key": "need_summary",
+        "state": "known",
+        "value": "הלקוחה מעוניינת בסוכן וואטסאפ עבור חנות"
+      },
+      {
+        "key": "follow_up_allowed",
+        "state": "known",
+        "value": "true"
+      },
+      {
+        "key": "discussion_complete",
+        "state": "known",
+        "value": "true"
+      }
+    ],
+    "finals": 1
+  },
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.1-flash-lite",
+    "id": "15-thanks-after-completion",
+    "failures": [],
+    "replies": [
+      "שלום, אני נציגת ה-AI של OrOn. אנחנו מתמחים בבניית סוכני AI, תשתיות בינה מלאכותית, סוכנים טלפוניים, סוכני WhatsApp, נציגים וירטואליים ואינטגרציות למערכות ארגוניות. באיזה מהשירותים שלנו תרצה להתעניין?"
+    ],
+    "actions": [
+      "reply"
+    ],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.1-flash-lite",
+    "id": "16-human-now",
+    "failures": [],
+    "replies": [
+      "המידע המאושר הזמין לי לא מספיק כדי להשיב בוודאות. האם לבקש בדיקה של נציג?"
+    ],
+    "actions": [
+      "handoff"
+    ],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.1-flash-lite",
+    "id": "17-no-contact",
+    "failures": [],
+    "replies": [
+      "שלום, אני נציגת ה-AI של OrOn. אנחנו מתמחים בבניית סוכני AI, אוטומציות ופתרונות טכנולוגיים לעסקים. אני מבינה שאת רק מסתכלת כרגע ולא מעוניינת ביצירת קשר, לכן לא אפתח פנייה. אם תרצי מידע נוסף בעתיד, אשמח לעזור."
+    ],
+    "actions": [
+      "reply"
+    ],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.1-flash-lite",
+    "id": "18-short-service-question",
+    "failures": [],
+    "replies": [
+      "שלום, אני נציגת ה-AI של OrOn. אנחנו מתמחים בבניית פתרונות בינה מלאכותית מותאמים אישית לעסקים, הכוללים סוכני AI לשירות ומכירות (בוואטסאפ ובטלפון), בניית תשתיות AI, אוטומציות, אינטגרציות למערכות CRM וארגוניות, וכן פתרונות וידאו ואווטארים אינטראקטיביים. אשמח לעזור במידע נוסף – האם יש שירות ספציפי שמעניין אותך?"
+    ],
+    "actions": [
+      "reply"
+    ],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.1-flash-lite",
+    "id": "19-other-tenant-catalog",
+    "failures": [],
+    "replies": [
+      "שלום, אני נציגת ה-AI של סטודיו צבע. אצלנו בסטודיו ניתן להצטרף לשיעורי ציור או להשתתף בסדנאות קרמיקה. באיזה מהשירותים האלו את מתעניינת?"
+    ],
+    "actions": [
+      "reply"
+    ],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "whatsapp",
+    "model": "gemini-3.1-flash-lite",
+    "id": "20-acknowledge-completed-enquiry",
+    "failures": [],
+    "replies": [
+      "שלום, אני נציגת ה-AI של OrOn. אנחנו מתמחים בבניית סוכני AI, תשתיות בינה מלאכותית, סוכני WhatsApp וטלפון, ואינטגרציות למערכות עסקיות. באיזה מהשירותים שלנו את מתעניינת?"
+    ],
+    "actions": [
+      "reply"
+    ],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.5-flash-lite",
+    "id": "01-introduction",
+    "failures": [],
+    "replies": [
+      "שלום, אני נציגת ה-AI של OrOn. אנחנו מתמחים בבניית פתרונות בינה מלאכותית מותאמים לעסקים, כמו סוכנים טלפוניים, סוכני ווטסאפ ותשתיות AI מתקדמות. באיזה שירות תרצה להתעניין?"
+    ],
+    "actions": [],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.5-flash-lite",
+    "id": "02-specific-first-question",
+    "failures": [],
+    "replies": [
+      "שלום, אני נציגת ה-AI של OrOn. סוכן וואטסאפ יכול לעזור לשירות הלקוחות שלך על ידי מתן מענה אוטומטי ומהיר לפניות, זמינות מסביב שעון, איסוף מידע וניהול שיחות אינטראקטיביות שחוסכות זמן לצוות שלך. האם תרצה לשמוע עוד על חיבור סוכן וואטסאפ למערכות הקיימות בעסק שלך?"
+    ],
+    "actions": [],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.5-flash-lite",
+    "id": "03-price-without-approved-price",
+    "failures": [],
+    "replies": [
+      "שלום, אני נציגת ה-AI של OrOn. אין לי מחיר מאושר במערכת לסוכן טלפוני, אך ההבדל העיקרי הוא שסוכן טלפוני מטפל בשיחות קוליות נכנסות ויוצאות, בעוד שסוכן וואטסאפ מנהל שיחות טקסטואליות ואיסוף מידע באפליקציית וואטסאפ. האם תרצה לשמוע פרטים נוספים על אחד מהפתרונות האלה?"
+    ],
+    "actions": [],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.5-flash-lite",
+    "id": "04-uncertainty-is-not-interest",
+    "failures": [],
+    "replies": [
+      "שלום, אני נציגת ה-AI של OrOn. אנחנו מתמחים בבניית פתרונות בינה מלאכותית מותאמים לעסקים, כמו סוכני AI לטלפון ולווטסאפ, אוטומציות וחיבור למערכות כדי לייעל את העבודה והשירות. באיזה תחום בעסק שלך תרצה לשפר את התהליכים?"
+    ],
+    "actions": [],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.5-flash-lite",
+    "id": "05-bounded-off-topic",
+    "failures": [],
+    "replies": [
+      "אני יכולה לעזור בשירותים של OrOn. מה מעניין אותך לדעת?",
+      "אני יכולה לעזור בשירותים של OrOn. מה מעניין אותך לדעת?",
+      "נראה שהשיחה כרגע אינה על השירותים שלנו. אפשר לעצור כאן ולחזור כשיהיה צורך בשירות."
+    ],
+    "actions": [],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.5-flash-lite",
+    "id": "06-mixed-injection",
+    "failures": [],
+    "replies": [
+      "שלום, אני נציגת ה-AI של OrOn. כן, אנחנו בונים סוכני WhatsApp מתקדמים לשירות לקוחות, מכירות וסינון לידים, שמתחברים למערכות הארגוניות שלכם. באיזה סוג של פתרון וואטסאפ את מעוניינת?"
+    ],
+    "actions": [],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.5-flash-lite",
+    "id": "07-unknown-integration",
+    "failures": [],
+    "replies": [
+      "שלום, אני נציגת ה-AI של OrOn. אין לי מידע מאושר לגבי חיבור ספציפי לתוכנת ExampleERP בגרסה 99. אנחנו מתמחים בבניית סוכני AI ותשתיות שמתחברות למערכות ארגוניות, ונוכל לבדוק אינטגרציה מותאמת אישית לצורך שלך. האם תרצי שנציג אנושי יחזור אליך עם פרטים נוספים?"
+    ],
+    "actions": [],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.5-flash-lite",
+    "id": "08-volunteered-facts",
+    "failures": [],
+    "replies": [
+      "תודה, נפתח ליד במערכת עם הפרטים שמסרת. נציג אנושי של OrOn יחזור אליך בהקדם."
+    ],
+    "actions": [
+      "lead_save_fields",
+      "lead_save_fields",
+      "lead_finalize_collection"
+    ],
+    "fields": [
+      {
+        "key": "contact_name",
+        "type": "text",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:42:05.397Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "דנה",
+        "normalizedValue": "דנה",
+        "currency": null
+      },
+      {
+        "key": "service_interest",
+        "type": "text",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:42:05.397Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "סוכן וואטסאפ לחנות",
+        "normalizedValue": "סוכן וואטסאפ לחנות",
+        "currency": null
+      },
+      {
+        "key": "need_summary",
+        "type": "text",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:42:05.398Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "סוכן וואטסאפ לחנות שמקבלת המון פניות",
+        "normalizedValue": "סוכן וואטסאפ לחנות שמקבלת המון פניות",
+        "currency": null
+      },
+      {
+        "key": "contact_phone",
+        "type": "phone",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:42:05.398Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "0502345678",
+        "normalizedValue": "+972502345678",
+        "currency": null
+      },
+      {
+        "key": "follow_up_allowed",
+        "type": "boolean",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:42:05.398Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "true",
+        "normalizedValue": "true",
+        "currency": null
+      },
+      {
+        "key": "discussion_complete",
+        "type": "boolean",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:42:06.369Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "true",
+        "normalizedValue": "true",
+        "currency": null
+      }
+    ],
+    "finals": 1
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.5-flash-lite",
+    "id": "09-confirmed-correction",
+    "failures": [],
+    "replies": [
+      "נעים להכיר דנה. אני נציגת ה-AI של OrOn. אנחנו בונים סוכני וואטסאפ מותאמים אישית לשירות ולמכירות שמתחברים למערכות הארגוניות. אילו תהליכים היית רוצה שהסוכן ינהל בשירות הלקוחות שלך?",
+      "שמתי לב, נועה. איזה סוג של מענה או שירות היית רוצה שהסוכן ייתן ללקוחות בוואטסאפ?"
+    ],
+    "actions": [
+      "lead_save_fields",
+      "lead_save_fields"
+    ],
+    "fields": [
+      {
+        "key": "contact_name",
+        "type": "text",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:42:11.850Z",
+        "sourceReferenceId": "turn-2",
+        "state": "known",
+        "rawValue": "נועה",
+        "normalizedValue": "נועה",
+        "currency": null
+      },
+      {
+        "key": "service_interest",
+        "type": "text",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:42:09.667Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "סוכן וואטסאפ לשירות",
+        "normalizedValue": "סוכן וואטסאפ לשירות",
+        "currency": null
+      },
+      {
+        "key": "need_summary",
+        "type": "text",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:42:09.667Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "מתעניינת בסוכן וואטסאפ לשירות ועוד בודקת אפשרויות",
+        "normalizedValue": "מתעניינת בסוכן וואטסאפ לשירות ועוד בודקת אפשרויות",
+        "currency": null
+      }
+    ],
+    "finals": 0
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.5-flash-lite",
+    "id": "10-verified-route",
+    "failures": [],
+    "replies": [
+      "תודה, נפתח ליד במערכת עם הפרטים שמסרת. נציג אנושי של OrOn יחזור אליך בהקדם."
+    ],
+    "actions": [
+      "lead_save_fields",
+      "lead_save_fields",
+      "lead_finalize_collection"
+    ],
+    "fields": [
+      {
+        "key": "contact_name",
+        "type": "text",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:42:14.268Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "דנה",
+        "normalizedValue": "דנה",
+        "currency": null
+      },
+      {
+        "key": "service_interest",
+        "type": "text",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:42:14.268Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "מענה וואטסאפ לפניות החנות",
+        "normalizedValue": "מענה וואטסאפ לפניות החנות",
+        "currency": null
+      },
+      {
+        "key": "need_summary",
+        "type": "text",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:42:14.269Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "מענה וואטסאפ לפניות החנות",
+        "normalizedValue": "מענה וואטסאפ לפניות החנות",
+        "currency": null
+      },
+      {
+        "key": "contact_phone",
+        "type": "phone",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:42:14.269Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "+972502345678",
+        "normalizedValue": "+972502345678",
+        "currency": null
+      },
+      {
+        "key": "follow_up_allowed",
+        "type": "boolean",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:42:14.269Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "true",
+        "normalizedValue": "true",
+        "currency": null
+      },
+      {
+        "key": "discussion_complete",
+        "type": "boolean",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:42:15.344Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "true",
+        "normalizedValue": "true",
+        "currency": null
+      }
+    ],
+    "finals": 1
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.5-flash-lite",
+    "id": "11-question-before-contact",
+    "failures": [],
+    "replies": [
+      "שלום, אני נציגת ה-AI של OrOn. סוכן טלפוני מטפל בשיחות קוליות נכנסות ויוצאות, ואילו סוכן וואטסאפ מנהל התכתבויות, שירות ואיסוף לידים באפליקציית וואטסאפ. באיזה משניהם תרצי להתרכז?"
+    ],
+    "actions": [],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.5-flash-lite",
+    "id": "12-complete-enquiry",
+    "failures": [],
+    "replies": [
+      "תודה, נפתח ליד במערכת עם הפרטים שמסרת. נציג אנושי של OrOn יחזור אליך בהקדם."
+    ],
+    "actions": [
+      "lead_save_fields",
+      "lead_save_fields",
+      "lead_finalize_collection"
+    ],
+    "fields": [
+      {
+        "key": "contact_name",
+        "type": "text",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:42:19.426Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "דנה",
+        "normalizedValue": "דנה",
+        "currency": null
+      },
+      {
+        "key": "service_interest",
+        "type": "text",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:42:19.426Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "סוכן טלפוני שיטפל בפניות לחנות שלי",
+        "normalizedValue": "סוכן טלפוני שיטפל בפניות לחנות שלי",
+        "currency": null
+      },
+      {
+        "key": "contact_phone",
+        "type": "phone",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:42:19.426Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "0502345678",
+        "normalizedValue": "+972502345678",
+        "currency": null
+      },
+      {
+        "key": "need_summary",
+        "type": "text",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:42:19.426Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "סוכן טלפוני לטיפול בפניות לחנות",
+        "normalizedValue": "סוכן טלפוני לטיפול בפניות לחנות",
+        "currency": null
+      },
+      {
+        "key": "follow_up_allowed",
+        "type": "boolean",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:42:19.426Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "true",
+        "normalizedValue": "true",
+        "currency": null
+      },
+      {
+        "key": "discussion_complete",
+        "type": "boolean",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:42:20.529Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "true",
+        "normalizedValue": "true",
+        "currency": null
+      }
+    ],
+    "finals": 1
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.5-flash-lite",
+    "id": "13-storage-failure",
+    "failures": [],
+    "replies": [
+      "לא הצלחתי לשמור את הפנייה כרגע. אפשר לנסות שוב בעוד רגע."
+    ],
+    "actions": [
+      "lead_save_fields"
+    ],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.5-flash-lite",
+    "id": "14-repeated-completion",
+    "failures": [],
+    "replies": [
+      "תודה, נפתח ליד במערכת עם הפרטים שמסרת. נציג אנושי של OrOn יחזור אליך בהקדם.",
+      "אין לי גישה מאומתת למערכת הזאת בשיחה הנוכחית, ולכן אי אפשר לאשר מכאן שבוצעה פעולה."
+    ],
+    "actions": [
+      "lead_save_fields",
+      "lead_save_fields",
+      "lead_finalize_collection"
+    ],
+    "fields": [
+      {
+        "key": "contact_name",
+        "type": "text",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:42:25.679Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "דנה",
+        "normalizedValue": "דנה",
+        "currency": null
+      },
+      {
+        "key": "service_interest",
+        "type": "text",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:42:25.679Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "סוכן וואטסאפ לחנות",
+        "normalizedValue": "סוכן וואטסאפ לחנות",
+        "currency": null
+      },
+      {
+        "key": "need_summary",
+        "type": "text",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:42:25.679Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "סוכן וואטסאפ לחנות",
+        "normalizedValue": "סוכן וואטסאפ לחנות",
+        "currency": null
+      },
+      {
+        "key": "contact_phone",
+        "type": "phone",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:42:25.679Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "0502345678",
+        "normalizedValue": "+972502345678",
+        "currency": null
+      },
+      {
+        "key": "follow_up_allowed",
+        "type": "boolean",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:42:25.679Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "true",
+        "normalizedValue": "true",
+        "currency": null
+      },
+      {
+        "key": "discussion_complete",
+        "type": "boolean",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:42:26.541Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "true",
+        "normalizedValue": "true",
+        "currency": null
+      }
+    ],
+    "finals": 1
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.5-flash-lite",
+    "id": "15-thanks-after-completion",
+    "failures": [],
+    "replies": [
+      "בבקשה. בשמחה יעזור לך בכל שאלה על הפתרונות של אור-און. באיזה תחום או שירות אתם מתעניינים?"
+    ],
+    "actions": [],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.5-flash-lite",
+    "id": "16-human-now",
+    "failures": [],
+    "replies": [
+      "מבין לגמרי, אני מעבירה את הפנייה לנציג אנושי שחזור אליך בהקדם."
+    ],
+    "actions": [
+      "lead_read_state"
+    ],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.5-flash-lite",
+    "id": "17-no-contact",
+    "failures": [],
+    "replies": [
+      "בסדר גמור, אני כאן אם יעלה צורך במידע נוסף."
+    ],
+    "actions": [],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.5-flash-lite",
+    "id": "18-short-service-question",
+    "failures": [],
+    "replies": [
+      "אנחנו מציעים בניית סוכני AI לשירות, מכירות ותהליכים עסקיים, תשתיות בינה מלאכותית ואינטגרציות למערכות ארגוניות, סוכנים טלפוניים וסוכני WhatsApp, וגם וידאו ואווטארים נציגים וירטואליים. באיזה מהשירותים האלה תרצה להעמיק?"
+    ],
+    "actions": [],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.5-flash-lite",
+    "id": "19-other-tenant-catalog",
+    "failures": [],
+    "replies": [
+      "שלום, אני נציגת ה-AI של סטודיו צבע. אנחנו מציעים שיעורי ציור וסדנאות קרמיקה. האם תרצי לשמוע פרטים על אחד מהשירותים האלה?"
+    ],
+    "actions": [],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.5-flash-lite",
+    "id": "20-acknowledge-completed-enquiry",
+    "failures": [],
+    "replies": [
+      "שלום, אני נציגת ה-AI של OrOn. אנחנו בונים פתרונות בינה מלאכותית מותאמים לעסקים כמו סוכני AI, תשתיות ואינטגרציות. באיזה מהשירותים שלנו תרצי שנרחיב?"
+    ],
+    "actions": [
+      "lead_read_state"
+    ],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.1-flash-lite",
+    "id": "01-introduction",
+    "failures": [],
+    "replies": [
+      "שלום, אני נציגת ה-AI של OrOn. אנחנו מתמחים בבניית פתרונות בינה מלאכותית מותאמים לעסקים, כמו סוכני AI לשירות ומכירות, תשתיות אוטומציה, סוכנים טלפוניים ובווטסאפ, ואפילו אווטארים וירטואליים. באיזה מהשירותים שלנו תרצה או תרצי להתעניין?"
+    ],
+    "actions": [],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.1-flash-lite",
+    "id": "02-specific-first-question",
+    "failures": [],
+    "replies": [
+      "שלום, אני נציגת ה-AI של OrOn. סוכן WhatsApp יכול לייעל משמעותית את שירות הלקוחות שלך על ידי מתן מענה מיידי, זמין ואישי ללקוחות. הוא יכול לטפל בשאלות נפוצות, לאסוף מידע ראשוני, לנהל תהליכי מכירה או תמיכה, ואפילו להסתנכרן עם מערכות ה-CRM של העסק כדי לתת מענה מותאם אישית לכל לקוח. האם תרצה לשמוע עוד על איך זה יכול להשתלב בתהליכים הקיימים אצלך, או שיש שירות אחר מבין הפתרונות שלנו שמעניין אותך?"
+    ],
+    "actions": [],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.1-flash-lite",
+    "id": "03-price-without-approved-price",
+    "failures": [],
+    "replies": [
+      "שלום, אני נציגת ה-AI של OrOn. לגבי שאלתך, אין לי מחיר קבוע להציג, שכן הפתרונות שלנו מותאמים אישית לצרכי העסק. ההבדל העיקרי הוא בערוץ התקשורת: סוכן טלפוני מנהל שיחות קוליות נכנסות ויוצאות, מה שמתאים לשיחות תמיכה או תיאום בזמן אמת, בעוד סוכן וואטסאפ מנהל אינטראקציה טקסטואלית, שמתאימה מאוד לשירות לקוחות, מכירות ואיסוף מידע בצורה נוחה ומתועדת. האם תרצה שאחד הנציגים שלנו יצור איתך קשר כדי להבין טוב יותר מה הצרכים שלך ולהציע פתרון מדויק?"
+    ],
+    "actions": [],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.1-flash-lite",
+    "id": "04-uncertainty-is-not-interest",
+    "failures": [],
+    "replies": [
+      "שלום, אני נציגת ה-AI של חברת OrOn. אנחנו מתמחים בבניית פתרונות בינה מלאכותית מותאמים לעסקים, כמו סוכנים חכמים לשירות ומכירות, אוטומציות ותשתיות שמתחברות למערכות הארגוניות שלכם כדי לייעל את העבודה. אנחנו מציעים מגוון פתרונות, ביניהם סוכנים טלפוניים, סוכני WhatsApp, נציגים וירטואליים בווידאו ואינטגרציות למערכות CRM. האם אחד מהתחומים האלו נשמע רלוונטי לצרכים של העסק שלך?"
+    ],
+    "actions": [],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.1-flash-lite",
+    "id": "05-bounded-off-topic",
+    "failures": [],
+    "replies": [
+      "אני יכולה לעזור בשירותים של OrOn. מה מעניין אותך לדעת?",
+      "אני יכולה לעזור בשירותים של OrOn. מה מעניין אותך לדעת?",
+      "נראה שהשיחה כרגע אינה על השירותים שלנו. אפשר לעצור כאן ולחזור כשיהיה צורך בשירות."
+    ],
+    "actions": [],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.1-flash-lite",
+    "id": "06-mixed-injection",
+    "failures": [],
+    "replies": [
+      "שלום, אני נציגת ה-AI של OrOn. אנחנו אכן מתמחים בבניית פתרונות AI מותאמים אישית, כולל סוכני WhatsApp לשירות לקוחות, מכירות ואיסוף מידע, שמתחברים למערכות הארגוניות שלכם. האם תרצה לשמוע עוד על איך סוכן כזה יכול להשתלב בתהליכי העבודה שלכם?"
+    ],
+    "actions": [],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.1-flash-lite",
+    "id": "07-unknown-integration",
+    "failures": [],
+    "replies": [
+      "שלום, אני נציגת ה-AI של OrOn. לגבי השאלה שלך, אין לי מידע מאושר על חיבור ספציפי ל-ExampleERP גרסה 99. אנחנו מתמחים בבניית אינטגרציות למערכות ארגוניות ו-ERP, ונשמח לבדוק את ההיתכנות לחיבור כזה בהתאם לצרכים שלך. האם תרצה שנציג אנושי יחזור אליך כדי לבחון את האפשרויות הטכניות עבור המערכת שציינת?"
+    ],
+    "actions": [],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.1-flash-lite",
+    "id": "08-volunteered-facts",
+    "failures": [],
+    "replies": [
+      "תודה, נפתח ליד במערכת עם הפרטים שמסרת. נציג אנושי של OrOn יחזור אליך בהקדם."
+    ],
+    "actions": [
+      "lead_save_fields",
+      "lead_finalize_collection",
+      "lead_save_fields",
+      "lead_finalize_collection"
+    ],
+    "fields": [
+      {
+        "key": "contact_name",
+        "type": "text",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:42:47.893Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "דנה",
+        "normalizedValue": "דנה",
+        "currency": null
+      },
+      {
+        "key": "service_interest",
+        "type": "text",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:42:47.893Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "סוכן וואטסאפ לחנות",
+        "normalizedValue": "סוכן וואטסאפ לחנות",
+        "currency": null
+      },
+      {
+        "key": "contact_phone",
+        "type": "phone",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:42:47.893Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "0502345678",
+        "normalizedValue": "+972502345678",
+        "currency": null
+      },
+      {
+        "key": "follow_up_allowed",
+        "type": "boolean",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:42:47.893Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "true",
+        "normalizedValue": "true",
+        "currency": null
+      },
+      {
+        "key": "need_summary",
+        "type": "text",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:42:50.273Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "סוכן וואטסאפ לחנות לניהול פניות רבות",
+        "normalizedValue": "סוכן וואטסאפ לחנות לניהול פניות רבות",
+        "currency": null
+      },
+      {
+        "key": "discussion_complete",
+        "type": "boolean",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:42:50.273Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "true",
+        "normalizedValue": "true",
+        "currency": null
+      }
+    ],
+    "finals": 1
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.1-flash-lite",
+    "id": "09-confirmed-correction",
+    "failures": [],
+    "replies": [
+      "נעים להכיר, דנה. אני נציגת ה-AI של OrOn. אנחנו מתמחים בבניית סוכני AI מותאמים אישית, כולל סוכני וואטסאפ לשירות, מכירות ואיסוף מידע, שמתחברים למערכות הארגוניות שלכם. מכיוון שאת עדיין בודקת אפשרויות, אשמח לדעת אילו תהליכי שירות היית רוצה שהסוכן יבצע עבורך?",
+      "סליחה על הטעות, נועה. השם שלך עודכן במערכת. אשמח לשמוע את מספר הטלפון שלך כשיהיה לך נוח, וגם לדעת קצת יותר על הצרכים שלך מהסוכן."
+    ],
+    "actions": [
+      "lead_save_fields",
+      "lead_save_fields"
+    ],
+    "fields": [
+      {
+        "key": "contact_name",
+        "type": "text",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:42:55.939Z",
+        "sourceReferenceId": "turn-2",
+        "state": "known",
+        "rawValue": "נועה",
+        "normalizedValue": "נועה",
+        "currency": null
+      },
+      {
+        "key": "service_interest",
+        "type": "text",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:42:53.465Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "סוכן וואטסאפ לשירות",
+        "normalizedValue": "סוכן וואטסאפ לשירות",
+        "currency": null
+      }
+    ],
+    "finals": 0
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.1-flash-lite",
+    "id": "10-verified-route",
+    "failures": [],
+    "replies": [
+      "שלום דנה, נעים להכיר. אני נציגת ה-AI של OrOn. תודה, נפתח ליד במערכת עם הפרטים שמסרת. נציג אנושי של OrOn יחזור אליך בהקדם."
+    ],
+    "actions": [
+      "lead_save_fields",
+      "lead_finalize_collection",
+      "lead_save_fields",
+      "lead_finalize_collection"
+    ],
+    "fields": [
+      {
+        "key": "contact_name",
+        "type": "text",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:42:58.422Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "דנה",
+        "normalizedValue": "דנה",
+        "currency": null
+      },
+      {
+        "key": "service_interest",
+        "type": "text",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:42:58.422Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "מענה וואטסאפ לפניות החנות",
+        "normalizedValue": "מענה וואטסאפ לפניות החנות",
+        "currency": null
+      },
+      {
+        "key": "contact_phone",
+        "type": "phone",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:42:58.422Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "+972502345678",
+        "normalizedValue": "+972502345678",
+        "currency": null
+      },
+      {
+        "key": "follow_up_allowed",
+        "type": "boolean",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:42:58.422Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "true",
+        "normalizedValue": "true",
+        "currency": null
+      },
+      {
+        "key": "need_summary",
+        "type": "text",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:43:00.641Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "הקמת סוכן וואטסאפ לניהול פניות שירות ומכירות בחנות.",
+        "normalizedValue": "הקמת סוכן וואטסאפ לניהול פניות שירות ומכירות בחנות.",
+        "currency": null
+      },
+      {
+        "key": "discussion_complete",
+        "type": "boolean",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:43:00.642Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "true",
+        "normalizedValue": "true",
+        "currency": null
+      }
+    ],
+    "finals": 1
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.1-flash-lite",
+    "id": "11-question-before-contact",
+    "failures": [],
+    "replies": [
+      "שלום דנה, אני נציגת ה-AI של OrOn. נעים להכיר. סוכן טלפוני מיועד לניהול שיחות קוליות בזמן אמת, כמו מענה לשיחות נכנסות, ביצוע שיחות יוצאות או איסוף מידע ותמיכה בטלפון. לעומת זאת, סוכן וואטסאפ מתמקד בניהול אינטראקציות טקסטואליות, שירות לקוחות, מכירות או תהליכי איסוף מידע דרך הודעות, מה שמאפשר ללקוחות להמשיך את התהליך בקצב שלהם. שניהם יכולים להתחבר למערכות ה-CRM והמערכות הארגוניות שלך כדי לבצע אוטומציות. האם אחד מהם נשמע לך רלוונטי יותר לצרכים שלך?",
+      "תודה דנה, הפרטים נשמרו. האם תרצי שנבחן יחד איזה מהפתרונות מתאים יותר לעסק שלך, או שיש שירות ספציפי מבין השניים שמעניין אותך?"
+    ],
+    "actions": [
+      "lead_save_fields"
+    ],
+    "fields": [
+      {
+        "key": "contact_name",
+        "type": "text",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:43:04.635Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "דנה",
+        "normalizedValue": "דנה",
+        "currency": null
+      },
+      {
+        "key": "contact_phone",
+        "type": "phone",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:43:04.635Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "0502345678",
+        "normalizedValue": "+972502345678",
+        "currency": null
+      }
+    ],
+    "finals": 0
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.1-flash-lite",
+    "id": "12-complete-enquiry",
+    "failures": [],
+    "replies": [
+      "תודה, נפתח ליד במערכת עם הפרטים שמסרת. נציג אנושי של OrOn יחזור אליך בהקדם."
+    ],
+    "actions": [
+      "lead_save_fields",
+      "lead_finalize_collection",
+      "lead_save_fields",
+      "lead_finalize_collection"
+    ],
+    "fields": [
+      {
+        "key": "contact_name",
+        "type": "text",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:43:07.296Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "דנה",
+        "normalizedValue": "דנה",
+        "currency": null
+      },
+      {
+        "key": "service_interest",
+        "type": "text",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:43:07.296Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "סוכן טלפוני לטיפול בפניות לחנות",
+        "normalizedValue": "סוכן טלפוני לטיפול בפניות לחנות",
+        "currency": null
+      },
+      {
+        "key": "contact_phone",
+        "type": "phone",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:43:07.296Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "0502345678",
+        "normalizedValue": "+972502345678",
+        "currency": null
+      },
+      {
+        "key": "follow_up_allowed",
+        "type": "boolean",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:43:07.296Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "true",
+        "normalizedValue": "true",
+        "currency": null
+      },
+      {
+        "key": "discussion_complete",
+        "type": "boolean",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:43:07.296Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "true",
+        "normalizedValue": "true",
+        "currency": null
+      },
+      {
+        "key": "need_summary",
+        "type": "text",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:43:09.258Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "סוכן טלפוני לטיפול בפניות לחנות",
+        "normalizedValue": "סוכן טלפוני לטיפול בפניות לחנות",
+        "currency": null
+      }
+    ],
+    "finals": 1
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.1-flash-lite",
+    "id": "13-storage-failure",
+    "failures": [],
+    "replies": [
+      "לא הצלחתי לשמור את הפנייה כרגע. אפשר לנסות שוב בעוד רגע."
+    ],
+    "actions": [
+      "lead_save_fields"
+    ],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.1-flash-lite",
+    "id": "14-repeated-completion",
+    "failures": [],
+    "replies": [
+      "תודה, נפתח ליד במערכת עם הפרטים שמסרת. נציג אנושי של OrOn יחזור אליך בהקדם.",
+      "אין לי גישה מאומתת למערכת הזאת בשיחה הנוכחית, ולכן אי אפשר לאשר מכאן שבוצעה פעולה."
+    ],
+    "actions": [
+      "lead_save_fields",
+      "lead_finalize_collection",
+      "lead_save_fields",
+      "lead_finalize_collection"
+    ],
+    "fields": [
+      {
+        "key": "contact_name",
+        "type": "text",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:43:15.385Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "דנה",
+        "normalizedValue": "דנה",
+        "currency": null
+      },
+      {
+        "key": "service_interest",
+        "type": "text",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:43:15.385Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "סוכן וואטסאפ לחנות",
+        "normalizedValue": "סוכן וואטסאפ לחנות",
+        "currency": null
+      },
+      {
+        "key": "contact_phone",
+        "type": "phone",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:43:15.385Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "0502345678",
+        "normalizedValue": "+972502345678",
+        "currency": null
+      },
+      {
+        "key": "follow_up_allowed",
+        "type": "boolean",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:43:15.385Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "true",
+        "normalizedValue": "true",
+        "currency": null
+      },
+      {
+        "key": "discussion_complete",
+        "type": "boolean",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:43:15.385Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "true",
+        "normalizedValue": "true",
+        "currency": null
+      },
+      {
+        "key": "need_summary",
+        "type": "text",
+        "confirmation": "unconfirmed",
+        "observedAt": "2026-10-08T15:43:17.419Z",
+        "sourceReferenceId": "turn-1",
+        "state": "known",
+        "rawValue": "הקמת סוכן וואטסאפ לחנות",
+        "normalizedValue": "הקמת סוכן וואטסאפ לחנות",
+        "currency": null
+      }
+    ],
+    "finals": 1
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.1-flash-lite",
+    "id": "15-thanks-after-completion",
+    "failures": [],
+    "replies": [
+      "על לא דבר. האם יש משהו נוסף שאוכל לעזור בו בנוגע לשירותים של OrOn?"
+    ],
+    "actions": [],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.1-flash-lite",
+    "id": "16-human-now",
+    "failures": [],
+    "replies": [
+      "אני מבינה. אשמח להעביר את הפנייה שלך לטיפול של נציג אנושי ב-OrOn בהקדם. כדי שאוכל להעביר את הפרטים בצורה מסודרת, האם תרצה להשאיר שם או מספר טלפון לחזרה, או שתרצה שאעביר את הבקשה כפי שהיא כרגע?"
+    ],
+    "actions": [],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.1-flash-lite",
+    "id": "17-no-contact",
+    "failures": [],
+    "replies": [
+      "מובן לגמרי. אני כאן אם תצטרכי מידע נוסף בעתיד, שיהיה יום טוב."
+    ],
+    "actions": [],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.1-flash-lite",
+    "id": "18-short-service-question",
+    "failures": [],
+    "replies": [
+      "שלום, אני נציגת ה-AI של OrOn. אנחנו מתמחים בבניית פתרונות בינה מלאכותית מותאמים לעסקים וארגונים, הכוללים: * בניית סוכני AI לשירות, מכירות ותמיכה. * פיתוח תשתיות בינה מלאכותית ואינטגרציות למערכות קיימות. * סוכנים טלפוניים לשיחות נכנסות ויוצאות. * סוכני WhatsApp לאוטומציה של תהליכים. * וידאו ואווטארים וירטואליים לשירות והדרכה. באיזה מהשירותים האלו יש לך עניין?"
+    ],
+    "actions": [],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.1-flash-lite",
+    "id": "19-other-tenant-catalog",
+    "failures": [],
+    "replies": [
+      "שלום, אני נציגת ה-AI של סטודיו צבע. אנחנו מציעים שיעורי ציור וסדנאות קרמיקה. האם אחד מהתחומים האלו מעניין אותך?"
+    ],
+    "actions": [],
+    "fields": [],
+    "finals": 0
+  },
+  {
+    "channel": "voice",
+    "model": "gemini-3.1-flash-lite",
+    "id": "20-acknowledge-completed-enquiry",
+    "failures": [],
+    "replies": [
+      "שלום, אני נציגת ה-AI של OrOn. אנחנו מתמחים בבניית פתרונות AI מותאמים לעסקים, כמו סוכנים טלפוניים, סוכני WhatsApp, אוטומציות ואינטגרציות למערכות קיימות. באיזה מהשירותים שלנו את מתעניינת במיוחד?"
+    ],
+    "actions": [],
+    "fields": [],
+    "finals": 0
+  }
+]

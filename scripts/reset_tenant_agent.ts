@@ -7,6 +7,7 @@ import {
   prepareAgentReset,
   publishPreparedAgentReset,
   activatePreparedAgentReset,
+  rollbackPreparedAgentReset,
   type AgentResetPlan,
 } from "../packages/ts/crm/src/agent-reset.js";
 
@@ -22,6 +23,8 @@ async function main() {
       "flow-definition": { type: "string" },
       "flow-version": { type: "string" },
       "rebind-existing-ai": { type: "boolean", default: false },
+      "expected-active-release": { type: "string" },
+      "rollback-operation": { type: "string" },
     },
   });
   if (!values.plan || !values.actor || !values.output)
@@ -50,6 +53,19 @@ async function main() {
         throw new Error("Mutations require explicit --apply-local");
       if (values.phase === "prepare")
         return prepareAgentReset(tx, values.actor ?? "", plan);
+      if (values.phase === "rollback") {
+        if (!values["expected-active-release"] || !values["rollback-operation"])
+          throw new Error(
+            "--expected-active-release and --rollback-operation required",
+          );
+        return rollbackPreparedAgentReset(
+          tx,
+          values.actor ?? "",
+          plan,
+          values["expected-active-release"],
+          values["rollback-operation"],
+        );
+      }
       const version = values["agent-version"];
       if (!version) throw new Error("--agent-version required");
       if (values.phase === "publish") {

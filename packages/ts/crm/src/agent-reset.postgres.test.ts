@@ -13,6 +13,7 @@ import {
   prepareAgentReset,
   publishPreparedAgentReset,
   activatePreparedAgentReset,
+  rollbackPreparedAgentReset,
   type AgentResetPlan,
 } from "./agent-reset.js";
 
@@ -225,23 +226,6 @@ describe.skipIf(!databaseUrl)(
             ).toBe(base.id);
             await sql`RESET ROLE`;
             await sql`SET LOCAL ROLE platform_web`;
-            if (process.env.AGENT_RESET_EVIDENCE_PATH)
-              writeFileSync(
-                process.env.AGENT_RESET_EVIDENCE_PATH,
-                JSON.stringify(
-                  {
-                    fixture: "synthetic; transaction rolled back",
-                    before: inventory,
-                    prepared: first,
-                    activated,
-                    retainedAfterDefaultCutover: retained,
-                    explicitRebind: rebound,
-                  },
-                  null,
-                  2,
-                ),
-                { flag: "wx" },
-              );
             await expect(
               sql.savepoint(async (gated) => {
                 await gated`SELECT platform.set_agent_quality_gate(true)`;
@@ -268,6 +252,67 @@ describe.skipIf(!databaseUrl)(
                 );
               }),
             ).rejects.toThrow(/golden|evidence|evaluation/iu);
+            const rollbackOperation = randomUUID();
+            const activeRelease = identifier(retained.configuration.active?.id);
+            await expect(
+              rollbackPreparedAgentReset(
+                sql,
+                actor,
+                plan,
+                randomUUID(),
+                rollbackOperation,
+              ),
+            ).rejects.toThrow("Configuration changed");
+            const rolledBack = await rollbackPreparedAgentReset(
+              sql,
+              actor,
+              plan,
+              activeRelease,
+              rollbackOperation,
+            );
+            expect(
+              await rollbackPreparedAgentReset(
+                sql,
+                actor,
+                plan,
+                activeRelease,
+                rollbackOperation,
+              ),
+            ).toEqual(rolledBack);
+            const restored = await inspectAgentReset(sql, plan);
+            expect(restored.configuration.active?.configuration).toEqual(
+              inventory.configuration.initialConfiguration,
+            );
+            expect(restored.configuration.active?.id).not.toBe(activeRelease);
+            expect(restored.activeCalls).toBe(1);
+            expect(restored.owners).toContainEqual({
+              mode: "human",
+              version: null,
+              count: 1,
+            });
+            expect(restored.owners).toContainEqual({
+              mode: "ai",
+              version,
+              count: 1,
+            });
+            if (process.env.AGENT_RESET_EVIDENCE_PATH)
+              writeFileSync(
+                process.env.AGENT_RESET_EVIDENCE_PATH,
+                JSON.stringify(
+                  {
+                    fixture: "synthetic; transaction rolled back",
+                    before: inventory,
+                    prepared: first,
+                    activated,
+                    retainedAfterDefaultCutover: retained,
+                    explicitRebind: rebound,
+                    rollback: rolledBack,
+                  },
+                  null,
+                  2,
+                ),
+                { flag: "wx" },
+              );
             throw new Rollback();
           })
           .catch((error: unknown) => {
