@@ -8,8 +8,7 @@ WORKDIR /workspace
 RUN corepack enable && corepack prepare pnpm@11.24.0 --activate
 COPY . .
 RUN pnpm install --frozen-lockfile \
-    && pnpm --filter @or-on/auth build \
-    && pnpm --filter @or-on/crm build \
+    && pnpm --filter "@or-on/web^..." build \
     && pnpm --filter @or-on/web build
 
 FROM node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS runtime
