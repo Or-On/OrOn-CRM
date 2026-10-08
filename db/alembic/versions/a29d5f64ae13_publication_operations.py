@@ -31,12 +31,12 @@ def _execute(script: str) -> None:
 def upgrade() -> None:
     _execute("""
     CREATE TABLE automation.publication_operations (
-      id uuid NOT NULL, tenant_id uuid NOT NULL REFERENCES public.tenants(id),
+      id uuid NOT NULL, tenant_id uuid NOT NULL REFERENCES public.tenants(id) ON DELETE RESTRICT,
       kind text NOT NULL CHECK(kind IN ('agent','retained_voice','canonical')),
       resource_id uuid NOT NULL, candidate_id uuid, candidate_version integer,
       request_hash text NOT NULL CHECK(length(request_hash)=64),
       result jsonb NOT NULL CHECK(jsonb_typeof(result)='object'),
-      created_by_user_id uuid NOT NULL REFERENCES public.users(id),
+      created_by_user_id uuid NOT NULL REFERENCES public.users(id) ON DELETE RESTRICT,
       created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY(tenant_id,id)
     );
