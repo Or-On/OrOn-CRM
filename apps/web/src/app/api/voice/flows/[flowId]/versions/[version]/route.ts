@@ -7,6 +7,6 @@ export async function GET(
   if (!/^[1-9]\d*$/u.test(version))
     return Response.json({ error: "Invalid version" }, { status: 400 });
   return voiceRead((client) =>
-    client.getVoiceFlowSource(flowId, Number(version)),
+    client.getVoiceFlowSource({ flow_id: flowId, version: Number(version) }),
   );
 }
