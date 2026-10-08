@@ -27,6 +27,17 @@ import {
 } from "./agent-quality-gate.js";
 import { saveCanonicalFlowDraft } from "./flow-runtime.js";
 const url = process.env.CRM_TEST_DATABASE_URL;
+if (url) {
+  const target = new URL(url);
+  if (
+    target.protocol !== "postgresql:" ||
+    target.hostname !== "127.0.0.1" ||
+    target.port !== "55480" ||
+    target.username !== "platform_migrator" ||
+    !/^\/oron_(?:crm|ui_preview)_[a-f0-9]{32}$/u.test(target.pathname)
+  )
+    throw new Error("owned UUID loopback migration fixture required");
+}
 async function scope(
   sql: postgres.TransactionSql,
   tenant: string,
@@ -159,12 +170,6 @@ async function fixture(db: postgres.Sql) {
 }
 describe.skipIf(!url)("publication bundle under application roles", () => {
   it("atomically advances distinct following triggers, preserves pins/history, rejects stale edits, and repeats once", async () => {
-    const u = new URL(required(url));
-    if (
-      !["localhost", "127.0.0.1"].includes(u.hostname) ||
-      !/^\/oron_crm_[a-f0-9]+$/.test(u.pathname)
-    )
-      throw new Error("disposable local DB required");
     const db = postgres(required(url), { max: 4 });
     try {
       const f = await fixture(db);
@@ -519,7 +524,11 @@ describe.skipIf(!url)("publication bundle under application roles", () => {
       if (process.env.PUBLICATION_CONTEXT_PATH)
         writeFileSync(
           process.env.PUBLICATION_CONTEXT_PATH,
-          JSON.stringify({ ...f, newAgent: incoming.newAgentVersionId }),
+          JSON.stringify({
+            ...f,
+            newAgent: incoming.newAgentVersionId,
+            publication: result,
+          }),
         );
     } finally {
       await db.end();

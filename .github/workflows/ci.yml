@@ -153,6 +153,10 @@ jobs:
       # worker's complete dependency closure so this diagnostic is valid from
       # a clean checkout instead of relying on stale local build artifacts.
       - run: pnpm --filter @or-on/messaging-worker... build
+      - name: Mandatory publication, source, golden and admission acceptance (no providers, no skips)
+        env:
+          MIGRATION_DATABASE_URL: ${{ env.DATABASE_URL }}
+        run: uv run --no-sync python scripts/check_publication_runtime.py
       - name: Mandatory WhatsApp principal and opening-menu acceptance (no providers, no skips)
         env:
           MIGRATION_DATABASE_URL: ${{ env.DATABASE_URL }}
