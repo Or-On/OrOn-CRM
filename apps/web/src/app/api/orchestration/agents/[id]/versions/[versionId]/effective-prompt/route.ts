@@ -77,10 +77,11 @@ export async function GET(
     if (channel === "voice") {
       if (!loaded.assertion)
         throw new Error("missing authorized read assertion");
+      const assertion = loaded.assertion;
       const config = loadConfig(process.env, { service: "web" });
       const client = new ControlApiClient(config.controlApiUrl, (target, init) => {
         const headers = new Headers(init?.headers);
-        headers.set("authorization", `Bearer ${loaded.assertion}`);
+        headers.set("authorization", `Bearer ${assertion}`);
         return fetch(target, {
           ...init, headers, cache: "no-store",
           signal: AbortSignal.any([request.signal, AbortSignal.timeout(10000)]),
