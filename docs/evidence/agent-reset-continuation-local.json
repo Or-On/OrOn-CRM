@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "codeCommit": "35e21c7d6fb3d3b6a799a5bc817932cd0868e54d",
+  "scope": "local implementation acceptance; no production deployment or browser/live transport acceptance",
+  "verifyExitCode": 0,
+  "logs": [
+    {
+      "path": ".artifacts/continuation-verify-r4.log",
+      "sha256": "33d2bea01401dce25bb2d3f17300f4828f3f84413b7370cb41238d41f56540fe"
+    },
+    {
+      "path": ".artifacts/continuation-python-postgres-authority-final.log",
+      "sha256": "c01edf89d9042c3461f6022d1a4c3d4338dbf95ac74d87570dc0ce36e63611a2"
+    },
+    {
+      "path": ".artifacts/continuation-crm-postgres.log",
+      "sha256": "ecb092493426f1eec93c917005926577272369a1486c94ace9213bd654dbb770"
+    },
+    {
+      "path": ".artifacts/continuation-worker-postgres.log",
+      "sha256": "b02a73ea1850931fabcb60770766d9df220e5296f610b52bcc8f60444751b417"
+    },
+    {
+      "path": ".artifacts/continuation-publication-final.log",
+      "sha256": "435e36b765e3e96191c3c968bc3aa837da3494c8553d5df0c7184751e707beef"
+    },
+    {
+      "path": ".artifacts/continuation-mandatory-publication.log",
+      "sha256": "6545f37283d0e15bb30e8074d6fcc18b0d8fbcddbe7726d18c614502eac6bd9d"
+    },
+    {
+      "path": ".artifacts/continuation-web-image-build.log",
+      "sha256": "58c320880cda6460434bb06945deb44ff7740add9f59b536b8b3af333767e157"
+    },
+    {
+      "path": ".artifacts/continuation-publication-impact.log",
+      "sha256": "4a85092c10c18deb32dd4f645923f485d7eb75e1f4a14e1e902f3567bf92a74a"
+    }
+  ],
+  "results": {
+    "pythonUnitPassed": 2231,
+    "pythonOptInSkipped": 465,
+    "postgresPassed": 440,
+    "crmPostgresPassed": 817,
+    "crmSeparateGoldenAndPublicationPassed": 8,
+    "workerPostgresPassed": 848,
+    "workerPostgresSkipped": 7,
+    "separateMessagingDiagnosticsPassed": 6,
+    "mandatoryPublicationTsPassed": 10,
+    "mandatoryPublicationPythonPassed": 3,
+    "webPassed": 1061,
+    "webSkipped": 14,
+    "webImageBuild": "passed"
+  },
+  "messagingDiagnostics": {
+    "worktree": "whatsapp-locale-callback",
+    "path": ".artifacts/task8-messaging-diagnostics.log",
+    "sha256": "506d2f7343dcbce5d797dba43a1092a2af50b8abf95fdc28be34a38ecce7e20c"
+  },
+  "limitations": [
+    "Counts overlap across targeted and full suites; do not sum as unique coverage.",
+    "Worker log retains prior failed run followed by final passing rerun.",
+    "No browser/mobile or live SIP/Meta acceptance.",
+    "Candidate physical golden evaluation not performed."
+  ]
+}

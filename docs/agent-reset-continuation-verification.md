@@ -9,11 +9,11 @@ No main merge, operational agent activation or deployment occurred. The stated
 
 | Scope | Review branch | Pull request |
 | --- | --- | --- |
-| Core and tasks 1–5 | `codex/unified-agent-reset` at `ac0d00a` | [#2](https://github.com/Or-On/OrOn-CRM/pull/2) |
+| Core and tasks 1–5 | `codex/unified-agent-reset` at `306c4bb` | [#2](https://github.com/Or-On/OrOn-CRM/pull/2) |
 | Task 6 | `codex/publication-bindings` | [#3](https://github.com/Or-On/OrOn-CRM/pull/3) |
 | Task 7 | `codex/flow-editor-ui-review` | [#4](https://github.com/Or-On/OrOn-CRM/pull/4) |
-| Task 8 | `codex/whatsapp-locale-callback` at `f784e69` | [#5](https://github.com/Or-On/OrOn-CRM/pull/5) |
-| Combined candidate / task 9 | `codex/release-integration-20261008` | Draft integration review |
+| Task 8 | `codex/whatsapp-locale-callback` at `842aee9` | [#5](https://github.com/Or-On/OrOn-CRM/pull/5) |
+| Combined candidate / task 9 | `codex/release-integration-20261008` | [#6](https://github.com/Or-On/OrOn-CRM/pull/6) |
 
 Task 6 owned migrations, generated clients and shared contracts. UI work used
 that contract; task 8 owned locale/lead/callback changes. Integration owns the
@@ -75,6 +75,14 @@ provider timestamps collide. No real customer messages/calls were sent here.
 See [publication evidence](publication-bindings-verification.md) and
 [WhatsApp evidence](task8-whatsapp-validation-and-routing.md).
 
+The [actual fictional impact example](evidence/publication-impact-example.json)
+records exact process, agent, canonical and retained identifiers from a committed
+local publication. Inbound voice and new WhatsApp follow the new bundle;
+outbound voice and the manual process keep their explicit pin. This fixture has
+zero existing chats. The separate rebind case passed with one eligible AI chat
+rebound and one removed chat skipped (`skippedRemoved=1`, `skippedHuman=0`),
+while the ordinary-manager case remained `published_pending_activation`.
+
 ## Integrated tests and honest failures
 
 Provider transports are disabled; PostgreSQL fixtures contain fictional data.
@@ -91,7 +99,13 @@ revisions and one head, `a3ae6075bf24`.
 | Exact source, warm/second admission, effective prompt, persisted hash Python PostgreSQL files | 4 passed, no skips |
 | Task 8 signed webhook/locale evidence | 318 passed in task branch |
 | Explicit human handoff and principal revocation race regression files | 23 + 18 passed on fresh fixtures |
-| Full combined verification and worker PostgreSQL rerun | Running; final result recorded below before review completion |
+| Full worker PostgreSQL rerun | 848 passed, 7 skipped (6 separately gated diagnostics and 1 platform-specific case) |
+| `scripts/preview_ui.py --check-messaging` | 6 diagnostic tests passed; isolated DB/login removed |
+| `scripts/check_publication_runtime.py` mandatory CI runner | 10 TypeScript + 3 Python, zero skips; isolated DB removed |
+| Graph verification and publication-runner guards | 30 passed |
+| Clean Web Docker build | Passed; local image only, no server started |
+| `uv run python scripts/dev.py verify` on integrated code `35e21c7` | Passed, exit 0: format/lint, strict types, unit suites, contracts, migration head, builds, peers and configured audit gates |
+| Full Python / web suites within verification | 2,231 Python + 1,061 web passed; opt-in skips itemized below |
 
 Publication commands:
 `pnpm --filter @or-on/crm exec vitest run src/publication-bindings.postgres.test.ts src/agent-quality-gate.postgres.test.ts`
@@ -107,6 +121,20 @@ actual mid-model principal changes and assert no stale send. Full verification
 first found three lint errors and then the generated operation tuple annotation;
 both were fixed. CI exposed a clean-image missing `@or-on/config` build; the web
 image now builds its complete workspace dependency closure.
+The full Python pass also caught a stale 164-revision assertion; it now names
+the two reviewed migrations and expects 166. Clean CI caught the analogous
+missing config build before CRM tests; the package test command now builds its
+workspace dependencies before collecting suites.
+
+Ordinary suite skips are reported rather than counted as passing: Python 465,
+web 14, CRM 137 and worker 246 in the default provider-free run. Required
+database/publication/diagnostic paths were additionally run with their explicit
+fixture flags as listed above. The one Windows-specific worker skip remains.
+The JavaScript audit's configured critical gate passed with 4 high, 4 moderate
+and 1 low advisory still reported; Python audit reported no known issue outside
+the existing time-bounded exception through 2026-10-13. These are not claims
+that every dependency has zero advisories. Final local log hashes are recorded
+in [verification evidence](evidence/agent-reset-continuation-local.json).
 
 ## Recovery and release gates
 
@@ -121,6 +149,12 @@ exact roles; no production roles were changed. Key escrow remains unverified.
 Take a fresh backup before any later rollout; this older snapshot is not a
 zero-data-loss rollback. Preserve immutable evidence instead of blind schema
 downgrade. Existing manual deployment tooling remains gated and was not run.
+
+The observed web environment still names `gemini-2.5-flash`; this is an
+environment observation, not proof of every tenant override or executed call.
+The candidate targets Gemini 3.5 Flash Lite with 3.1 Flash Lite fallback and
+Harper / `tts-rt-v2`, backed by the separately recorded offline provider evidence.
+Those candidate settings were not activated. No live voice identity was claimed.
 
 Meta v2 was reconciled against the correct ProTouch WABA and submitted once
 using the exact requested Hebrew body. Meta returned HTTP 400, code 100,
