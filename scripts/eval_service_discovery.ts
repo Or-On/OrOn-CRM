@@ -78,6 +78,7 @@ async function main() {
   )) as {
     systemPrompt: string;
     fields: unknown;
+    maxResponseTokens: number;
     capabilities: string[];
   };
   const catalog = (await readJson(
@@ -112,6 +113,8 @@ async function main() {
           }),
         ),
         fields: manifest.fields,
+        maxResponseTokens: manifest.maxResponseTokens,
+        requestTimeoutSecs: 5,
         catalog,
       },
       null,
@@ -146,8 +149,8 @@ async function main() {
         apiKey,
         baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
         model,
-        timeoutMs: 45000,
-        maxTokens: 2048,
+        timeoutMs: 5000,
+        maxTokens: manifest.maxResponseTokens,
       });
       try {
         for (const turn of scenario.turns) {

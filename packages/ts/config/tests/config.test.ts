@@ -7,6 +7,24 @@ import {
 } from "../src/index.js";
 
 describe("loadConfig", () => {
+  it("bounds structured model output and propagates the actual request deadline", () => {
+    expect(loadConfig({}).llm).toMatchObject({
+      maxTokens: 2048,
+      timeoutMs: 5000,
+    });
+    expect(
+      loadConfig({ LLM_MAX_TOKENS: "512", LLM_REQUEST_TIMEOUT_SECS: "2.5" })
+        .llm,
+    ).toMatchObject({ maxTokens: 512, timeoutMs: 2500 });
+    for (const value of ["0", "2049", "1.5", "invalid"])
+      expect(() => loadConfig({ LLM_MAX_TOKENS: value })).toThrow(
+        ConfigurationError,
+      );
+    for (const value of ["0", "-1", "61", "invalid"])
+      expect(() => loadConfig({ LLM_REQUEST_TIMEOUT_SECS: value })).toThrow(
+        ConfigurationError,
+      );
+  });
   it("defaults audio transcription off without inventing a model", () => {
     expect(loadConfig({}).audioTranscription).toEqual({
       enabled: false,

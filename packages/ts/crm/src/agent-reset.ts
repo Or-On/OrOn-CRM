@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type postgres from "postgres";
+import { agentRuntimePolicy } from "@or-on/config";
 import {
   createAgentProfileRevision,
   createCanonicalFlowDraft,
@@ -16,6 +17,11 @@ import {
 } from "./tenant-configuration.js";
 import type { JsonValue } from "./types.js";
 import { assertKnowledgeManager } from "./knowledge.js";
+import {
+  defaultAgentQuality,
+  parseAgentQuality,
+  qualityObject,
+} from "./agent-quality.js";
 
 /** Every identifier comes from a reviewed inventory, never a tenant slug. */
 export interface AgentResetPlan {
@@ -33,6 +39,7 @@ export interface AgentResetPlan {
   readonly systemPrompt: string;
   readonly fields: unknown;
   readonly capabilities: readonly string[];
+  readonly maxResponseTokens: number;
   readonly reviewedModelConfigurationId?: string;
 }
 
@@ -177,12 +184,30 @@ export async function prepareAgentReset(
     },
   );
   if (!revision) throw new TypeError("Reset profile unavailable");
+  const priorQuality = qualityObject(
+    before.agent.channel_configuration,
+  ).quality;
+  const quality = parseAgentQuality(priorQuality ?? defaultAgentQuality);
+  const reviewedQuality = parseAgentQuality({
+    ...quality,
+    language: "he",
+    agentGrammar: agentRuntimePolicy.voice.agentGrammar,
+    callerAddressDefault: "unknown",
+    speakingStyle: "concise",
+    voiceId: agentRuntimePolicy.voice.voice,
+    budgets: { ...quality.budgets, maxResponseTokens: plan.maxResponseTokens },
+  });
+  await sql`UPDATE agents.agent_profile_versions SET channel_configuration=channel_configuration ||
+    ${sql.json({ quality: JSON.parse(JSON.stringify(reviewedQuality)) as JsonValue })}
+    WHERE id=${revision.versionId}::uuid AND published_at IS NULL`;
   if (plan.reviewedModelConfigurationId) {
     const model = await sql<
       { id: string }[]
     >`SELECT id FROM agents.model_configurations
       WHERE id=${plan.reviewedModelConfigurationId}::uuid AND tenant_id=platform.current_tenant_id()
         AND is_enabled AND provider='gemini' AND model='gemini-3.5-flash-lite'
+        AND (NOT settings ? 'maxTokens' OR
+          (jsonb_typeof(settings->'maxTokens')='number' AND (settings->>'maxTokens')::numeric>=${plan.maxResponseTokens}))
         AND settings->>'fallbackModel'='gemini-3.1-flash-lite' FOR SHARE`;
     if (model.length !== 1)
       throw new TypeError("Reviewed model migration is unavailable");

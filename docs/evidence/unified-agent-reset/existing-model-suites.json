@@ -1,5 +1,5 @@
 {
-  "promptSha256": "ad638ee0bdffdc78223cdc77a4eeaab37cfbc8e63b3ee05fcbb0b6474192d0c0",
+  "promptSha256": "a170461bb5cd4a51a8482f1d85c67175b1c7759f1876be266237338ceed51f4c",
   "kind": "existing provider suites; not database or service-discovery acceptance",
   "models": {
     "gemini-3.5-flash-lite": {
@@ -8,8 +8,8 @@
       "passed": 25,
       "failed": 0,
       "skipped": 0,
-      "testDurationP50Seconds": 0.972,
-      "testDurationP95Seconds": 4.942,
+      "testDurationP50Seconds": 0.894,
+      "testDurationP95Seconds": 5.054,
       "latencyNote": "Whole test duration, not single inference latency"
     },
     "gemini-3.1-flash-lite": {
@@ -18,8 +18,8 @@
       "passed": 25,
       "failed": 0,
       "skipped": 0,
-      "testDurationP50Seconds": 1.176,
-      "testDurationP95Seconds": 4.501,
+      "testDurationP50Seconds": 1.198,
+      "testDurationP95Seconds": 5.505,
       "latencyNote": "Whole test duration, not single inference latency"
     }
   }

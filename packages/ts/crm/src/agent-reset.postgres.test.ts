@@ -8,6 +8,7 @@ import {
   rebindAgentConversations,
 } from "./cross-channel.js";
 import type { JsonValue } from "./types.js";
+import { defaultAgentQuality } from "./agent-quality.js";
 import {
   inspectAgentReset,
   prepareAgentReset,
@@ -42,7 +43,11 @@ describe.skipIf(!databaseUrl)(
         ),
       ) as Pick<
         AgentResetPlan,
-        "systemPrompt" | "fields" | "capabilities" | "name"
+        | "systemPrompt"
+        | "fields"
+        | "capabilities"
+        | "name"
+        | "maxResponseTokens"
       >;
       try {
         await db
@@ -77,6 +82,9 @@ describe.skipIf(!databaseUrl)(
               { id: string }[]
             >`SELECT id FROM agents.agent_profile_versions WHERE agent_profile_id=${profile}::uuid`;
             if (!base) throw new Error("missing fixture version");
+            await sql`UPDATE agents.agent_profile_versions SET channel_configuration=channel_configuration ||
+              ${sql.json({ quality: JSON.parse(JSON.stringify(defaultAgentQuality)) as JsonValue })}
+              WHERE id=${base.id}::uuid`;
             await publishAgentProfile(sql, actor, profile, base.id);
             const channel = randomUUID(),
               contact = randomUUID(),
@@ -122,6 +130,18 @@ describe.skipIf(!databaseUrl)(
             >`SELECT channel_configuration->>'voiceInstructions' AS text FROM agents.agent_profile_versions WHERE id=${identifier(first.agentVersionId)}::uuid`;
             expect(composed?.text).toContain(manifest.systemPrompt);
             expect(composed?.text).toContain("durable");
+            expect(
+              (
+                await sql`SELECT channel_configuration->'quality'->'budgets'->>'maxResponseTokens' AS tokens
+              FROM agents.agent_profile_versions WHERE id=${identifier(first.agentVersionId)}::uuid`
+              )[0]?.tokens,
+            ).toBe("2048");
+            expect(
+              (
+                await sql`SELECT channel_configuration->'quality'->'budgets'->>'maxResponseTokens' AS tokens
+              FROM agents.agent_profile_versions WHERE id=${base.id}::uuid`
+              )[0]?.tokens,
+            ).toBe("256");
             expect(await prepareAgentReset(sql, actor, plan)).toEqual(first);
             expect(
               await sql`SELECT id FROM agents.agent_profile_versions WHERE agent_profile_id=${profile}::uuid`,

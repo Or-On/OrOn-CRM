@@ -270,6 +270,9 @@ importers:
 
   packages/ts/crm:
     dependencies:
+      '@or-on/config':
+        specifier: workspace:*
+        version: link:../config
       postgres:
         specifier: 'catalog:'
         version: 3.4.9

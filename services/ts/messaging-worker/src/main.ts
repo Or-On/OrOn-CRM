@@ -57,6 +57,8 @@ async function main(): Promise<void> {
           apiKey: config.secrets.llmApiKey,
           baseUrl: config.llm.baseUrl,
           model: config.llm.model,
+          maxTokens: config.llm.maxTokens,
+          timeoutMs: config.llm.timeoutMs,
         }
       : undefined;
   const credentialKeys = channelCredentialKeys(process.env);
@@ -139,6 +141,8 @@ async function main(): Promise<void> {
             apiKey: route.credential.apiKey,
             baseUrl: route.baseUrl,
             model: route.model,
+            maxTokens: config.llm.maxTokens,
+            timeoutMs: config.llm.timeoutMs,
             ...route.settings,
           }),
       },

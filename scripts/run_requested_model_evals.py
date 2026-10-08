@@ -48,6 +48,7 @@ def main():
             "LLM_REASONING_EFFORT": "minimal",
             "ORON_LLM_REASONING_EFFORT": "minimal",
             "LLM_MAX_TOKENS": "2048",
+            "LLM_REQUEST_TIMEOUT_SECS": "5",
             "PYTHONUTF8": "1",
         }
         report = args.output / (model + ".xml")

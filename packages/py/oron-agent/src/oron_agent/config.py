@@ -97,9 +97,9 @@ class Settings(BaseSettings):
     # A little variation sounds conversational without making tool selection or
     # collected details erratic. These settings apply only to openai-compat.
     llm_temperature: float = Field(default=0.4, ge=0.0, le=2.0, validation_alias="LLM_TEMPERATURE")
-    # A hard ceiling prevents a voice turn becoming a monologue. The persona
-    # remains the primary 1-2 sentence control; this is the last safety net.
-    llm_max_tokens: int = Field(default=256, ge=32, le=2048, validation_alias="LLM_MAX_TOKENS")
+    # This ceiling includes structured tool arguments, not only speech. The
+    # reviewed profile may impose a lower ceiling; the persona keeps speech short.
+    llm_max_tokens: int = Field(default=2048, ge=32, le=2048, validation_alias="LLM_MAX_TOKENS")
     # Optional throwaway inference at call setup. Off by default: the current
     # Google compatibility endpoint showed no useful prompt-cache benefit, so a
     # warm-up added cost without making the first customer turn faster.

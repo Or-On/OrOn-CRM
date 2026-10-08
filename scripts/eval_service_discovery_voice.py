@@ -128,8 +128,8 @@ async def scenario_run(model, key, scenario, instructions):
         base_url="https://generativelanguage.googleapis.com/v1beta/openai",
         model=model,
         reasoning_effort=LlmReasoningEffort.MINIMAL,
-        max_tokens=2048,
-        request_timeout_secs=45,
+        max_tokens=instructions["maxResponseTokens"],
+        request_timeout_secs=instructions["requestTimeoutSecs"],
         on_attempt=record,
     )
     business = "סטודיו צבע" if scenario.get("otherTenant") else "OrOn"

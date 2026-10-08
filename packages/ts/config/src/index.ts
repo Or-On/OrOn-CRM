@@ -132,6 +132,8 @@ const sourceSchema = z.object({
   LLM_API_KEY: optionalSecret,
   LLM_MODEL: optionalText,
   LLM_FALLBACK_MODEL: optionalText,
+  LLM_MAX_TOKENS: z.coerce.number().int().min(32).max(2048).default(2048),
+  LLM_REQUEST_TIMEOUT_SECS: z.coerce.number().positive().max(60).default(5),
   LLM_BASE_URL: optionalProviderUrl,
   CREDENTIAL_ENCRYPTION_KEY: optionalSecret,
   STRIPE_SECRET_KEY: optionalSecret,
@@ -201,6 +203,8 @@ export interface PlatformConfig {
     readonly provider: "vertex" | "openai-compat";
     readonly model: string | undefined;
     readonly fallbackModel: string | undefined;
+    readonly maxTokens: number;
+    readonly timeoutMs: number;
     readonly baseUrl: string | undefined;
   };
   readonly whatsApp: {
@@ -433,6 +437,8 @@ export function loadConfig(
       provider: result.data.LLM_PROVIDER,
       model: result.data.LLM_MODEL,
       fallbackModel: result.data.LLM_FALLBACK_MODEL,
+      maxTokens: result.data.LLM_MAX_TOKENS,
+      timeoutMs: result.data.LLM_REQUEST_TIMEOUT_SECS * 1000,
       baseUrl: result.data.LLM_BASE_URL,
     },
     whatsApp: {

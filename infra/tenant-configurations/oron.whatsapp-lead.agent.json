@@ -2,6 +2,7 @@
   "name": "Or-On — שיחה על שירותים ואיסוף פנייה",
   "capabilities": ["lead.write", "lead.finalize", "lead.follow_up"],
   "locale": "he",
+  "maxResponseTokens": 2048,
   "openingMenuEnabled": false,
   "automaticTemplateGreetingEnabled": false,
   "messages": {

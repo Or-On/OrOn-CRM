@@ -32,6 +32,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@or-on/config": "workspace:*",
     "postgres": "catalog:"
   },
   "devDependencies": {

@@ -1,7 +1,7 @@
 # Unified agent reset — local verification and activation package
 
 Status: **Implemented locally; activation review blocked by required browser acceptance**.
-Implementation commit: `957b1b5` plus the follow-up acceptance/rollback commit on
+Implementation commits: `957b1b5` and `5f3e89c` on
 `codex/unified-agent-reset`, based on
 `a78d3b9cd3b1de1e1ab918729fd87e1401efa326`. No production configuration or data has
 been changed by this work. The original checkout remains separate.
@@ -49,6 +49,14 @@ It has no second service script, hard-coded questionnaire or separate closing.
 - A model-name replacement did not update Gemini parameters or retry behavior.
   Capability mapping is shared through generated policy; fallback recomputes
   settings and never replays a response after partial speech or tool output.
+- The new profile inherited a 256-token voice quality budget even though the
+  multi-field tool evaluations used 2,048. The reset now stores the reviewed
+  2,048-token budget in its new immutable quality snapshot, preserves the old
+  version, and rejects an explicitly configured model with a lower cap. Typed
+  worker configuration now propagates the token ceiling and request deadline
+  to the default and explicit routes; reviewed explicit settings still override
+  these defaults. The reset rejects an explicit model cap below its reviewed
+  profile budget rather than silently raising a custom limit.
 - Field intake now resolves explicit tenant model credentials and limits, with
   a fresh authority/snapshot/quota check for every physical attempt, including
   fallback. A missing or disabled explicit route cannot borrow a deployment key.
@@ -113,7 +121,7 @@ several suites overlap.
 | Full messaging worker with explicit local database fixtures | **795 passed, 19 skipped**; 18 separately passed, one POSIX-only check remains skipped | `messaging-pg-r18.log` |
 | Form-link lifecycle, submission, recovery and tenant isolation | **18 passed** | `service-form-r16.log` |
 | Model routing, quota, key rotation, concurrent workers, machine-tool revocation | **29 passed**, including new pending-trigger denial | `model-machine-pg-r17.log` |
-| Reset, retained conversations/call, explicit rebind and rollback | **1 passed**, real PostgreSQL | `reset-rehearsal-r19.json` |
+| Reset, retained conversations/call, explicit rebind and rollback | **1 passed**, real PostgreSQL | `reset-rehearsal-r24.json` |
 | Upgrade → downgrade to `f3a8c2d91750` → upgrade; deterministic SQL + contract | Passed, **164 revisions, one head `a18c4e53fd02`** | `migration-cycle-r15.log` |
 | Generated API contract, production web/workspace build, peer dependencies | Passed | `verify-continuation-r16.log` |
 | Dependency audits | Repository gate passed; **9 npm findings (4 high, 4 moderate, 1 low), no critical**. Python: one existing time-limited exception, no other known findings | `verify-continuation-r16.log` |
@@ -147,10 +155,10 @@ retain final filtered replies, actions, captured facts and outcomes.
 
 | Channel | Model | Corpus | Inference p50 / p95 |
 | --- | --- | --- | --- |
-| WhatsApp | Gemini 3.5 Flash-Lite | 20/20 | 1,237 / 1,951 ms |
-| WhatsApp | Gemini 3.1 Flash-Lite | 20/20 | 1,748 / 2,523 ms |
-| Voice adapter | Gemini 3.5 Flash-Lite | 20/20 | 998 / 1,404 ms |
-| Voice adapter | Gemini 3.1 Flash-Lite | 20/20 | 1,167 / 1,650 ms |
+| WhatsApp | gemini-3.5-flash-lite | 20/20 | 1,179 / 1,791 ms |
+| WhatsApp | gemini-3.1-flash-lite | 20/20 | 1,543 / 3,075 ms |
+| Voice adapter | gemini-3.5-flash-lite | 20/20 | 974 / 1,280 ms |
+| Voice adapter | gemini-3.1-flash-lite | 20/20 | 1,222 / 1,723 ms |
 
 Existing `oron-agent` and `oron-flows` provider suites also passed **25/25 for
 each model**, zero skips. Their p50/p95 values measure whole test duration,
@@ -164,7 +172,9 @@ real telephone or WhatsApp exchange.
 Earlier failures were retained. Voice r10 measured 38/40 with an evaluator that
 omitted text accompanying tool calls. The corrected r11 captures such text and
 filters it **before** tool execution, so later success cannot license an earlier
-claim. WhatsApp r10 and voice r11 are the reported source runs. One successful
+claim. After correcting the deployed profile token ceiling, r22 repeated both full
+corpora with a 2,048-token ceiling and 5-second request deadline; these are the
+reported source runs. One successful
 corpus is not a guarantee of deterministic model behavior.
 
 Live browser inspection is **NOT RUN**: automatic approval review rejected both
@@ -218,7 +228,10 @@ uv run python scripts/run_requested_model_evals.py --allow-provider-evals --env-
 Both channel adapters retain the same canonical business definition. Deployment
 configuration sets `LLM_PROVIDER=openai-compat`, Google's OpenAI-compatible
 endpoint, `LLM_MODEL=gemini-3.5-flash-lite`,
-`LLM_FALLBACK_MODEL=gemini-3.1-flash-lite`, and minimal thinking. Model-specific
+`LLM_FALLBACK_MODEL=gemini-3.1-flash-lite`, `LLM_MAX_TOKENS=2048`, `LLM_REQUEST_TIMEOUT_SECS=5`, and minimal thinking.
+The previously read local configuration used 256 tokens; retaining that override
+would still truncate tool calls. The activation review must verify the deployed
+environment and profile budget together. Model-specific
 payload mapping omits unsupported 3.5 temperature settings. Explicit tenant
 configurations require a reviewed clone; an environment change cannot rewrite
 immutable references. The dispatcher now requires access to the same existing
