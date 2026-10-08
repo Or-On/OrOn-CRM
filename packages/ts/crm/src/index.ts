@@ -63,3 +63,4 @@ export * from "./memory-human-controls.js";
 export * from "./callable-voice-flows.js";
 
 export * from "./incomplete-service-requests.js";
+export * from "./publication-bindings.js";

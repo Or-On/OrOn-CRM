@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import {
+  FlowRevisionConflictError,
   archiveAutomation,
   renameAutomation,
   saveCanonicalFlowDraft,
@@ -27,8 +28,19 @@ export async function PATCH(
         Array.isArray(body.flow)
       )
         throw new TypeError("flow definition is required");
+      if (
+        !Number.isInteger(body.expectedRevision) ||
+        Number(body.expectedRevision) < 1
+      )
+        throw new TypeError("expectedRevision is required");
       const saved = await withCurrentTenant("flows:manage", (sql, session) =>
-        saveCanonicalFlowDraft(sql, session.userId, id, body.flow),
+        saveCanonicalFlowDraft(
+          sql,
+          session.userId,
+          id,
+          body.flow,
+          Number(body.expectedRevision),
+        ),
       );
       return saved === null
         ? NextResponse.json({ error: "Not found" }, { status: 404 })
@@ -43,6 +55,11 @@ export async function PATCH(
       ? NextResponse.json({ ok: true })
       : NextResponse.json({ error: "Not found" }, { status: 404 });
   } catch (error) {
+    if (error instanceof FlowRevisionConflictError)
+      return NextResponse.json(
+        { error: error.message, code: "FLOW_REVISION_CHANGED" },
+        { status: 409 },
+      );
     return crmErrorResponse(error);
   }
 }

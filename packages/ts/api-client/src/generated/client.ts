@@ -11,6 +11,7 @@ import type {
   FlowDocumentRequest,
   FlowList,
   FlowPublishResult,
+  FlowSourceResult,
   FlowValidationResult,
   LiveStatus,
   PhoneNumberList,
@@ -142,6 +143,15 @@ export class GeneratedControlApiClient {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     });
+  }
+
+  public async getVoiceFlowSource(parameters: {
+    readonly flow_id: string;
+    readonly version: number;
+  }): Promise<ApiResponse<FlowSourceResult>> {
+    return this.request<FlowSourceResult>(
+      `/api/v1/voice/flows/${encodeURIComponent(String(parameters.flow_id))}/versions/${encodeURIComponent(String(parameters.version))}`,
+    );
   }
 
   public async listVoicePhoneNumbers(): Promise<ApiResponse<PhoneNumberList>> {

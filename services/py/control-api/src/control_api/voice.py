@@ -175,6 +175,36 @@ class FlowList(BaseModel):
 
 class FlowDocumentRequest(BaseModel):
     source: dict[str, object]
+    expected_base_version: Annotated[int, Field(ge=0)] | None = None
+    expected_revision: Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")] | None = None
+    request_id: UUID | None = None
+
+
+class FlowSourceResult(BaseModel):
+    flow_id: UUID
+    version: int
+    source: dict[str, object]
+    spec: dict[str, object]
+    components_version: str
+    origin: Literal["tenant", "packaged"]
+    editable: bool
+    revision: str
+    base_version: int
+
+
+def flow_source_revision(source: dict[str, object]) -> str:
+    return hashlib.sha256(
+        json.dumps(source, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+
+
+class VoicePublicationResult(BaseModel):
+    status: Literal["published_pending_activation"] = "published_pending_activation"
+    operationId: UUID | None = None
+    releaseId: UUID | None = None
+    impacts: list[dict[str, object]] = Field(default_factory=list)
 
 
 class FlowValidationResult(BaseModel):
@@ -186,6 +216,7 @@ class FlowValidationResult(BaseModel):
 class FlowPublishResult(BaseModel):
     flow: FlowSummary
     created: bool
+    publication: VoicePublicationResult = Field(default_factory=VoicePublicationResult)
 
 
 class ComponentCatalog(BaseModel):
@@ -301,6 +332,10 @@ class VoiceRepository(Protocol):
     ) -> ReconciliationReport: ...
 
     async def list_flows(self, principal: ServicePrincipal) -> list[FlowSummary]: ...
+
+    async def get_flow_source(
+        self, principal: ServicePrincipal, flow_id: UUID, version: int
+    ) -> FlowSourceResult | None: ...
 
     async def validate_flow(self, command: FlowDocumentRequest) -> FlowValidationResult: ...
 
@@ -821,6 +856,34 @@ class PostgresVoiceRepository:
             rows = list((await database.execute(statement)).scalars())
             return [_flow_summary(row) for row in rows]
 
+    async def get_flow_source(
+        self, principal: ServicePrincipal, flow_id: UUID, version: int
+    ) -> FlowSourceResult | None:
+        async with self._sessionmaker() as database, database.begin():
+            await self._scope(database, principal)
+            row = (
+                await database.execute(
+                    select(Flow).where(
+                        col(Flow.flow_id) == flow_id,
+                        col(Flow.version) == version,
+                        _tenant_flow_owner_clause(principal.tenant_id),
+                    )
+                )
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            return FlowSourceResult(
+                flow_id=row.flow_id,
+                version=row.version,
+                source=row.source,
+                spec=row.spec,
+                components_version=row.components_version,
+                origin="tenant",
+                editable=True,
+                revision=flow_source_revision(row.source),
+                base_version=row.version,
+            )
+
     async def validate_flow(self, command: FlowDocumentRequest) -> FlowValidationResult:
         try:
             composition = Composition.model_validate(command.source)
@@ -848,6 +911,62 @@ class PostgresVoiceRepository:
         composition = Composition.model_validate(source)
         async with self._sessionmaker() as database, database.begin():
             await self._scope(database, principal)
+            # Same tenant lock as the TS release boundary. Never call providers here.
+            await database.execute(
+                text(
+                    "SELECT pg_advisory_xact_lock("
+                    "hashtextextended('tenant-configuration:' || :tenant,0))"
+                ),
+                {"tenant": str(principal.tenant_id)},
+            )
+            request_hash = flow_source_revision(command.model_dump(mode="json"))
+            operation_id = command.request_id
+            if operation_id is not None:
+                previous = (
+                    (
+                        await database.execute(
+                            text(
+                                "SELECT request_hash,result FROM automation.publication_operations "
+                                "WHERE tenant_id=:tenant AND id=:id"
+                            ),
+                            {"tenant": principal.tenant_id, "id": operation_id},
+                        )
+                    )
+                    .mappings()
+                    .first()
+                )
+                if previous is not None:
+                    if previous["request_hash"] != request_hash:
+                        raise SimulatedCallConflict(
+                            "publication request ID conflicts with another candidate"
+                        )
+                    return FlowPublishResult.model_validate(previous["result"]["retainedResult"])
+            latest = (
+                await database.execute(
+                    select(Flow)
+                    .where(
+                        col(Flow.flow_id) == composition.flow.id,
+                        _tenant_flow_owner_clause(principal.tenant_id),
+                    )
+                    .order_by(col(Flow.version).desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if command.expected_base_version is not None:
+                if (latest.version if latest else 0) != command.expected_base_version:
+                    raise SimulatedCallConflict(
+                        "flow base version changed; reload before publishing"
+                    )
+                if latest and command.expected_revision != flow_source_revision(latest.source):
+                    raise SimulatedCallConflict(
+                        "flow source revision changed; reload before publishing"
+                    )
+                source["flow"] = {
+                    **cast(dict[str, object], source["flow"]),
+                    "version": command.expected_base_version + 1,
+                }
+                composition = Composition.model_validate(source)
+                spec = expand(composition).model_dump(mode="json")
             inserted = await database.execute(
                 insert(_FLOW_TABLE)
                 .values(
@@ -884,7 +1003,32 @@ class PostgresVoiceRepository:
                     target_id=row.flow_id,
                     metadata={"version": row.version},
                 )
-            return FlowPublishResult(flow=_flow_summary(row), created=created)
+            result = FlowPublishResult(
+                flow=_flow_summary(row),
+                created=created,
+                publication=VoicePublicationResult(operationId=operation_id),
+            )
+            if operation_id is not None:
+                await database.execute(
+                    text("""INSERT INTO automation.publication_operations
+                  (tenant_id,id,kind,resource_id,candidate_version,request_hash,result,created_by_user_id)
+                  VALUES(:tenant,:id,'retained_voice',:flow,:version,:hash,:result,:actor)""").bindparams(
+                        bindparam("result", type_=JSONB)
+                    ),
+                    {
+                        "tenant": principal.tenant_id,
+                        "id": operation_id,
+                        "flow": row.flow_id,
+                        "version": row.version,
+                        "hash": request_hash,
+                        "actor": principal.user_id,
+                        "result": {
+                            **result.publication.model_dump(mode="json"),
+                            "retainedResult": result.model_dump(mode="json"),
+                        },
+                    },
+                )
+            return result
 
     async def list_campaigns(self, principal: ServicePrincipal) -> list[VoiceCampaignSummary]:
         async with self._sessionmaker() as database, database.begin():
@@ -1397,6 +1541,22 @@ def create_voice_router(
     ) -> FlowList:
         return FlowList(items=await store.list_flows(principal))
 
+    @router.get(
+        "/flows/{flow_id}/versions/{version}",
+        response_model=FlowSourceResult,
+        operation_id="get_voice_flow_source",
+    )
+    async def get_voice_flow_source(
+        flow_id: UUID,
+        version: Annotated[int, Field(ge=1)],
+        principal: ServicePrincipal = Depends(require_voice_read),
+        store: VoiceRepository = Depends(configured_repository),
+    ) -> FlowSourceResult:
+        result = await store.get_flow_source(principal, flow_id, version)
+        if result is None:
+            raise HTTPException(status_code=404, detail="voice flow source not found")
+        return result
+
     @router.post(
         "/flows/validate",
         response_model=FlowValidationResult,
@@ -1404,7 +1564,7 @@ def create_voice_router(
     )
     async def validate_voice_flow(
         command: FlowDocumentRequest,
-        _: ServicePrincipal = Depends(require_voice_write),
+        _: ServicePrincipal = Depends(require_voice_manage),
         store: VoiceRepository = Depends(configured_repository),
     ) -> FlowValidationResult:
         return await store.validate_flow(command)

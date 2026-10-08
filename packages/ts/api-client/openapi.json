@@ -546,6 +546,42 @@
       },
       "FlowDocumentRequest": {
         "properties": {
+          "expected_base_version": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Base Version"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "pattern": "^[a-f0-9]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Revision"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
+          },
           "source": {
             "additionalProperties": true,
             "title": "Source",
@@ -578,10 +614,70 @@
           },
           "flow": {
             "$ref": "#/components/schemas/FlowSummary"
+          },
+          "publication": {
+            "$ref": "#/components/schemas/VoicePublicationResult"
           }
         },
         "required": ["flow", "created"],
         "title": "FlowPublishResult",
+        "type": "object"
+      },
+      "FlowSourceResult": {
+        "properties": {
+          "base_version": {
+            "title": "Base Version",
+            "type": "integer"
+          },
+          "components_version": {
+            "title": "Components Version",
+            "type": "string"
+          },
+          "editable": {
+            "title": "Editable",
+            "type": "boolean"
+          },
+          "flow_id": {
+            "format": "uuid",
+            "title": "Flow Id",
+            "type": "string"
+          },
+          "origin": {
+            "enum": ["tenant", "packaged"],
+            "title": "Origin",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "string"
+          },
+          "source": {
+            "additionalProperties": true,
+            "title": "Source",
+            "type": "object"
+          },
+          "spec": {
+            "additionalProperties": true,
+            "title": "Spec",
+            "type": "object"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "flow_id",
+          "version",
+          "source",
+          "spec",
+          "components_version",
+          "origin",
+          "editable",
+          "revision",
+          "base_version"
+        ],
+        "title": "FlowSourceResult",
         "type": "object"
       },
       "FlowSummary": {
@@ -1439,6 +1535,50 @@
         "title": "VoiceControlStatus",
         "type": "object"
       },
+      "VoicePublicationResult": {
+        "properties": {
+          "impacts": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Impacts",
+            "type": "array"
+          },
+          "operationId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operationid"
+          },
+          "releaseId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Releaseid"
+          },
+          "status": {
+            "const": "published_pending_activation",
+            "default": "published_pending_activation",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "title": "VoicePublicationResult",
+        "type": "object"
+      },
       "VoiceSessionDetail": {
         "properties": {
           "answered": {
@@ -2155,6 +2295,62 @@
           }
         ],
         "summary": "Validate Voice Flow",
+        "tags": ["voice"]
+      }
+    },
+    "/api/v1/voice/flows/{flow_id}/versions/{version}": {
+      "get": {
+        "operationId": "get_voice_flow_source",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "flow_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Flow Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Version",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlowSourceResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Voice Flow Source",
         "tags": ["voice"]
       }
     },
