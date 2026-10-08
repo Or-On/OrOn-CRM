@@ -244,7 +244,8 @@ describe.skipIf(!url)("publication bundle under application roles", () => {
         expect(old?.ai_agent_profile_version_id).toBe(f.base);
         const profiles = await listAgentProfiles(sql);
         expect(
-          profiles.find((p) => p.id === f.profile)?.lifecycle.staleConversations,
+          profiles.find((p) => p.id === f.profile)?.lifecycle
+            .staleConversations,
         ).toBe(1);
         const rebound = await rebindAgentConversations(
           sql,

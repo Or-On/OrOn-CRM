@@ -29,6 +29,7 @@ REQUIRED = {
     "SHA256SUMS",
 }
 TARGET = re.compile(r"oron_restore_[a-f0-9]{32}")
+LEGACY_RECOVERY_ROLES = {"oron_app", "oron_sessions_app", "oron_tenancy_app"}
 EVALUATOR = "platform_agent_evaluation"
 EVALUATOR_FUNCTIONS = {
     "platform.claim_agent_quality_evaluation()",
@@ -253,7 +254,7 @@ async def verify_role_contract(connection, contract: dict) -> None:
     """Check existing cluster roles; never create, grant or relax any role."""
     for role in contract["requiredRoles"]:
         name = role["name"]
-        if not re.fullmatch(r"platform_[a-z_]+", name):
+        if not re.fullmatch(r"platform_[a-z_]+", name) and name not in LEGACY_RECOVERY_ROLES:
             raise RestoreRefused("Unexpected role contract")
         actual = await connection.fetchrow(
             "SELECT rolsuper,rolbypassrls,rolcanlogin,rolinherit,rolcreatedb,"
@@ -271,7 +272,9 @@ async def verify_role_contract(connection, contract: dict) -> None:
             "SELECT role.rolname AS role,member.rolname AS member,m.admin_option AS admin,"
             "m.inherit_option AS inherit,m.set_option AS set FROM pg_auth_members m "
             "JOIN pg_roles role ON role.oid=m.roleid JOIN pg_roles member ON member.oid=m.member "
-            "WHERE role.rolname LIKE 'platform_%' OR member.rolname LIKE 'platform_%'"
+            "WHERE role.rolname LIKE 'platform_%' OR member.rolname LIKE 'platform_%' "
+            "OR role.rolname=ANY($1::text[]) OR member.rolname=ANY($1::text[])",
+            sorted(LEGACY_RECOVERY_ROLES),
         )
         canonical = lambda rows: sorted(  # noqa: E731 - local canonical tuple projection
             (r["role"], r["member"], r["admin"], r["inherit"], r["set"]) for r in rows

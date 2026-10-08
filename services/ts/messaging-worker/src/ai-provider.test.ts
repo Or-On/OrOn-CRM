@@ -1210,10 +1210,27 @@ it("requests correction for an invalid phone receipt without paying for inferenc
   const fetcher = vi.fn();
   vi.stubGlobal("fetch", fetcher);
   const response = await provider().decide({
-    systemPrompt: "Synthetic", locale: "he", messages: [],
-    actionReceipts: [{ action: "lead_save", ok: false, reference: null,
-      detail: "invalid field", validationError: { code: "invalid_phone", field: "callback_phone", recoverable: true } }],
+    systemPrompt: "Synthetic",
+    locale: "he",
+    messages: [],
+    actionReceipts: [
+      {
+        action: "lead_save",
+        ok: false,
+        reference: null,
+        detail: "invalid field",
+        validationError: {
+          code: "invalid_phone",
+          field: "callback_phone",
+          recoverable: true,
+        },
+      },
+    ],
   });
-  expect(response).toEqual({ action: "reply", replyCode: "invalid_callback_phone", text: "" });
+  expect(response).toEqual({
+    action: "reply",
+    replyCode: "invalid_callback_phone",
+    text: "",
+  });
   expect(fetcher).not.toHaveBeenCalled();
 });

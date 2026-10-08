@@ -383,3 +383,31 @@ def test_whatsapp_verifier_capability_drift_denied(mutation):
         contract.pop("whatsappVerifierCapabilities")
     with pytest.raises(restore.RestoreRefused):
         restore.validate_security_contract(contract)
+
+
+@pytest.mark.parametrize("name", ["oron_app", "oron_sessions_app", "oron_tenancy_app"])
+def test_explicit_legacy_recovery_roles_require_matching_nonprivileged_flags(name):
+    role = {"name": name, **dict.fromkeys(restore.ROLE_FLAGS, False)}
+
+    class Connection:
+        async def fetchrow(self, _query, _name):
+            return {column: role[flag] for flag, column in restore.ROLE_FLAGS.items()}
+
+    asyncio.run(restore.verify_role_contract(Connection(), {"requiredRoles": [role]}))
+    role["superuser"] = True
+    with pytest.raises(restore.RestoreRefused, match="bypass"):
+        asyncio.run(restore.verify_role_contract(Connection(), {"requiredRoles": [role]}))
+
+
+def test_arbitrary_legacy_role_is_not_accepted():
+    with pytest.raises(restore.RestoreRefused, match="Unexpected role"):
+        asyncio.run(
+            restore.verify_role_contract(
+                None,
+                {
+                    "requiredRoles": [
+                        {"name": "oron_unreviewed", **dict.fromkeys(restore.ROLE_FLAGS, False)}
+                    ]
+                },
+            )
+        )
