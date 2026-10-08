@@ -8,6 +8,7 @@ import type {
   CanonicalFlowContract,
   CanonicalFlowValidationResult,
   ComponentCatalog,
+  EffectivePromptResult,
   FlowDocumentRequest,
   FlowList,
   FlowPublishResult,
@@ -75,6 +76,15 @@ export class GeneratedControlApiClient {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
       },
+    );
+  }
+
+  public async getAgentEffectivePrompt(parameters: {
+    readonly agent_id: string;
+    readonly version_id: string;
+  }): Promise<ApiResponse<EffectivePromptResult>> {
+    return this.request<EffectivePromptResult>(
+      `/api/v1/orchestration/agents/${encodeURIComponent(String(parameters.agent_id))}/versions/${encodeURIComponent(String(parameters.version_id))}/effective-prompt`,
     );
   }
 

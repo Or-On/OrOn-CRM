@@ -22,6 +22,7 @@ export type {
   FlowList,
   FlowPublishResult,
   FlowSummary,
+  EffectivePromptResult,
   FlowSourceResult,
   VoicePublicationResult,
   FlowValidationResult,

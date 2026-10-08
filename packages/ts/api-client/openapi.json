@@ -544,6 +544,68 @@
         "title": "Direction",
         "type": "string"
       },
+      "EffectivePromptResult": {
+        "properties": {
+          "blocks": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Blocks",
+            "type": "array"
+          },
+          "characterCount": {
+            "title": "Charactercount",
+            "type": "integer"
+          },
+          "compositionVersion": {
+            "title": "Compositionversion",
+            "type": "string"
+          },
+          "exclusions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Exclusions",
+            "type": "array"
+          },
+          "hash": {
+            "title": "Hash",
+            "type": "string"
+          },
+          "hashScope": {
+            "title": "Hashscope",
+            "type": "string"
+          },
+          "scriptedOpening": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scriptedopening"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "blocks",
+          "hash",
+          "hashScope",
+          "compositionVersion",
+          "characterCount",
+          "exclusions"
+        ],
+        "title": "EffectivePromptResult",
+        "type": "object"
+      },
       "FlowDocumentRequest": {
         "properties": {
           "expected_base_version": {
@@ -2005,6 +2067,111 @@
           }
         ],
         "summary": "Evaluate Agent Provider",
+        "tags": ["orchestration"]
+      }
+    },
+    "/api/v1/orchestration/agents/{agent_id}/versions/{version_id}/effective-prompt": {
+      "get": {
+        "operationId": "get_agent_effective_prompt",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Agent Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Version Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "flow_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Flow Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "flow_version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Flow Version"
+            }
+          },
+          {
+            "in": "query",
+            "name": "node_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Node Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EffectivePromptResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Inspect Prompt",
         "tags": ["orchestration"]
       }
     },
