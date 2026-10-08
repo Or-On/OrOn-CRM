@@ -31,9 +31,9 @@ def _execute(script: str) -> None:
 SQL = """
 ALTER TABLE automation.publication_operations ADD COLUMN candidate_snapshot jsonb,ADD COLUMN candidate_digest text;
 CREATE TABLE agents.publication_evaluation_contexts(
-  tenant_id uuid NOT NULL,job_id uuid PRIMARY KEY REFERENCES agents.quality_evaluation_jobs(id),
+  tenant_id uuid NOT NULL,job_id uuid PRIMARY KEY REFERENCES agents.quality_evaluation_jobs(id) ON DELETE RESTRICT,
   operation_id uuid NOT NULL,candidate_digest text NOT NULL CHECK(length(candidate_digest)=64),
-  FOREIGN KEY(tenant_id,operation_id) REFERENCES automation.publication_operations(tenant_id,id)
+  FOREIGN KEY(tenant_id,operation_id) REFERENCES automation.publication_operations(tenant_id,id) ON DELETE RESTRICT
 );
 ALTER TABLE agents.publication_evaluation_contexts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agents.publication_evaluation_contexts FORCE ROW LEVEL SECURITY;
@@ -151,6 +151,7 @@ DECLARE operation uuid; BEGIN
   IF operation IS NOT NULL AND NOT platform.publication_evaluation_satisfied(operation) THEN RAISE EXCEPTION 'exact publication candidate evaluation required before activation' USING ERRCODE='55000';END IF;
  END IF;RETURN NEW;
 END $$;
+REVOKE ALL ON FUNCTION platform.guard_publication_activation_evidence() FROM PUBLIC;
 CREATE TRIGGER publication_activation_evidence BEFORE UPDATE OF status ON platform.tenant_configuration_releases FOR EACH ROW EXECUTE FUNCTION platform.guard_publication_activation_evidence();
 REVOKE ALL ON FUNCTION platform.list_publication_quality_evaluations(uuid,uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION platform.list_publication_quality_evaluations(uuid,uuid) TO platform_web;

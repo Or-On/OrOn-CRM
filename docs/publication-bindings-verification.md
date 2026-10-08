@@ -26,3 +26,7 @@ The repository provides the trusted database worker protocol, not a standalone p
 No pre-change failing reproduction of the complete feature was captured. Local intermediate failures (migration multi-statement execution, privilege wrapper, source client arity, stricter lint and fixture-name guard) were observed and corrected or explicitly retained as limitations. No local HTTP server was started after prior automatic review denied server startup. Browser screenshots, physical audio/provider delivery and production release are not included in this evidence.
 
 Global NULL-tenant retained flows remain hidden by the established tenant predicate. There is no authorized packaged catalog/copy endpoint in this implementation; those sources are not silently granted cross-tenant visibility.
+
+## Catalog regression correction
+
+The integrated catalog gate found two real migration defects, reproduced before the fix: PUBLIC could execute the publication activation trigger function, and four publication/evidence foreign keys used implicit NO ACTION. The unpublished a29/a3 migrations now revoke PUBLIC execution and declare ON DELETE RESTRICT, preserving audit/evaluation dependencies. Catalog assertions now identify the offending function or constraint. A fresh owned database was migrated from empty to the corrected head; all 12 catalog tests passed. The separate correctly named owned UI fixture also passed all 31 leads tests, resolving the earlier fixture-name limitation. No applied migration on a durable environment was edited or patched in place.
