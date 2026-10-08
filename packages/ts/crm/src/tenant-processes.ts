@@ -51,6 +51,7 @@ export interface TenantProcess {
 }
 
 export interface TenantProcessInput {
+  readonly bindingPolicy?: "pinned" | "follow_published";
   readonly name: string;
   readonly purpose?: string;
   readonly enabled: boolean;

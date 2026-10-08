@@ -46,6 +46,13 @@ export async function validateRetainedReferences(
     }
 }
 
+export class FlowRevisionConflictError extends Error {
+  constructor() {
+    super("Flow revision changed; reload before saving");
+    this.name = "FlowRevisionConflictError";
+  }
+}
+
 export interface SavedCanonicalFlowDraft {
   readonly version: number;
   readonly versionId: string;
@@ -62,6 +69,7 @@ export async function saveCanonicalFlowDraft(
   actorUserId: string,
   definitionId: string,
   candidate: unknown,
+  expectedRevision?: number,
 ): Promise<SavedCanonicalFlowDraft | null> {
   if (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/iu.test(definitionId))
     throw new TypeError("invalid flow identifier");
@@ -94,6 +102,8 @@ export async function saveCanonicalFlowDraft(
   if (latest?.agent_profile_version_id === null || latest === undefined)
     throw new TypeError("only canonical flows can be edited");
 
+  if (expectedRevision !== undefined && latest.version !== expectedRevision)
+    throw new FlowRevisionConflictError();
   const version = latest.version + 1;
   const inserted = await sql<{ id: string }[]>`
     INSERT INTO automation.flow_versions

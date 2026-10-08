@@ -1,4 +1,5 @@
 import type postgres from "postgres";
+import { parseReferencePolicy } from "./cross-channel.js";
 
 import {
   capabilityRequiredFeature,
@@ -178,6 +179,7 @@ export function parseTenantConfiguration(value: unknown): TenantConfiguration {
         : text(process.purpose, "Process purpose", 1000);
     return {
       name: text(process.name, "Process name", 120),
+      bindingPolicy: parseReferencePolicy(process.bindingPolicy),
       purpose,
       enabled: process.enabled,
       trigger: process.trigger as TenantProcessInput["trigger"],

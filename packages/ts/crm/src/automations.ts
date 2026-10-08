@@ -8,6 +8,7 @@ import type {
 import { requireTenantFeature } from "./tenant-features.js";
 
 interface AutomationRow {
+  version_id: string;
   definition: JsonValue;
   execution_kind: NonNullable<AutomationSummary["executionKind"]>;
   id: string;
@@ -25,11 +26,11 @@ export async function listAutomations(
   await requireTenantFeature(sql, "agents");
   const rows = await sql<AutomationRow[]>`
     SELECT definition.id, definition.name, definition.description,
-           version.version, version.published_at, version.validation_status,
+           version.id AS version_id, version.version, version.published_at, version.validation_status,
            definition.created_at, version.definition, version.execution_kind
     FROM automation.flow_definitions definition
     JOIN LATERAL (
-      SELECT flow.version, flow.published_at, flow.validation_status, flow.definition,
+      SELECT flow.id, flow.version, flow.published_at, flow.validation_status, flow.definition,
              CASE WHEN flow.definition->'nodes' = '[]'::jsonb THEN 'empty'
                   WHEN flow.definition->>'schemaVersion' = '1.0' THEN 'canonical'
                   ELSE 'unsupported' END AS execution_kind
@@ -42,6 +43,7 @@ export async function listAutomations(
   `;
   return rows.map((row) => ({
     definition: row.definition,
+    versionId: row.version_id,
     executionKind: row.execution_kind,
     id: row.id,
     name: row.name,

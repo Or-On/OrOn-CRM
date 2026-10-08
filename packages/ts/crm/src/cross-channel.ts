@@ -382,6 +382,7 @@ export async function rebindAgentConversations(
       AND pinned.agent_profile_id = ${profileId}::uuid
       AND pinned.id <> ${target}::uuid
       AND conversation.ownership_mode = 'ai'
+      AND conversation.removed_from_inbox_at IS NULL
     RETURNING conversation.id
   `;
   await auditAction(

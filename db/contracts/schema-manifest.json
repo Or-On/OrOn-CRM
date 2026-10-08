@@ -1,5 +1,5 @@
 {
-  "alembic_head": "a18c4e53fd02",
+  "alembic_head": "a29d5f64ae13",
   "expected_functions": [
     "agents.activate_reviewed_memory",
     "agents.alert_exhausted_memory_summary",
@@ -85,6 +85,7 @@
     "platform.authorize_machine_tool",
     "platform.authorize_media_commit",
     "platform.begin_opening_menu_attempt",
+    "platform.can_activate_publication",
     "platform.canonical_actor_authorized",
     "platform.capture_outbound_execution_authority",
     "platform.capture_principal_handoff_authority",
@@ -123,6 +124,7 @@
     "platform.enqueue_opening_menu_for_inbound",
     "platform.fail_agent_quality_evaluation",
     "platform.fail_stale_voice_sessions",
+    "platform.field_intake_model_route",
     "platform.finalize_agent_quality_evaluation",
     "platform.finish_voice_memory",
     "platform.guard_tenant_slug_uniqueness",
@@ -215,6 +217,7 @@
     "platform.tenant_feature_enabled_for",
     "platform.update_current_tenant_name",
     "platform.update_current_user_profile",
+    "platform.validate_publication_binding_policy",
     "platform.validate_tenant_configuration",
     "platform.verified_voice_handoff_context",
     "platform.verify_voice_caller_identity",
@@ -223,7 +226,6 @@
     "platform.voice_flow_available",
     "platform.voice_identity_verification_requirements",
     "platform.voice_model_route",
-    "platform.field_intake_model_route",
     "platform.voice_simulation_eligible",
     "platform.voice_sms_challenge",
     "platform.voice_sms_delivery",
@@ -462,7 +464,8 @@
       "flow_versions",
       "handoffs",
       "tenant_processes",
-      "voice_identity_verifications"
+      "voice_identity_verifications",
+      "publication_operations"
     ],
     "billing": [
       "ledger_entries",
@@ -789,6 +792,7 @@
     "service.digital_intake_forms",
     "platform.principal_handoff_authority",
     "service.whatsapp_form_template_policy",
-    "service.whatsapp_form_sources"
+    "service.whatsapp_form_sources",
+    "automation.publication_operations"
   ]
 }

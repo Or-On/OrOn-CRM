@@ -606,3 +606,51 @@ def test_phone_number_listing_is_scoped_to_the_principals_tenant() -> None:
 
     assert f"WHERE phone_numbers.tenant_id = '{tenant_id}'" in statement
     assert "ORDER BY phone_numbers.e164" in statement
+
+
+async def test_source_get_is_read_only_and_publish_validation_requires_manage_grant() -> None:
+    from control_api.voice import FlowSourceResult
+
+    tenant_id, flow_id = uuid4(), uuid4()
+
+    class SourceRepository(FakeVoiceRepository):
+        async def get_flow_source(self, principal, requested, version):
+            self.principal = principal
+            if requested != flow_id or version != 2:
+                return None
+            return FlowSourceResult(
+                flow_id=flow_id,
+                version=2,
+                base_version=2,
+                source={"flow": {"id": str(flow_id), "version": 2}},
+                spec={},
+                components_version="test",
+                origin="tenant",
+                editable=True,
+                revision="a" * 64,
+            )
+
+    repository = SourceRepository()
+    app = create_app(
+        settings=_settings(),
+        database_probe=FakeProbe(),
+        voice_repository=repository,
+        assertion_verifier=ServiceAssertionVerifier(SECRET),
+    )
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        path = f"/api/v1/voice/flows/{flow_id}/versions/2"
+        assert (await client.get(path)).status_code == 401
+        headers = {"authorization": f"Bearer {_token(tenant_id=tenant_id)}"}
+        response = await client.get(path, headers=headers)
+        assert response.status_code == 200 and response.json()["version"] == 2
+        assert (
+            await client.get(f"/api/v1/voice/flows/{flow_id}/versions/3", headers=headers)
+        ).status_code == 404
+        write = {"authorization": f"Bearer {_token(capability='voice:write')}"}
+        for action in ["validate", "publish"]:
+            assert (
+                await client.post(
+                    f"/api/v1/voice/flows/{action}", json={"source": {}}, headers=write
+                )
+            ).status_code == 403
+    assert repository.principal.tenant_id == tenant_id

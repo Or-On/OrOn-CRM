@@ -293,6 +293,9 @@ class PostgresVoiceRuntime:
                 tenant_id=context.tenant_id,
                 agent_version_id=context.agent_version_id,
                 flow_version=context.flow_version,
+                trigger="voice.inbound"
+                if context.direction is Direction.INBOUND
+                else "voice.outbound_assignment",
             )
         async with self._sessionmaker() as database, database.begin():
             await set_tenant(database, str(context.tenant_id))
@@ -890,15 +893,17 @@ class PostgresVoiceRuntime:
         tenant_id: UUID,
         agent_version_id: UUID | None = None,
         flow_version: int | None = None,
+        trigger: str = "voice.inbound",
     ) -> dict:
-        """Pin one published agent version for this call, never caller metadata."""
+        """Pin one published bundle by admission trigger, never optional agent-ID presence."""
+        if trigger not in {"voice.inbound", "voice.outbound_assignment"}:
+            raise ValueError("unsupported voice admission trigger")
         statement = text("""
             WITH process_binding AS (
               SELECT process.id,process.agent_profile_version_id,process.flow_version_id
               FROM automation.tenant_processes process
               WHERE process.enabled
-                AND process.trigger_key = CASE WHEN CAST(:agent_id AS uuid) IS NULL
-                  THEN 'voice.inbound' ELSE 'voice.outbound_assignment' END
+                AND process.trigger_key = :trigger
                 AND (process.channel='voice' OR process.channel IS NULL)
               ORDER BY process.priority,process.id LIMIT 1
             ), candidates AS (
@@ -981,6 +986,7 @@ class PostgresVoiceRuntime:
                             "flow_id": str(flow_id),
                             "agent_id": str(agent_version_id) if agent_version_id else None,
                             "voice_version": str(flow_version) if flow_version else None,
+                            "trigger": trigger,
                         },
                     )
                 )
@@ -2026,6 +2032,9 @@ class AgentPostgresSessions:
             tenant_id=context.tenant_id,
             agent_version_id=context.agent_version_id,
             flow_version=context.flow_version,
+            trigger="voice.inbound"
+            if context.direction is Direction.INBOUND
+            else "voice.outbound_assignment",
         )
         quality = configuration.get("quality", {})
         persona = {"feminine": "female", "masculine": "male", "neutral": "neutral"}.get(

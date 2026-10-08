@@ -22,6 +22,8 @@ export type {
   FlowList,
   FlowPublishResult,
   FlowSummary,
+  FlowSourceResult,
+  VoicePublicationResult,
   FlowValidationResult,
   LiveStatus,
   PhoneNumberList,
