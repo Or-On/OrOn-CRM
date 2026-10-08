@@ -121,6 +121,17 @@ export interface DependencyStatus {
 
 export type Direction = "inbound" | "outbound" | "browser";
 
+export interface EffectivePromptResult {
+  readonly blocks: Array<Record<string, unknown>>;
+  readonly characterCount: number;
+  readonly compositionVersion: string;
+  readonly exclusions: Array<string>;
+  readonly hash: string;
+  readonly hashScope: string;
+  readonly scriptedOpening?: Record<string, unknown> | null;
+  readonly text: string;
+}
+
 export interface FlowDocumentRequest {
   readonly expected_base_version?: number | null;
   readonly expected_revision?: string | null;
