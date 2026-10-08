@@ -140,6 +140,44 @@ describe("golden request/status UI; no physical quality proof", () => {
       screen.getByText(/does not prove the model ran or the suite passed/u),
     ).toBeDefined();
   });
+  it("binds queued evaluation and status to the exact publication candidate", async () => {
+    const operation = "40000000-0000-4000-8000-000000000099";
+    api.read.mockResolvedValue({
+      enabled: true,
+      datasets: [
+        {
+          id: dataset,
+          digest: "0".repeat(64),
+          rubricVersion: "Synthetic candidate UI fixture",
+          approvedAt: "2026-10-03T00:00:00Z",
+        },
+      ],
+      evaluations: [],
+    });
+    api.mutate.mockResolvedValue({ id: "evaluation-one" });
+    render(
+      localized(
+        <AgentGoldenEvaluations
+          endpoint={endpoint}
+          versionId={version}
+          publicationOperationId={operation}
+          locale="he"
+        />,
+      ),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "בקשת הרצת סט השיחות שאושר" }),
+    );
+    await waitFor(() => expect(api.mutate).toHaveBeenCalledOnce());
+    expect(api.read.mock.calls[0]?.[0]).toBe(
+      `${endpoint}/golden-evaluations?versionId=${version}&publicationOperationId=${operation}`,
+    );
+    expect(api.mutate.mock.calls[0]?.[1]).toEqual({
+      versionId: version,
+      datasetId: dataset,
+      publicationOperationId: operation,
+    });
+  });
   it("reports unavailable status without rendering a fake completion", async () => {
     api.read.mockRejectedValue(Error("fixture unavailable"));
     render(

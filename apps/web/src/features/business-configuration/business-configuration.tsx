@@ -447,6 +447,10 @@ export function BusinessConfiguration({
       agentProfileVersionId: text(form, "agentProfileVersionId") || null,
       flowVersionId: text(form, "flowVersionId") || null,
       priority: Number(text(form, "priority") || 100),
+      bindingPolicy:
+        text(form, "bindingPolicy") === "follow_published"
+          ? "follow_published"
+          : "pinned",
     };
     update({
       ...draft,
@@ -1092,6 +1096,29 @@ export function BusinessConfiguration({
                 defaultValue={editing?.purpose ?? ""}
                 disabled={locked}
               />
+              <Select
+                id="process-binding-policy"
+                disabled={locked}
+                label={copy("Publication policy", "מדיניות פרסום")}
+                name="bindingPolicy"
+                defaultValue={editing?.bindingPolicy ?? "pinned"}
+              >
+                <option value="pinned">
+                  {copy("Pinned to reviewed versions", "נעול לגרסאות שנבדקו")}
+                </option>
+                <option value="follow_published">
+                  {copy(
+                    "Follow authorized publications",
+                    "מתעדכן לאחר פרסום והפעלה מאושרים",
+                  )}
+                </option>
+              </Select>
+              <p>
+                {copy(
+                  "Changing this policy requires configuration review. Existing calls and chats keep their admitted versions.",
+                  "שינוי המדיניות דורש בדיקת תצורה ואישור. שיחות קיימות שומרות על הגרסאות שאליהן התקבלו.",
+                )}
+              </p>
               <Select
                 id="process-trigger"
                 label={copy("Customer event", "אירוע לקוח")}
