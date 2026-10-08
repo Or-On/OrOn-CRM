@@ -12,6 +12,7 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock("@or-on/crm", () => ({
+  FlowRevisionConflictError: class FlowRevisionConflictError extends Error {},
   archiveAgentProfile: state.archiveAgent,
   archiveAutomation: state.archiveFlow,
   renameAgentProfile: state.renameAgent,
@@ -147,7 +148,7 @@ describe("agent and flow management APIs", () => {
     const response = await patchFlow(
       new Request("http://localhost/api/orchestration/flows/definition-1", {
         method: "PATCH",
-        body: JSON.stringify({ flow }),
+        body: JSON.stringify({ flow, expectedRevision: 1 }),
       }),
       context,
     );
@@ -165,6 +166,7 @@ describe("agent and flow management APIs", () => {
       "user-1",
       "definition-1",
       flow,
+      1,
     );
   });
 
