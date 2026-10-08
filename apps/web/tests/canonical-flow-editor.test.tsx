@@ -63,9 +63,128 @@ function editor(
   );
 }
 
+class TestResizeObserver {
+  observe() {
+    return undefined;
+  }
+  unobserve() {
+    return undefined;
+  }
+  disconnect() {
+    return undefined;
+  }
+}
+vi.stubGlobal("ResizeObserver", TestResizeObserver);
 afterEach(cleanup);
 
 describe("canonical flow editor", () => {
+  it("creates the first executable path from an empty flow", async () => {
+    const onSave = vi.fn().mockResolvedValue(2);
+    render(
+      localized(
+        <CanonicalFlowEditor
+          definition={{
+            schemaVersion: "1.0",
+            channels: ["whatsapp"],
+            nodes: [],
+            edges: [],
+          }}
+          disabled={false}
+          flowId={flowId}
+          labelForType={(type) => type}
+          onSave={onSave}
+          version={1}
+        />,
+      ),
+    );
+    fireEvent.click(screen.getByText(en.orchestration.flowEditorTitle));
+    fireEvent.click(
+      screen.getByRole("button", { name: en.orchestration.flowEditorAddNode }),
+    );
+    fireEvent.change(
+      required(
+        screen.getAllByLabelText(en.orchestration.flowEditorNodeType)[0],
+      ),
+      { target: { value: "start" } },
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: en.orchestration.flowEditorAddNode }),
+    );
+    fireEvent.change(
+      required(
+        screen.getAllByLabelText(en.orchestration.flowEditorNodeType)[1],
+      ),
+      { target: { value: "end" } },
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: en.orchestration.flowEditorAddEdge }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: en.orchestration.flowEditorSave }),
+    );
+    await waitFor(() => expect(onSave).toHaveBeenCalledOnce());
+    expect(onSave.mock.calls[0]?.[0]).toMatchObject({
+      nodes: [
+        { id: "step-1", type: "start" },
+        { id: "step-2", type: "end" },
+      ],
+      edges: [{ source: "step-1", target: "step-2" }],
+    });
+  });
+  it("preserves layout, channel edges and reference policies after a text edit", () => {
+    const configured = {
+      ...definition,
+      agentReferencePolicy: "pinned",
+      layout: { version: 1, positions: { message: { x: 12, y: 34 } } },
+      edges: definition.edges.map((edge) => ({
+        ...edge,
+        channels: ["whatsapp"],
+      })),
+    };
+    const draft = flowEditorDraftFromDefinition(configured);
+    expect(
+      canonicalFlowFromEditorDraft({
+        ...draft,
+        nodes: draft.nodes.map((node) =>
+          node.id === "message" ? { ...node, label: "Updated" } : node,
+        ),
+      }),
+    ).toEqual({
+      ...configured,
+      nodes: configured.nodes.map((node) =>
+        node.id === "message" ? { ...node, label: "Updated" } : node,
+      ),
+    });
+  });
+  it("blocks cyclic and unreachable paths before transport", async () => {
+    const onSave = vi.fn().mockResolvedValue(2);
+    render(
+      localized(
+        <CanonicalFlowEditor
+          definition={{
+            ...definition,
+            edges: [
+              ...definition.edges,
+              { id: "cycle", source: "message", target: "start" },
+            ],
+          }}
+          disabled={false}
+          flowId={flowId}
+          labelForType={(type) => type}
+          onSave={onSave}
+          version={1}
+        />,
+      ),
+    );
+    fireEvent.click(screen.getByText(en.orchestration.flowEditorTitle));
+    fireEvent.click(
+      screen.getByRole("button", { name: en.orchestration.flowEditorSave }),
+    );
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "התהליך לא תקין",
+    );
+    expect(onSave).not.toHaveBeenCalled();
+  });
   it("edits labels and node configuration before saving a canonical draft", async () => {
     const onSave = vi
       .fn<(flow: CanonicalFlow) => Promise<number | undefined>>()
@@ -151,6 +270,42 @@ describe("canonical flow editor", () => {
     expect(canonicalFlowFromEditorDraft(draft)).toEqual(definition);
   });
 
+  it("keeps the original revision and text when server props change during editing", async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const renderEditor = (version: number, text: string) =>
+      localized(
+        <CanonicalFlowEditor
+          definition={{
+            ...definition,
+            nodes: definition.nodes.map((node) =>
+              node.id === "message"
+                ? { ...node, configuration: { text } }
+                : node,
+            ),
+          }}
+          disabled={false}
+          flowId={flowId}
+          labelForType={(type) => type}
+          onSave={onSave}
+          version={version}
+        />,
+      );
+    const { rerender } = render(renderEditor(1, "Original"));
+    fireEvent.click(screen.getByText(en.orchestration.flowEditorTitle));
+    fireEvent.change(screen.getByLabelText("תוכן ההודעה"), {
+      target: { value: "My local edit" },
+    });
+    rerender(renderEditor(2, "Another operator"));
+    expect(
+      screen.getByLabelText<HTMLTextAreaElement>("תוכן ההודעה").value,
+    ).toBe("My local edit");
+    fireEvent.click(
+      screen.getByRole("button", { name: en.orchestration.flowEditorSave }),
+    );
+    await waitFor(() => expect(onSave).toHaveBeenCalledOnce());
+    expect(onSave.mock.calls[0]?.[1]).toBe(1);
+    expect(screen.getByText(/פורסמה או נשמרה גרסה אחרת/)).toBeTruthy();
+  });
   it("normalizes whitespace around node and connection identifiers", () => {
     const draft = flowEditorDraftFromDefinition(definition);
     const flow = canonicalFlowFromEditorDraft({
