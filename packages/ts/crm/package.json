@@ -23,6 +23,10 @@
     "./tenant-configuration-client": {
       "types": "./src/tenant-configuration-client.ts",
       "default": "./dist/tenant-configuration-client.js"
+    },
+    "./flow-editor-contract": {
+      "types": "./src/flow-editor-contract.ts",
+      "default": "./dist/flow-editor-contract.js"
     }
   },
   "scripts": {
