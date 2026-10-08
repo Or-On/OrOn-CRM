@@ -34,6 +34,18 @@
     {
       "path": ".artifacts/task8-history-regression.log",
       "sha256": "7e93a6823176c51711e5d7603e6e0544fd62b10036bcd78d5b9561aa8e81b2ba"
+    },
+    {
+      "path": ".artifacts/task8-handoff-regression.log",
+      "sha256": "8232d9df4acca9e92eed1741003a7ea9c096268729e295a2152b42dc22344078"
+    },
+    {
+      "path": ".artifacts/task8-principal-clean-final.log",
+      "sha256": "657e295c11ab66654477ac81c69713ea96bd83bf8e56611e393fcc9e24f49194"
+    },
+    {
+      "path": ".artifacts/task8-handoff-static.log",
+      "sha256": "5a3973f79ed9becd5f23c4feff467513814de7ea381d75a4d2e339aa8b8edca9"
     }
   ],
   "results": {
@@ -43,7 +55,9 @@
     "existingDiscoveryAndLeadPostgres": 5,
     "automaticAiCallPostgres": 1,
     "webBff": 6,
-    "pythonSharedParity": 81
+    "pythonSharedParity": 81,
+    "principalHandoffPostgres": 23,
+    "digitalFormPostgres": 18
   },
   "limits": [
     "Local source checks, not full release CI",
