@@ -263,15 +263,36 @@ describe.skipIf(!url)(
             ).toHaveLength(0);
             return;
           }
+          if (scenario.startsWith("no-tools-")) {
+            // Immediate human requests now bypass the model. Keep this race
+            // inside a real conversational turn so the provider-side revocation
+            // must still be revalidated before any reply is committed or sent.
+            decision = { action: "reply", replyCode: "clarify", text: "" };
+          }
           await inbound(
-            scenario === "safety"
-              ? "There is a burning smell from the unit. Please connect me to a human representative."
-              : "Please connect me to a human representative.",
+            scenario.startsWith("no-tools-")
+              ? "My unit is flickering. What can I check?"
+              : scenario === "safety"
+                ? "There is a burning smell from the unit. Please connect me to a human representative."
+                : "Please connect me to a human representative.",
           );
           const jobs = await admin<
             { status: string; last_error_safe: string | null }[]
           >`SELECT status,last_error_safe FROM ops.jobs WHERE tenant_id=${tenant}::uuid AND job_type='whatsapp.ai.reply' ORDER BY created_at`;
           if (scenario.startsWith("no-tools-")) {
+            expect(decisions).toBe(2);
+            const [binding] = await admin<
+              { enabled: boolean; principal_id: string }[]
+            >`SELECT enabled,principal_id FROM platform.tenant_ai_execution_bindings WHERE tenant_id=${tenant}::uuid`;
+            if (scenario === "no-tools-disabled-during-model")
+              expect(binding).toEqual({
+                enabled: false,
+                principal_id: principal,
+              });
+            else {
+              expect(binding?.enabled).toBe(true);
+              expect(binding?.principal_id).not.toBe(principal);
+            }
             expect(jobs).toEqual([
               { status: "succeeded", last_error_safe: null },
               {
@@ -312,6 +333,9 @@ describe.skipIf(!url)(
           // Returning to AI uses the same CRM API as Inbox. A completed human
           // transition must never make the next two independent customer turns mute.
           if (scenario === "human_requested") {
+            // The handoff itself was authorized and committed without a model
+            // invocation; only the greeting and resumed AI turns invoke it.
+            expect(decisions).toBe(1);
             await admin.begin(async (tx) => {
               await tx`SET LOCAL ROLE platform_web`;
               await tx`SELECT set_config('app.current_tenant',${tenant},true),set_config('app.current_user',${user},true),set_config('app.current_role','owner',true)`;
@@ -333,7 +357,7 @@ describe.skipIf(!url)(
             await inbound("My television has a problem. Can you help?");
             await inbound("The screen flickers after I turn it on.");
             expect(sent).toHaveLength(4);
-            expect(decisions).toBe(4);
+            expect(decisions).toBe(3);
             expect(
               (
                 await admin<
