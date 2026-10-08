@@ -1,0 +1,37 @@
+{
+  "schemaVersion": "1.0",
+  "baseCommit": "ac0d00a",
+  "providerTraffic": "none; signed synthetic webhook and fake provider only",
+  "logs": [
+    {
+      "path": ".artifacts/task8-final-checks.log",
+      "sha256": "8788c2878113a0780b53c2a5353eb24c54958c2fc44bcb213b4199773f51a6ba"
+    },
+    {
+      "path": ".artifacts/task8-final-retest.log",
+      "sha256": "4ce501b3764807602731a8347e715ae6e41dbe1bb4faf46aa3548d7a835cc2b0"
+    },
+    {
+      "path": ".artifacts/task8-callback-final.log",
+      "sha256": "1951c50c82a9883481ddf62b6e8a2f0bd330a5a44f2d6deb01662f382288ce34"
+    },
+    {
+      "path": ".artifacts/task8-final-static-r2.log",
+      "sha256": "57016f5ec555334451e14a4aa77d41aacfca5026b695287ee06a749fe852ff36"
+    }
+  ],
+  "results": {
+    "crmFocused": 252,
+    "groundingAndLocale": 301,
+    "newSignedWebhookPostgres": 15,
+    "existingDiscoveryAndLeadPostgres": 5,
+    "automaticAiCallPostgres": 1,
+    "webBff": 6,
+    "pythonSharedParity": 81
+  },
+  "limits": [
+    "Local source checks, not full release CI",
+    "No live Meta delivery or browser inspection",
+    "Historical failed combined runs retained; focused final reruns passed"
+  ]
+}

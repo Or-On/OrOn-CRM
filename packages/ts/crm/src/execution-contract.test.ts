@@ -293,3 +293,22 @@ describe("voice and WhatsApp resolve the same contract", () => {
       expect(resolver).toContain(`"${field}"`);
   });
 });
+
+it("pins reviewed dialling region independently of response language", () => {
+  const approved = buildAgentExecutionContract(
+    input({
+      version: version({
+        locale: "en",
+        channelConfiguration: { phoneRegion: "IL" },
+      }),
+    }),
+  );
+  const unconfigured = buildAgentExecutionContract(
+    input({ version: version({ locale: "he" }) }),
+  );
+  expect(approved.phoneRegion).toBe("IL");
+  expect(unconfigured.phoneRegion).toBeUndefined();
+  expect(executionConfigurationHash(approved)).not.toBe(
+    executionConfigurationHash(unconfigured),
+  );
+});

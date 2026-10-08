@@ -28,6 +28,7 @@ import {
 } from "./tenant-business-context.js";
 
 export interface WhatsAppAiRequest {
+  readonly configuredLocale?: string;
   readonly contextBudgetEnabled?: boolean;
   /** The published agent version's own prompt, verbatim. */
   readonly systemPrompt: string;
@@ -146,6 +147,11 @@ export interface WhatsAppAiRequest {
 }
 
 export interface WhatsAppActionReceipt {
+  readonly validationError?: {
+    readonly code: string;
+    readonly field: string;
+    readonly recoverable: true;
+  };
   readonly action: string;
   readonly ok: boolean;
   /** The customer-safe reference the action returned, when it committed. */
@@ -254,6 +260,10 @@ function providerTokenDetails(
 }
 
 export interface WhatsAppAiAttempt {
+  readonly runtimeInstructionHash?: string;
+  readonly staticEffectiveInstructionHash?: string;
+  readonly compositionVersion?: string;
+  readonly effectiveLocale?: string;
   readonly eventId: string;
   readonly model: string;
   readonly occurredAt: string;

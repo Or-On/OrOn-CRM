@@ -40,6 +40,7 @@ export interface AgentResetPlan {
   readonly fields: unknown;
   readonly capabilities: readonly string[];
   readonly maxResponseTokens: number;
+  readonly phoneRegion?: "IL";
   readonly reviewedModelConfigurationId?: string;
 }
 
@@ -181,6 +182,9 @@ export async function prepareAgentReset(
       channels: ["voice", "whatsapp"],
       toolPermissions: parseAgentCapabilities(plan.capabilities),
       leadFieldSchemaId: schema.id,
+      ...(plan.phoneRegion === undefined
+        ? {}
+        : { phoneRegion: plan.phoneRegion }),
     },
   );
   if (!revision) throw new TypeError("Reset profile unavailable");

@@ -820,8 +820,7 @@ describe.skipIf(sourceUrl === undefined)(
         });
       }
 
-      // Scripted at the provider boundary: every agent is asked for a person,
-      // and the lead agent first saves what the customer said.
+      // An immediate person request bypasses model collection for every agent.
       const requests: WhatsAppAiRequest[] = [];
       const decide = vi
         .fn<(request: WhatsAppAiRequest) => Promise<WhatsAppAiDecision>>()
@@ -879,7 +878,9 @@ describe.skipIf(sourceUrl === undefined)(
         await store.close();
       }
 
-      // Each request carried its own agent's prompt and nothing else's tools.
+      // A person request requires no questionnaire or billable model call.
+      expect(requests).toHaveLength(0);
+      // If invoked in a future fixture, requests must remain isolated.
       for (const request of requests) {
         const marker = request.systemPrompt.slice(0, 9);
         expect(["FIXTURE-A", "FIXTURE-B", "FIXTURE-C"]).toContain(marker);
@@ -907,8 +908,8 @@ describe.skipIf(sourceUrl === undefined)(
           handoffs: Number(handoffs[0]?.count),
         };
       };
-      // Support escalates into a ticket; the lead agent saves a lead and
-      // escalates without inventing a support issue; the survey does neither.
+      // Support escalates into a ticket; lead and survey agents transfer
+      // without creating an unwanted lead or support issue.
       // Every one of them can still reach a person.
       expect(await effects(conversations.support)).toEqual({
         tickets: 1,
@@ -917,7 +918,7 @@ describe.skipIf(sourceUrl === undefined)(
       });
       expect(await effects(conversations.lead)).toEqual({
         tickets: 0,
-        leads: 1,
+        leads: 0,
         handoffs: 1,
       });
       expect(await effects(conversations.survey)).toEqual({

@@ -1,4 +1,5 @@
 {
+  "phoneRegion": "IL",
   "name": "Or-On — שיחה על שירותים ואיסוף פנייה",
   "capabilities": ["lead.write", "lead.finalize", "lead.follow_up"],
   "locale": "he",

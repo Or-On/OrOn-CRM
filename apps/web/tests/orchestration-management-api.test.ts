@@ -1,6 +1,8 @@
+import type * as Crm from "@or-on/crm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
+  reviseAgent: vi.fn(),
   archiveAgent: vi.fn(),
   archiveFlow: vi.fn(),
   defaultAgent: vi.fn(),
@@ -11,7 +13,9 @@ const state = vi.hoisted(() => ({
   saveFlow: vi.fn(),
 }));
 
-vi.mock("@or-on/crm", () => ({
+vi.mock("@or-on/crm", async (importOriginal) => ({
+  ...(await importOriginal<typeof Crm>()),
+  createAgentProfileRevision: state.reviseAgent,
   archiveAgentProfile: state.archiveAgent,
   archiveAutomation: state.archiveFlow,
   renameAgentProfile: state.renameAgent,
@@ -180,4 +184,39 @@ describe("agent and flow management APIs", () => {
     expect(state.saveFlow).not.toHaveBeenCalled();
     expect(state.permission).not.toHaveBeenCalled();
   });
+});
+
+it("validates and forwards reviewed callback region on an agent revision", async () => {
+  state.reviseAgent.mockResolvedValue({ version: 2, versionId: "new" });
+  const body = {
+    baseVersionId: "base",
+    systemPrompt: "Approved discovery",
+    channels: ["whatsapp"],
+    capabilities: [],
+    phoneRegion: "IL",
+  };
+  const response = await patchAgent(
+    new Request("http://localhost/api/orchestration/agents/definition-1", {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+    context,
+  );
+  expect(response.status).toBe(201);
+  expect(state.reviseAgent).toHaveBeenCalledWith(
+    {},
+    "user-1",
+    "definition-1",
+    expect.objectContaining({ phoneRegion: "IL" }),
+  );
+  state.reviseAgent.mockClear();
+  const refused = await patchAgent(
+    new Request("http://localhost/api/orchestration/agents/definition-1", {
+      method: "PATCH",
+      body: JSON.stringify({ ...body, phoneRegion: "invented" }),
+    }),
+    context,
+  );
+  expect(refused.status).toBe(400);
+  expect(state.reviseAgent).not.toHaveBeenCalled();
 });

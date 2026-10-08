@@ -29,12 +29,15 @@ async function revise(profileId: string, body: Record<string, unknown>) {
     throw new TypeError("systemPrompt is required to revise an agent");
   if (typeof body.baseVersionId !== "string")
     throw new TypeError("baseVersionId is required to revise an agent");
+  if (body.phoneRegion !== undefined && body.phoneRegion !== "IL")
+    throw new TypeError("unsupported reviewed phone region");
   const revision = await withCurrentTenant("flows:manage", (sql, session) =>
     createAgentProfileRevision(sql, session.userId, profileId, {
       baseVersionId: body.baseVersionId as string,
       systemPrompt: body.systemPrompt as string,
       ...(typeof body.locale === "string" ? { locale: body.locale } : {}),
       channels: channels(body.channels),
+      ...(body.phoneRegion === "IL" ? { phoneRegion: "IL" as const } : {}),
       toolPermissions: capabilities(body.capabilities),
       ...(typeof body.roleTitle === "string"
         ? { roleTitle: body.roleTitle }
