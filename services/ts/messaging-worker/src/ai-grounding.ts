@@ -571,7 +571,10 @@ export function detectedMessageLocale(
       ),
   );
   if (
-    collectingName ||
+    (collectingName &&
+      !/\b(?:i|we|you)\s+(?:need|want|have|would|can|cannot|do|are)|\b(?:the|my|our)\s+\w+\s+(?:is|has|does|needs)/iu.test(
+        natural,
+      )) ||
     meaningful.length < 3 ||
     new Set(meaningful.map((word) => word.toLowerCase())).size < 3
   )

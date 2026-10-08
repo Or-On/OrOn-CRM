@@ -16,7 +16,9 @@ import {
 
 import { createMessagingStore } from "../src/database.js";
 import type {
+  WhatsAppAiAttempt,
   WhatsAppAiDecision,
+  WhatsAppAiProvider,
   WhatsAppAiRequest,
 } from "../src/ai-provider.js";
 import {
@@ -153,6 +155,7 @@ describe.skipIf(sourceUrl === undefined)(
       messageId: string,
       text: string,
       from: string,
+      timestamp = String(Math.floor(Date.now() / 1000)),
     ): Promise<void> {
       const rawBody = Buffer.from(
         JSON.stringify({
@@ -169,7 +172,7 @@ describe.skipIf(sourceUrl === undefined)(
                         id: messageId,
                         from,
                         type: "text",
-                        timestamp: String(Math.floor(Date.now() / 1000)),
+                        timestamp,
                         text: { body: text },
                       },
                     ],
@@ -705,5 +708,157 @@ describe.skipIf(sourceUrl === undefined)(
         await admin`SELECT id FROM agents.agent_profiles WHERE name='Missing lead schema'`,
       ).toHaveLength(0);
     });
+
+    it("persists customer language across name, greeting and phone answers and switches back", async () => {
+      const id = randomUUID();
+      const from = "12025550182";
+      const timestamp = String(Math.floor(Date.now() / 1000));
+      const agent = await publishAgent(`Locale ${id}`, []);
+      await acceptInbound(`wamid.locale-init-${id}`, "שלום", from, timestamp);
+      const bootstrap = createMessagingStore(workerUrl, `locale-init-${id}`, {
+        simulator: new SimulatorWhatsAppProvider(),
+        meta: {
+          name: "meta",
+          send: vi.fn(() => Promise.reject(new Error("no send"))),
+        },
+      });
+      try {
+        await processUntilIdle(bootstrap);
+      } finally {
+        await bootstrap.close();
+      }
+      const conversationId = await conversationFor(`+${from}`);
+      await web.begin(async (tx) => {
+        await tx`SELECT set_config('app.current_tenant',${tenantId},true),set_config('app.current_user',${userId},true)`;
+        await setConversationOwnership(tx, conversationId, userId, "ai", agent);
+      });
+      const attempts: WhatsAppAiAttempt[] = [];
+      const decide = vi.fn<WhatsAppAiProvider["decide"]>(
+        async (r, _onUsage, onAttempt) => {
+          const attempt: WhatsAppAiAttempt = {
+            eventId: randomUUID(),
+            model: "instruction-provenance-fixture",
+            occurredAt: new Date().toISOString(),
+            inputTokens: null,
+            outputTokens: null,
+            latencyMs: 1,
+            status: "succeeded",
+            errorCode: null,
+            runtimeInstructionHash: "a".repeat(64),
+            staticEffectiveInstructionHash: "b".repeat(64),
+            compositionVersion: "effective-instructions.v1",
+            effectiveLocale: r.locale,
+          };
+          await required(onAttempt)(attempt);
+          attempts.push(attempt);
+          return {
+            action: "reply",
+            text: r.locale === "he" ? "מה השם שלך?" : "What is your full name?",
+          };
+        },
+      );
+      const send = vi.fn(() =>
+        Promise.resolve({ messageId: `wamid.${randomUUID()}` }),
+      );
+      const store = createMessagingStore(
+        workerUrl,
+        `locale-${id}`,
+        {
+          simulator: new SimulatorWhatsAppProvider(),
+          meta: { name: "meta", send },
+        },
+        undefined,
+        {
+          aiProvider: { decide, accountingMode: "attempts" },
+          realWhatsAppEnabled: true,
+        },
+      );
+      try {
+        for (const [input, locale] of [
+          ["Dana", "he"],
+          ["Will May Need", "he"],
+          ["hi", "he"],
+          ["hello hi hello", "he"],
+          ["I need help", "en"],
+          ["Dana", "en"],
+          ["0501234567", "en"],
+          ["dana@example.com", "en"],
+          ["עברית בבקשה", "he"],
+          ["dana", "he"],
+          ["WhatsApp לא עובד", "he"],
+          ["אפשר באנגלית?", "en"],
+          ["https://example.com/help", "en"],
+          ["שלום, אני צריך מידע", "he"],
+        ] as const) {
+          // Real Meta provider timestamps have seconds precision. Keep every
+          // customer turn at the same provider timestamp to prove receipt order.
+          await acceptInbound(
+            `wamid.locale-${randomUUID()}`,
+            input,
+            from,
+            timestamp,
+          );
+          await processUntilIdle(store);
+          expect(decide.mock.calls.at(-1)?.[0].locale, input).toBe(locale);
+          const delivered = await admin<
+            {
+              content_text: string;
+              status: string;
+              provider_payload: {
+                aiGrounding: { locale: string; localePolicy: string };
+              };
+            }[]
+          >`SELECT content_text,status,provider_payload FROM messaging.messages WHERE conversation_id=${conversationId}::uuid AND direction='outbound' ORDER BY created_at DESC LIMIT 1`;
+          expect(delivered[0]?.status).toBe("sent");
+          expect(delivered[0]?.provider_payload.aiGrounding).toMatchObject({
+            locale,
+            localePolicy: "customer-language.v2",
+          });
+          expect(
+            /\p{Script=Hebrew}/u.test(delivered[0]?.content_text ?? ""),
+          ).toBe(locale === "he");
+          const attempt = required(attempts.at(-1));
+          const records = await admin<
+            {
+              id: string;
+              tenant_id: string;
+              target_id: string;
+              job_id: string;
+              agent_version_id: string;
+              action: string;
+              metadata: Record<string, unknown>;
+            }[]
+          >`SELECT a.id,a.tenant_id,a.target_id,a.action,a.metadata,m.job_id,m.agent_version_id
+            FROM audit.records a JOIN agents.model_attempts m ON m.id=a.id
+            WHERE a.id=${attempt.eventId}::uuid`;
+          expect(records).toHaveLength(1);
+          const record = required(records[0]);
+          expect(record).toMatchObject({
+            id: attempt.eventId,
+            tenant_id: tenantId,
+            target_id: record.job_id,
+            agent_version_id: agent,
+            action: "model_attempt.instructions",
+          });
+          expect(record.metadata).toEqual({
+            model: attempt.model,
+            agentVersionId: agent,
+            inputTokens: null,
+            outputTokens: null,
+            runtimeInstructionHash: attempt.runtimeInstructionHash,
+            staticEffectiveInstructionHash:
+              attempt.staticEffectiveInstructionHash,
+            compositionVersion: "effective-instructions.v1",
+            effectiveLocale: locale,
+            channel: "whatsapp",
+          });
+        }
+      } finally {
+        await store.close();
+      }
+      expect(
+        await admin`SELECT id FROM crm.leads WHERE source_conversation_id=${conversationId}::uuid`,
+      ).toHaveLength(0);
+    }, 120_000);
   },
 );
