@@ -525,6 +525,68 @@ describe.skipIf(!url)("publication bundle under application roles", () => {
       await db.end();
     }
   });
+  it("serializes concurrent agent and retained publications without losing either new reference", async () => {
+    const db = postgres(required(url), { max: 3 });
+    try {
+      const f = await fixture(db);
+      const operation = randomUUID();
+      const draft = await db.begin(async (sql) => {
+        await sql`INSERT INTO public.flows(flow_id,version,tenant_id,source,spec,components_version)VALUES(${f.voice}::uuid,2,${f.tenant}::uuid,'{}','{}','test')`;
+        await scope(sql, f.tenant, f.actor);
+        await sql`INSERT INTO automation.publication_operations(tenant_id,id,kind,resource_id,candidate_version,request_hash,result,created_by_user_id)VALUES(${f.tenant}::uuid,${operation}::uuid,'retained_voice',${f.voice}::uuid,2,${"c".repeat(64)},${sql.json({ status: "published_pending_activation", operationId: operation, releaseId: null, impacts: [] })},${f.actor}::uuid)`;
+        return required(
+          await createAgentProfileRevision(sql, f.actor, f.profile, {
+            baseVersionId: f.base,
+            systemPrompt: "Concurrent published revision",
+            channels: ["voice", "whatsapp"],
+          }),
+        );
+      });
+      const results = await Promise.all([
+        db.begin(async (sql) => {
+          await scope(sql, f.tenant, f.actor);
+          return publishAgentWithBindings(sql, f.actor, f.profile, {
+            expectedVersionId: draft.versionId,
+            requestId: randomUUID(),
+            activate: true,
+          });
+        }),
+        db.begin(async (sql) => {
+          await scope(sql, f.tenant, f.actor);
+          return activateRetainedPublication(sql, f.actor, operation, true);
+        }),
+      ]);
+      expect(
+        results.every((r) => r.status === "active_for_new_interactions"),
+      ).toBe(true);
+      await db.begin(async (sql) => {
+        await scope(sql, f.tenant, f.actor);
+        const active = required(
+          (await getTenantConfigurationState(sql)).active,
+        );
+        const inbound = required(
+          active.configuration.processes.find(
+            (p) => p.trigger === "voice.inbound",
+          ),
+        );
+        expect(inbound.agentProfileVersionId).toBe(draft.versionId);
+        const [row] = await sql<
+          { definition: CanonicalFlow; agent_profile_version_id: string }[]
+        >`SELECT definition,agent_profile_version_id FROM automation.flow_versions WHERE id=${inbound.flowVersionId ?? null}::uuid`;
+        expect(row?.agent_profile_version_id).toBe(draft.versionId);
+        expect(
+          row?.definition.nodes.find((n) => n.type === "voice.call")
+            ?.configuration?.flowVersion,
+        ).toBe(2);
+        expect(
+          active.configuration.processes.find((p) => p.name === "Pinned")
+            ?.agentProfileVersionId,
+        ).toBe(f.base);
+      });
+    } finally {
+      await db.end();
+    }
+  }, 30000);
   it("stages exact candidate evidence and refuses stale, unrelated and synthetic-only acceptance", async () => {
     const db = postgres(required(url), { max: 2 });
     try {
