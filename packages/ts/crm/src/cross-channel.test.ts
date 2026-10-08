@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   compileCanonicalFlow,
   explicitWhatsAppCallbackIntent,
+  explicitWhatsAppHumanFollowupIntent,
   parseCanonicalFlow,
   validateCanonicalFlow,
   type CanonicalFlow,
@@ -174,7 +175,7 @@ describe("explicit WhatsApp callback intent", () => {
     "Yes, please call me now",
     "Okay, can you call me?",
   ])("accepts a direct request for a representative callback: %s", (text) => {
-    expect(explicitWhatsAppCallbackIntent(text)).toBe(true);
+    expect(explicitWhatsAppCallbackIntent(text)).toBe(false);
   });
 
   it.each([
@@ -332,5 +333,27 @@ describe("explicit WhatsApp callback intent", () => {
     (text) => {
       expect(explicitWhatsAppCallbackIntent(text)).toBe(false);
     },
+  );
+});
+
+describe("distinct human follow-up and automated call consent", () => {
+  it.each([
+    "תחזרו אליי",
+    "שנציג יחזור אליי",
+    "תתקשרו אליי עכשיו",
+    "שמי Dana, תחזרו אליי בטלפון 0501234567",
+  ])("records only human follow-up for %s", (text) => {
+    expect(explicitWhatsAppHumanFollowupIntent(text)).toBe(true);
+    expect(explicitWhatsAppCallbackIntent(text)).toBe(false);
+  });
+  it.each(["אל תחזרו אליי", 'הוא אמר "תחזרו אליי"', "אם אצטרך תחזרו אליי"])(
+    "rejects nonconsent %s",
+    (text) => expect(explicitWhatsAppHumanFollowupIntent(text)).toBe(false),
+  );
+  it.each([
+    "שהסוכן AI יתקשר אליי עכשיו",
+    "Please have the AI agent call me now.",
+  ])("requires explicit AI-call intent %s", (text) =>
+    expect(explicitWhatsAppCallbackIntent(text)).toBe(true),
   );
 });

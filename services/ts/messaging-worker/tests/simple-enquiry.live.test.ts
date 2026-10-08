@@ -325,7 +325,7 @@ describe.skipIf(sourceUrl === undefined)(
           };
         if (
           latest === "כן, תחזרו אליי לגבי אוטומציה לשירות לקוחות" &&
-          !values.follow_up_allowed
+          !values.discussion_complete
         )
           return {
             action: "lead_save",

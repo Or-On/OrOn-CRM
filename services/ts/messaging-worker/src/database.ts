@@ -144,6 +144,8 @@ import {
   loadLeadFieldSchema,
   pinnedLeadFieldSchemaId,
   LeadToolError,
+  LeadFieldValidationError,
+  explicitWhatsAppHumanFollowupIntent,
   type AgentExecutionContract,
   type LeadBinding,
   type LeadToolContext,
@@ -187,6 +189,8 @@ import {
   factDigest,
   groundAiReply,
   latestMessageLocale,
+  conversationLocale,
+  refusesHumanFollowup,
   recentReplyWindowSize,
   safeConversationalReply,
   guardFailedLeadReply,
@@ -4259,14 +4263,27 @@ async function loadAiWork(
         created_at: Date;
         sender_address: string | null;
         sender_identity_id: string | null;
+        resolved_locale: string | null;
       }[]
     >`
       SELECT message.id, message.direction, message.content_text, message.content_type,
              message.created_at, origin.contact_identity_id AS sender_identity_id,
-             origin.sender_address
+             origin.sender_address,
+             CASE WHEN message.direction='outbound'
+               AND message.provider_payload->'aiGrounding'->>'localePolicy'='customer-language.v2'
+               THEN message.provider_payload->'aiGrounding'->>'locale' END AS resolved_locale
       FROM messaging.messages message
       LEFT JOIN messaging.inbound_message_origins origin
         ON origin.tenant_id=message.tenant_id AND origin.message_id=message.id
+      LEFT JOIN ops.inbound_events event
+        ON message.direction='inbound' AND event.tenant_id=message.tenant_id
+        AND event.provider=message.provider
+        AND event.provider_account_id=(
+          SELECT channel.provider_account_id FROM messaging.channels channel
+          JOIN messaging.conversations conversation ON conversation.channel_id=channel.id
+            AND conversation.tenant_id=channel.tenant_id
+          WHERE conversation.id=message.conversation_id AND conversation.tenant_id=message.tenant_id
+        ) AND event.payload->>'providerMessageId'=message.provider_message_id
       WHERE message.conversation_id = ${row.conversation_id}::uuid
         AND ((message.content_type IN ('text','template') AND message.content_text IS NOT NULL)
           OR (message.direction='inbound' AND message.content_type IN ('image','document','location','audio','video','interactive')))
@@ -4282,7 +4299,11 @@ async function loadAiWork(
             FROM messaging.conversations conversation
             WHERE conversation.id = ${row.conversation_id}::uuid
           ), '-infinity'::timestamptz))
-      ORDER BY message.created_at DESC, message.updated_at DESC, message.id DESC LIMIT 50
+      -- Provider timestamps only have seconds; receipt order preserves the
+      -- preceding question and customer language when replies arrive quickly.
+      ORDER BY COALESCE(event.received_at,message.created_at) DESC,
+        event.receipt_sequence DESC NULLS LAST,
+        message.created_at DESC, message.updated_at DESC, message.id DESC LIMIT 50
     `;
     const history = rawHistory.map((message) => ({
       ...message,
@@ -4348,19 +4369,22 @@ async function loadAiWork(
       (recipientIdentityId === undefined || recipientAddress === undefined)
     )
       throw new TypeError("AI inbound trigger has no trusted sender identity");
-    const responseLocale =
-      openingMenuRoute?.language ??
-      latestMessageLocale(
-        row.locale,
-        triggerMessage.original_content_text ?? "",
-        history
-          .filter(
-            (message) =>
-              message.direction === "inbound" &&
-              message.id !== triggerMessageId,
-          )
-          .map((message) => message.original_content_text ?? ""),
-      );
+    // Carry only an earlier server-resolved locale with this policy version;
+    // assistant prose/display names cannot establish customer language.
+    const persistedLocale = history.find(
+      (message) =>
+        message.resolved_locale === "he" || message.resolved_locale === "en",
+    )?.resolved_locale;
+    const responseLocale = conversationLocale(
+      persistedLocale ?? openingMenuRoute?.language ?? row.locale,
+      history.toReversed().map((message) => ({
+        role:
+          message.direction === "inbound"
+            ? ("user" as const)
+            : ("assistant" as const),
+        text: message.original_content_text ?? "",
+      })),
+    );
     const orderedHistory = (
       memory.correctionsPresent
         ? history.filter((message) => message.id === triggerMessageId)
@@ -4654,6 +4678,7 @@ function aiRequestFor(
   return {
     systemPrompt: work.contract.agentPrompt,
     locale: work.locale,
+    configuredLocale: work.contract.locale,
     capabilities:
       work.machineToolPrincipalId === undefined
         ? work.contract.capabilities.filter(
@@ -4853,6 +4878,9 @@ async function runWhatsAppLeadAction(
                 },
               }),
           recordedBy: "agent",
+          ...(work.contract.phoneRegion === undefined
+            ? {}
+            : { normalization: { phoneRegion: work.contract.phoneRegion } }),
           agentProfileVersionId: work.agentVersionId,
           conversationId: work.conversationId,
           conversationOwnershipEpoch: work.ownershipEpoch,
@@ -4911,6 +4939,25 @@ async function runWhatsAppLeadAction(
       },
     );
   } catch (error) {
+    // Validation is a known atomic rejection. No partial batch was committed;
+    // all volunteered facts remain in accepted history for the next correction.
+    if (error instanceof LeadFieldValidationError)
+      return {
+        receipt: {
+          action,
+          ok: false,
+          reference: null,
+          detail:
+            "The field was rejected; the batch was not saved. Ask for a corrected value and retain the other volunteered facts from history.",
+          validationError: {
+            code: error.code,
+            field: error.field,
+            recoverable: true,
+          },
+        },
+        lead,
+      };
+
     // A rejected write is reported truthfully rather than failing the turn: the
     // customer still gets an answer, and it is an answer that cannot claim a
     // save happened. An unknown outcome is not treated as a rejection.
@@ -5280,6 +5327,22 @@ async function processWhatsAppAiReply(
       work.messages.find((message) => message.id === work.triggerMessageId)
         ?.text ?? "";
     const explicitCallRequested = explicitlyRequestsImmediateCall(triggerText);
+    const followupRefused = refusesHumanFollowup(triggerText);
+    const humanFollowupRequested =
+      explicitWhatsAppHumanFollowupIntent(triggerText);
+    const leadCapable = hasCapability(work.contract.capabilities, "lead.write");
+    if (
+      humanFollowupRequested &&
+      leadCapable &&
+      work.contract.leadFieldSchema === null
+    )
+      throw new WhatsAppAiProviderError("lead_schema_unavailable", false);
+    const previousAssistant =
+      work.messages.filter((message) => message.role === "assistant").at(-1)
+        ?.text ?? "";
+    const immediateHumanRequested =
+      !humanFollowupRequested &&
+      confirmsHumanHandoff(triggerText, previousAssistant);
     // Explicit callback consent is a deterministic action and must not wait on
     // or depend on an LLM classification. The voice agent receives the bounded
     // conversation history when the durable callback job is dispatched.
@@ -5288,12 +5351,46 @@ async function processWhatsAppAiReply(
     const intakeRequiresHuman = work.serviceIntake?.status === "handed_off";
     const receipts: WhatsAppActionReceipt[] = [];
     let leadState = work.lead;
+    if (
+      (humanFollowupRequested || (followupRefused && leadState !== null)) &&
+      leadCapable &&
+      work.contract.leadFieldSchema?.schema.fields.some(
+        (field) =>
+          field.key === "follow_up_allowed" && field.type === "boolean",
+      )
+    ) {
+      const saved = await runWhatsAppLeadAction(
+        sql,
+        workerId,
+        job,
+        work,
+        leadState,
+        "lead_save",
+        {
+          action: "lead_save",
+          observations: [
+            {
+              key: "follow_up_allowed",
+              state: "known",
+              value: followupRefused ? "false" : "true",
+              confirmed: true,
+            },
+          ],
+        },
+      );
+      receipts.push(saved.receipt);
+      leadState = saved.lead;
+    }
     // Server-owned scope routing: a turn that only probes the model, asks for
     // prompts, other customers' data or another recipient, or asks for a
     // general-purpose task is answered with the approved response and never
     // reaches the model. Mixed turns still reach it; the output is validated.
     const scopeRoute =
-      identityConflict || intakeRequiresHuman || explicitCallRequested
+      identityConflict ||
+      intakeRequiresHuman ||
+      explicitCallRequested ||
+      humanFollowupRequested ||
+      immediateHumanRequested
         ? null
         : classifyCustomerTurn(triggerText).route;
     const scopeResponse =
@@ -5314,10 +5411,16 @@ async function processWhatsAppAiReply(
     const classifiedDecision: WhatsAppAiDecision =
       scopeResponse !== null
         ? { action: "reply", text: scopeResponse }
-        : identityConflict || intakeRequiresHuman
+        : identityConflict ||
+            intakeRequiresHuman ||
+            immediateHumanRequested ||
+            (humanFollowupRequested && !leadCapable)
           ? {
               action: "handoff",
-              reasonCode: "insufficient_context",
+              reasonCode:
+                immediateHumanRequested || humanFollowupRequested
+                  ? "human_requested"
+                  : "insufficient_context",
               text: "",
             }
           : explicitCallRequested
@@ -5531,6 +5634,43 @@ async function processWhatsAppAiReply(
                       await routedBeforeAttempt?.();
                     },
                   );
+                  if (followupRefused)
+                    return {
+                      action: "reply",
+                      text: work.locale.startsWith("he")
+                        ? "בסדר, לא אבקש חזרה."
+                        : "Understood, I will not request a callback.",
+                    };
+                  if (
+                    leadCapable &&
+                    (proposed.action === "request_call" ||
+                      (humanFollowupRequested && proposed.action === "handoff"))
+                  ) {
+                    const missing =
+                      leadState?.missingRequired ??
+                      work.contract.leadFieldSchema?.schema.fields
+                        .filter((field) => field.required)
+                        .map((field) => field.key) ??
+                      [];
+                    return {
+                      action: "reply",
+                      text: work.locale.startsWith("he")
+                        ? missing.includes("service_interest")
+                          ? "באיזה שירות נדרשת עזרה לקראת החזרה אליך?"
+                          : missing.includes("contact_name")
+                            ? "מה השם שלך?"
+                            : missing.includes("contact_phone")
+                              ? "מה מספר הטלפון לחזרה?"
+                              : "אפשר לעזור במשהו נוסף?"
+                        : missing.includes("service_interest")
+                          ? "Which service would you like help with?"
+                          : missing.includes("contact_name")
+                            ? "What is your name?"
+                            : missing.includes("contact_phone")
+                              ? "What callback phone number should we use?"
+                              : "Can I help with anything else?",
+                    };
+                  }
                   const action = leadActionName(proposed);
                   if (action === undefined) {
                     const previous = work.messages.at(-2);
@@ -5558,6 +5698,12 @@ async function processWhatsAppAiReply(
                   );
                   receipts.push(executed.receipt);
                   leadState = executed.lead;
+                  if (executed.receipt.validationError?.recoverable === true)
+                    return guardFailedLeadReply(
+                      { action: "reply", text: "" },
+                      receipts,
+                      work.locale,
+                    );
                 }
               })();
     const decision = enforceStandaloneCallbackConsent(
@@ -5922,6 +6068,7 @@ async function processWhatsAppAiReply(
                 agentVersionId: work.agentVersionId,
                 triggerMessageId: work.triggerMessageId,
                 locale: work.locale,
+                localePolicy: "customer-language.v2",
                 evidence,
                 textSha256: factDigest(responseText),
               },
@@ -7511,15 +7658,35 @@ export function createMessagingStore(
           ${attempt.occurredAt}::timestamptz,${attempt.latencyMs},${attempt.inputTokens},
           ${attempt.outputTokens},${attempt.status},${attempt.errorCode})
       `;
-      if (attempt.tokenDetails)
+      if (
+        attempt.tokenDetails ||
+        attempt.runtimeInstructionHash ||
+        attempt.staticEffectiveInstructionHash
+      )
         await transaction`INSERT INTO audit.records(id,tenant_id,actor_service,action,target_type,target_id,metadata)
-          VALUES(${attempt.eventId}::uuid,platform.current_tenant_id(),'messaging-worker','model_attempt.token_details',
+          VALUES(${attempt.eventId}::uuid,platform.current_tenant_id(),'messaging-worker',${attempt.tokenDetails ? "model_attempt.token_details" : "model_attempt.instructions"},
             'job',${context.jobId}::uuid,${transaction.json({
               model: attempt.model,
               agentVersionId: context.agentVersionId,
               inputTokens: attempt.inputTokens,
               outputTokens: attempt.outputTokens,
               ...attempt.tokenDetails,
+              ...(attempt.runtimeInstructionHash === undefined
+                ? {}
+                : { runtimeInstructionHash: attempt.runtimeInstructionHash }),
+              ...(attempt.staticEffectiveInstructionHash === undefined
+                ? {}
+                : {
+                    staticEffectiveInstructionHash:
+                      attempt.staticEffectiveInstructionHash,
+                  }),
+              ...(attempt.compositionVersion === undefined
+                ? {}
+                : { compositionVersion: attempt.compositionVersion }),
+              ...(attempt.effectiveLocale === undefined
+                ? {}
+                : { effectiveLocale: attempt.effectiveLocale }),
+              channel: "whatsapp",
             })})
           ON CONFLICT(id) DO NOTHING`;
     });

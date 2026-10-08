@@ -28,6 +28,8 @@ export async function POST(request: Request) {
     const body = await jsonObject(request);
     if (typeof body.name !== "string" || typeof body.systemPrompt !== "string")
       throw new TypeError("name and systemPrompt are required");
+    if (body.phoneRegion !== undefined && body.phoneRegion !== "IL")
+      throw new TypeError("unsupported reviewed phone region");
     const id = await withCurrentTenant("flows:manage", (sql, session) =>
       createAgentProfileDraft(sql, session.userId, {
         name: body.name as string,
@@ -37,6 +39,7 @@ export async function POST(request: Request) {
           : {}),
         ...(typeof body.locale === "string" ? { locale: body.locale } : {}),
         channels: channels(body.channels),
+        ...(body.phoneRegion === "IL" ? { phoneRegion: "IL" as const } : {}),
         toolPermissions: capabilities(body.capabilities),
         ...(typeof body.roleTitle === "string"
           ? { roleTitle: body.roleTitle }

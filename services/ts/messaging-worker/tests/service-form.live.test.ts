@@ -17,6 +17,7 @@ import {
 
 import { createMessagingStore } from "../src/database.js";
 import type { WhatsAppAiProvider } from "../src/ai-provider.js";
+import { actionReceiptReply } from "../src/ai-grounding.js";
 import type { FieldServiceAiProvider } from "../src/field-service-provider.js";
 import {
   SimulatorWhatsAppProvider,
@@ -929,10 +930,23 @@ describe.skipIf(sourceUrl === undefined)(
               reasonCode: "human_requested",
               text: "",
             });
+          const transferSent = await runWorker(false, {
+            aiProvider: { decide: transfer },
+          });
+          expect(transferSent).toHaveLength(1);
+          // The explicit confirmation routes directly to a committed handoff,
+          // without invoking a model or pretending the pending form was sent.
+          expect(transfer).not.toHaveBeenCalled();
+          expect(transferSent[0]?.delivery).toEqual({
+            kind: "text",
+            text: actionReceiptReply("handoff", "he"),
+          });
           expect(
-            await runWorker(false, { aiProvider: { decide: transfer } }),
+            await admin`SELECT id FROM automation.handoffs WHERE conversation_id=${conversationId}::uuid`,
           ).toHaveLength(1);
-          expect(transfer).toHaveBeenCalledOnce();
+          expect(
+            await admin`SELECT id FROM service.cases WHERE intake_draft_id=${intakeId}::uuid`,
+          ).toHaveLength(0);
           expect(
             await admin`SELECT ownership_mode FROM messaging.conversations WHERE id=${conversationId}::uuid`,
           ).toEqual([{ ownership_mode: "human" }]);
