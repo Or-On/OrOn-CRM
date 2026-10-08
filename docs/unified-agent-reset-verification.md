@@ -330,13 +330,13 @@ production schema rollback. Preserve token and provider-outcome uncertainty.
 | 3. Hebrew form | Hebrew/RTL component/API tests, append/remove photos, versioned address/legacy payload, PostgreSQL persistence/export | None required for local form | **Mobile/browser check blocked** |
 | 4. Reliable delivery | Two-job admission/send, safe retries, consent/recipient/window rechecks, unknown-outcome fence, immutable brand snapshot | Real Meta transport NOT RUN; provider fakes in database tests | v2 template disabled until separately approved |
 | 5. Incomplete requests | Tenant-scoped BFF/RLS/actions, no premature ticket, exact 15-minute badge boundary | Not a provider operation | **Browser case-screen check blocked** |
-| 6–8 | **Not supplied** | Not claimed | Not claimed |
+| 6–8 | Supplied by the continuation and implemented; see [continuation verification](agent-reset-continuation-verification.md) | Explicitly separated from local evidence | Activation remains gated |
 
 There is no production deployment, configuration mutation, main push or merge.
-The runtime, migrations and generated contracts are integrated in one branch
-because they share a serial schema lineage and one canonical policy; separate
-independent PRs would create misleading partially deployable heads. Follow-up
-verification and rollback work is a separate commit on that same branch.
+This section records the original core candidate. The continuation now has
+separate task 6, 7 and 8 review branches and a combined release integration
+branch, preserving the serial migration lineage. The continuation report
+supersedes the earlier missing-task and single-branch limitations.
 
 Before activation review, complete the real mobile/browser form and case-screen
 checks after the local-server approval block is resolved. Listen to

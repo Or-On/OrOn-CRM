@@ -1,0 +1,239 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-10-08T17:24:53.266630+00:00",
+  "deployedCommit": "b4cc8cf05c21c968377ec63f4280b1ae5184a9b6",
+  "rollbackTag": "rollback-2026-10-08",
+  "deploymentPerformed": false,
+  "candidateMigrationHead": "a3ae6075bf24",
+  "sourceMigrationHead": "f3a8c2d91750",
+  "services": [
+    {
+      "service": "caddy",
+      "imageId": "sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648",
+      "imageReference": "caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648",
+      "repoDigests": [
+        "caddy@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648"
+      ],
+      "status": "running",
+      "health": "healthy"
+    },
+    {
+      "service": "control-api",
+      "imageId": "sha256:1abe2c0274d96ee38a05a8c66169b8c2c8babd29576c52d97c83038871a8cb64",
+      "imageReference": "me-west1-docker.pkg.dev/website-478708/or-on-platform/control-api@sha256:1abe2c0274d96ee38a05a8c66169b8c2c8babd29576c52d97c83038871a8cb64",
+      "repoDigests": [
+        "me-west1-docker.pkg.dev/website-478708/or-on-platform/control-api@sha256:1abe2c0274d96ee38a05a8c66169b8c2c8babd29576c52d97c83038871a8cb64"
+      ],
+      "status": "running",
+      "health": "healthy"
+    },
+    {
+      "service": "dispatcher",
+      "imageId": "sha256:4e84b5bec820225bc1070e6d234041de7bfabb496c441b79e0de716851650b8e",
+      "imageReference": "me-west1-docker.pkg.dev/website-478708/or-on-platform/dispatcher@sha256:4e84b5bec820225bc1070e6d234041de7bfabb496c441b79e0de716851650b8e",
+      "repoDigests": [
+        "me-west1-docker.pkg.dev/website-478708/or-on-platform/dispatcher@sha256:4e84b5bec820225bc1070e6d234041de7bfabb496c441b79e0de716851650b8e"
+      ],
+      "status": "running",
+      "health": "healthy"
+    },
+    {
+      "service": "web",
+      "imageId": "sha256:f8c8e76a72427a83a75f51eab850af3a2fb8467f5883136ea36051be9a5d9548",
+      "imageReference": "me-west1-docker.pkg.dev/website-478708/or-on-platform/web@sha256:f8c8e76a72427a83a75f51eab850af3a2fb8467f5883136ea36051be9a5d9548",
+      "repoDigests": [
+        "me-west1-docker.pkg.dev/website-478708/or-on-platform/web@sha256:f8c8e76a72427a83a75f51eab850af3a2fb8467f5883136ea36051be9a5d9548"
+      ],
+      "status": "running",
+      "health": "healthy"
+    },
+    {
+      "service": "messaging-worker",
+      "imageId": "sha256:3d2fd07284209f2932b3e8f4abf5d431f0999f25ef3c29a265d30011a8139c93",
+      "imageReference": "me-west1-docker.pkg.dev/website-478708/or-on-platform/messaging-worker@sha256:3d2fd07284209f2932b3e8f4abf5d431f0999f25ef3c29a265d30011a8139c93",
+      "repoDigests": [
+        "me-west1-docker.pkg.dev/website-478708/or-on-platform/messaging-worker@sha256:3d2fd07284209f2932b3e8f4abf5d431f0999f25ef3c29a265d30011a8139c93"
+      ],
+      "status": "running",
+      "health": "healthy"
+    },
+    {
+      "service": "sweeper",
+      "imageId": "sha256:854eabfe67f2634cfbfa3df602dc69629508edad505c21d166baf9b0789ba87b",
+      "imageReference": "me-west1-docker.pkg.dev/website-478708/or-on-platform/migrator@sha256:854eabfe67f2634cfbfa3df602dc69629508edad505c21d166baf9b0789ba87b",
+      "repoDigests": [
+        "me-west1-docker.pkg.dev/website-478708/or-on-platform/migrator@sha256:854eabfe67f2634cfbfa3df602dc69629508edad505c21d166baf9b0789ba87b"
+      ],
+      "status": "running",
+      "health": null
+    },
+    {
+      "service": "postgres",
+      "imageId": "sha256:1c59e2c3c818eaa0f0628f695b36e7c9e362d6b219b36a54a32df645cbd7e1af",
+      "imageReference": "postgres:18.6-bookworm@sha256:1c59e2c3c818eaa0f0628f695b36e7c9e362d6b219b36a54a32df645cbd7e1af",
+      "repoDigests": [
+        "postgres@sha256:1c59e2c3c818eaa0f0628f695b36e7c9e362d6b219b36a54a32df645cbd7e1af"
+      ],
+      "status": "running",
+      "health": "healthy"
+    }
+  ],
+  "latestPublishedReleases": [
+    {
+      "id": "a6903245-da98-46d7-995e-3a3ce16ad453",
+      "status": "published",
+      "version": 16,
+      "tenantId": "00000000-0000-0000-0000-000000000001",
+      "configurationHash": "289add4f6e244e5ee97866dfbc9cd537"
+    },
+    {
+      "id": "691f63fe-7661-426e-8276-86414486a913",
+      "status": "published",
+      "version": 11,
+      "tenantId": "633d9906-3866-4ddd-b85c-99c525bd3cb3",
+      "configurationHash": "2f5d0dd92b5ddba08635362b69b9ad54"
+    }
+  ],
+  "processBindings": [
+    {
+      "id": "40a2868d-84e3-4c2f-9501-0d3e4f8574d4",
+      "channel": "whatsapp",
+      "enabled": true,
+      "trigger": "whatsapp.new_conversation",
+      "revision": 1,
+      "tenantId": "633d9906-3866-4ddd-b85c-99c525bd3cb3",
+      "agentVersionId": "dcb9715a-f344-41df-8074-1589df3d6c76",
+      "canonicalFlowVersionId": "d2d6971d-2c94-4842-8e3c-14ea3e603b6c"
+    },
+    {
+      "id": "c6285287-8943-4764-a678-39e838d205e4",
+      "channel": "voice",
+      "enabled": true,
+      "trigger": "voice.inbound",
+      "revision": 1,
+      "tenantId": "633d9906-3866-4ddd-b85c-99c525bd3cb3",
+      "agentVersionId": "af517837-c4f6-4218-be2a-48e386c1f3f0",
+      "canonicalFlowVersionId": "3854ecca-af7f-47e7-9c86-559357619dac"
+    },
+    {
+      "id": "6beffdfa-2947-44f9-ba8a-8f65e03b1232",
+      "channel": "voice",
+      "enabled": true,
+      "trigger": "voice.outbound_assignment",
+      "revision": 1,
+      "tenantId": "633d9906-3866-4ddd-b85c-99c525bd3cb3",
+      "agentVersionId": "af517837-c4f6-4218-be2a-48e386c1f3f0",
+      "canonicalFlowVersionId": "3854ecca-af7f-47e7-9c86-559357619dac"
+    },
+    {
+      "id": "61130d80-54c5-4c26-b397-fae26261f426",
+      "channel": "whatsapp",
+      "enabled": true,
+      "trigger": "whatsapp.new_conversation",
+      "revision": 1,
+      "tenantId": "00000000-0000-0000-0000-000000000001",
+      "agentVersionId": "6c001f45-5da4-4956-9550-ec199dfdbe68",
+      "canonicalFlowVersionId": "5537d559-ba07-4694-9318-2dda12850f1f"
+    },
+    {
+      "id": "d0607ccd-962e-441a-8a7d-bfe29628fbb1",
+      "channel": "voice",
+      "enabled": true,
+      "trigger": "voice.outbound_assignment",
+      "revision": 1,
+      "tenantId": "00000000-0000-0000-0000-000000000001",
+      "agentVersionId": "072b9420-8f25-479f-a785-6a57dafd1120",
+      "canonicalFlowVersionId": "7da9be3d-bc67-46da-a7e4-6794d9ca0ee8"
+    },
+    {
+      "id": "d24dfc79-1d7d-4aaa-9735-0328b79bfb26",
+      "channel": "voice",
+      "enabled": true,
+      "trigger": "voice.inbound",
+      "revision": 1,
+      "tenantId": "00000000-0000-0000-0000-000000000001",
+      "agentVersionId": "072b9420-8f25-479f-a785-6a57dafd1120",
+      "canonicalFlowVersionId": "7da9be3d-bc67-46da-a7e4-6794d9ca0ee8"
+    }
+  ],
+  "observedWebEnvironment": {
+    "LLM_MODEL": "gemini-2.5-flash",
+    "LLM_PROVIDER": "openai-compat"
+  },
+  "modelObservationScope": "Web service environment only; tenant overrides and actual executed model are not inferred.",
+  "legacyRoleRecoveryContract": {
+    "roles": [
+      {
+        "name": "oron_app",
+        "login": true,
+        "inherit": true,
+        "createDb": false,
+        "bypassRls": false,
+        "superuser": false,
+        "createRole": false,
+        "replication": false
+      },
+      {
+        "name": "oron_sessions_app",
+        "login": true,
+        "inherit": true,
+        "createDb": false,
+        "bypassRls": false,
+        "superuser": false,
+        "createRole": false,
+        "replication": false
+      },
+      {
+        "name": "oron_tenancy_app",
+        "login": true,
+        "inherit": true,
+        "createDb": false,
+        "bypassRls": false,
+        "superuser": false,
+        "createRole": false,
+        "replication": false
+      }
+    ],
+    "memberships": []
+  },
+  "backup": {
+    "name": "dev_oron_platform-20261008T012416Z.backup.tar.gz",
+    "bytes": 82599970,
+    "modifiedAt": "2026-10-08T01:24:45.828380+00:00",
+    "sha256": "df0000f12b1fd5f6d9731361b552afb2cee9ec1ea9851f1b7cb5566bd76286c0",
+    "members": [
+      "database.dump",
+      "release.txt",
+      "schema-head.txt",
+      "security-contract.json",
+      "release.tar",
+      "backup-manifest.json",
+      "objects.tar",
+      "SHA256SUMS"
+    ],
+    "release.txt": "b4cc8cf05c21c968377ec63f4280b1ae5184a9b6",
+    "schema-head.txt": "f3a8c2d91750",
+    "databaseDumpPresent": true
+  },
+  "restoreDrill": {
+    "schemaHead": "f3a8c2d91750",
+    "backupSha256": "df0000f12b1fd5f6d9731361b552afb2cee9ec1ea9851f1b7cb5566bd76286c0",
+    "sourceRelease": "b4cc8cf05c21c968377ec63f4280b1ae5184a9b6",
+    "scope": "isolated_network_none_fixture",
+    "target": "oron_restore_2fb84aa4df2b4c8d8fcd5dcc4787ee16",
+    "contentsDisplayed": false,
+    "keyEscrowVerified": false,
+    "legacyRolesSupplementedFromCurrentReadOnlyInventory": true,
+    "status": "PASS",
+    "databaseRestored": true,
+    "securityContractVerified": true,
+    "objectsRestoredAndVerified": true
+  },
+  "rollbackLimits": [
+    "Refresh inventory and backup before rollout. Snapshot was taken at 01:24 UTC, not immediately before deployment.",
+    "Verify key escrow separately.",
+    "Revert code/environment with matching reviewed bindings; preserve admitted sessions and immutable evidence.",
+    "Do not downgrade schema with retained evidence; use reviewed forward recovery or isolated restore."
+  ],
+  "privateStagingCleanup": "Blocked by automatic review; excluded from Git."
+}
