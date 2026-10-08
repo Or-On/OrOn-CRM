@@ -1,7 +1,7 @@
 # Unified agent reset — local verification and activation package
 
 Status: **Implemented locally; activation review blocked by required browser acceptance**.
-Implementation commits: `957b1b5` and `5f3e89c` on
+Implementation commits: `957b1b5`, `5f3e89c` and `e5937d0` on
 `codex/unified-agent-reset`, based on
 `a78d3b9cd3b1de1e1ab918729fd87e1401efa326`. No production configuration or data has
 been changed by this work. The original checkout remains separate.
@@ -110,10 +110,10 @@ several suites overlap.
 
 | Gate | Measured result | Local raw evidence |
 | --- | --- | --- |
-| TypeScript format, ESLint, repository/docs/secret checks, Ruff, TS and Python types | Passed | `verify-r15.log` |
-| Normal Python | 2,194 passed, 461 deliberately skipped | `verify-r15.log` |
-| Normal web | 1,040 passed, 14 skipped | `verify-r15.log` |
-| Normal messaging worker | 584 passed, 229 skipped before added pending-trigger case | `verify-r15.log` |
+| TypeScript format, ESLint, repository/docs/secret checks, Ruff, TS and Python types | Passed | `verify-final-r24.log` |
+| Normal Python | 2,194 passed, 461 deliberately skipped | `verify-final-r24.log` |
+| Normal web | 1,040 passed, 14 skipped | `verify-final-r24.log` |
+| Normal messaging worker | 584 passed, 230 skipped | `verify-final-r24.log` |
 | Full Python PostgreSQL | **440 passed, zero skipped** | `postgres-r15.log` |
 | CRM application-role PostgreSQL | 771 passed, 18 skipped; those 18 separately passed below | `application-role-pg-r12.log` |
 | Publication quality gate, knowledge and handoff PostgreSQL | **18 passed** | `quality-pg-r15.log` |
@@ -123,16 +123,17 @@ several suites overlap.
 | Model routing, quota, key rotation, concurrent workers, machine-tool revocation | **29 passed**, including new pending-trigger denial | `model-machine-pg-r17.log` |
 | Reset, retained conversations/call, explicit rebind and rollback | **1 passed**, real PostgreSQL | `reset-rehearsal-r24.json` |
 | Upgrade → downgrade to `f3a8c2d91750` → upgrade; deterministic SQL + contract | Passed, **164 revisions, one head `a18c4e53fd02`** | `migration-cycle-r15.log` |
-| Generated API contract, production web/workspace build, peer dependencies | Passed | `verify-continuation-r16.log` |
-| Dependency audits | Repository gate passed; **9 npm findings (4 high, 4 moderate, 1 low), no critical**. Python: one existing time-limited exception, no other known findings | `verify-continuation-r16.log` |
+| Generated API contract, production web/workspace build, peer dependencies | Passed | `verify-final-r24.log` |
+| Dependency audits | Repository gate passed; **9 npm findings (4 high, 4 moderate, 1 low), no critical**. Python: one existing time-limited exception, no other known findings | `verify-final-r24.log` |
 
 `uv run python -m scripts.dev verify` is the Makefile's actual verify entry point.
-The complete r15 run passed lint/types/tests but Windows transiently refused a
-write to generated `client.ts`. The identical `pnpm contracts:check` then passed
-without a code change, followed by all remaining verify phases in r16. Thus
-**all phases passed, but not in one uninterrupted invocation**. Skipped normal
-integration tests are not reported as passing; explicit database runs supply
-separate evidence.
+The final r24 invocation completed **all phases uninterrupted, exit code 0**
+on the current implementation, including the corrected token budget and explicit
+provider route. This is a local verification result, not a remote CI run.
+Earlier r15/r16 logs retain the transient Windows generated-file write failure
+and its recovery. Skipped normal integration tests are not reported as passing;
+explicit database runs supply separate evidence. The final configuration suite
+passed all 56 tests, including token and timeout validation.
 
 The full messaging run passed **795 tests**, with 19 explicitly skipped.
 The 12 readiness and 6 diagnostics tests subsequently passed in their required

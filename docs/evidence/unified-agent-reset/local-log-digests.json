@@ -44,6 +44,12 @@
     "messaging-pg-r18.log": {
       "sha256": "ba6b98173abade045e127e3e59eebb3135188ff33ae2ebe87359d8eeddf48194",
       "bytes": 46149
+    },
+    "verify-final-r24.log": {
+      "sha256": "7b3524c526b296188f154bea9bcaf72a227aab40c2d7f04bc2ce918545dd3078",
+      "bytes": 87978,
+      "exitCode": 0,
+      "implementationCommit": "e5937d0"
     }
   }
 }
