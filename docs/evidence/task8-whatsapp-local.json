@@ -18,12 +18,28 @@
     {
       "path": ".artifacts/task8-final-static-r2.log",
       "sha256": "57016f5ec555334451e14a4aa77d41aacfca5026b695287ee06a749fe852ff36"
+    },
+    {
+      "path": ".artifacts/task8-locale-attempt-final-r2.log",
+      "sha256": "985a20e61e6b434dd733e72993a0ce33091ed4c07d7898633640c622c20bbfb9"
+    },
+    {
+      "path": ".artifacts/task8-locale-attempt-final-r3.log",
+      "sha256": "ce53411527e128165837eb6e9feeddb199c883d805d722328cdedd1ab6d6d958"
+    },
+    {
+      "path": ".artifacts/task8-locale-static.log",
+      "sha256": "5a3973f79ed9becd5f23c4feff467513814de7ea381d75a4d2e339aa8b8edca9"
+    },
+    {
+      "path": ".artifacts/task8-history-regression.log",
+      "sha256": "7e93a6823176c51711e5d7603e6e0544fd62b10036bcd78d5b9561aa8e81b2ba"
     }
   ],
   "results": {
     "crmFocused": 252,
-    "groundingAndLocale": 301,
-    "newSignedWebhookPostgres": 15,
+    "groundingAndLocale": 302,
+    "newSignedWebhookPostgres": 16,
     "existingDiscoveryAndLeadPostgres": 5,
     "automaticAiCallPostgres": 1,
     "webBff": 6,

@@ -73,3 +73,12 @@ it.each(["English please", "אפשר באנגלית?", "I need help"])(
 );
 it("explicit Hebrew returns from English", () =>
   expect(latestMessageLocale("he", "עברית בבקשה", ["I need help"])).toBe("he"));
+
+it("a name question does not erase a substantive English request", () => {
+  expect(
+    conversationLocale("he", [
+      { role: "assistant", text: "מה השם שלך?" },
+      { role: "user", text: "I need help" },
+    ]),
+  ).toBe("en");
+});

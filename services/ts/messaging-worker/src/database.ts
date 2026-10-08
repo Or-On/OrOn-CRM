@@ -4275,6 +4275,15 @@ async function loadAiWork(
       FROM messaging.messages message
       LEFT JOIN messaging.inbound_message_origins origin
         ON origin.tenant_id=message.tenant_id AND origin.message_id=message.id
+      LEFT JOIN ops.inbound_events event
+        ON message.direction='inbound' AND event.tenant_id=message.tenant_id
+        AND event.provider=message.provider
+        AND event.provider_account_id=(
+          SELECT channel.provider_account_id FROM messaging.channels channel
+          JOIN messaging.conversations conversation ON conversation.channel_id=channel.id
+            AND conversation.tenant_id=channel.tenant_id
+          WHERE conversation.id=message.conversation_id AND conversation.tenant_id=message.tenant_id
+        ) AND event.payload->>'providerMessageId'=message.provider_message_id
       WHERE message.conversation_id = ${row.conversation_id}::uuid
         AND ((message.content_type IN ('text','template') AND message.content_text IS NOT NULL)
           OR (message.direction='inbound' AND message.content_type IN ('image','document','location','audio','video','interactive')))
@@ -4290,7 +4299,11 @@ async function loadAiWork(
             FROM messaging.conversations conversation
             WHERE conversation.id = ${row.conversation_id}::uuid
           ), '-infinity'::timestamptz))
-      ORDER BY message.created_at DESC, message.updated_at DESC, message.id DESC LIMIT 50
+      -- Provider timestamps only have seconds; receipt order preserves the
+      -- preceding question and customer language when replies arrive quickly.
+      ORDER BY COALESCE(event.received_at,message.created_at) DESC,
+        event.receipt_sequence DESC NULLS LAST,
+        message.created_at DESC, message.updated_at DESC, message.id DESC LIMIT 50
     `;
     const history = rawHistory.map((message) => ({
       ...message,
