@@ -107,18 +107,18 @@ async def test_exact_source_tenant_denial_server_allocation_and_identical_retry(
         await repo.close()
 
 
-async def test_real_admission_reads_following_inbound_and_pinned_outbound_in_warm_and_second_instances():
+async def test_real_admission_uses_exact_triggers_in_warm_and_second_instances():
     import json
-    from pathlib import Path
     from uuid import UUID
 
+    from anyio import Path
     from dispatcher_runtime.persistence import PostgresVoiceRuntime
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
     path = os.getenv("PUBLICATION_CONTEXT_PATH")
     if not path:
         pytest.skip("TS publication fixture context required")
-    context = json.loads(Path(path).read_text(encoding="utf-8"))
+    context = json.loads(await Path(path).read_text(encoding="utf-8"))
     assert URL
     engine = create_async_engine(
         URL.replace("postgresql://", "postgresql+asyncpg://"),

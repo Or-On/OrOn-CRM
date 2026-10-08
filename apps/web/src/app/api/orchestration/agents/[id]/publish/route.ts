@@ -66,7 +66,10 @@ export async function POST(
             activate: command.activate as boolean,
           }),
       );
-      return NextResponse.json({ published: true, publication });
+      return NextResponse.json({
+        published: publication.status !== "blocked_evaluation",
+        publication,
+      });
     }
     const { id } = await context.params;
     const published = await withFreshCurrentTenant(

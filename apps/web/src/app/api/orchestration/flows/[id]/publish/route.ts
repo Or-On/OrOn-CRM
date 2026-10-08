@@ -39,7 +39,10 @@ export async function POST(
             activate: body.activate as boolean,
           }),
       );
-      return NextResponse.json({ published: true, publication });
+      return NextResponse.json({
+        published: publication.status !== "blocked_evaluation",
+        publication,
+      });
     }
     const published = await withFreshCurrentTenant(
       "flows:manage",

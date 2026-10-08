@@ -4,6 +4,7 @@ import postgres from "postgres";
 import { describe, expect, it } from "vitest";
 import {
   rebindAgentConversations,
+  listAgentProfiles,
   createAgentProfileDraft,
   createAgentProfileRevision,
   createCanonicalFlowDraft,
@@ -20,6 +21,10 @@ import {
   publishAgentWithBindings,
   activateRetainedPublication,
 } from "./publication-bindings.js";
+import {
+  requestAgentGoldenEvaluation,
+  getAgentGoldenWorkspace,
+} from "./agent-quality-gate.js";
 import { saveCanonicalFlowDraft } from "./flow-runtime.js";
 const url = process.env.CRM_TEST_DATABASE_URL;
 async function scope(
@@ -48,9 +53,11 @@ async function fixture(db: postgres.Sql) {
       channels: ["voice", "whatsapp"],
     });
     const [base] = await sql<
-      { id: string }[]
+      {
+        id: string;
+      }[]
     >`SELECT id FROM agents.agent_profile_versions WHERE agent_profile_id=${profile}::uuid`;
-    await publishAgentProfile(sql, actor, profile, base!.id);
+    await publishAgentProfile(sql, actor, profile, required(base).id);
     const flow: CanonicalFlow = {
       schemaVersion: "1.0",
       agentReferencePolicy: "follow_published",
@@ -78,12 +85,14 @@ async function fixture(db: postgres.Sql) {
       sql,
       actor,
       "Fictional following flow",
-      base!.id,
+      required(base).id,
       flow,
     );
     await publishCanonicalFlow(sql, actor, definition);
     const [fv] = await sql<
-      { id: string }[]
+      {
+        id: string;
+      }[]
     >`SELECT id FROM automation.flow_versions WHERE flow_definition_id=${definition}::uuid`;
     const processes = (
       [
@@ -103,8 +112,8 @@ async function fixture(db: postgres.Sql) {
       channel,
       bindingPolicy,
       enabled: true,
-      agentProfileVersionId: base!.id,
-      flowVersionId: fv!.id,
+      agentProfileVersionId: required(base).id,
+      flowVersionId: required(fv).id,
       requiredFeatures: [],
       priority: 100,
     }));
@@ -120,7 +129,7 @@ async function fixture(db: postgres.Sql) {
       null,
       randomUUID(),
     );
-    let draft = (await getTenantConfigurationState(sql)).draft!;
+    let draft = required((await getTenantConfigurationState(sql)).draft);
     await transitionTenantConfiguration(
       sql,
       "submit",
@@ -128,7 +137,7 @@ async function fixture(db: postgres.Sql) {
       "fixture",
       randomUUID(),
     );
-    draft = (await getTenantConfigurationState(sql)).draft!;
+    draft = required((await getTenantConfigurationState(sql)).draft);
     await transitionTenantConfiguration(
       sql,
       "approve",
@@ -141,22 +150,22 @@ async function fixture(db: postgres.Sql) {
       actor,
       voice,
       profile,
-      base: base!.id,
+      base: required(base).id,
       definition,
-      flowId: fv!.id,
+      flowId: required(fv).id,
       flow,
     };
   });
 }
 describe.skipIf(!url)("publication bundle under application roles", () => {
   it("atomically advances distinct following triggers, preserves pins/history, rejects stale edits, and repeats once", async () => {
-    const u = new URL(url!);
+    const u = new URL(required(url));
     if (
       !["localhost", "127.0.0.1"].includes(u.hostname) ||
       !/^\/oron_crm_[a-f0-9]+$/.test(u.pathname)
     )
       throw new Error("disposable local DB required");
-    const db = postgres(url!, { max: 4 });
+    const db = postgres(required(url), { max: 4 });
     try {
       const f = await fixture(db);
       const channel = randomUUID(),
@@ -183,7 +192,7 @@ describe.skipIf(!url)("publication bundle under application roles", () => {
         });
       });
       const request = {
-        expectedVersionId: draft!.versionId,
+        expectedVersionId: required(draft).versionId,
         requestId: randomUUID(),
         activate: true,
       };
@@ -216,7 +225,9 @@ describe.skipIf(!url)("publication bundle under application roles", () => {
         expect(
           routes
             .filter((x) => x.trigger_key !== "manual.contact_action")
-            .every((x) => x.agent_profile_version_id === draft!.versionId),
+            .every(
+              (x) => x.agent_profile_version_id === required(draft).versionId,
+            ),
         ).toBe(true);
         expect(
           (
@@ -231,16 +242,27 @@ describe.skipIf(!url)("publication bundle under application roles", () => {
         const [old] =
           await sql`SELECT ai_agent_profile_version_id,ownership_epoch FROM messaging.conversations WHERE id=${chat}::uuid`;
         expect(old?.ai_agent_profile_version_id).toBe(f.base);
+        const profiles = await listAgentProfiles(sql);
+        expect(
+          profiles.find((p) => p.id === f.profile)?.lifecycle.staleConversations,
+        ).toBe(1);
         const rebound = await rebindAgentConversations(
           sql,
           f.actor,
           f.profile,
-          draft!.versionId,
+          required(draft).versionId,
         );
-        expect(rebound?.rebound).toBe(1);
+        expect(rebound).toMatchObject({
+          rebound: 1,
+          skipped: 1,
+          skippedRemoved: 1,
+          skippedHuman: 0,
+        });
         const [after] =
           await sql`SELECT ai_agent_profile_version_id,ownership_epoch FROM messaging.conversations WHERE id=${chat}::uuid`;
-        expect(after?.ai_agent_profile_version_id).toBe(draft!.versionId);
+        expect(after?.ai_agent_profile_version_id).toBe(
+          required(draft).versionId,
+        );
         expect(Number(after?.ownership_epoch)).toBeGreaterThan(
           Number(old?.ownership_epoch),
         );
@@ -261,7 +283,7 @@ describe.skipIf(!url)("publication bundle under application roles", () => {
         ).rejects.toThrow("revision changed");
       });
       // A separate database connection resolves the committed bundle (no process-local current cache).
-      const second = postgres(url!, { max: 1 });
+      const second = postgres(required(url), { max: 1 });
       try {
         await second.begin(async (sql) => {
           await scope(sql, f.tenant, f.actor);
@@ -293,7 +315,7 @@ describe.skipIf(!url)("publication bundle under application roles", () => {
     }
   }, 30000);
   it("stages retained source and advances its followers once; published stays pending without activation", async () => {
-    const db = postgres(url!, { max: 2 });
+    const db = postgres(required(url), { max: 2 });
     try {
       const f = await fixture(db);
       const operation = randomUUID();
@@ -315,7 +337,7 @@ describe.skipIf(!url)("publication bundle under application roles", () => {
         expect(
           await activateRetainedPublication(sql, f.actor, operation, false),
         ).toEqual(result);
-        const draft = (await getTenantConfigurationState(sql)).draft!;
+        const draft = required((await getTenantConfigurationState(sql)).draft);
         expect(draft.status).toBe("submitted");
         await transitionTenantConfiguration(
           sql,
@@ -324,12 +346,15 @@ describe.skipIf(!url)("publication bundle under application roles", () => {
           "reviewed",
           randomUUID(),
         );
-        const [changed] =
-          await sql`SELECT definition FROM automation.flow_versions WHERE id=${result.impacts.find((x) => x.processName === "Inbound")!.newFlowVersionId}::uuid`;
+        const [changed] = await sql<
+          {
+            definition: CanonicalFlow;
+          }[]
+        >`SELECT definition FROM automation.flow_versions WHERE id=${required(result.impacts.find((x) => x.processName === "Inbound")).newFlowVersionId}::uuid`;
         expect(
           changed?.definition.nodes.find(
             (n: { type: string }) => n.type === "voice.call",
-          ).configuration.flowVersion,
+          )?.configuration?.flowVersion,
         ).toBe(2);
       });
     } finally {
@@ -337,7 +362,7 @@ describe.skipIf(!url)("publication bundle under application roles", () => {
     }
   }, 30000);
   it("rejects a pending review without partially publishing", async () => {
-    const db = postgres(url!, { max: 2 });
+    const db = postgres(required(url), { max: 2 });
     try {
       const f = await fixture(db);
       const draft = await db.begin(async (sql) => {
@@ -353,7 +378,7 @@ describe.skipIf(!url)("publication bundle under application roles", () => {
         const state = await getTenantConfigurationState(sql);
         await saveTenantConfigurationDraft(
           sql,
-          state.active!.configuration,
+          required(state.active).configuration,
           null,
           randomUUID(),
         );
@@ -362,7 +387,7 @@ describe.skipIf(!url)("publication bundle under application roles", () => {
         db.begin(async (sql) => {
           await scope(sql, f.tenant, f.actor);
           return publishAgentWithBindings(sql, f.actor, f.profile, {
-            expectedVersionId: draft!.versionId,
+            expectedVersionId: required(draft).versionId,
             requestId: randomUUID(),
             activate: true,
           });
@@ -372,7 +397,7 @@ describe.skipIf(!url)("publication bundle under application roles", () => {
         await scope(sql, f.tenant, f.actor);
         expect(
           (
-            await sql`SELECT published_at FROM agents.agent_profile_versions WHERE id=${draft!.versionId}::uuid`
+            await sql`SELECT published_at FROM agents.agent_profile_versions WHERE id=${required(draft).versionId}::uuid`
           )[0]?.published_at,
         ).toBeNull();
         expect(
@@ -386,7 +411,7 @@ describe.skipIf(!url)("publication bundle under application roles", () => {
     }
   });
   it("leaves ordinary managers pending and denies their crafted approval without partial activation", async () => {
-    const db = postgres(url!, { max: 2 });
+    const db = postgres(required(url), { max: 2 });
     try {
       const f = await fixture(db);
       await db`UPDATE public.users SET is_superuser=false WHERE id=${f.actor}::uuid`;
@@ -403,7 +428,7 @@ describe.skipIf(!url)("publication bundle under application roles", () => {
           },
         );
         return publishAgentWithBindings(sql, f.actor, f.profile, {
-          expectedVersionId: draft!.versionId,
+          expectedVersionId: required(draft).versionId,
           requestId: randomUUID(),
           activate: true,
         });
@@ -423,9 +448,9 @@ describe.skipIf(!url)("publication bundle under application roles", () => {
       await db.begin(async (sql) => {
         await scope(sql, f.tenant, f.actor);
         expect(
-          (
-            await getTenantConfigurationState(sql)
-          ).active!.configuration.processes.every(
+          required(
+            (await getTenantConfigurationState(sql)).active,
+          ).configuration.processes.every(
             (p) => p.agentProfileVersionId === f.base,
           ),
         ).toBe(true);
@@ -435,22 +460,22 @@ describe.skipIf(!url)("publication bundle under application roles", () => {
     }
   });
   it("an inbound follower advances while the separate outbound pin and runtime fixtures stay exact", async () => {
-    const db = postgres(url!, { max: 2 });
+    const db = postgres(required(url), { max: 2 });
     try {
       const f = await fixture(db);
       const result = await db.begin(async (sql) => {
         await scope(sql, f.tenant, f.actor);
         const state = await getTenantConfigurationState(sql);
         const config = {
-          ...state.active!.configuration,
-          processes: state.active!.configuration.processes.map((p) =>
+          ...required(state.active).configuration,
+          processes: required(state.active).configuration.processes.map((p) =>
             p.trigger === "voice.outbound_assignment"
               ? { ...p, bindingPolicy: "pinned" }
               : p,
           ),
         };
         await saveTenantConfigurationDraft(sql, config, null, randomUUID());
-        let pending = (await getTenantConfigurationState(sql)).draft!;
+        let pending = required((await getTenantConfigurationState(sql)).draft);
         await transitionTenantConfiguration(
           sql,
           "submit",
@@ -458,7 +483,7 @@ describe.skipIf(!url)("publication bundle under application roles", () => {
           "explicit pin",
           randomUUID(),
         );
-        pending = (await getTenantConfigurationState(sql)).draft!;
+        pending = required((await getTenantConfigurationState(sql)).draft);
         await transitionTenantConfiguration(
           sql,
           "approve",
@@ -477,17 +502,17 @@ describe.skipIf(!url)("publication bundle under application roles", () => {
           },
         );
         return publishAgentWithBindings(sql, f.actor, f.profile, {
-          expectedVersionId: draft!.versionId,
+          expectedVersionId: required(draft).versionId,
           requestId: randomUUID(),
           activate: true,
         });
       });
-      const incoming = result.impacts.find(
-          (i) => i.trigger === "voice.inbound",
-        )!,
-        outgoing = result.impacts.find(
-          (i) => i.trigger === "voice.outbound_assignment",
-        )!;
+      const incoming = required(
+          result.impacts.find((i) => i.trigger === "voice.inbound"),
+        ),
+        outgoing = required(
+          result.impacts.find((i) => i.trigger === "voice.outbound_assignment"),
+        );
       expect(incoming.newAgentVersionId).not.toBe(f.base);
       expect(outgoing.newAgentVersionId).toBe(f.base);
       if (process.env.PUBLICATION_CONTEXT_PATH)
@@ -499,4 +524,161 @@ describe.skipIf(!url)("publication bundle under application roles", () => {
       await db.end();
     }
   });
+  it("stages exact candidate evidence and refuses stale, unrelated and synthetic-only acceptance", async () => {
+    const db = postgres(required(url), { max: 2 });
+    try {
+      const f = await fixture(db);
+      const result = await db.begin(async (sql) => {
+        await scope(sql, f.tenant, f.actor);
+        const draft = await createAgentProfileRevision(
+          sql,
+          f.actor,
+          f.profile,
+          {
+            baseVersionId: f.base,
+            systemPrompt: "Exact evaluated opening",
+            channels: ["voice", "whatsapp"],
+          },
+        );
+        await sql`SELECT platform.set_agent_quality_gate(true)`;
+        return publishAgentWithBindings(sql, f.actor, f.profile, {
+          expectedVersionId: required(draft).versionId,
+          requestId: randomUUID(),
+          activate: true,
+        });
+      });
+      expect(result.status).toBe("blocked_evaluation");
+      expect(result.evaluationCandidates).toHaveLength(1);
+      const candidate = required(required(result.evaluationCandidates)[0]);
+      let evaluationJob = "";
+      let caseId = "";
+      await db.begin(async (sql) => {
+        await scope(sql, f.tenant, f.actor);
+        expect(
+          (
+            await sql`SELECT published_at FROM agents.agent_profile_versions WHERE id=${candidate.agentVersionId}::uuid`
+          )[0]?.published_at,
+        ).toBeNull();
+        expect(
+          required(
+            (await getTenantConfigurationState(sql)).active,
+          ).configuration.processes.every(
+            (p) => p.agentProfileVersionId === f.base,
+          ),
+        ).toBe(true);
+        const cases = Array.from({ length: 30 }, (_, i) => ({
+          id: randomUUID(),
+          channel: "whatsapp",
+          input: `Fictional candidate ${String(i)}`,
+          expected: { clarify: true },
+        }));
+        const [dataset] = await sql<
+          {
+            id: string;
+          }[]
+        >`SELECT platform.create_quality_dataset(${f.profile}::uuid,'synthetic_fixture',${sql.json(cases)},'{}'::jsonb) AS id`;
+        const body = {
+          versionId: candidate.agentVersionId,
+          datasetId: required(dataset).id,
+          publicationOperationId: result.operationId,
+        };
+        const job = await requestAgentGoldenEvaluation(sql, f.profile, body);
+        evaluationJob = job;
+        caseId = required(cases[0]).id;
+        expect(await requestAgentGoldenEvaluation(sql, f.profile, body)).toBe(
+          job,
+        );
+        const workspace = await getAgentGoldenWorkspace(
+          sql,
+          f.profile,
+          candidate.agentVersionId,
+          result.operationId,
+        );
+        expect(workspace.evaluations).toMatchObject([
+          { id: job, state: "blocked", hasAcceptedReceipt: false },
+        ]);
+        expect(
+          (
+            await activateRetainedPublication(
+              sql,
+              f.actor,
+              result.operationId,
+              true,
+            )
+          ).status,
+        ).toBe("blocked_evaluation");
+        await expect(
+          sql.savepoint((nested) =>
+            requestAgentGoldenEvaluation(nested, f.profile, {
+              ...body,
+              versionId: f.base,
+            }),
+          ),
+        ).rejects.toThrow("agent not part of candidate");
+      });
+      // Only this owned synthetic fixture is made claimable to test the worker boundary.
+      // It can never earn a real-data receipt; no provider evidence is fabricated.
+      await db`UPDATE agents.quality_evaluation_jobs SET state='pending' WHERE id=${evaluationJob}::uuid`;
+      await db.begin(async (sql) => {
+        await sql`SET LOCAL ROLE platform_agent_evaluation`;
+        const [row] = await sql<
+          {
+            claim: {
+              jobId: string;
+              claimToken: string;
+              publicationCandidateDigest: string;
+              publicationCandidate: {
+                resource: {
+                  system_prompt: string;
+                };
+              };
+            };
+          }[]
+        >`SELECT platform.claim_agent_quality_evaluation() AS claim`;
+        expect(required(row).claim.jobId).toBe(evaluationJob);
+        expect(required(row).claim.publicationCandidateDigest).toBe(
+          candidate.candidateDigest,
+        );
+        expect(
+          required(row).claim.publicationCandidate.resource.system_prompt,
+        ).toBe("Exact evaluated opening");
+        await expect(
+          sql.savepoint(
+            (nested) =>
+              nested`SELECT platform.append_agent_quality_case(${evaluationJob}::uuid,${required(row).claim.claimToken}::uuid,${caseId}::uuid,'{}'::jsonb)`,
+          ),
+        ).rejects.toThrow(
+          "physical case must attest exact publication candidate",
+        );
+        await expect(
+          sql.savepoint(
+            (nested) =>
+              nested`SELECT platform.finalize_agent_quality_evaluation(${evaluationJob}::uuid,${required(row).claim.claimToken}::uuid)`,
+          ),
+        ).rejects.toThrow("approved real dataset and policy required");
+        await sql`SELECT platform.fail_agent_quality_evaluation(${evaluationJob}::uuid,${required(row).claim.claimToken}::uuid,'synthetic_fixture_only')`;
+      });
+      // Relevant tenant instructions changing after preparation invalidates this receipt request.
+      await db`UPDATE crm.tenant_settings SET support_profile='{"businessDescription":"Changed after candidate"}' WHERE tenant_id=${f.tenant}::uuid`;
+      await expect(
+        db.begin(async (sql) => {
+          await scope(sql, f.tenant, f.actor);
+          return activateRetainedPublication(
+            sql,
+            f.actor,
+            result.operationId,
+            true,
+          );
+        }),
+      ).rejects.toThrow("candidate changed");
+    } finally {
+      await db.end();
+    }
+  }, 30000);
 });
+
+function required<T>(value: T | null | undefined): T {
+  if (value === null || value === undefined)
+    throw new Error("Expected fixture value");
+  return value;
+}

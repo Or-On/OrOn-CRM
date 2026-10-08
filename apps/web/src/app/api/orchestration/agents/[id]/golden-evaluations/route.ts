@@ -22,7 +22,12 @@ export async function GET(request: Request, context: Context) {
     const { id } = await context.params;
     const versionId = new URL(request.url).searchParams.get("versionId");
     const workspace = await withCurrentTenant("flows:manage", (sql) =>
-      getAgentGoldenWorkspace(sql, id, versionId),
+      getAgentGoldenWorkspace(
+        sql,
+        id,
+        versionId,
+        new URL(request.url).searchParams.get("publicationOperationId"),
+      ),
     );
     return NextResponse.json(workspace, {
       headers: { "Cache-Control": "private, no-store" },

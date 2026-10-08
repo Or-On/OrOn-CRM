@@ -1377,7 +1377,7 @@ describe.skipIf(databaseUrl === undefined)(
         const rebound = await withTenant(database, fixture, async (sql) =>
           rebindAgentConversations(sql, fixture.userId, profileId, v2),
         );
-        expect(rebound).toEqual({ versionId: v2, rebound: 1 });
+        expect(rebound).toMatchObject({ versionId: v2, rebound: 1 });
         const after = await withTenant(
           database,
           fixture,
