@@ -71,6 +71,7 @@ export interface CallUsage {
   readonly llm_completion_tokens?: number;
   readonly llm_model?: string;
   readonly llm_prompt_tokens?: number;
+  readonly llm_usage_by_model?: Record<string, unknown>;
   readonly stt_audio_seconds?: number;
   readonly tts_audio_seconds?: number;
   readonly tts_characters?: number;

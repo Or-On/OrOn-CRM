@@ -11,6 +11,8 @@ import {
   submitDigitalServiceForm,
   queueWhatsAppOutbound,
   setConversationOwnership,
+  listIncompleteServiceRequests,
+  actOnIncompleteServiceRequest,
 } from "@or-on/crm";
 
 import { createMessagingStore } from "../src/database.js";
@@ -18,12 +20,17 @@ import type { WhatsAppAiProvider } from "../src/ai-provider.js";
 import type { FieldServiceAiProvider } from "../src/field-service-provider.js";
 import {
   SimulatorWhatsAppProvider,
+  WhatsAppProviderError,
   type WhatsAppSendRequest,
 } from "../src/providers.js";
 
 // Explicit opt-in. Creates/drops only its own UUID-named database; fictional
 // data; a recording fake stands in for Meta — nothing leaves the machine.
 const sourceUrl = process.env.CROSS_CHANNEL_TEST_DATABASE_URL;
+// These tests drive several durable jobs per case against real PostgreSQL.
+// A five-second unit-test budget can abandon a still-running worker and let it
+// claim the next case's fixture. This is not a provider latency benchmark.
+vi.setConfig({ testTimeout: 30_000 });
 const root = fileURLToPath(new URL("../../../../", import.meta.url));
 const tenantId = "10000000-0000-4000-8000-000000000001";
 const userId = "20000000-0000-4000-8000-000000000001";
@@ -99,6 +106,36 @@ describe.skipIf(sourceUrl === undefined)(
         stdio: "pipe",
       });
       admin = postgres(url.toString(), { max: 1 });
+      // The disposable database was migrated by postgres. Production migrations
+      // run as platform_migrator: reproduce its owner access for SECURITY DEFINER
+      // routines without giving any application role those privileges.
+      for (const schema of [
+        "public",
+        "platform",
+        "crm",
+        "messaging",
+        "automation",
+        "agents",
+        "service",
+        "support",
+        "objects",
+        "ops",
+        "audit",
+        "billing",
+      ]) {
+        await admin.unsafe(
+          `GRANT USAGE ON SCHEMA "${schema}" TO platform_migrator`,
+        );
+        await admin.unsafe(
+          `GRANT ALL ON ALL TABLES IN SCHEMA "${schema}" TO platform_migrator`,
+        );
+        await admin.unsafe(
+          `GRANT ALL ON ALL SEQUENCES IN SCHEMA "${schema}" TO platform_migrator`,
+        );
+        await admin.unsafe(
+          `GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA "${schema}" TO platform_migrator`,
+        );
+      }
       await admin`SELECT set_config('app.current_tenant',${tenantId},false)`;
       cleanup.push(() => admin.end());
       for (const feature of [
@@ -167,6 +204,9 @@ describe.skipIf(sourceUrl === undefined)(
         RETURNING id
       `;
       channelId = channels[0]?.id ?? "";
+      expect(
+        await admin`SELECT platform.machine_agent_tools_authorized(${agentId}::uuid,${principalId}::uuid) AS allowed`,
+      ).toEqual([{ allowed: true }]);
       await admin`INSERT INTO platform.whatsapp_template_policy(tenant_id,enabled) VALUES(${tenantId}::uuid,true)
         ON CONFLICT (tenant_id) DO UPDATE SET enabled=true`;
       url.searchParams.set("options", "-c role=platform_messaging");
@@ -220,6 +260,7 @@ describe.skipIf(sourceUrl === undefined)(
         aiProvider?: WhatsAppAiProvider;
         fieldServiceProvider?: FieldServiceAiProvider;
         beforeSend?: (request: WhatsAppSendRequest) => Promise<void>;
+        afterSend?: (request: WhatsAppSendRequest) => Promise<void>;
       } = {},
     ): Promise<WhatsAppSendRequest[]> {
       const sent: WhatsAppSendRequest[] = [];
@@ -235,6 +276,7 @@ describe.skipIf(sourceUrl === undefined)(
               await request.beforeAttempt?.();
               request.onAttemptStarted?.();
               sent.push(request);
+              await overrides.afterSend?.(request);
               return { messageId: `wamid.out-${randomUUID()}` };
             }),
           },
@@ -328,7 +370,12 @@ describe.skipIf(sourceUrl === undefined)(
         "המסך מרצד, תשלח לי קישור לטופס",
       );
       const delivered = await runWorker(false, { aiProvider: { decide } });
-      expect(decide).toHaveBeenCalledOnce();
+      expect(
+        decide,
+        JSON.stringify(
+          await admin`SELECT c.ownership_mode,c.ai_enabled_by_user_id,c.ai_agent_profile_version_id,platform.messaging_ai_actor_authorized(c.ai_enabled_by_user_id) AS authorized,j.status,j.last_error_safe FROM messaging.conversations c JOIN ops.jobs j ON j.reference_id=c.id WHERE j.job_type='whatsapp.ai.reply'`,
+        ),
+      ).toHaveBeenCalledOnce();
       expect(decide.mock.calls[0]?.[0].digitalServiceFormAvailable).toBe(true);
       const jobs =
         await admin`SELECT job_type,status,last_error_safe FROM ops.jobs WHERE status IN ('dead','retry')`;
@@ -336,8 +383,12 @@ describe.skipIf(sourceUrl === undefined)(
       const delivery = delivered[0]?.delivery;
       if (delivery?.kind !== "text")
         throw new Error("Expected actual form text");
-      expect(delivery.text).toContain("הנה הטופס");
-      const link = /https:\/\/[^\s]+/u.exec(delivery.text)?.[0];
+      expect(delivery.text).toContain(
+        "כדי לפתוח קריאת שירות מלאו את הטופס בקישור:",
+      );
+      const link = /https:\/\/[^\s]+/u
+        .exec(delivery.text)?.[0]
+        ?.replace(/\.$/u, "");
       if (!link) throw new Error("No real form link");
       const token =
         new URLSearchParams(new URL(link).hash.slice(1)).get("token") ?? "";
@@ -355,6 +406,38 @@ describe.skipIf(sourceUrl === undefined)(
       expect(rows).toHaveLength(1);
       const intake = rows[0];
       if (!intake) throw new Error("Digital intake missing");
+      const visible = await admin.begin(async (tx) => {
+        await tx`SET LOCAL ROLE platform_web`;
+        await tx`SELECT set_config('app.current_tenant',${tenantId},true),set_config('app.current_user',${userId},true)`;
+        return listIncompleteServiceRequests(tx);
+      });
+      expect(visible.find((row) => row.id === intake.id)).toMatchObject({
+        stage: "awaiting_submission",
+        recipient: "+972502345697",
+        delivery: "sent",
+      });
+      const foreignTenant = randomUUID(),
+        foreignActor = randomUUID();
+      await admin`INSERT INTO public.tenants(id,name,slug) VALUES(${foreignTenant}::uuid,'Fictional other service',${foreignTenant})`;
+      await admin`INSERT INTO public.users(id,email,status) VALUES(${foreignActor}::uuid,${foreignActor + "@example.invalid"},'active')`;
+      await admin`INSERT INTO public.memberships(tenant_id,user_id,role) VALUES(${foreignTenant}::uuid,${foreignActor}::uuid,'owner')`;
+      await admin`INSERT INTO platform.tenant_feature_entitlements(tenant_id,feature_key,available,enabled,granted_at) VALUES(${foreignTenant}::uuid,'field_service',true,true,clock_timestamp()) ON CONFLICT(tenant_id,feature_key) DO UPDATE SET available=true,enabled=true`;
+      await admin`INSERT INTO service.tenant_configuration(tenant_id,enabled,whatsapp_intake_enabled) VALUES(${foreignTenant}::uuid,true,true)`;
+      await admin.begin(async (tx) => {
+        await tx`SET LOCAL ROLE platform_web`;
+        await tx`SELECT set_config('app.current_tenant',${foreignTenant},true),set_config('app.current_user',${foreignActor},true),set_config('app.current_role','owner',true)`;
+        expect(await listIncompleteServiceRequests(tx)).toEqual([]);
+        await expect(
+          tx.savepoint((nested) =>
+            actOnIncompleteServiceRequest(
+              nested,
+              intake.id,
+              "close",
+              randomUUID(),
+            ),
+          ),
+        ).rejects.toMatchObject({ code: "P0002" });
+      });
       expect(intake.source_session_id).toBeNull();
       expect(
         await admin`SELECT id FROM service.cases WHERE intake_draft_id=${intake.id}::uuid`,
@@ -380,19 +463,32 @@ describe.skipIf(sourceUrl === undefined)(
         await tx`SELECT set_config('app.current_tenant',${tenantId},true)`;
         return submitDigitalServiceForm(tx, token, {
           customerName: "לקוח בדיקה",
-          serviceLocation: "משרד בדיקה",
+          serviceLocation: "רחוב בדיקה 3, עיר בדיקה",
+          serviceStreet: "רחוב בדיקה 3",
+          serviceCity: "עיר בדיקה",
           faultDescription: "המסך מרצד",
           confirmed: true,
           photos: [],
         });
       });
       expect(submitted.created).toBe(true);
+      const afterSubmission = await admin.begin(async (tx) => {
+        await tx`SET LOCAL ROLE platform_web`;
+        await tx`SELECT set_config('app.current_tenant',${tenantId},true),set_config('app.current_user',${userId},true)`;
+        return listIncompleteServiceRequests(tx);
+      });
+      expect(afterSubmission.some((row) => row.id === intake.id)).toBe(false);
+      expect(
+        await admin`SELECT location.city,location.address FROM service.cases c JOIN crm.service_locations location ON location.id=c.service_location_id WHERE c.intake_draft_id=${intake.id}::uuid`,
+      ).toEqual([{ city: "עיר בדיקה", address: "רחוב בדיקה 3, עיר בדיקה" }]);
       const again = await admin.begin(async (tx) => {
         await tx`SET LOCAL ROLE platform_web`;
         await tx`SELECT set_config('app.current_tenant',${tenantId},true)`;
         return submitDigitalServiceForm(tx, token, {
           customerName: "לקוח בדיקה",
-          serviceLocation: "משרד בדיקה",
+          serviceLocation: "רחוב בדיקה 3, עיר בדיקה",
+          serviceStreet: "רחוב בדיקה 3",
+          serviceCity: "עיר בדיקה",
           faultDescription: "המסך מרצד",
           confirmed: true,
           photos: [],
@@ -475,6 +571,121 @@ describe.skipIf(sourceUrl === undefined)(
       },
     );
 
+    it("recovers a definitely failed direct WhatsApp form through the staff action and original sender", async () => {
+      const providerId = await acceptInbound(
+        "972502346105",
+        "אפשר טופס לתקלה במסך?",
+      );
+      const decide = vi
+        .fn<WhatsAppAiProvider["decide"]>()
+        .mockResolvedValue({ action: "service_form" });
+      expect(
+        await runWorker(false, {
+          aiProvider: { decide },
+          beforeSend: () =>
+            Promise.reject(
+              new WhatsAppProviderError("fixture_definite_failure", false),
+            ),
+        }),
+      ).toHaveLength(0);
+      const [intake] = await admin<
+        { id: string }[]
+      >`SELECT source.intake_id AS id FROM service.whatsapp_form_sources source
+        JOIN messaging.messages message ON message.id=source.trigger_message_id WHERE message.provider_message_id=${providerId}`;
+      if (!intake) throw new Error("Expected direct intake");
+      const operation = randomUUID();
+      await admin.begin(async (tx) => {
+        await tx`SET LOCAL ROLE platform_web`;
+        await tx`SELECT set_config('app.current_tenant',${tenantId},true),set_config('app.current_user',${userId},true)`;
+        const row = (await listIncompleteServiceRequests(tx)).find(
+          (item) => item.id === intake.id,
+        );
+        expect(row).toMatchObject({
+          stage: "failed",
+          recipient: "+972502346105",
+          delivery: "failed",
+        });
+        expect(row?.actions).toContain("retry");
+        await actOnIncompleteServiceRequest(tx, intake.id, "retry", operation);
+        await actOnIncompleteServiceRequest(tx, intake.id, "retry", operation);
+      });
+      const recovered = await runWorker(false);
+      expect(recovered).toHaveLength(1);
+      expect(recovered[0]?.recipient).toBe("+972502346105");
+      expect(
+        await admin`SELECT id FROM service.cases WHERE intake_draft_id=${intake.id}::uuid`,
+      ).toHaveLength(0);
+      expect(
+        await admin`SELECT draft.followup_status,draft.followup_attempt,request.status AS send_status,
+        request.provider_message_id IS NOT NULL AS provider_accepted FROM service.intake_drafts draft
+        JOIN messaging.outbound_requests request ON request.message_id=draft.followup_message_id
+        WHERE draft.id=${intake.id}::uuid`,
+      ).toEqual([
+        {
+          followup_status: "admitted",
+          followup_attempt: 1,
+          send_status: "sent",
+          provider_accepted: true,
+        },
+      ]);
+      expect(await runWorker(false)).toHaveLength(0);
+      expect(
+        await admin`SELECT operation_id FROM service.intake_staff_actions WHERE intake_id=${intake.id}::uuid`,
+      ).toHaveLength(1);
+    });
+
+    it("does not resend an unknown direct form outcome when the customer asks again", async () => {
+      const trigger = await acceptInbound("972502346106", "אפשר קישור לטופס?");
+      const aiProvider = {
+        decide: vi
+          .fn<WhatsAppAiProvider["decide"]>()
+          .mockResolvedValue({ action: "service_form" }),
+      };
+      const uncertain = await runWorker(false, {
+        aiProvider,
+        afterSend: () =>
+          Promise.reject(
+            new WhatsAppProviderError("delivery_outcome_unknown", false),
+          ),
+      });
+      expect(uncertain).toHaveLength(1);
+      const [before] = await admin<
+        { intake_id: string; token_hash: string }[]
+      >`SELECT source.intake_id,form.token_hash FROM service.whatsapp_form_sources source
+        JOIN messaging.messages message ON message.id=source.trigger_message_id JOIN service.digital_intake_forms form ON form.intake_id=source.intake_id
+        WHERE message.provider_message_id=${trigger}`;
+      if (!before) throw new Error("Expected uncertain intake");
+      await admin.begin(async (tx) => {
+        await tx`SET LOCAL ROLE platform_web`;
+        await tx`SELECT set_config('app.current_tenant',${tenantId},true),set_config('app.current_user',${userId},true)`;
+        expect(
+          (await listIncompleteServiceRequests(tx)).find(
+            (row) => row.id === before.intake_id,
+          ),
+        ).toMatchObject({ stage: "uncertain", actions: ["close"] });
+      });
+      await acceptInbound("972502346106", "שלח שוב את הקישור");
+      const responses = await runWorker(false, { aiProvider });
+      expect(
+        responses.filter(
+          (request) =>
+            request.delivery.kind === "text" &&
+            request.delivery.text.includes("https://"),
+        ),
+      ).toHaveLength(0);
+      expect(
+        await admin`SELECT token_hash FROM service.digital_intake_forms WHERE intake_id=${before.intake_id}::uuid`,
+      ).toEqual([{ token_hash: before.token_hash }]);
+      expect(
+        await admin`SELECT followup_status,followup_error_safe FROM service.intake_drafts WHERE id=${before.intake_id}::uuid`,
+      ).toEqual([
+        {
+          followup_status: "failed",
+          followup_error_safe: "delivery_outcome_unknown",
+        },
+      ]);
+    });
+
     it("does not discard an already committed form link when another message arrives before delivery", async () => {
       const decide = vi
         .fn<WhatsAppAiProvider["decide"]>()
@@ -521,7 +732,12 @@ describe.skipIf(sourceUrl === undefined)(
           expect(await runWorker(false, { aiProvider: { decide } })).toEqual(
             [],
           );
-          expect(decide).toHaveBeenCalledOnce();
+          expect(
+            decide,
+            JSON.stringify(
+              await admin`SELECT c.ownership_mode,c.ai_enabled_by_user_id,c.ai_agent_profile_version_id,platform.messaging_ai_actor_authorized(c.ai_enabled_by_user_id) AS authorized,j.status,j.last_error_safe FROM messaging.conversations c JOIN ops.jobs j ON j.reference_id=c.id WHERE j.job_type='whatsapp.ai.reply'`,
+            ),
+          ).toHaveBeenCalledOnce();
           expect(
             await admin`SELECT source.intake_id FROM service.whatsapp_form_sources source JOIN messaging.messages message
           ON message.id=source.trigger_message_id AND message.tenant_id=source.tenant_id WHERE message.provider_message_id=${providerId}`,
@@ -569,7 +785,12 @@ describe.skipIf(sourceUrl === undefined)(
       const binding = bindings[0];
       if (!binding) throw new Error("First inbound not retained");
       expect(extractIntake).not.toHaveBeenCalled();
-      expect(decide).toHaveBeenCalledOnce();
+      expect(
+        decide,
+        JSON.stringify(
+          await admin`SELECT c.ownership_mode,c.ai_enabled_by_user_id,c.ai_agent_profile_version_id,platform.messaging_ai_actor_authorized(c.ai_enabled_by_user_id) AS authorized,j.status,j.last_error_safe FROM messaging.conversations c JOIN ops.jobs j ON j.reference_id=c.id WHERE j.job_type='whatsapp.ai.reply'`,
+        ),
+      ).toHaveBeenCalledOnce();
       expect(
         await admin`SELECT id FROM service.intake_drafts WHERE conversation_id=${binding.conversation_id}::uuid`,
       ).toEqual([]);
@@ -872,10 +1093,13 @@ describe.skipIf(sourceUrl === undefined)(
             "https://service.example.invalid/service-request#tenant=",
           );
           expect(delivery.text).toContain(
-            followupStatus === "queued" ? "press Submit" : "ללחוץ על שליחה",
+            "כדי לפתוח קריאת שירות מלאו את הטופס בקישור:",
           );
           expect(delivery.text).not.toContain("השיבו להודעה");
-          const url = new URL(delivery.text.split("\n").at(-1) ?? "");
+          const url = new URL(
+            /https:\/\/[^\s]+/u.exec(delivery.text)?.[0]?.replace(/\.$/u, "") ??
+              "",
+          );
           const fragment = new URLSearchParams(url.hash.slice(1));
           expect(fragment.get("tenant")).toBe(tenantId);
           expect(fragment.get("token")).toMatch(/^[0-9a-f]{64}$/u);
@@ -978,6 +1202,18 @@ describe.skipIf(sourceUrl === undefined)(
         status: "queued",
         intakeId,
       });
+      const rejected = await runWorker(true, {
+        beforeSend: () =>
+          Promise.reject(
+            new WhatsAppProviderError("provider_rejected", false, 400),
+          ),
+      });
+      expect(rejected).toHaveLength(0);
+      expect(
+        await admin`SELECT followup_status,followup_attempt FROM service.intake_drafts WHERE id=${intakeId}::uuid`,
+      ).toEqual([{ followup_status: "failed", followup_attempt: 1 }]);
+      await admin`INSERT INTO ops.jobs(tenant_id,queue,job_type,reference_type,reference_id,payload,idempotency_key)
+        VALUES(${tenantId}::uuid,'messaging','field_service.intake_followup','intake_draft',${intakeId}::uuid,'{}'::jsonb,${`retry-${randomUUID()}`})`;
       const sent = await runWorker(true);
       expect(sent).toHaveLength(1);
       expect(sent[0]?.recipient).toBe(caller);
@@ -1006,7 +1242,7 @@ describe.skipIf(sourceUrl === undefined)(
       ).toHaveLength(0);
       expect(await runWorker(true)).toEqual([]);
       const requests = await admin<{ id: string; conversation_id: string }[]>`
-        SELECT id,conversation_id FROM messaging.outbound_requests WHERE idempotency_key=${`service-followup:${intakeId}`}`;
+        SELECT id,conversation_id FROM messaging.outbound_requests WHERE idempotency_key=${`service-followup:${intakeId}:attempt:2`}`;
       const request = requests[0];
       if (request === undefined)
         throw new Error("Follow-up request was not queued");
@@ -1073,7 +1309,9 @@ describe.skipIf(sourceUrl === undefined)(
       expect(form?.faultDescription).toBe("המסך לא נדלק");
       const submission = {
         customerName: "דנה",
-        serviceLocation: "אתר בדיקה",
+        serviceLocation: "רחוב בדיקה 3, עיר בדיקה",
+        serviceStreet: "רחוב בדיקה 3",
+        serviceCity: "עיר בדיקה",
         faultDescription: "תיאור חופשי מהטופס",
         confirmed: true,
         photos: [],
@@ -1100,7 +1338,25 @@ describe.skipIf(sourceUrl === undefined)(
       ).toEqual([{ allowed: false }]);
       // A real least-privileged worker must also finish the dossier summary.
       // In production this used to fail by joining the inaccessible tenants table.
-      const summarizeEvidence = vi.fn(() => Promise.resolve("סיכום בדיקה"));
+      const attemptId = randomUUID();
+      const summarizeEvidence = vi.fn<
+        FieldServiceAiProvider["summarizeEvidence"]
+      >(async (_request, hooks) => {
+        if (!hooks) throw new Error("Missing attempt authorization");
+        const attempt = {
+          eventId: attemptId,
+          model: "fixture-fallback",
+          occurredAt: new Date().toISOString(),
+        };
+        await hooks.beforeAttempt(attempt);
+        await hooks.onAttempt({
+          ...attempt,
+          latencyMs: 10,
+          outcome: "success",
+          usage: { inputTokens: 12, outputTokens: 5, latencyMs: 10 },
+        });
+        return "סיכום בדיקה";
+      });
       await runWorker(true, {
         fieldServiceProvider: {
           providerName: "fixture",
@@ -1117,10 +1373,24 @@ describe.skipIf(sourceUrl === undefined)(
         (SELECT id FROM service.cases WHERE intake_draft_id=${intakeId}::uuid) AND source_kind='whatsapp'`,
       ).toEqual([{ status: "completed", error_safe: null }]);
       expect(summarizeEvidence).toHaveBeenCalled();
+      expect(
+        await admin`SELECT action FROM audit.records WHERE metadata->>'eventId'=${attemptId} ORDER BY action`,
+      ).toEqual([
+        { action: "field_service.model_attempt.completed" },
+        { action: "field_service.model_attempt.started" },
+      ]);
+      expect(
+        await admin`SELECT model FROM service.case_summaries WHERE case_id IN
+        (SELECT id FROM service.cases WHERE intake_draft_id=${intakeId}::uuid) AND source_kind='whatsapp'`,
+      ).toEqual([{ model: "fixture-fallback" }]);
       expect(summarizeEvidence).toHaveBeenCalledWith(
         expect.objectContaining({
           locale: "he",
           sourceKind: "whatsapp",
+        }),
+        expect.objectContaining({
+          beforeAttempt: expect.any(Function) as unknown,
+          onAttempt: expect.any(Function) as unknown,
         }),
       );
     });

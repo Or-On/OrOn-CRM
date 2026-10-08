@@ -13,6 +13,8 @@ import httpx
 import pytest
 from oron_agent.config import load_settings
 from oron_agent.grounding import grounding_instruction, render_reply
+from oron_agent.model_parameters import compatible_parameters
+from oron_agent.provider_context import fold_instructions
 
 
 @dataclass(frozen=True)
@@ -135,14 +137,15 @@ def test_provider_advances_support_instead_of_acknowledging(case: Case):
         {"role": "user", "content": case.latest_caller_text},
         {"role": "system", "content": grounding_instruction([], case.language)},
     ]
+    instruction, conversation = fold_instructions(messages)
     request = {
         "model": model,
-        "messages": messages,
-        "temperature": float(os.environ.get("LLM_TEMPERATURE", "0.4")),
+        "messages": [{"role": "system", "content": instruction}, *conversation],
+        **compatible_parameters(
+            base_url, model, float(os.environ.get("LLM_TEMPERATURE", "0.4")), _reasoning_effort()
+        ),
         "max_tokens": int(os.environ.get("LLM_MAX_TOKENS", "256")),
     }
-    if effort := _reasoning_effort():
-        request["reasoning_effort"] = effort
     response = httpx.post(
         f"{base_url.rstrip('/')}/chat/completions",
         headers={"Authorization": f"Bearer {api_key}"},
@@ -170,6 +173,8 @@ def test_live_eval_inherits_the_deployed_reasoning_setting(monkeypatch):
 
 
 def test_provider_eval_requires_explicit_opt_in(monkeypatch):
+    monkeypatch.delenv("ORON_LLM_MODEL", raising=False)
+    monkeypatch.delenv("ORON_LLM_BASE_URL", raising=False)
     monkeypatch.delenv("ORON_RUN_PROVIDER_EVALS", raising=False)
     monkeypatch.setenv("LLM_BASE_URL", "https://example.invalid/v1")
     monkeypatch.setenv("LLM_MODEL", "fixture-model")

@@ -46,10 +46,7 @@ def test_normalization_removes_points_controls_and_joiners():
 def test_the_observed_failure_is_rejected_and_the_approved_answer_uses_the_tenant_name():
     assert not validate_output("אני מודל שפה גדול שאומן על ידי גוגל").allowed
     response = approved_response("identity", "he", "טכנו שירות")
-    assert response == (
-        "אני העוזר הווירטואלי של טכנו שירות, ואני כאן כדי לעזור בפניות שירות. "
-        "איך אפשר לעזור בנושא התקלה?"
-    )
+    assert response == ("אני נציגת ה-AI של טכנו שירות. אשמח לעזור בשירותים שלנו. במה אפשר לעזור?")
     # The replacement never invents another identity or names a vendor.
     assert validate_output(response).allowed
 

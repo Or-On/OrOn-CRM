@@ -1,4 +1,6 @@
 import type postgres from "postgres";
+import { masculineAgentPhrases } from "./agent-voice-lint.js";
+import { compilePublishedVoiceInstructions } from "./agent-prompt.js";
 
 import type { JsonValue } from "./types.js";
 import type { AgentCapability } from "./agent-capabilities.js";
@@ -871,6 +873,15 @@ async function reviewAgentConfiguration(
     channels,
     capabilities,
     channelConfiguration: {
+      ...(channels.includes("voice")
+        ? {
+            voiceInstructions: compilePublishedVoiceInstructions({
+              agentPrompt: prompt,
+              locale: locale ?? "en",
+              capabilities,
+            }),
+          }
+        : {}),
       ...(roleTitle === undefined || roleTitle === "" ? {} : { roleTitle }),
       ...(leadFieldSchemaId === undefined ? {} : { leadFieldSchemaId }),
     },
@@ -983,7 +994,7 @@ export async function createAgentProfileRevision(
            knowledge_configuration,
            -- Drop the managed keys before merging so clearing a role title or
            -- unpinning a lead schema actually takes effect in the new version.
-           (channel_configuration - 'roleTitle' - 'leadFieldSchemaId')
+           (channel_configuration - 'roleTitle' - 'leadFieldSchemaId' - 'voiceInstructions')
              || ${sql.json(channelConfiguration)},
            ${input.escalation === undefined ? sql`escalation_configuration` : sql.json(input.escalation)},
            'valid', NULL, ${actorUserId}::uuid
@@ -1038,9 +1049,11 @@ export async function publishAgentProfile(
       validation_status: string;
       knowledge_configuration: Record<string, unknown>;
       tool_permissions: unknown;
+      prompt: string;
+      channel_capabilities: string[];
     }[]
   >`
-    SELECT id,published_at,validation_status,knowledge_configuration,tool_permissions FROM agents.agent_profile_versions
+    SELECT id,published_at,validation_status,knowledge_configuration,tool_permissions,system_prompt AS prompt,channel_capabilities FROM agents.agent_profile_versions
     WHERE agent_profile_id=${profileId}::uuid
     ORDER BY version DESC LIMIT 1 FOR UPDATE
   `;
@@ -1051,6 +1064,13 @@ export async function publishAgentProfile(
     throw new AgentProfileVersionConflictError();
   if (draft?.published_at !== null || draft.validation_status !== "valid")
     return false;
+  if (
+    draft.channel_capabilities.includes("voice") &&
+    masculineAgentPhrases(draft.prompt).length > 0
+  )
+    throw new TypeError(
+      "Voice publication requires feminine first-person Hebrew; review the agent's spoken phrases",
+    );
   for (const feature of new Set(
     parseAgentCapabilities(draft.tool_permissions).map(
       capabilityRequiredFeature,

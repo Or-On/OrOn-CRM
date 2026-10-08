@@ -36,6 +36,7 @@ def test_restart_cooldown_and_window_budget_survive_persistent_failure() -> None
 @pytest.mark.parametrize("apply", [False, True])
 def test_actual_cli_dry_run_or_one_nondependent_restart(tmp_path, monkeypatch, apply) -> None:
     (tmp_path / "shared").mkdir()
+    monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setattr(recovery, "ROOT", tmp_path)
     monkeypatch.setattr(recovery, "Path", lambda _: tmp_path / "lock")
     monkeypatch.setitem(
@@ -185,6 +186,7 @@ def test_schema_probe_requires_exact_single_release_head(monkeypatch, tmp_path, 
     directory = tmp_path / "current/db/contracts"
     directory.mkdir(parents=True)
     (directory / "schema-manifest.json").write_text(json.dumps({"alembic_head": "f4ec0637b92e"}))
+    monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setattr(recovery, "ROOT", tmp_path)
     calls = []
 
@@ -201,6 +203,7 @@ def test_schema_probe_requires_exact_single_release_head(monkeypatch, tmp_path, 
 
 
 def test_schema_probe_missing_manifest_and_failed_probe_close(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setattr(recovery, "ROOT", tmp_path)
     assert not recovery.schema_matches_release(["compose"])
     directory = tmp_path / "current/db/contracts"
@@ -231,3 +234,10 @@ def test_schema_mismatch_suppresses_app_restart_with_healthy_database(
     monkeypatch.setattr(recovery, "command", lambda args: calls.append(args))
     recovery.recover(["compose"], tmp_path / "state.json", {}, 1000, apply=True)
     assert calls == [["compose", "restart", "--no-deps", "--timeout", "45", "caddy"]]
+
+
+def test_recovery_rejects_nonlinux_before_opening_a_deployment_lock(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(sys, "argv", ["recovery"])
+    with pytest.raises(RuntimeError, match="Linux host"):
+        recovery.main()

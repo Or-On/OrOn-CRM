@@ -1,4 +1,6 @@
 import type postgres from "postgres";
+import { compilePublishedVoiceInstructions } from "./agent-prompt.js";
+import { parseAgentCapabilities } from "./agent-capabilities.js";
 import {
   defaultAgentQuality,
   parseAgentQuality,
@@ -180,7 +182,7 @@ export async function createAgentQualityDraft(
       throw new TypeError("selected knowledge is unavailable in this tenant");
   }
   const rows = await sql<
-    { id: string }[]
+    { id: string; tool_permissions: unknown }[]
   >`INSERT INTO agents.agent_profile_versions
       (tenant_id,agent_profile_id,version,schema_version,system_prompt,locale,model_configuration_id,channel_capabilities,
        tool_permissions,knowledge_configuration,channel_configuration,escalation_configuration,validation_status,created_by_user_id)
@@ -189,9 +191,17 @@ export async function createAgentQualityDraft(
       ${sql.json({ schemaVersion: "1.0", sourceIds: [...sourceIds] })},
       channel_configuration || ${sql.json({ quality: JSON.parse(JSON.stringify(quality)) as postgres.JSONValue })},
       escalation_configuration,'pending',${actorId}::uuid
-    FROM agents.agent_profile_versions WHERE id=${baseVersionId}::uuid AND agent_profile_id=${profileId}::uuid RETURNING id`;
+    FROM agents.agent_profile_versions WHERE id=${baseVersionId}::uuid AND agent_profile_id=${profileId}::uuid RETURNING id,tool_permissions`;
   const id = rows[0]?.id;
   if (!id) throw new TypeError("base version is unavailable in this agent");
+  // A quality edit may change the business prompt. Recompile in the same draft
+  // transaction, before evaluation/publication, so no old derived prompt leaks.
+  const voiceInstructions = compilePublishedVoiceInstructions({
+    agentPrompt: systemPrompt,
+    locale: quality.language,
+    capabilities: parseAgentCapabilities(rows[0]?.tool_permissions),
+  });
+  await sql`UPDATE agents.agent_profile_versions SET channel_configuration=channel_configuration || ${sql.json({ voiceInstructions })} WHERE id=${id}::uuid AND published_at IS NULL`;
   await sql`UPDATE agents.agent_profiles SET updated_at=clock_timestamp() WHERE id=${profileId}::uuid`;
   await auditKnowledge(sql, actorId, "agent_quality.drafted", id);
   return id;

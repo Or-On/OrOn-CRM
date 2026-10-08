@@ -58,6 +58,32 @@ function canonical(value: BoundModelAttempt): string {
   for (const count of [value.inputTokens, value.outputTokens])
     if (count !== null && (!Number.isSafeInteger(count) || count < 0))
       throw new TypeError("invalid provider token count");
+  const details = value.tokenDetails;
+  let tokenDetails: Record<string, number | null> | undefined;
+  if (details !== undefined) {
+    tokenDetails = {};
+    for (const key of [
+      "cachedInput",
+      "audioInput",
+      "cachedAudioInput",
+      "reasoningOutput",
+      "audioOutput",
+    ] as const) {
+      const count = details[key];
+      const limit = key.endsWith("Output")
+        ? value.outputTokens
+        : value.inputTokens;
+      if (
+        count !== null &&
+        (limit === null ||
+          !Number.isSafeInteger(count) ||
+          count < 0 ||
+          count > limit)
+      )
+        throw new TypeError("invalid provider token detail");
+      tokenDetails[key] = count;
+    }
+  }
   // Explicit projection prevents request content, credentials or arbitrary extras
   // from being persisted even when a dynamically typed caller supplies them.
   return JSON.stringify({
@@ -72,6 +98,7 @@ function canonical(value: BoundModelAttempt): string {
     latencyMs: value.latencyMs,
     status: value.status,
     errorCode: value.errorCode,
+    ...(tokenDetails ? { tokenDetails } : {}),
   });
 }
 

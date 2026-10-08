@@ -168,7 +168,13 @@ describe("external service submission visibility", () => {
     expect(fetcher).toHaveBeenCalledTimes(3);
   });
   it("keeps expanded older service cases and resumes polling only after returning to the latest page", async () => {
-    calls.read.mockResolvedValue({ cases: [serviceCase], nextCursor: null });
+    calls.read.mockImplementation((url: string) =>
+      Promise.resolve(
+        url === "/api/field-service/incomplete"
+          ? { requests: [] }
+          : { cases: [serviceCase], nextCursor: null },
+      ),
+    );
     render(
       localized(
         <FieldServiceWorkspace
@@ -188,7 +194,11 @@ describe("external service submission visibility", () => {
       fireEvent.click(screen.getByRole("button", { name: "Load more cases" }));
     });
     await tick(15000);
-    expect(calls.read).toHaveBeenCalledTimes(1);
+    expect(
+      calls.read.mock.calls.filter(([url]) =>
+        String(url).startsWith("/api/field-service/cases"),
+      ),
+    ).toHaveLength(1);
     expect(screen.getByText("FS-FIRST")).toBeTruthy();
     expect(screen.getByText("FS-NEW-FORM")).toBeTruthy();
     await interact(() => {
@@ -198,7 +208,11 @@ describe("external service submission visibility", () => {
     });
     expect(screen.queryByText("FS-FIRST")).toBeNull();
     await tick();
-    expect(calls.read).toHaveBeenCalledTimes(3);
+    expect(
+      calls.read.mock.calls.filter(([url]) =>
+        String(url).startsWith("/api/field-service/cases"),
+      ),
+    ).toHaveLength(3);
   });
   it("pauses while hidden, editing or in a dialog, prevents overlapping requests and cleans up", async () => {
     let finish: (() => void) | undefined;
@@ -310,7 +324,13 @@ describe("external service submission visibility", () => {
     );
   });
   it("shows an externally created case without a manual reload and pauses for an open creation draft", async () => {
-    calls.read.mockResolvedValue({ cases: [serviceCase], nextCursor: null });
+    calls.read.mockImplementation((url: string) =>
+      Promise.resolve(
+        url === "/api/field-service/incomplete"
+          ? { requests: [] }
+          : { cases: [serviceCase], nextCursor: null },
+      ),
+    );
     render(
       localized(
         <FieldServiceWorkspace

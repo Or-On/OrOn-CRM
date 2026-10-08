@@ -28,6 +28,7 @@ def _settings():
         llm_api_key=secret,
         llm_base_url="https://provider.invalid/v1",
         llm_model="fixture-model",
+        llm_fallback_model=None,
         llm_reasoning_effort=LlmReasoningEffort.NONE,
         llm_temperature=0.4,
         llm_max_tokens=256,

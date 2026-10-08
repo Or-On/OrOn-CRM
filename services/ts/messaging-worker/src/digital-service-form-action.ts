@@ -1,5 +1,9 @@
 import type postgres from "postgres";
-import { digitalServiceFormHash, issueDigitalServiceForm } from "@or-on/crm";
+import {
+  digitalServiceFormHash,
+  issueDigitalServiceForm,
+  readServiceFormMessage,
+} from "@or-on/crm";
 
 export function digitalFormReply(url: string, locale: string): string {
   return locale.toLowerCase().startsWith("he")
@@ -32,7 +36,7 @@ export async function existingDigitalForm(
   for (const candidate of candidates) {
     const text = `${candidate.content_text ?? ""} ${JSON.stringify(candidate.structured_content)}`;
     for (const match of text.matchAll(/https:\/\/[^\s"\\<>]+/gu)) {
-      const url = match[0];
+      const url = match[0].replace(/[.,)]+$/u, "");
       try {
         if (new URL(url).origin !== origin) continue;
       } catch {
@@ -87,7 +91,11 @@ export async function verifiedExistingDigitalFormReply(
       ${input.triggerMessageId}::uuid,${input.messageId}::uuid,${digitalServiceFormHash(token)},${input.url})
       AND platform.current_tenant_id()::text=${fragment.get("tenant") ?? ""} AS allowed`;
   return rows[0]?.allowed === true
-    ? digitalFormReply(input.url, input.locale)
+    ? await readServiceFormMessage(
+        sql,
+        input.url,
+        digitalFormReply(input.url, input.locale),
+      )
     : undefined;
 }
 
@@ -156,6 +164,10 @@ export async function verifiedDigitalFormReply(
       ${input.triggerMessageId}::uuid,${input.messageId}::uuid,${digitalServiceFormHash(token)},${url.origin})
       AND platform.current_tenant_id()::text=${fragment.get("tenant") ?? ""} AS allowed`;
   return rows[0]?.allowed === true
-    ? digitalFormReply(input.url, input.locale)
+    ? await readServiceFormMessage(
+        sql,
+        input.url,
+        digitalFormReply(input.url, input.locale),
+      )
     : undefined;
 }

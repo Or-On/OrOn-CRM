@@ -41,7 +41,7 @@ async def role(pg, tenant, name):
     await pg.execute(f"SET LOCAL ROLE {name}")  # noqa: S608 -- test-owned role constant
 
 
-async def fixture(pg, *, photo_required=False):
+async def fixture(pg, *, photo_required=False, legacy=True):
     await pg.execute("RESET ROLE")
     tenant, contact, session, intake = (uuid4() for _ in range(4))
     token = uuid4().hex + uuid4().hex
@@ -112,6 +112,14 @@ async def fixture(pg, *, photo_required=False):
     await pg.execute(
         "UPDATE service.intake_drafts SET followup_status='admitted' WHERE id=$1", intake
     )
+    if legacy and await pg.fetchval(
+        "SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='service' "
+        "AND table_name='digital_intake_forms' AND column_name='form_version')"
+    ):
+        # Old tokens and their already-loaded clients remain supported.
+        await pg.execute(
+            "UPDATE service.digital_intake_forms SET form_version=1 WHERE intake_id=$1", intake
+        )
     await role(pg, tenant, "platform_web")
     return tenant, intake, digest
 
@@ -140,7 +148,8 @@ async def test_read_then_explicit_submission_is_atomic_and_idempotent(pg):
     )
     await role(pg, tenant, "platform_web")
     result = json.loads(await pg.fetchval("SELECT service.read_digital_intake_form($1)", digest))
-    assert result["businessName"] == "Fictional Repairs"
+    # An issued link keeps its reviewed brand even if the live profile changes.
+    assert result["businessName"] == "Fictional service"
     assert result["customerName"] == "דנה"
     assert result["faultDescription"] == "מסך לא נדלק"
     assert result["submitted"] is False
@@ -440,6 +449,27 @@ async def test_two_actual_connections_serialize_duplicate_submission_into_one_ca
     await run_alembic(isolated_postgres_url, "upgrade", "head")
     postgres_url = isolated_postgres_url
     seed = await asyncpg.connect(postgres_url)
+    # The superuser migration harness must give the migration owner its normal
+    # owner-equivalent access; application roles continue to use their RLS grants.
+    for schema in [
+        "public",
+        "platform",
+        "crm",
+        "messaging",
+        "automation",
+        "agents",
+        "service",
+        "support",
+        "objects",
+        "ops",
+        "audit",
+        "billing",
+    ]:
+        await seed.execute(f"GRANT USAGE ON SCHEMA {schema} TO platform_migrator")  # noqa: S608
+        await seed.execute(f"GRANT ALL ON ALL TABLES IN SCHEMA {schema} TO platform_migrator")  # noqa: S608
+        await seed.execute(
+            f"GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA {schema} TO platform_migrator"
+        )  # noqa: S608
     tenant = None
     first_written, release_first, second_started = asyncio.Event(), asyncio.Event(), asyncio.Event()
     tasks = []
@@ -580,8 +610,52 @@ async def test_full_form_address_survives_bounded_location_name_without_prefix_c
         "AND location.id=service_case.service_location_id WHERE service_case.intake_draft_id=$1",
         intake,
     )
-    assert dict(location) == {"name": address[:160], "address": address}
+    assert dict(location) == {"name": "מיקום שירות", "address": address}
     assert (
         await pg.fetchval("SELECT count(*) FROM crm.service_locations WHERE tenant_id=$1", tenant)
         == 2
     )
+
+
+@pytest.mark.asyncio
+async def test_new_form_requires_street_city_and_preserves_one_case(pg):
+    tenant, intake, digest = await fixture(pg, legacy=False)
+    detail = json.loads(await pg.fetchval("SELECT service.read_digital_intake_form($1)", digest))
+    assert detail["formVersion"] == 2
+    with pytest.raises(asyncpg.InvalidParameterValueError):
+        async with pg.transaction():
+            await submit(pg, digest)
+    for city in ["", " " * 3, "x" * 121]:
+        with pytest.raises(asyncpg.InvalidParameterValueError):
+            async with pg.transaction():
+                await pg.fetchval(
+                    "SELECT service.submit_digital_intake_form_v2("
+                    "$1,'דנה','רחוב 3',$2,'מסך מרצד',true,'[]')",
+                    digest,
+                    city,
+                )
+    query = (
+        "SELECT service.submit_digital_intake_form_v2("
+        "$1,'דנה','רחוב 3','עיר בדיקה','מסך מרצד',true,'[]')"
+    )
+    first = json.loads(await pg.fetchval(query, digest))
+    second = json.loads(await pg.fetchval(query, digest))
+    assert first["created"] is True and second == {
+        "created": False,
+        "reference": first["reference"],
+    }
+    await pg.execute("RESET ROLE")
+    location = await pg.fetchrow(
+        "SELECT l.name,l.address,l.city FROM crm.service_locations l "
+        "JOIN service.cases c ON c.service_location_id=l.id WHERE c.intake_draft_id=$1",
+        intake,
+    )
+    assert dict(location) == {
+        "name": "מיקום שירות",
+        "address": "רחוב 3, עיר בדיקה",
+        "city": "עיר בדיקה",
+    }
+    fields = json.loads(
+        await pg.fetchval("SELECT collected_fields FROM service.intake_drafts WHERE id=$1", intake)
+    )
+    assert fields["serviceStreet"] == "רחוב 3" and fields["serviceCity"] == "עיר בדיקה"

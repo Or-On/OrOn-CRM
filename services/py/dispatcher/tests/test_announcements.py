@@ -71,3 +71,14 @@ async def test_connect_failure_cleans_up_and_releases_slot(monkeypatch):
     room.disconnect.assert_awaited_once()
     source.aclose.assert_awaited_once()
     assert adapter._slots._value == 3
+
+
+@pytest.mark.parametrize("error", [FileNotFoundError(), ValueError("corrupt")])
+async def test_bad_asset_does_not_connect_or_hold_capacity(monkeypatch, error):
+    monkeypatch.setattr(announcements, "announcement_pcm", Mock(side_effect=error))
+    connect = Mock()
+    monkeypatch.setattr(announcements.rtc, "Room", connect)
+    adapter = announcements.RoomAnnouncements(url="ws://fictional.invalid", mint_token=Mock())
+    await adapter.play("fictional-room", "failure")
+    connect.assert_not_called()
+    assert adapter._slots._value == 3

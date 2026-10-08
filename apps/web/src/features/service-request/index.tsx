@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type SyntheticEvent } from "react";
-import { useLocale } from "next-intl";
+import Image from "next/image";
 import { Button, Input, Textarea } from "@or-on/ui";
 import styles from "./service-request.module.css";
 
@@ -15,6 +15,8 @@ interface LinkCredentials {
 }
 interface RequestDetails {
   businessName?: string;
+  businessPhone?: string;
+  formVersion?: number;
   customerName: string;
   faultDescription: string;
   photoRequired: boolean;
@@ -134,6 +136,12 @@ function readDetails(value: unknown): RequestDetails {
     ...("businessName" in value && typeof value.businessName === "string"
       ? { businessName: value.businessName }
       : {}),
+    ...("businessPhone" in value &&
+    typeof value.businessPhone === "string" &&
+    /^\+[1-9][0-9]{7,14}$/u.test(value.businessPhone)
+      ? { businessPhone: value.businessPhone }
+      : {}),
+    formVersion: "formVersion" in value && value.formVersion === 2 ? 2 : 1,
     customerName: value.customerName,
     faultDescription: value.faultDescription,
     photoRequired: value.photoRequired,
@@ -145,8 +153,7 @@ function readDetails(value: unknown): RequestDetails {
 }
 
 export function ServiceRequestForm() {
-  const he = useLocale().startsWith("he"),
-    copy = he ? wording.he : wording.en;
+  const copy = wording.he;
   const credentials = useRef<LinkCredentials | undefined>(undefined);
   const sending = useRef(false);
   const [reload, setReload] = useState(0);
@@ -161,7 +168,14 @@ export function ServiceRequestForm() {
   const [photos, setPhotos] = useState<File[]>([]);
   const [name, setName] = useState(""),
     [fault, setFault] = useState(""),
-    [location, setLocation] = useState("");
+    [location, setLocation] = useState(""),
+    [city, setCity] = useState("");
+  const [previews, setPreviews] = useState<string[]>([]);
+  useEffect(() => {
+    const urls = photos.map((file) => URL.createObjectURL(file));
+    setPreviews(urls);
+    return () => urls.forEach((url) => URL.revokeObjectURL(url));
+  }, [photos]);
   const [confirmed, setConfirmed] = useState(false);
   const resultHeading = useRef<HTMLHeadingElement>(null);
 
@@ -185,6 +199,7 @@ export function ServiceRequestForm() {
     setName("");
     setFault("");
     setLocation("");
+    setCity("");
     setPhotos([]);
     setConfirmed(false);
     setError(undefined);
@@ -233,7 +248,9 @@ export function ServiceRequestForm() {
       !fault.trim() ||
       fault.trim().length > 4000 ||
       !location.trim() ||
-      location.trim().length > 500 ||
+      location.trim().length > (details.formVersion === 2 ? 350 : 500) ||
+      (details.formVersion === 2 &&
+        (!city.trim() || city.trim().length > 120)) ||
       !confirmed
     ) {
       setError("missing");
@@ -260,6 +277,11 @@ export function ServiceRequestForm() {
     body.set("customerName", name.trim());
     body.set("faultDescription", fault.trim());
     body.set("serviceLocation", location.trim());
+    if (details.formVersion === 2) {
+      body.set("formVersion", "2");
+      body.set("serviceStreet", location.trim());
+      body.set("serviceCity", city.trim());
+    }
     body.set("confirmed", "true");
     for (const file of photos) body.append("photos", file);
     sending.current = true;
@@ -306,7 +328,7 @@ export function ServiceRequestForm() {
   }
 
   return (
-    <main className={styles.page} dir={he ? "rtl" : "ltr"}>
+    <main className={styles.page} lang="he" dir="rtl">
       <section className={styles.card} aria-labelledby="service-request-title">
         <header>
           <p className={styles.eyebrow}>
@@ -338,7 +360,7 @@ export function ServiceRequestForm() {
             ) : null}
           </div>
         ) : (
-          <form onSubmit={(event) => void submit(event)}>
+          <form noValidate onSubmit={(event) => void submit(event)}>
             <p className={styles.intro}>{copy.intro}</p>
             <fieldset className={styles.fields} disabled={pending}>
               <Input
@@ -363,7 +385,9 @@ export function ServiceRequestForm() {
               />
               <Textarea
                 id="service-location"
-                label={copy.location}
+                label={
+                  details?.formVersion === 2 ? "רחוב ומספר בית" : copy.location
+                }
                 hint={copy.locationHint}
                 value={location}
                 onChange={(event) => setLocation(event.target.value)}
@@ -373,16 +397,26 @@ export function ServiceRequestForm() {
                 autoComplete="street-address"
                 dir="auto"
               />
+              {details?.formVersion === 2 ? (
+                <Input
+                  id="service-city"
+                  label="עיר"
+                  value={city}
+                  onChange={(event) => setCity(event.target.value)}
+                  maxLength={120}
+                  required
+                  autoComplete="address-level2"
+                  dir="auto"
+                />
+              ) : null}
               <div className={styles.upload}>
-                <label htmlFor="service-photos">
-                  {copy.photos}
-                  {details?.photoRequired ? " *" : ""}
-                </label>
+                <label htmlFor="service-photos">הוספת תמונות</label>
                 <p id="service-photos-hint">
                   {copy.photosHint}
                   {details?.photoRequired ? ` ${copy.requiredPhoto}` : ""}
                 </p>
                 <input
+                  className={styles.fileInput}
                   id="service-photos"
                   type="file"
                   accept="image/jpeg,image/png,image/webp"
@@ -390,15 +424,57 @@ export function ServiceRequestForm() {
                   aria-required={details?.photoRequired === true}
                   aria-describedby="service-photos-hint"
                   onChange={(event) => {
-                    setPhotos(Array.from(event.target.files ?? []));
+                    const combined = [
+                      ...photos,
+                      ...Array.from(event.target.files ?? []),
+                    ];
+                    event.target.value = "";
+                    if (
+                      combined.length > maximumPhotos ||
+                      combined.some(
+                        (file) =>
+                          !photoTypes.has(file.type) ||
+                          file.size === 0 ||
+                          file.size > maximumPhotoBytes,
+                      ) ||
+                      combined.reduce((sum, file) => sum + file.size, 0) >
+                        maximumBytes
+                    ) {
+                      setError("invalidPhotos");
+                      return;
+                    }
+                    setPhotos(combined);
                     setError(undefined);
                   }}
                 />
+                <p role="status">{photos.length} מתוך 5</p>
                 {photos.length ? (
-                  <ul>
+                  <ul className={styles.previews}>
                     {photos.map((file, index) => (
                       <li key={`${String(index)}:${file.name}`} dir="auto">
-                        {file.name}
+                        {previews[index] ? (
+                          <Image
+                            unoptimized
+                            src={previews[index]}
+                            alt={file.name}
+                            width={100}
+                            height={100}
+                          />
+                        ) : null}
+                        <span>{file.name}</span>
+                        <Button
+                          type="button"
+                          aria-label={`הסרת ${file.name}`}
+                          onClick={() =>
+                            setPhotos((current) =>
+                              current.filter(
+                                (_, position) => position !== index,
+                              ),
+                            )
+                          }
+                        >
+                          הסרה
+                        </Button>
                       </li>
                     ))}
                   </ul>
@@ -424,6 +500,11 @@ export function ServiceRequestForm() {
             </fieldset>
           </form>
         )}
+        {details?.businessPhone ? (
+          <a className={styles.phone} href={`tel:${details.businessPhone}`}>
+            התקשרו אלינו
+          </a>
+        ) : null}
       </section>
     </main>
   );

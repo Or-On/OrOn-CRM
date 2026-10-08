@@ -6,11 +6,46 @@ import {
   enforceStandaloneCallbackConsent,
   explicitlyRequestsImmediateCall,
   groundAiReply,
+  guardFailedLeadReply,
   latestMessageLocale,
   safeConversationalReply,
   safeKnowledgeStatement,
   type EligibleKnowledgeFact,
 } from "./ai-grounding.js";
+
+it("preserves an honest lack of approved price without treating מאושר as a completed action", () => {
+  const text =
+    "אין בידיי מחיר מאושר לסוכן טלפוני. סוכן טלפוני מטפל בשיחות ואילו סוכן וואטסאפ מטפל בהודעות.";
+  expect(groundAiReply({ action: "reply", text }, [], "he").text).toBe(text);
+  expect(safeConversationalReply("אושר החזר והכסף שולם.")).toBe(false);
+});
+
+it("delivers an honest failure after a refused lead write despite a model success claim", () => {
+  const proposed = {
+    action: "reply" as const,
+    text: "רשמתי את פרטיך, נציג אנושי יחזור אליך בהקדם.",
+  };
+  const failed = [
+    {
+      action: "lead_save",
+      ok: false,
+      reference: null,
+      detail: "storage unavailable",
+    },
+  ];
+  const guarded = guardFailedLeadReply(proposed, failed, "he");
+  expect(groundAiReply(guarded, [], "he").text).toBe(
+    "לא הצלחתי להשלים את שמירת הפנייה כרגע. אפשר לנסות שוב בהמשך.",
+  );
+  const clarification = {
+    action: "reply" as const,
+    text: "מה המספר המלא לחזרה?",
+  };
+  expect(guardFailedLeadReply(clarification, failed, "he")).toEqual(
+    clarification,
+  );
+  expect(guardFailedLeadReply(proposed, [], "he")).toEqual(proposed);
+});
 
 const fact: EligibleKnowledgeFact = {
   sourceId: "10000000-0000-4000-8000-000000000001",
@@ -1104,4 +1139,19 @@ describe("unexecuted form promises", () => {
       );
     },
   );
+});
+
+it("keeps an approved service answer while repairing a closed neutral-address phrase", () => {
+  const text =
+    "שלום, אני נציגת ה-AI של סטודיו צבע. אצלנו שיעורי ציור וסדנאות קרמיקה. באיזה שירות את/ה מתעניין/ת?";
+  const delivered = groundAiReply({ action: "reply", text }, [], "he");
+  expect(delivered.text).toBe(text.replace("את/ה מתעניין/ת", "יש עניין"));
+  expect(safeConversationalReply(delivered.text, { locale: "he" })).toBe(true);
+  expect(
+    groundAiReply(
+      { action: "reply", text: "אושר החזר. באיזה שירות את/ה מתעניין/ת?" },
+      [],
+      "he",
+    ).text,
+  ).not.toContain("אושר החזר");
 });

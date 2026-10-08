@@ -224,7 +224,15 @@ def test_a_refused_write_is_never_reported_as_saved() -> None:
             {"observations": [{"key": "company", "state": "known", "value": "X"}]},
         )
     )
-    assert result == {"ok": False, "error": "the action was refused", "code": "LD423"}
+    assert result == {
+        "ok": False,
+        "error": "the action was refused",
+        "code": "LD423",
+        "nextStep": (
+            "Explain that the request could not be completed. Do not re-ask granted consent."
+        ),
+    }
+    assert turns.failed_for_current_turn()
     assert turns.receipt_for_current_turn() is False
 
 
@@ -320,3 +328,30 @@ def test_a_read_only_agent_can_read_but_not_write() -> None:
     )
     assert write["ok"] is False
     assert all(call[0] != "save_fields" for call in store.calls)
+
+
+def test_failed_write_remains_honest_after_read_and_each_new_turn() -> None:
+    from oron_agent.spoken_safety import BusinessClaimGuardFilter
+
+    async def scenario():
+        store, turns = FakeStore(), AcceptedTurns()
+        runtime = tools(store, FULL, turns)
+        runtime.lead_id = LEAD_ID
+        guard = BusinessClaimGuardFilter(
+            get_language=lambda: "he", lead_write_failed=turns.failed_turn_key
+        )
+        for _ in range(2):
+            turns.accept()
+            store.fail_next_save = LeadStoreRefusal("unavailable", "Synthetic outage")
+            result = await runtime.run(
+                "lead_save_fields",
+                {"observations": [{"key": "company", "state": "known", "value": "Synthetic"}]},
+            )
+            assert result["ok"] is False
+            await runtime.run("lead_read_state", {})
+            assert "לא הצלחתי" in await guard.filter("האם לבקש מנציג לחזור אליך?")
+            assert await guard.filter("עוד משפט באותו תור") == ""
+        turns.accept()
+        assert await guard.filter("שלום") == "שלום"
+
+    run(scenario())

@@ -63,23 +63,8 @@ def test_direction_is_an_enum():
         CallContext(call_id="c4", direction="sideways", flow_id=FLOW_ID, tenant_id=TENANT_ID)
 
 
-def test_tts_voice_defaults_to_none_and_is_settable():
-    assert (
-        CallContext(
-            call_id="c5", direction="inbound", flow_id=FLOW_ID, tenant_id=TENANT_ID
-        ).tts_voice
-        is None
-    )
-    assert (
-        CallContext(
-            call_id="c6",
-            direction="inbound",
-            tts_voice="Kore",
-            flow_id=FLOW_ID,
-            tenant_id=TENANT_ID,
-        ).tts_voice
-        == "Kore"
-    )
+def test_call_context_cannot_override_the_canonical_voice():
+    assert "tts_voice" not in CallContext.model_fields
 
 
 def test_caller_address_gender_is_typed_and_optional():

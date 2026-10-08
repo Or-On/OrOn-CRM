@@ -2225,6 +2225,7 @@ name = "or-on-dispatcher-runtime"
 version = "0.1.0"
 source = { editable = "services/py/dispatcher" }
 dependencies = [
+    { name = "cryptography" },
     { name = "httpx" },
     { name = "or-on-platform-integration" },
     { name = "oron-db" },
@@ -2241,6 +2242,7 @@ voice = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cryptography", specifier = "==50.0.1" },
     { name = "httpx", specifier = "==0.28.1" },
     { name = "or-on-platform-integration", editable = "packages/py/platform-integration" },
     { name = "oron-agent", marker = "extra == 'voice'", editable = "packages/py/oron-agent" },

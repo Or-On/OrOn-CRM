@@ -1,24 +1,7 @@
-Fixed lifecycle announcements generated offline on 2026-10-03 with the installed
-Microsoft Asaf Hebrew voice. Mono signed PCM16 WAV, 16,000Hz. No model or external
-TTS request is required during playback.
+# Lifecycle audio
 
-- `busy-he.wav` (6.07s): כל הנציגים עסוקים כרגע. אנא נסו שוב בעוד כמה דקות. תודה.
-- `goodbye-he.wav` (4.31s): אנחנו מסיימים כעת את השיחה. תודה ולהתראות.
+Generated offline using Soniox tts-rt-v2, Harper, on 2026-10-08. Five mono PCM16 WAV files at 16,000 Hz; exact text, SHA-256 and durations are retained in provenance.json. Playback never calls a synthesis provider. Missing, corrupt or overlong files must not select another voice.
 
-The adapter validates format/duration, waits for a subscriber, uses 20ms frames,
-waits for playout, and closes the room connection/audio source under bounded
-deadlines. Live SIP audibility, Hebrew listening quality and cap-plus-one / active
-call deployment acceptance remain mandatory after an approved deployment.
+Reproduce explicitly: `uv run python scripts/generate_announcements.py --allow-offline-provider --output .artifacts/harper-announcements` with SONIOX_API_KEY in the environment. Normal tests never run this command.
 
-- `failure-he.wav`: אירעה תקלה בשיחה. אנא נסו שוב מאוחר יותר. תודה.
-  Fixed truthful provider-failure audio; no promise of a human transfer or task.
-  Generated locally using the existing OneCore Asaf token without registry changes.
-
-- `unavailable-he.wav`: השירות אינו זמין כעת. אנא נסו שוב מאוחר יותר. תודה.
-  Fixed unpublished/unavailable-agent refusal, without provider synthesis.
-
-- `recovery-he.wav` (4.91s): הייתה הפרעה קצרה בקול. אפשר לחזור על המשפט האחרון?
-  Generated offline on 2026-10-05 with the same OneCore Asaf voice. Used only
-  after the first recoverable interruption has discarded the broken reply and
-  verified that caller capture is connected. It requests a fresh turn without
-  claiming that synthesis has already recovered or repeating uncertain speech.
+Format and duration are verified. Listening acceptance and real-call audibility remain NOT RUN and are required before activation.

@@ -81,6 +81,7 @@ class Settings(BaseSettings):
     llm_api_key: SecretStr = Field(default=SecretStr(""), validation_alias="LLM_API_KEY")
     llm_base_url: str = Field(default="", validation_alias="LLM_BASE_URL")
     llm_model: str = Field(default="", validation_alias="LLM_MODEL")
+    llm_fallback_model: str | None = Field(default=None, validation_alias="LLM_FALLBACK_MODEL")
     # Voice turns need a fast reaction, not a hidden reasoning pass. This stays
     # unset for generic compatible providers; deployments opt in only when the
     # selected endpoint supports the OpenAI `reasoning_effort` parameter.
@@ -96,9 +97,9 @@ class Settings(BaseSettings):
     # A little variation sounds conversational without making tool selection or
     # collected details erratic. These settings apply only to openai-compat.
     llm_temperature: float = Field(default=0.4, ge=0.0, le=2.0, validation_alias="LLM_TEMPERATURE")
-    # A hard ceiling prevents a voice turn becoming a monologue. The persona
-    # remains the primary 1-2 sentence control; this is the last safety net.
-    llm_max_tokens: int = Field(default=256, ge=32, le=2048, validation_alias="LLM_MAX_TOKENS")
+    # This ceiling includes structured tool arguments, not only speech. The
+    # reviewed profile may impose a lower ceiling; the persona keeps speech short.
+    llm_max_tokens: int = Field(default=2048, ge=32, le=2048, validation_alias="LLM_MAX_TOKENS")
     # Optional throwaway inference at call setup. Off by default: the current
     # Google compatibility endpoint showed no useful prompt-cache benefit, so a
     # warm-up added cost without making the first customer turn faster.
@@ -325,12 +326,12 @@ class Settings(BaseSettings):
         """Gemini 3 cannot disable thinking through the compatibility API."""
         if (
             "generativelanguage.googleapis.com" in self.llm_base_url
-            and self.llm_model.startswith("gemini-3")
+            and self.llm_model.startswith(("gemini-3", "gemini-2.5-pro"))
             and self.llm_reasoning_effort is LlmReasoningEffort.NONE
         ):
             raise ValueError(
-                "LLM_REASONING_EFFORT=none is supported by Gemini 2.5 models, not Gemini 3; "
-                "use gemini-2.5-flash for the lowest-latency voice path or set the effort to low"
+                "LLM_REASONING_EFFORT=none is unsupported by Gemini 3 and Gemini 2.5 Pro; "
+                "set the effort to minimal"
             )
         return self
 

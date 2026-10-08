@@ -2476,3 +2476,30 @@
   display: grid;
   gap: 1rem;
 }
+
+.field-service-incomplete {
+  margin-block: 1rem;
+  padding: 1.25rem;
+}
+.field-service-incomplete-list {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
+  gap: 1rem;
+}
+.field-service-incomplete-list li {
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  padding: 1rem;
+  overflow-wrap: anywhere;
+}
+.field-service-incomplete-list p {
+  margin-block: 0.6rem;
+}
+.field-service-incomplete-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-block-start: 1rem;
+}

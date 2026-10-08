@@ -177,6 +177,7 @@ async function main(): Promise<void> {
     "LLM_API_KEY",
     "LLM_BASE_URL",
     "LLM_MODEL",
+    "LLM_FALLBACK_MODEL",
     "LLM_REASONING_EFFORT",
     "LLM_MAX_TOKENS",
     "LLM_TEMPERATURE",
@@ -291,6 +292,7 @@ async function main(): Promise<void> {
     serialize({
       DATABASE_URL: databaseUrl("platform_web", passwords.web),
       VOICE_DATABASE_URL: databaseUrl("platform_voice", passwords.voice),
+      CREDENTIAL_ENCRYPTION_KEY: credentialEncryptionKey,
       AUTH_SERVICE_SECRET: authServiceSecret,
       ENABLE_REAL_VOICE_PROVIDERS: flags.ENABLE_REAL_VOICE_PROVIDERS,
       ...voice,

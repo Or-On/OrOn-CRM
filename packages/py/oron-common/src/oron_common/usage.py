@@ -13,6 +13,7 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, Field, PrivateAttr, computed_field
 
 from oron_common.context import CallContext
+from oron_common.model_rates import MODEL_RATES
 
 
 class Carrier(StrEnum):
@@ -60,6 +61,8 @@ class CallUsage(BaseModel):
     # charging the full rate.
     llm_cached_prompt_tokens: int = 0
     llm_completion_tokens: int = 0
+    # Per-model buckets prevent pricing primary usage at a later fallback rate.
+    llm_usage_by_model: dict[str, dict[str, int]] = Field(default_factory=dict)
     tts_model: str = ""
     tts_characters: int = 0
     tts_audio_seconds: float = 0.0
@@ -71,6 +74,68 @@ class CallUsage(BaseModel):
     # Provider events are process-owned persistence state, never API/model input.
     # Keep them until the checkpoint transaction actually commits.
     _model_events: list[tuple[UUID, int, int, datetime]] = PrivateAttr(default_factory=list)
+    _authoritative_model_attempts: bool = PrivateAttr(default=False)
+
+    def enable_model_attempt_accounting(self) -> None:
+        self._authoritative_model_attempts = True
+
+    @property
+    def has_model_attempt_accounting(self) -> bool:
+        return self._authoritative_model_attempts
+
+    def record_model_attempt(self, attempt: dict) -> None:
+        """Compatibility API totals include reasoning; do not add it twice.
+
+        Persist missing usage explicitly, including failed billable attempts.
+        Detailed audio/cache overlap is never inferred from the prompt total.
+        """
+        model = attempt["model"]
+        bucket = self.llm_usage_by_model.setdefault(
+            model, {"prompt": 0, "cached": 0, "completion": 0}
+        )
+        reported = attempt.get("usage")
+        if not isinstance(reported, dict) or any(
+            type(reported.get(k)) is not int or reported[k] < 0
+            for k in ("prompt_tokens", "completion_tokens")
+        ):
+            bucket["unknown_attempts"] = bucket.get("unknown_attempts", 0) + 1
+            return
+        prompt, completion = reported["prompt_tokens"], reported["completion_tokens"]
+        detail = reported.get("prompt_tokens_details") or {}
+        output_detail = reported.get("completion_tokens_details") or {}
+        if not isinstance(detail, dict) or not isinstance(output_detail, dict):
+            bucket["unknown_attempts"] = bucket.get("unknown_attempts", 0) + 1
+            return
+        cached = detail.get("cached_tokens", 0) or 0
+        audio = detail.get("audio_tokens", 0) or 0
+        reasoning = output_detail.get("reasoning_tokens", 0) or 0
+        if (
+            any(type(v) is not int or v < 0 for v in (cached, audio, reasoning))
+            or max(cached, audio) > prompt
+            or reasoning > completion
+        ):
+            bucket["unknown_attempts"] = bucket.get("unknown_attempts", 0) + 1
+            return
+        for key, value in (
+            ("prompt", prompt),
+            ("completion", completion),
+            ("cached", cached),
+            ("audio", audio),
+            ("reasoning", reasoning),
+        ):
+            bucket[key] = bucket.get(key, 0) + value
+        # The API does not always disclose the intersection of audio and cache.
+        if audio and cached:
+            overlap = detail.get("cached_audio_tokens")
+            if type(overlap) is int and 0 <= overlap <= min(audio, cached):
+                bucket["cached_audio"] = bucket.get("cached_audio", 0) + overlap
+            else:
+                bucket["unknown_audio_cache"] = 1
+        self.llm_model = model
+        self.llm_prompt_tokens += prompt
+        self.llm_cached_prompt_tokens += cached
+        self.llm_completion_tokens += completion
+        self.record_model_event(prompt, completion)
 
     def record_model_event(self, input_tokens: int, output_tokens: int) -> None:
         if any(
@@ -96,6 +161,8 @@ class LlmRates(BaseModel):
     # priced before anyone checked its cached rate over-reports rather than
     # silently under-bills.
     cached_prompt_per_1k: float | None = None
+    audio_prompt_per_1k: float | None = None
+    cached_audio_prompt_per_1k: float | None = None
 
     @property
     def cached_rate(self) -> float:
@@ -147,6 +214,24 @@ class PriceBook(BaseModel):
 
     llm: dict[str, LlmRates] = Field(
         default_factory=lambda: {
+            **{
+                model: LlmRates(
+                    prompt_per_1k=rate["inputUsdPerMillion"] / 1000,
+                    completion_per_1k=rate["outputUsdPerMillion"] / 1000,
+                    cached_prompt_per_1k=rate["cachedInputUsdPerMillion"] / 1000,
+                    audio_prompt_per_1k=(
+                        rate["audioInputUsdPerMillion"] / 1000
+                        if "audioInputUsdPerMillion" in rate
+                        else None
+                    ),
+                    cached_audio_prompt_per_1k=(
+                        rate["cachedAudioInputUsdPerMillion"] / 1000
+                        if "cachedAudioInputUsdPerMillion" in rate
+                        else None
+                    ),
+                )
+                for model, rate in MODEL_RATES.items()
+            },
             # Output is the non-thinking "Text Output - Predictions" SKU at
             # $0.60/1M; the flow runs without reasoning, so the $2.50/1M
             # thinking rate does not apply.
@@ -228,7 +313,36 @@ def price(usage: CallUsage, book: PriceBook) -> CallCost:
     elif usage.call_seconds:
         cost.unpriced.append(usage.carrier or "telephony:unknown")
 
-    if llm := book.llm.get(usage.llm_model):
+    if usage.llm_usage_by_model:
+        for model, tokens in usage.llm_usage_by_model.items():
+            if tokens.get("unknown_attempts"):
+                cost.unpriced.append(model + ":usage_unknown")
+            audio = tokens.get("audio", 0)
+            cached_audio = tokens.get("cached_audio", 0)
+            model_rate = book.llm.get(model)
+            if audio:
+                if (
+                    tokens.get("unknown_audio_cache")
+                    or model_rate is None
+                    or model_rate.audio_prompt_per_1k is None
+                    or (cached_audio and model_rate.cached_audio_prompt_per_1k is None)
+                ):
+                    cost.unpriced.append(model + ":audio_unpriced")
+                    continue
+                cost.llm += (audio - cached_audio) / 1000 * model_rate.audio_prompt_per_1k
+                cost.llm += cached_audio / 1000 * (model_rate.cached_audio_prompt_per_1k or 0)
+            model_cost = price(
+                CallUsage(
+                    llm_model=model,
+                    llm_prompt_tokens=max(0, tokens.get("prompt", 0) - audio),
+                    llm_cached_prompt_tokens=max(0, tokens.get("cached", 0) - cached_audio),
+                    llm_completion_tokens=tokens.get("completion", 0),
+                ),
+                book,
+            )
+            cost.llm += model_cost.llm
+            cost.unpriced.extend(model_cost.unpriced)
+    elif llm := book.llm.get(usage.llm_model):
         # Clamped: a provider reporting more cache hits than prompt tokens must not
         # produce a negative charge.
         cached = min(usage.llm_cached_prompt_tokens, usage.llm_prompt_tokens)

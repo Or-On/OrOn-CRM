@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import logging
 import wave
 from collections.abc import Callable
 from importlib.resources import files
@@ -23,7 +24,10 @@ def announcement_pcm(kind: Announcement) -> bytes:
             raise ValueError("announcement must be mono PCM16 at16kHz")
         if not 0 < audio.getnframes() <= 8 * 16000:
             raise ValueError("announcement duration exceeds bounded playback")
-        return audio.readframes(audio.getnframes())
+        pcm = audio.readframes(audio.getnframes())
+        if len(pcm) != audio.getnframes() * 2:
+            raise ValueError("truncated announcement")
+        return pcm
 
 
 class RoomAnnouncements:
@@ -35,7 +39,14 @@ class RoomAnnouncements:
         self._slots = asyncio.Semaphore(3)
 
     async def play(self, room_name: str, kind: Announcement) -> None:
-        pcm = announcement_pcm(kind)
+        try:
+            pcm = announcement_pcm(kind)
+        except OSError, EOFError, wave.Error, ValueError:
+            logging.getLogger(__name__).error(
+                "voice announcement unavailable", extra={"kind": kind}
+            )
+            # No fallback voice or synthesis: let the caller's lifecycle finish.
+            return
         await asyncio.wait_for(self._slots.acquire(), timeout=2)
         room = None
         source = None

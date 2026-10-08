@@ -93,3 +93,16 @@ async def test_tool_presence_does_not_license_a_whatsapp_delivery_promise(announ
 async def test_whatsapp_queue_receipt_wording_is_not_a_delivery_claim():
     text = "The request for a WhatsApp form link is queued. Delivery is not confirmed."
     assert await BusinessClaimGuardFilter(lambda: "en").filter(text) == text
+
+
+def test_save_receipt_is_not_a_finalization_receipt():
+    from oron_agent.grounding import render_reply
+
+    closing = "תודה, נפתח ליד במערכת עם הפרטים שמסרת. נציג אנושי של OrOn יחזור אליך בהקדם."
+    blocked = render_reply(closing, [], "he", save_claim_receipted=True)
+    assert blocked.text != closing
+    assert blocked.decision == "suppressed_unverified_claim"
+    allowed = render_reply(
+        closing, [], "he", save_claim_receipted=True, finalized_claim_receipted=True
+    )
+    assert allowed.text == closing

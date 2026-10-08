@@ -13,7 +13,7 @@ import { serviceAgentPolicy } from "./agent-scope-policy.generated.js";
 export const agentScopePolicyVersion = serviceAgentPolicy.policyVersion;
 
 export type ApprovedResponseKind =
-  "identity" | "scope" | "data" | "recipient" | "fallback";
+  "identity" | "scope" | "data" | "recipient" | "fallback" | "pause";
 
 const strip = new RegExp(
   "[\u0591-\u05c7\u00ad\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]",
@@ -104,6 +104,17 @@ export function classifyCustomerTurn(text: string): TurnDecision {
   return { categories, serviceSignal, route: route ?? "identity", mixed: [] };
 }
 
+/** Derive the limit from persisted caller turns; a greeting never resets it. */
+export function repeatedScopeRedirect(turns: readonly string[]): boolean {
+  let count = 0;
+  for (const text of [...turns].reverse()) {
+    const decision = classifyCustomerTurn(text);
+    if (decision.serviceSignal) break;
+    if (decision.route !== null && ++count >= 3) return true;
+  }
+  return false;
+}
+
 /**
  * Reject customer-visible wording that leaves the service scope. Exact
  * server-approved responses are always allowed.
@@ -154,6 +165,7 @@ export function approvedAgentResponses(
     "data",
     "recipient",
     "fallback",
+    "pause",
   ];
   return new Set(
     kinds.flatMap((kind) =>

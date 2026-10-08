@@ -213,7 +213,7 @@ describe("OpenAiCompatibleChatProvider", () => {
     expect(body).toMatchObject({
       model: "test-model",
       max_tokens: 300,
-      reasoning_effort: "none",
+      temperature: 0.2,
       response_format: { json_schema: { strict: true } },
       stream: false,
     });
@@ -325,7 +325,7 @@ describe("OpenAiCompatibleChatProvider", () => {
       "verified_whatsapp_identity",
     );
     expect(body.messages[0]?.content).toContain(
-      "never ask for a phone number merely to search for the customer",
+      "Never ask for a phone number merely to search for the customer",
     );
     expect(body.messages[0]?.content).toContain(
       "never ask the customer to classify it as old or new",
@@ -454,25 +454,29 @@ describe("OpenAiCompatibleChatProvider", () => {
   });
 
   it.each([
-    [400, false],
-    [401, false],
-    [403, false],
-    [429, true],
-    [500, true],
-  ])("classifies HTTP %i retryability", async (status, retryable) => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(new Response(null, { status })),
-    );
-    const error = await provider()
-      .decide(request)
-      .catch((caught: unknown) => caught);
-    expect(error).toBeInstanceOf(WhatsAppAiProviderError);
-    expect(error).toMatchObject({
-      code: `ai_http_${String(status)}`,
-      retryable,
-    });
-  });
+    [400, 1],
+    [401, 1],
+    [403, 1],
+    [429, 2],
+    [500, 2],
+  ])(
+    "bounds HTTP %i recovery without worker retry multiplication",
+    async (status, attempts) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(new Response(null, { status })),
+      );
+      const error = await provider()
+        .decide(request)
+        .catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(WhatsAppAiProviderError);
+      expect(error).toMatchObject({
+        code: `ai_http_${String(status)}`,
+        retryable: false,
+      });
+      expect(fetch).toHaveBeenCalledTimes(attempts);
+    },
+  );
 
   it("exhausts a bounded timeout recovery", async () => {
     vi.stubGlobal(
@@ -733,7 +737,7 @@ describe("the published agent governs the WhatsApp request", () => {
     expect(system).toContain("You are a short Hebrew IT support agent.");
     expect(system).toContain("Prior tickets");
     expect(system).toContain("service intake state");
-    expect(system).toContain("never ask for a phone number");
+    expect(system).toContain("Never ask for a phone number");
   });
 
   it("offers no lead action to an agent that did not publish one", async () => {
@@ -770,7 +774,7 @@ describe("the published agent governs the WhatsApp request", () => {
     await provider().decide({
       ...leadCoordinator,
       capabilities: ["lead.write", "lead.finalize"],
-      lead: { schema: leadSchema, missingRequired: ["company"] },
+      lead: { schema: leadSchema, missingRequired: [] },
     });
 
     const schema = decisionSchemaOf(fetchMock);
@@ -895,7 +899,7 @@ describe("the published agent governs the WhatsApp request", () => {
     );
     expect(system).toContain("If they ask you to collect details first");
     expect(system).toContain("finalize first, then record follow-up");
-    expect(system).toContain("do not repeat a successful action");
+    expect(system).toContain("do not repeat a successful finalization");
     expect(system).toContain("A follow-up receipt records a request");
     expect(system).toContain("only that outcome lets you say it is saved");
   });
@@ -1169,4 +1173,35 @@ describe("the published agent governs the WhatsApp request", () => {
       ],
     });
   });
+});
+
+it("returns the canonical failed-write reply without another paid inference or consent question", async () => {
+  const fetcher = vi.fn();
+  vi.stubGlobal("fetch", fetcher);
+  const beforeAttempt = vi.fn();
+  const response = await provider().decide(
+    {
+      systemPrompt: "Synthetic",
+      locale: "he",
+      messages: [{ role: "user", text: "תחזרו אליי" }],
+      actionReceipts: [
+        {
+          action: "lead_save",
+          ok: false,
+          reference: null,
+          detail: "Storage unavailable",
+        },
+      ],
+    },
+    undefined,
+    undefined,
+    beforeAttempt,
+  );
+  expect(response).toEqual({
+    action: "reply",
+    replyCode: "action_failed",
+    text: "",
+  });
+  expect(fetcher).not.toHaveBeenCalled();
+  expect(beforeAttempt).not.toHaveBeenCalled();
 });

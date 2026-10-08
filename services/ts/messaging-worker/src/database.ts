@@ -1,5 +1,13 @@
 import {
-  digitalFormReply,
+  fieldIntakeModel,
+  type FieldIntakeModelProjection,
+} from "./field-intake-model.js";
+import { digitalFormReply } from "./digital-service-form-action.js";
+import {
+  readServiceFormMessage,
+  serviceFormTemplateParameters,
+} from "@or-on/crm";
+import {
   existingDigitalForm,
   verifiedExistingDigitalFormReply,
   startDigitalForm,
@@ -149,6 +157,7 @@ import {
   approvedAgentResponse,
   approvedAgentResponses,
   classifyCustomerTurn,
+  repeatedScopeRedirect,
   validateAgentOutput,
 } from "@or-on/crm";
 
@@ -180,6 +189,7 @@ import {
   latestMessageLocale,
   recentReplyWindowSize,
   safeConversationalReply,
+  guardFailedLeadReply,
   type CommittedRecord,
   type EligibleKnowledgeFact,
   type GroundedReply,
@@ -197,6 +207,7 @@ import {
 import {
   FieldServiceAiProviderError,
   type FieldServiceAiProvider,
+  type FieldServiceAttemptHooks,
 } from "./field-service-provider.js";
 import {
   ArtifactVerifierError,
@@ -313,6 +324,7 @@ export interface MessagingAutomationOptions {
   readonly automaticCallsEnabled?: boolean;
   readonly realWhatsAppEnabled?: boolean;
   readonly fieldServiceProvider?: FieldServiceAiProvider;
+  readonly fieldServiceModelRoutingEnabled?: boolean;
   readonly protectedFieldKeys?: ProtectedFieldKeys;
   readonly privateObjectStorage?: PrivateObjectStorageOptions;
   /** Reads a call's stored artifacts to decide whether they are usable. */
@@ -815,6 +827,45 @@ async function loadFieldServiceIntakeWork(
   });
 }
 
+function fieldServiceAttempts(
+  sql: Sql,
+  workerId: string,
+  job: JobRow,
+  provider: FieldServiceAiProvider,
+  authorize: (transaction: postgres.TransactionSql) => Promise<void>,
+): FieldServiceAttemptHooks & { model: string } {
+  const hooks: FieldServiceAttemptHooks & { model: string } = {
+    model: provider.modelName,
+    async beforeAttempt(attempt) {
+      await withOwnedJobTransaction(sql, workerId, job, async (tx) => {
+        await authorize(tx);
+        // An unpaired start remains explicit unknown usage after a process crash.
+        await tx`INSERT INTO audit.records(id,tenant_id,actor_service,action,target_type,target_id,metadata)
+          VALUES(${attempt.eventId}::uuid,platform.current_tenant_id(),'messaging-worker',
+          'field_service.model_attempt.started','job',${job.id}::uuid,
+          ${tx.json({ ...attempt, claimToken: job.claim_token, jobType: job.job_type, provider: provider.providerName })})`;
+      });
+    },
+    async onAttempt(attempt) {
+      // Accounting may finish after ownership changes; it cannot commit case output.
+      await sql.begin(async (tx) => {
+        await setTenantContext(tx, job.tenant_id);
+        const recorded = await tx<{ id: string }[]>`INSERT INTO audit.records(
+          tenant_id,actor_service,action,target_type,target_id,metadata)
+          SELECT platform.current_tenant_id(),'messaging-worker','field_service.model_attempt.completed',
+          'job',${job.id}::uuid,${JSON.stringify({ ...attempt, claimToken: job.claim_token, jobType: job.job_type, provider: provider.providerName })}::text::jsonb
+          WHERE EXISTS(SELECT 1 FROM audit.records WHERE id=${attempt.eventId}::uuid
+            AND tenant_id=platform.current_tenant_id() AND target_id=${job.id}::uuid
+            AND action='field_service.model_attempt.started' AND metadata->>'claimToken'=${job.claim_token}) RETURNING id`;
+        if (recorded.length !== 1)
+          throw new TypeError("field_service_attempt_not_reserved");
+      });
+      hooks.model = attempt.model;
+    },
+  };
+  return hooks;
+}
+
 async function processFieldServiceIntake(
   sql: Sql,
   workerId: string,
@@ -825,10 +876,33 @@ async function processFieldServiceIntake(
   try {
     const work = await loadFieldServiceIntakeWork(sql, workerId, job);
     if (work === undefined) return;
-    const provider = automation.fieldServiceProvider;
-    if (provider === undefined)
-      throw new TypeError("field_service_ai_unavailable");
-    await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
+    const snapshot = await withOwnedJobTransaction(
+      sql,
+      workerId,
+      job,
+      async (tx) => {
+        const rows = await tx<{ route: FieldIntakeModelProjection | null }[]>`
+        SELECT platform.field_intake_model_route(${job.id}::uuid,${workerId},${job.claim_token}::uuid,false,NULL) AS route`;
+        const route = rows[0]?.route;
+        if (
+          route?.tenantId !== job.tenant_id ||
+          route.agentVersionId !== work.agentVersionId ||
+          route.ownershipEpoch !== work.ownershipEpoch
+        )
+          throw new TypeError("field_service_model_unavailable");
+        return route;
+      },
+    );
+    const provider = await fieldIntakeModel(
+      snapshot,
+      automation.fieldServiceProvider,
+      automation.modelRouting?.resolveSealedCredential,
+    );
+    const authorizeAttempt = async (transaction: postgres.TransactionSql) => {
+      await requireTenantFeatures(transaction, ["field_service", "whatsapp"]);
+      const feature = await getFieldServiceFeatureState(transaction);
+      if (!feature.effective || !feature.whatsAppIntakeEnabled)
+        throw new TypeError("field_service_disabled");
       const machine = await authorizeMachineTool(
         transaction,
         job,
@@ -838,15 +912,32 @@ async function processFieldServiceIntake(
       );
       if (machine?.principalId !== work.machinePrincipalId)
         throw new TypeError("machine tool execution principal changed");
-    });
-    const extraction = await provider.extractIntake({
-      locale: openingMenuRoute?.language ?? work.locale,
-      workflowPolicy: work.existing?.workflowPolicy ?? work.workflowPolicy,
-      existingFields: { ...work.knownFields, ...work.existing?.fields },
-      storeOptions: work.storeOptions,
-      intakeAlreadyOpen: work.existing !== undefined,
-      messages: work.messages,
-    });
+    };
+    await withOwnedJobTransaction(sql, workerId, job, authorizeAttempt);
+    const attempts = fieldServiceAttempts(
+      sql,
+      workerId,
+      job,
+      provider,
+      async (tx) => {
+        await authorizeAttempt(tx);
+        const rows = await tx<{ route: FieldIntakeModelProjection | null }[]>`
+          SELECT platform.field_intake_model_route(${job.id}::uuid,${workerId},${job.claim_token}::uuid,true,${JSON.stringify(snapshot)}::text::jsonb) AS route`;
+        if (!rows[0]?.route)
+          throw new TypeError("field_service_model_changed_or_quota_exhausted");
+      },
+    );
+    const extraction = await provider.extractIntake(
+      {
+        locale: openingMenuRoute?.language ?? work.locale,
+        workflowPolicy: work.existing?.workflowPolicy ?? work.workflowPolicy,
+        existingFields: { ...work.knownFields, ...work.existing?.fields },
+        storeOptions: work.storeOptions,
+        intakeAlreadyOpen: work.existing !== undefined,
+        messages: work.messages,
+      },
+      attempts,
+    );
     await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
       await requireOwnedJob(transaction, workerId, job);
@@ -955,7 +1046,7 @@ async function processFieldServiceIntake(
             jobId: job.id,
             triggerMessageId: work.triggerMessageId,
             provider: provider.providerName,
-            model: provider.modelName,
+            model: attempts.model,
             confidence: extraction.confidence,
             confirmedByCustomer: extraction.confirmed,
             missingFields: updated.missingFields,
@@ -1282,7 +1373,10 @@ async function processAudioTranscription(
           VALUES(platform.current_tenant_id(),'messaging','whatsapp.ai.reply','conversation',${work.conversationId}::uuid,
             jsonb_build_object('conversationId',${work.conversationId}::uuid,'triggerMessageId',${binding.messageId}::uuid),
             ${`whatsapp-ai-audio:${binding.operationId}`},3,100) ON CONFLICT DO NOTHING`;
-              if (automation.fieldServiceProvider !== undefined)
+              if (
+                automation.fieldServiceProvider !== undefined ||
+                automation.fieldServiceModelRoutingEnabled === true
+              )
                 await tx`
           INSERT INTO ops.jobs(tenant_id,queue,job_type,reference_type,reference_id,payload,idempotency_key,max_attempts,priority)
           SELECT platform.current_tenant_id(),'messaging','field_service.intake.extract','message',${binding.messageId}::uuid,
@@ -1984,11 +2078,40 @@ async function processFieldServiceSummary(
       },
     );
     if (!mayCallProvider) return;
-    const summary = await provider.summarizeEvidence({
-      sourceKind: work.sourceKind,
-      locale: work.locale,
-      evidence,
-    });
+    const attempts = fieldServiceAttempts(
+      sql,
+      workerId,
+      job,
+      provider,
+      async (transaction) => {
+        await requireTenantFeatures(transaction, ["field_service"]);
+        if (!(await getFieldServiceFeatureState(transaction)).effective)
+          throw new TypeError("field_service_disabled");
+        const menu = await transaction<{ allowed: boolean }[]>`
+        SELECT platform.opening_menu_business_job_allowed(${job.id}::uuid,${workerId},${job.claim_token}::uuid) AS allowed`;
+        if (menu[0]?.allowed !== true)
+          throw new TypeError("opening_menu_route_denied");
+        if (
+          work.sourceKind === "whatsapp" &&
+          (
+            await whatsappSummarySource(
+              transaction,
+              work.caseId,
+              work.sourceReferenceId,
+            )
+          )?.checksum !== work.checksum
+        )
+          throw new TypeError("field_service_summary_source_changed");
+      },
+    );
+    const summary = await provider.summarizeEvidence(
+      {
+        sourceKind: work.sourceKind,
+        locale: work.locale,
+        evidence,
+      },
+      attempts,
+    );
     await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
       await requireOwnedJob(transaction, workerId, job);
@@ -2037,7 +2160,7 @@ async function processFieldServiceSummary(
       }
       const completed = await transaction<{ id: string }[]>`
         UPDATE service.case_summaries SET status='completed', summary=${summary},
-          provider=${provider.providerName}, model=${provider.modelName},
+          provider=${provider.providerName}, model=${attempts.model},
           error_safe=NULL, completed_at=CURRENT_TIMESTAMP
         WHERE id=${work.summaryId}::uuid AND status='processing'
           AND source_checksum=${work.checksum}
@@ -2263,10 +2386,34 @@ async function processFieldServiceOcr(
       },
     );
     if (!mayCallProvider) return;
-    const extraction = await provider.extractProductLabel({
-      bytes,
-      contentType: work.contentType,
-    });
+    const attempts = fieldServiceAttempts(
+      sql,
+      workerId,
+      job,
+      provider,
+      async (transaction) => {
+        await requireTenantFeatures(transaction, [
+          "field_service",
+          "documents",
+          "ocr",
+        ]);
+        const feature = await getFieldServiceFeatureState(transaction);
+        if (!feature.effective || !feature.ocrEnabled)
+          throw new TypeError("field_service_disabled");
+        await requireCurrentOcrSource(transaction, work);
+        const menu = await transaction<{ allowed: boolean }[]>`
+        SELECT platform.opening_menu_business_job_allowed(${job.id}::uuid,${workerId},${job.claim_token}::uuid) AS allowed`;
+        if (menu[0]?.allowed !== true)
+          throw new TypeError("opening_menu_route_denied");
+      },
+    );
+    const extraction = await provider.extractProductLabel(
+      {
+        bytes,
+        contentType: work.contentType,
+      },
+      attempts,
+    );
     await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
       await requireOwnedJob(transaction, workerId, job);
@@ -2296,7 +2443,7 @@ async function processFieldServiceOcr(
         UPDATE service.ocr_results SET
           status='review_required', proposed_fields=${transaction.json(extraction.fields)},
           confidence=${extraction.confidence}, provider=${provider.providerName},
-          model=${provider.modelName}, error_safe=NULL,
+          model=${attempts.model}, error_safe=NULL,
           provenance=${transaction.json({
             schemaVersion: "1.0",
             sourceObjectId: work.objectId,
@@ -2932,10 +3079,6 @@ async function processIntakeFollowup(
       const plan = plans[0]?.plan;
       if (plan === undefined)
         throw new TypeError("intake follow-up plan missing");
-      if (plan.followupStatus === "admitted") {
-        await finishJob(transaction, job, workerId);
-        return;
-      }
       if (plan.optedOut === true || plan.consent !== "granted") {
         await settle(transaction, "blocked_consent", null);
         return;
@@ -2993,6 +3136,7 @@ async function processIntakeFollowup(
                   language: string;
                   channelId: string;
                   publicOrigin: string;
+                  parameterCount: number;
                 } | null;
               }[]
             >`SELECT service.whatsapp_form_template_configuration(conversation.channel_id) AS configuration
@@ -3039,10 +3183,18 @@ async function processIntakeFollowup(
               wabaId: configuration.wabaId,
             }
           : undefined;
+      const attempts = await transaction<
+        { attempt: number }[]
+      >`SELECT service.allocate_followup_attempt(${intakeId}::uuid) AS attempt`;
+      const attempt = attempts[0]?.attempt ?? 0;
+      if (attempt === 0) {
+        await finishJob(transaction, job, workerId);
+        return;
+      }
       const common = {
         conversationId: recipient.conversationId,
         explicitlyConfirmed: true,
-        idempotencyKey: `service-followup:${intakeId}`,
+        idempotencyKey: `service-followup:${intakeId}:attempt:${String(attempt)}`,
         provider: recipient.provider,
         realProviderEnabled: automation.realWhatsAppEnabled === true,
         recipientIdentityId: recipient.recipientIdentityId,
@@ -3094,18 +3246,24 @@ async function processIntakeFollowup(
           ? {
               ...common,
               kind: "text",
-              text: renderIntakeFollowup(customerPlan, businessName, formUrl),
+              text:
+                formUrl === undefined
+                  ? renderIntakeFollowup(customerPlan, businessName)
+                  : await readServiceFormMessage(transaction, formUrl),
             }
           : {
               ...common,
               kind: "template",
               templateName: delivery.templateName,
               language: delivery.language,
-              parameters: followupTemplateParameters(
-                plan,
-                businessName,
-                formUrl,
-              ),
+              parameters:
+                formUrl !== undefined && formTemplate !== undefined
+                  ? await serviceFormTemplateParameters(
+                      transaction,
+                      formUrl,
+                      formTemplate.parameterCount,
+                    )
+                  : followupTemplateParameters(plan, businessName, formUrl),
             },
         channelConfig,
       );
@@ -3127,7 +3285,12 @@ async function processIntakeFollowup(
         `;
         await transaction`UPDATE ops.jobs SET max_attempts=attempts WHERE id=${job.id}::uuid AND status='running' AND locked_by=${workerId}`;
       }
-      await transaction`SELECT ops.fail_messaging_job_claim(${job.id}::uuid,${workerId},${job.claim_token}::uuid,${refused ? "intake_followup_refused" : "intake_followup_failed"},30)`;
+      // Admission retries stop once the outbound job exists. They never restart
+      // an admitted send; that job owns its own bounded transport recovery.
+      await transaction`UPDATE ops.jobs SET max_attempts=least(max_attempts,4) WHERE id=${job.id}::uuid`;
+      await transaction`SELECT ops.fail_messaging_job_claim(${job.id}::uuid,${workerId},${job.claim_token}::uuid,
+        ${refused ? "intake_followup_refused" : "intake_followup_failed"},
+        (SELECT CASE WHEN attempts<=1 THEN 30 WHEN attempts=2 THEN 120 ELSE 600 END FROM ops.jobs WHERE id=${job.id}::uuid))`;
       // Retries exhausted: the inquiry must say so rather than stay queued.
       if (!refused)
         await transaction`
@@ -4580,7 +4743,17 @@ function committedRecordFrom(
 ): CommittedRecord | undefined {
   if (lead === null || !receipts.some((receipt) => receipt.ok))
     return undefined;
-  return { leadId: lead.id, revision: lead.revision };
+  return {
+    leadId: lead.id,
+    revision: lead.revision,
+    operation:
+      lead.status === "ready_for_review" &&
+      receipts.some(
+        (receipt) => receipt.ok && receipt.action === "lead_finalize",
+      )
+        ? "lead.finalize"
+        : "lead.save",
+  };
 }
 
 function leadActionSummary(result: LeadToolResult): string {
@@ -5127,7 +5300,14 @@ async function processWhatsAppAiReply(
       scopeRoute === null
         ? null
         : approvedAgentResponse(
-            scopeRoute,
+            repeatedScopeRedirect(
+              work.messages
+                .filter((message) => message.role === "user")
+                .slice(-32)
+                .map((message) => message.text),
+            )
+              ? "pause"
+              : scopeRoute,
             work.locale,
             work.tenantDisplayName,
           );
@@ -5355,7 +5535,7 @@ async function processWhatsAppAiReply(
                   if (action === undefined) {
                     const previous = work.messages.at(-2);
                     return deferUnconfirmedContextHandoff(
-                      proposed,
+                      guardFailedLeadReply(proposed, receipts, work.locale),
                       triggerText,
                       previous?.role === "assistant" ? previous.text : "",
                     );
@@ -5519,6 +5699,7 @@ async function processWhatsAppAiReply(
                   [
                     "an outstanding service form already exists",
                     "name and fault are required before the form link",
+                    "Previous form delivery requires reconciliation",
                   ].includes(error.message)
                 )
                   return undefined;
@@ -5539,7 +5720,11 @@ async function processWhatsAppAiReply(
           evidence = unavailable.evidence;
         } else {
           recordFormFollowup = existing === undefined;
-          responseText = digitalFormReply(form.url, work.locale);
+          responseText = await readServiceFormMessage(
+            transaction,
+            form.url,
+            digitalFormReply(form.url, work.locale),
+          );
           evidence = {
             kind: "receipt",
             operation: form.reused ? "service_form_existing" : "service_form",
@@ -6670,6 +6855,7 @@ async function committedRecordStillHolds(
   transaction: postgres.TransactionSql,
   conversationId: string,
   claimed: unknown,
+  finalized = false,
 ): Promise<boolean> {
   const value = record(claimed);
   if (!uuid(value.leadId) || typeof value.revision !== "number") return false;
@@ -6678,6 +6864,7 @@ async function committedRecordStillHolds(
     WHERE id=${value.leadId}::uuid
       AND source_conversation_id=${conversationId}::uuid
       AND revision >= ${value.revision}
+      AND (${!finalized} OR (${value.operation === "lead.finalize"} AND status IN ('ready_for_review','qualified','converted')))
   `;
   return rows[0] !== undefined;
 }
@@ -6809,6 +6996,12 @@ async function requireGroundedOutbound(
           row.conversation_id,
           evidence.record,
         ),
+        finalizedRecord: await committedRecordStillHolds(
+          transaction,
+          row.conversation_id,
+          evidence.record,
+          true,
+        ),
       })
     )
       expected = row.content_text ?? "";
@@ -6824,8 +7017,22 @@ async function requireGroundedOutbound(
       route !== null &&
       route === evidence.route &&
       approvedAgentResponses(name).has(row.content_text ?? "")
-    )
-      expected = approvedAgentResponse(route, metadata.locale, name);
+    ) {
+      const history = await transaction<{ content_text: string | null }[]>`
+        SELECT content_text FROM messaging.messages
+        WHERE tenant_id=platform.current_tenant_id() AND conversation_id=${row.conversation_id}::uuid
+          AND direction='inbound' AND created_at <= (SELECT created_at FROM messaging.messages WHERE id=${metadata.triggerMessageId}::uuid)
+        ORDER BY created_at DESC,id DESC LIMIT 32`;
+      expected = approvedAgentResponse(
+        repeatedScopeRedirect(
+          history.toReversed().map((message) => message.content_text ?? ""),
+        )
+          ? "pause"
+          : route,
+        metadata.locale,
+        name,
+      );
+    }
   } else if (evidence.kind === "receipt" && uuid(evidence.resourceId)) {
     if (
       evidence.operation === "service_form" &&
@@ -7211,7 +7418,9 @@ async function processWhatsAppOutbound(
     const code = invalidDelay ? "rate_limit_delay_quarantined" : failure.code;
     await withOwnedJobTransaction(sql, workerId, job, async (transaction) => {
       await setTenantContext(transaction, job.tenant_id);
-      const owned = await transaction<{ id: string }[]>`SELECT id FROM ops.jobs
+      const owned = await transaction<
+        { id: string; attempts: number }[]
+      >`SELECT id, attempts FROM ops.jobs
         WHERE id=${job.id}::uuid AND status='running' AND locked_by=${workerId} FOR UPDATE`;
       if (owned.length !== 1) return;
       if (!retryable) {
@@ -7220,7 +7429,7 @@ async function processWhatsAppOutbound(
         `;
       }
       await transaction`
-        SELECT ops.fail_messaging_job_claim(${job.id}::uuid, ${workerId}, ${job.claim_token}::uuid, ${code}, 5)
+        SELECT ops.fail_messaging_job_claim(${job.id}::uuid, ${workerId}, ${job.claim_token}::uuid, ${code}, ${[30, 120, 600][Math.min((owned[0]?.attempts ?? 1) - 1, 2)] ?? 600})
       `;
       if (retryable && providerDelay !== undefined)
         await transaction`
@@ -7302,6 +7511,17 @@ export function createMessagingStore(
           ${attempt.occurredAt}::timestamptz,${attempt.latencyMs},${attempt.inputTokens},
           ${attempt.outputTokens},${attempt.status},${attempt.errorCode})
       `;
+      if (attempt.tokenDetails)
+        await transaction`INSERT INTO audit.records(id,tenant_id,actor_service,action,target_type,target_id,metadata)
+          VALUES(${attempt.eventId}::uuid,platform.current_tenant_id(),'messaging-worker','model_attempt.token_details',
+            'job',${context.jobId}::uuid,${transaction.json({
+              model: attempt.model,
+              agentVersionId: context.agentVersionId,
+              inputTokens: attempt.inputTokens,
+              outputTokens: attempt.outputTokens,
+              ...attempt.tokenDetails,
+            })})
+          ON CONFLICT(id) DO NOTHING`;
     });
     await automation.modelAccountingSpool?.acknowledgeCommitted({
       ...attempt,
@@ -7418,7 +7638,8 @@ export function createMessagingStore(
             event,
             automation.aiProvider !== undefined,
             automation.realWhatsAppEnabled === true,
-            automation.fieldServiceProvider !== undefined,
+            automation.fieldServiceProvider !== undefined ||
+              automation.fieldServiceModelRoutingEnabled === true,
             providers.meta,
             automation.resolveChannelCredential,
           );

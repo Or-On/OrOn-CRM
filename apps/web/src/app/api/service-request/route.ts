@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { readDigitalServiceForm, submitDigitalServiceForm } from "@or-on/crm";
+import {
+  markDigitalServiceFormOpened,
+  readDigitalServiceForm,
+  submitDigitalServiceForm,
+} from "@or-on/crm";
 import { boundedMultipart } from "../../../features/uploads";
 import { crmErrorResponse } from "../../../features/crm-route";
 import {
@@ -26,7 +30,19 @@ function unavailable(): never {
 }
 
 function errorResponse(error: unknown) {
-  const response = crmErrorResponse(error);
+  const classified = crmErrorResponse(error);
+  const message =
+    classified.status === 404
+      ? "הקישור אינו זמין או שפג תוקפו. יש לבקש קישור חדש."
+      : classified.status >= 500
+        ? "לא הצלחנו לשמור את הפנייה כרגע. נסו שוב."
+        : classified.status === 403
+          ? "אין אפשרות לבצע את הפעולה באמצעות הקישור הזה."
+          : "יש לבדוק את הפרטים והתמונות ולאשר את ההגשה.";
+  const response = NextResponse.json(
+    { error: message },
+    { status: classified.status },
+  );
   for (const [name, value] of Object.entries(headers))
     response.headers.set(name, value);
   return response;
@@ -35,13 +51,18 @@ function errorResponse(error: unknown) {
 export async function GET(request: Request) {
   try {
     const identity = serviceFormIdentity(request);
-    const form = await withServiceForm(identity.tenant, (sql) =>
-      readDigitalServiceForm(sql, identity.token),
-    );
+    const form = await withServiceForm(identity.tenant, async (sql) => {
+      const result = await readDigitalServiceForm(sql, identity.token);
+      if (result !== null)
+        await markDigitalServiceFormOpened(sql, identity.token);
+      return result;
+    });
     if (form === null) unavailable();
     return NextResponse.json(
       {
         businessName: form.businessName,
+        businessPhone: form.businessPhone,
+        formVersion: form.formVersion ?? 1,
         customerName: form.customerName,
         faultDescription: form.faultDescription,
         photoRequired: form.photoRequired,
@@ -89,7 +110,24 @@ export async function POST(request: Request) {
       );
     const form = await boundedMultipart(request, 20 * 1024 * 1024 + 64 * 1024);
     const customerName = field(form, "customerName", 160);
-    const serviceLocation = field(form, "serviceLocation", 500);
+    const version = form.get("formVersion");
+    if (
+      form.getAll("formVersion").length > 1 ||
+      (version !== null && version !== "2")
+    )
+      throw new TypeError("Invalid form version");
+    if (existing.formVersion === 2 && version !== "2")
+      throw new TypeError("Street and city required");
+    const address =
+      version === "2"
+        ? {
+            serviceStreet: field(form, "serviceStreet", 350),
+            serviceCity: field(form, "serviceCity", 120),
+          }
+        : undefined;
+    const serviceLocation = address
+      ? `${address.serviceStreet}, ${address.serviceCity}`
+      : field(form, "serviceLocation", 500);
     const faultDescription = field(form, "faultDescription", 4000);
     if (
       form.getAll("confirmed").length !== 1 ||
@@ -104,6 +142,7 @@ export async function POST(request: Request) {
         (file) =>
           !(file instanceof File) ||
           file.size === 0 ||
+          file.size > 12 * 1024 * 1024 ||
           !["image/jpeg", "image/png", "image/webp"].includes(file.type),
       )
     )
@@ -132,6 +171,7 @@ export async function POST(request: Request) {
       const result = await submitDigitalServiceForm(sql, authorized.token, {
         customerName,
         serviceLocation,
+        ...address,
         faultDescription,
         confirmed: true,
         photos: staged,

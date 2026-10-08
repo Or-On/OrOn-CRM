@@ -32,6 +32,33 @@ async function fixture(test: (directory: string) => Promise<void>) {
   }
 }
 describe("durable bounded accounting metadata spool", () => {
+  it("retains bounded token subsets across restart and rejects invalid accounting details", async () =>
+    fixture(async (root) => {
+      const attempt = {
+        ...event(),
+        inputTokens: 100,
+        outputTokens: 20,
+        tokenDetails: {
+          cachedInput: 50,
+          audioInput: 25,
+          cachedAudioInput: null,
+          reasoningOutput: 8,
+          audioOutput: null,
+        },
+      };
+      const spool = await createFilesystemAccountingSpool(root);
+      await spool.put(attempt);
+      expect(
+        await (await createFilesystemAccountingSpool(root)).pending(),
+      ).toEqual([attempt]);
+      await expect(
+        spool.put({
+          ...attempt,
+          eventId: randomUUID(),
+          tokenDetails: { ...attempt.tokenDetails, reasoningOutput: 21 },
+        }),
+      ).rejects.toThrow("invalid provider token detail");
+    }));
   it("replays completed events after a crash-left temporary file without deleting evidence", async () =>
     fixture(async (root) => {
       const attempt = event(),
