@@ -67,3 +67,4 @@ export * from "./publication-bindings.js";
 
 export * from "./whatsapp-instructions.js";
 export * from "./effective-prompt.js";
+export * from "./tenant-business-context.js";
