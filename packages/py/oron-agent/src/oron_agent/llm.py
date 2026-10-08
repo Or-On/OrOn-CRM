@@ -16,6 +16,7 @@ from uuid import uuid4
 from google.genai.types import HttpOptions
 from loguru import logger
 from openai import APIConnectionError, APITimeoutError
+from oron_common.voice_instructions import COMPOSITION_VERSION, instruction_text_snapshot
 from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter, GeminiLLMInvocationParams
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -110,6 +111,9 @@ class _BoundedOpenAILLMService(OpenAILLMService):
         self._attempt_model: ContextVar[str | None] = ContextVar(
             "voice_attempt_model", default=None
         )
+        self._instruction_hash: ContextVar[str | None] = ContextVar(
+            "voice_instruction_hash", default=None
+        )
         validate_fallback(self._configured_base_url, self._primary_model, fallback_model)
 
     async def get_chat_completions(self, context):
@@ -189,6 +193,8 @@ class _BoundedOpenAILLMService(OpenAILLMService):
                     if self._on_attempt is not None:
                         await self._on_attempt(
                             {
+                                "runtimeInstructionHash": self._instruction_hash.get(),
+                                "compositionVersion": COMPOSITION_VERSION,
                                 "attemptId": attempt_id,
                                 "model": model,
                                 "status": status,
@@ -271,6 +277,8 @@ class _BoundedOpenAILLMService(OpenAILLMService):
                 if self._on_attempt is not None:
                     await self._on_attempt(
                         {
+                            "runtimeInstructionHash": self._instruction_hash.get(),
+                            "compositionVersion": COMPOSITION_VERSION,
                             "attemptId": str(uuid4()),
                             "model": model,
                             "status": status,
@@ -356,6 +364,7 @@ class _BoundedOpenAILLMService(OpenAILLMService):
             # identity. An opener with no conversation yet gets an explicit
             # non-customer call-start event; see provider_context.
             instruction, conversation = fold_instructions(self._without_empty_tool_calls(messages))
+            self._instruction_hash.set(instruction_text_snapshot(instruction or "")["hash"])
             params["messages"] = (
                 [{"role": "system", "content": instruction}, *conversation]
                 if instruction

@@ -9,6 +9,7 @@ from uuid import UUID
 
 from loguru import logger
 from oron_common import CallContext, CallUsage, Direction, PriceBook, carrier_for
+from oron_common.voice_instructions import COMPOSITION_VERSION, instruction_text_snapshot
 from oron_flows import FlowVoice
 from oron_flows.node import ActionType
 from oron_hebrew import build_g2p, make_hebrew_niqqud_transformer
@@ -284,6 +285,26 @@ async def run_bot(
             raise StoredFlowUnavailable("published tenant voice flow is unavailable")
     else:
         spec = await resolve_flow_spec(sessions, ctx)
+    static_instruction_hash = instruction_text_snapshot(spec.role_message or "")["hash"]
+    snapshot_writer = getattr(sessions, "record_instruction_snapshot", None)
+    if snapshot_writer is not None:
+        await snapshot_writer(
+            ctx,
+            {
+                "staticEffectiveInstructionHash": static_instruction_hash,
+                "compositionVersion": COMPOSITION_VERSION,
+                "agentVersionId": configuration.get("agentVersionId"),
+                "retainedFlowId": str(spec.id),
+                "retainedFlowVersion": spec.version,
+                "locale": spec.language,
+                "nodeInstructionHashes": {
+                    node.name: instruction_text_snapshot(
+                        node.role_message or spec.role_message or ""
+                    )["hash"]
+                    for node in spec.nodes
+                },
+            },
+        )
     quality = configuration.get("quality", {})
     if not isinstance(quality, dict):
         quality = {}
@@ -487,6 +508,7 @@ async def run_bot(
     attempt_writer = getattr(sessions, "record_model_attempt", None)
 
     async def record_model_attempt(attempt: dict) -> None:
+        attempt = {**attempt, "staticEffectiveInstructionHash": static_instruction_hash}
         usage.record_model_attempt(attempt)
         if attempt_writer is not None:
             await attempt_writer(ctx, attempt)

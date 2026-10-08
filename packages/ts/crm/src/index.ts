@@ -63,3 +63,6 @@ export * from "./memory-human-controls.js";
 export * from "./callable-voice-flows.js";
 
 export * from "./incomplete-service-requests.js";
+
+export * from "./whatsapp-instructions.js";
+export * from "./effective-prompt.js";

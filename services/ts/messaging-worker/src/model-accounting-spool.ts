@@ -84,9 +84,29 @@ function canonical(value: BoundModelAttempt): string {
       tokenDetails[key] = count;
     }
   }
+  for (const hash of [
+    value.runtimeInstructionHash,
+    value.staticEffectiveInstructionHash,
+  ])
+    if (hash !== undefined && !/^[a-f0-9]{64}$/u.test(hash))
+      throw new TypeError("invalid instruction hash");
+  if (
+    value.effectiveLocale !== undefined &&
+    !/^[a-zA-Z-]{2,35}$/u.test(value.effectiveLocale)
+  )
+    throw new TypeError("invalid instruction locale");
+  if (
+    value.compositionVersion !== undefined &&
+    value.compositionVersion !== "effective-instructions.v1"
+  )
+    throw new TypeError("invalid instruction composition version");
   // Explicit projection prevents request content, credentials or arbitrary extras
   // from being persisted even when a dynamically typed caller supplies them.
   return JSON.stringify({
+    staticEffectiveInstructionHash: value.staticEffectiveInstructionHash,
+    effectiveLocale: value.effectiveLocale,
+    runtimeInstructionHash: value.runtimeInstructionHash,
+    compositionVersion: value.compositionVersion,
     eventId: value.eventId,
     tenantId: value.tenantId,
     jobId: value.jobId,
