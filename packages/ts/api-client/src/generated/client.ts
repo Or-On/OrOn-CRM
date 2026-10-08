@@ -8,9 +8,11 @@ import type {
   CanonicalFlowContract,
   CanonicalFlowValidationResult,
   ComponentCatalog,
+  EffectivePromptResult,
   FlowDocumentRequest,
   FlowList,
   FlowPublishResult,
+  FlowSourceResult,
   FlowValidationResult,
   LiveStatus,
   PhoneNumberList,
@@ -74,6 +76,23 @@ export class GeneratedControlApiClient {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
       },
+    );
+  }
+
+  public async getAgentEffectivePrompt(parameters: {
+    readonly agent_id: string;
+    readonly version_id: string;
+    readonly flow_id?: string | null;
+    readonly flow_version?: number | null;
+    readonly node_id?: string | null;
+  }): Promise<ApiResponse<EffectivePromptResult>> {
+    return this.request<EffectivePromptResult>(
+      `/api/v1/orchestration/agents/${encodeURIComponent(String(parameters.agent_id))}/versions/${encodeURIComponent(String(parameters.version_id))}/effective-prompt` +
+        this.query([
+          ["flow_id", parameters.flow_id],
+          ["flow_version", parameters.flow_version],
+          ["node_id", parameters.node_id],
+        ]),
     );
   }
 
@@ -142,6 +161,15 @@ export class GeneratedControlApiClient {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     });
+  }
+
+  public async getVoiceFlowSource(parameters: {
+    readonly flow_id: string;
+    readonly version: number;
+  }): Promise<ApiResponse<FlowSourceResult>> {
+    return this.request<FlowSourceResult>(
+      `/api/v1/voice/flows/${encodeURIComponent(String(parameters.flow_id))}/versions/${encodeURIComponent(String(parameters.version))}`,
+    );
   }
 
   public async listVoicePhoneNumbers(): Promise<ApiResponse<PhoneNumberList>> {
@@ -236,6 +264,12 @@ export class GeneratedControlApiClient {
     return this.request<ReadyStatus>("/health/ready");
   }
 
+  private query(entries: readonly (readonly [string, unknown])[]): string {
+    const query = new URLSearchParams();
+    for (const [key, value] of entries)
+      if (value !== undefined && value !== null) query.set(key, String(value));
+    return query.size ? "?" + query.toString() : "";
+  }
   private async request<T>(
     path: string,
     init?: RequestInit,

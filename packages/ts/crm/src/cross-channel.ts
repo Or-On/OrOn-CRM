@@ -27,40 +27,15 @@ import { assertAgentGoldenPublishable } from "./agent-quality-gate.js";
 import { assertKnowledgeManager } from "./knowledge.js";
 import { parseLeadFieldSchema } from "./lead-schema.js";
 
-export const supportedChannels = ["voice", "whatsapp"] as const;
-export type SupportedChannel = (typeof supportedChannels)[number];
-export type FlowNodeType =
-  "start" | "end" | "message.send" | "voice.call" | "crm.update" | "handoff";
-const flowNodeTypes: readonly FlowNodeType[] = [
-  "start",
-  "end",
-  "message.send",
-  "voice.call",
-  "crm.update",
-  "handoff",
-];
-
-export interface CanonicalFlowNode {
-  readonly id: string;
-  readonly type: FlowNodeType;
-  readonly label?: string;
-  readonly configuration?: Readonly<Record<string, JsonValue>>;
-}
-
-export interface CanonicalFlowEdge {
-  readonly id: string;
-  readonly source: string;
-  readonly target: string;
-  /** Optional channel scope; omitted edges retain their existing behavior. */
-  readonly channels?: readonly SupportedChannel[];
-}
-
-export interface CanonicalFlow {
-  readonly schemaVersion: "1.0";
-  readonly channels: readonly SupportedChannel[];
-  readonly nodes: readonly CanonicalFlowNode[];
-  readonly edges: readonly CanonicalFlowEdge[];
-}
+export * from "./canonical-flow-contract.js";
+import {
+  parseCanonicalFlow,
+  validateCanonicalFlow,
+  compileCanonicalFlow,
+  sortedUniqueChannels,
+  type CanonicalFlow,
+  type SupportedChannel,
+} from "./canonical-flow-contract.js";
 
 function requiredFeaturesForFlow(
   flow: CanonicalFlow,
@@ -76,143 +51,6 @@ function requiredFeaturesForFlow(
   }
   return [...features];
 }
-
-export function parseCanonicalFlow(value: unknown): CanonicalFlow {
-  if (value === null || typeof value !== "object")
-    throw new TypeError("flow must be an object");
-  const record = value as Readonly<Record<string, unknown>>;
-  if (
-    record.schemaVersion !== "1.0" ||
-    !Array.isArray(record.channels) ||
-    !Array.isArray(record.nodes) ||
-    !Array.isArray(record.edges)
-  )
-    throw new TypeError("flow must use canonical schema version 1.0");
-  if (record.nodes.length > 100 || record.edges.length > 200)
-    throw new TypeError("flow exceeds the supported size");
-  const channels = record.channels.map((channel) => {
-    if (
-      typeof channel !== "string" ||
-      !supportedChannels.includes(channel as SupportedChannel)
-    )
-      throw new TypeError("flow contains an unsupported channel");
-    return channel as SupportedChannel;
-  });
-  const nodes = record.nodes.map((node) => {
-    if (node === null || typeof node !== "object")
-      throw new TypeError("flow nodes must be objects");
-    const candidate = node as Readonly<Record<string, unknown>>;
-    if (
-      typeof candidate.id !== "string" ||
-      !/^[\w-]{1,64}$/u.test(candidate.id) ||
-      typeof candidate.type !== "string" ||
-      !flowNodeTypes.includes(candidate.type as FlowNodeType)
-    )
-      throw new TypeError("flow node id/type is invalid");
-    const configuration = candidate.configuration;
-    const label = candidate.label;
-    if (
-      label !== undefined &&
-      (typeof label !== "string" ||
-        label.trim().length === 0 ||
-        label.trim().length > 120)
-    )
-      throw new TypeError("flow node label must contain 1–120 characters");
-    if (
-      configuration !== undefined &&
-      (configuration === null ||
-        typeof configuration !== "object" ||
-        Array.isArray(configuration))
-    )
-      throw new TypeError("node configuration must be an object");
-    // JSON round-trip detaches the persisted immutable version from caller objects.
-    const encoded = JSON.stringify(configuration ?? {});
-    if (encoded.length > 64_000)
-      throw new TypeError("node configuration is too large");
-    JSON.parse(encoded, (key: string, entry: unknown) => {
-      if (
-        /^(?:access_?token|api_?key|app_?secret|password|private_?key|secret)$/iu.test(
-          key,
-        )
-      )
-        throw new TypeError("credentials must never be embedded in flows");
-      return entry;
-    });
-    return {
-      id: candidate.id,
-      type: candidate.type as FlowNodeType,
-      ...(label === undefined ? {} : { label: label.trim() }),
-      ...(configuration === undefined
-        ? {}
-        : { configuration: JSON.parse(encoded) as Record<string, JsonValue> }),
-    };
-  });
-  const edges = record.edges.map((edge) => {
-    if (edge === null || typeof edge !== "object")
-      throw new TypeError("flow edges must be objects");
-    const candidate = edge as Readonly<Record<string, unknown>>;
-    if (
-      typeof candidate.id !== "string" ||
-      !/^[\w-]{1,64}$/u.test(candidate.id) ||
-      typeof candidate.source !== "string" ||
-      !/^[\w-]{1,64}$/u.test(candidate.source) ||
-      typeof candidate.target !== "string" ||
-      !/^[\w-]{1,64}$/u.test(candidate.target)
-    )
-      throw new TypeError("flow edge id/source/target is invalid");
-    const edgeChannels = candidate.channels;
-    if (
-      edgeChannels !== undefined &&
-      (!Array.isArray(edgeChannels) ||
-        edgeChannels.length === 0 ||
-        edgeChannels.some(
-          (channel: unknown) =>
-            typeof channel !== "string" ||
-            !channels.includes(channel as SupportedChannel),
-        ))
-    )
-      throw new TypeError(
-        "flow edge channels must be supported selected channels",
-      );
-    return {
-      id: candidate.id,
-      source: candidate.source,
-      target: candidate.target,
-      ...(edgeChannels === undefined
-        ? {}
-        : {
-            channels: sortedUniqueChannels(edgeChannels as SupportedChannel[]),
-          }),
-    };
-  });
-  return { schemaVersion: "1.0", channels, nodes, edges };
-}
-
-export interface FlowValidation {
-  readonly valid: boolean;
-  readonly errors: readonly string[];
-}
-
-export interface CompiledAdapter {
-  readonly schemaVersion: "oron-flow.v1" | "wacrm-automation.v1";
-  readonly nodes: readonly CanonicalFlowNode[];
-  readonly edges: readonly CanonicalFlowEdge[];
-}
-
-export type CompiledAdapters = Readonly<
-  Partial<Record<SupportedChannel, CompiledAdapter>>
->;
-
-const nodeChannels: Readonly<
-  Record<FlowNodeType, readonly SupportedChannel[]>
-> = {
-  start: supportedChannels,
-  end: supportedChannels,
-  "message.send": ["whatsapp"],
-  "voice.call": ["voice"],
-  "crm.update": supportedChannels,
-  handoff: supportedChannels,
-};
 
 function databaseJson(value: unknown): postgres.JSONValue {
   return JSON.parse(JSON.stringify(value)) as postgres.JSONValue;
@@ -232,92 +70,6 @@ async function auditAction(
     VALUES (platform.current_tenant_id(), ${actorUserId}::uuid, ${action},
             ${targetType}, ${targetId}::uuid, ${sql.json(databaseJson(metadata))})
   `;
-}
-
-function sortedUniqueChannels(
-  channels: readonly SupportedChannel[],
-): readonly SupportedChannel[] {
-  return [...new Set(channels)].sort();
-}
-
-export function validateCanonicalFlow(flow: CanonicalFlow): FlowValidation {
-  const errors: string[] = [];
-  const channels = sortedUniqueChannels(flow.channels);
-  if (channels.length === 0) errors.push("at least one channel is required");
-  if (channels.length !== flow.channels.length)
-    errors.push("flow channels must not be duplicated");
-  if (channels.some((channel) => !supportedChannels.includes(channel)))
-    errors.push("flow contains an unsupported channel");
-
-  const ids = new Set<string>();
-  for (const node of flow.nodes) {
-    if (node.id.trim() === "") errors.push("node IDs must not be empty");
-    if (ids.has(node.id)) errors.push(`duplicate node ID: ${node.id}`);
-    ids.add(node.id);
-    if (!(node.type in nodeChannels)) {
-      errors.push(`node ${node.id} has an unsupported type`);
-      continue;
-    }
-    if (!nodeChannels[node.type].some((channel) => channels.includes(channel)))
-      errors.push(`node ${node.id} is unsupported by the selected channels`);
-  }
-  if (flow.nodes.filter((node) => node.type === "start").length !== 1)
-    errors.push("flow must contain exactly one start node");
-  if (!flow.nodes.some((node) => node.type === "end"))
-    errors.push("flow must contain at least one end node");
-  const edgeIds = new Set<string>();
-  for (const edge of flow.edges) {
-    if (
-      edge.channels !== undefined &&
-      (edge.channels.length === 0 ||
-        edge.channels.some((channel) => !channels.includes(channel)))
-    )
-      errors.push(`edge ${edge.id} has invalid channel scope`);
-    if (edgeIds.has(edge.id)) errors.push(`duplicate edge ID: ${edge.id}`);
-    edgeIds.add(edge.id);
-    if (!ids.has(edge.source) || !ids.has(edge.target))
-      errors.push(`edge ${edge.id} references a missing node`);
-    if (edge.source === edge.target)
-      errors.push(`edge ${edge.id} cannot connect a node to itself`);
-  }
-  return { valid: errors.length === 0, errors: [...new Set(errors)].sort() };
-}
-
-function compileAdapter(
-  flow: CanonicalFlow,
-  channel: SupportedChannel,
-): CompiledAdapter {
-  const nodes = flow.nodes
-    .filter((node) => nodeChannels[node.type].includes(channel))
-    .toSorted((left, right) => left.id.localeCompare(right.id));
-  const ids = new Set(nodes.map((node) => node.id));
-  const edges = flow.edges
-    .filter(
-      (edge) =>
-        ids.has(edge.source) &&
-        ids.has(edge.target) &&
-        (edge.channels === undefined || edge.channels.includes(channel)),
-    )
-    .toSorted((left, right) => left.id.localeCompare(right.id));
-  return {
-    schemaVersion: channel === "voice" ? "oron-flow.v1" : "wacrm-automation.v1",
-    nodes,
-    edges,
-  };
-}
-
-export function compileCanonicalFlow(flow: CanonicalFlow): CompiledAdapters {
-  const validation = validateCanonicalFlow(flow);
-  if (!validation.valid)
-    throw new TypeError(
-      `invalid canonical flow: ${validation.errors.join("; ")}`,
-    );
-  return Object.fromEntries(
-    sortedUniqueChannels(flow.channels).map((channel) => [
-      channel,
-      compileAdapter(flow, channel),
-    ]),
-  );
 }
 
 export interface AgentProfileSummary {
@@ -498,6 +250,7 @@ export async function listAgentProfiles(
         ON pinned.id = conversation.ai_agent_profile_version_id
       WHERE pinned.agent_profile_id = profile.id
         AND conversation.ownership_mode = 'ai'
+        AND conversation.removed_from_inbox_at IS NULL
     ) assigned ON true
     LEFT JOIN LATERAL (
       SELECT count(DISTINCT flow.flow_definition_id) AS count
@@ -598,7 +351,13 @@ export async function rebindAgentConversations(
   actorUserId: string,
   profileId: string,
   expectedVersionId: string,
-): Promise<{ readonly versionId: string; readonly rebound: number } | null> {
+): Promise<{
+  readonly versionId: string;
+  readonly rebound: number;
+  readonly skipped: number;
+  readonly skippedHuman: number;
+  readonly skippedRemoved: number;
+} | null> {
   await requireTenantFeature(sql, "agents");
   await requireTenantFeature(sql, "whatsapp");
   await sql`
@@ -621,6 +380,23 @@ export async function rebindAgentConversations(
     throw new TypeError(
       "a newer version was published; review it before rebinding",
     );
+  // Lock this precise candidate set so reported exclusions cannot change between
+  // counting and rebinding. New conversations retain their admission snapshot.
+  const candidates = await sql<
+    { ownership_mode: string; removed_from_inbox_at: Date | null }[]
+  >`
+    SELECT conversation.ownership_mode,conversation.removed_from_inbox_at
+    FROM messaging.conversations conversation
+    JOIN agents.agent_profile_versions pinned ON pinned.id=conversation.ai_agent_profile_version_id
+    WHERE pinned.agent_profile_id=${profileId}::uuid AND pinned.id<>${target}::uuid
+    ORDER BY conversation.id FOR UPDATE OF conversation
+  `;
+  const skippedRemoved = candidates.filter(
+    (row) => row.removed_from_inbox_at !== null,
+  ).length;
+  const skippedHuman = candidates.filter(
+    (row) => row.removed_from_inbox_at === null && row.ownership_mode !== "ai",
+  ).length;
   const rows = await sql<{ id: string }[]>`
     UPDATE messaging.conversations conversation
     SET ai_agent_profile_version_id=${target}::uuid, updated_at=CURRENT_TIMESTAMP
@@ -629,6 +405,7 @@ export async function rebindAgentConversations(
       AND pinned.agent_profile_id = ${profileId}::uuid
       AND pinned.id <> ${target}::uuid
       AND conversation.ownership_mode = 'ai'
+      AND conversation.removed_from_inbox_at IS NULL
     RETURNING conversation.id
   `;
   await auditAction(
@@ -639,7 +416,13 @@ export async function rebindAgentConversations(
     profileId,
     { versionId: target, conversations: rows.length },
   );
-  return { versionId: target, rebound: rows.length };
+  return {
+    versionId: target,
+    rebound: rows.length,
+    skipped: skippedHuman + skippedRemoved,
+    skippedHuman,
+    skippedRemoved,
+  };
 }
 
 export async function renameAgentProfile(

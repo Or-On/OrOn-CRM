@@ -343,6 +343,7 @@ export interface BroadcastSummary {
 }
 
 export interface AutomationSummary {
+  readonly versionId?: string;
   readonly definition?: JsonValue;
   readonly executionKind?: "empty" | "canonical" | "unsupported";
   readonly id: string;

@@ -86,7 +86,9 @@ def _method_name(operation_id: str) -> str:
 
 
 def generate_client(document: dict[str, Any]) -> str:
-    operations: list[tuple[str, str, str, str, str | None, list[tuple[str, str]]]] = []
+    operations: list[
+        tuple[str, str, str, str, str | None, list[tuple[str, str]], list[tuple[str, str, bool]]]
+    ] = []
     for path, path_item in sorted(document.get("paths", {}).items()):
         for http_method in ("get", "post"):
             operation = path_item.get(http_method)
@@ -107,6 +109,18 @@ def generate_client(document: dict[str, Any]) -> str:
                 ]
                 if parameter.get("in") == "path"
             }
+            query_parameters = [
+                (
+                    parameter["name"],
+                    _typescript_type(parameter.get("schema", {})),
+                    parameter.get("required", False),
+                )
+                for parameter in [
+                    *path_item.get("parameters", []),
+                    *operation.get("parameters", []),
+                ]
+                if parameter.get("in") == "query"
+            ]
             path_parameters = []
             for name in re.findall(r"\{([^}]+)\}", path):
                 if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) or name not in declared:
@@ -120,6 +134,7 @@ def generate_client(document: dict[str, Any]) -> str:
                     http_method.upper(),
                     request_type,
                     path_parameters,
+                    query_parameters,
                 )
             )
 
@@ -127,7 +142,7 @@ def generate_client(document: dict[str, Any]) -> str:
         sorted(
             {
                 schema_type
-                for _, _, response_type, _, request_type, _ in operations
+                for _, _, response_type, _, request_type, _, _ in operations
                 for schema_type in (response_type, request_type)
                 if schema_type is not None
             }
@@ -156,18 +171,44 @@ def generate_client(document: dict[str, Any]) -> str:
         "  ) {}",
         "",
     ]
-    for method_name, path, response_type, http_method, request_type, path_parameters in operations:
+    for (
+        method_name,
+        path,
+        response_type,
+        http_method,
+        request_type,
+        path_parameters,
+        query_parameters,
+    ) in operations:
         arguments = []
         target = json.dumps(path)
-        if path_parameters:
-            fields = "; ".join(f"readonly {name}: {kind}" for name, kind in path_parameters)
-            arguments.append(f"parameters: {{ {fields} }}")
+        if path_parameters or query_parameters:
+            fields = "; ".join(
+                [
+                    *(f"readonly {name}: {kind}" for name, kind in path_parameters),
+                    *(
+                        f"readonly {name}{'' if required else '?'}: {kind}"
+                        for name, kind, required in query_parameters
+                    ),
+                ]
+            )
+            default = (
+                " = {}"
+                if not path_parameters and not any(required for _, _, required in query_parameters)
+                else ""
+            )
+            arguments.append(f"parameters: {{ {fields} }}{default}")
             escaped = path.replace("`", "\\`").replace("${", "\\${")
             for name, _ in path_parameters:
                 escaped = escaped.replace(
                     "{" + name + "}", "${encodeURIComponent(String(parameters." + name + "))}"
                 )
             target = "`" + escaped + "`"
+        if query_parameters:
+            query_entries = ", ".join(
+                f"[{json.dumps(name)}, parameters.{name}]" for name, _, _ in query_parameters
+            )
+            target = f"{target} + this.query([{query_entries}])"
         if request_type is not None:
             arguments.append(f"body: {request_type}")
         signature = ", ".join(arguments)
@@ -199,6 +240,12 @@ def generate_client(document: dict[str, Any]) -> str:
             )
     lines.extend(
         [
+            "  private query(entries: readonly (readonly [string, unknown])[]): string {",
+            "    const query = new URLSearchParams();",
+            "    for (const [key, value] of entries)",
+            "      if (value !== undefined && value !== null) query.set(key, String(value));",
+            '    return query.size ? "?" + query.toString() : "";',
+            "  }",
             (
                 "  private async request<T>(path: string, init?: RequestInit): "
                 "Promise<ApiResponse<T>> {"

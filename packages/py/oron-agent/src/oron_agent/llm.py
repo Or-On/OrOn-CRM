@@ -16,6 +16,7 @@ from uuid import uuid4
 from google.genai.types import HttpOptions
 from loguru import logger
 from openai import APIConnectionError, APITimeoutError
+from oron_common.voice_instructions import COMPOSITION_VERSION, instruction_text_snapshot
 from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter, GeminiLLMInvocationParams
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -110,6 +111,9 @@ class _BoundedOpenAILLMService(OpenAILLMService):
         self._attempt_model: ContextVar[str | None] = ContextVar(
             "voice_attempt_model", default=None
         )
+        self._instruction_hash: ContextVar[str | None] = ContextVar(
+            "voice_instruction_hash", default=None
+        )
         validate_fallback(self._configured_base_url, self._primary_model, fallback_model)
 
     async def get_chat_completions(self, context):
@@ -135,6 +139,7 @@ class _BoundedOpenAILLMService(OpenAILLMService):
                 reported_usage = None
                 attempt_id = str(uuid4())
                 model_token = self._attempt_model.set(model)
+                hash_token = self._instruction_hash.set(None)
                 self.set_full_model_name(model)
                 try:
                     stream = await super(_BoundedOpenAILLMService, self).get_chat_completions(
@@ -183,12 +188,16 @@ class _BoundedOpenAILLMService(OpenAILLMService):
                         raise
                 finally:
                     self._attempt_model.reset(model_token)
+                    runtime_hash = self._instruction_hash.get()
+                    self._instruction_hash.reset(hash_token)
                     if stream is not None:
                         with suppress(Exception):
                             await stream.close()
                     if self._on_attempt is not None:
                         await self._on_attempt(
                             {
+                                "runtimeInstructionHash": runtime_hash,
+                                "compositionVersion": COMPOSITION_VERSION,
                                 "attemptId": attempt_id,
                                 "model": model,
                                 "status": status,
@@ -217,6 +226,7 @@ class _BoundedOpenAILLMService(OpenAILLMService):
                 await self._before_attempt()
             started, status, usage = monotonic(), "failed", None
             token = self._attempt_model.set(model)
+            hash_token = self._instruction_hash.set(None)
             try:
                 invocation = self.get_llm_adapter().get_llm_invocation_params(
                     context,
@@ -268,9 +278,13 @@ class _BoundedOpenAILLMService(OpenAILLMService):
                     raise
             finally:
                 self._attempt_model.reset(token)
+                runtime_hash = self._instruction_hash.get()
+                self._instruction_hash.reset(hash_token)
                 if self._on_attempt is not None:
                     await self._on_attempt(
                         {
+                            "runtimeInstructionHash": runtime_hash,
+                            "compositionVersion": COMPOSITION_VERSION,
                             "attemptId": str(uuid4()),
                             "model": model,
                             "status": status,
@@ -356,6 +370,7 @@ class _BoundedOpenAILLMService(OpenAILLMService):
             # identity. An opener with no conversation yet gets an explicit
             # non-customer call-start event; see provider_context.
             instruction, conversation = fold_instructions(self._without_empty_tool_calls(messages))
+            self._instruction_hash.set(instruction_text_snapshot(instruction or "")["hash"])
             params["messages"] = (
                 [{"role": "system", "content": instruction}, *conversation]
                 if instruction

@@ -26,6 +26,10 @@ from control_api.audio_preview import (
     create_audio_preview_router,
 )
 from control_api.auth import ServiceAssertionVerifier
+from control_api.effective_prompt import (
+    PostgresEffectivePromptRepository,
+    create_effective_prompt_router,
+)
 from control_api.orchestration import create_orchestration_router
 from control_api.voice import PostgresVoiceRepository, VoiceRepository, create_voice_router
 from control_api.voice_control import PostgresVoiceControlRepository, create_voice_control_router
@@ -144,6 +148,14 @@ def create_app(
         )
     app.include_router(
         create_agent_evaluation_router(agent_evaluation_service, resolved_assertion_verifier)
+    )
+    app.include_router(
+        create_effective_prompt_router(
+            PostgresEffectivePromptRepository(resolved_voice_repository.session_factory)
+            if isinstance(resolved_voice_repository, PostgresVoiceRepository)
+            else None,
+            resolved_assertion_verifier,
+        )
     )
     control_repository = (
         PostgresVoiceControlRepository(resolved_voice_repository.session_factory)

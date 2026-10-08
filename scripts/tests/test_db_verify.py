@@ -47,7 +47,9 @@ def test_graph_has_preserved_oron_root_and_one_target_head() -> None:
     # handoff acknowledgement across the same transaction's ownership change.
     # 148 admits only the reviewed voice-form template exception.
     # 149 admits direct WhatsApp forms; 150 keeps pending forms conversational.
-    assert report.revision_count == 164
+    # 165 stages reviewed follower publications; 166 binds golden evidence to
+    # the exact publication candidate (a29d5f64ae13, a3ae6075bf24).
+    assert report.revision_count == 166
 
 
 def test_lead_workflow_guard_is_present_in_the_final_configuration_validator() -> None:

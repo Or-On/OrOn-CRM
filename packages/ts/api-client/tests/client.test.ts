@@ -108,3 +108,30 @@ describe("ControlApiClient", () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 });
+
+it("preserves exact effective prompt selectors and omits absent query context", async () => {
+  const fetcher = vi.fn<(input: string | URL | Request) => Promise<Response>>(
+    () =>
+      Promise.resolve(Response.json({ text: "", blocks: [], hash: "fixture" })),
+  );
+  const client = new ControlApiClient("http://control-api:8000", fetcher);
+  await client.getAgentEffectivePrompt({
+    agent_id: "profile",
+    version_id: "version",
+    flow_id: "flow",
+    flow_version: 4,
+    node_id: "node / one",
+  });
+  const url = fetcher.mock.calls[0]?.[0] as unknown as URL;
+  expect(url.pathname).toBe(
+    "/api/v1/orchestration/agents/profile/versions/version/effective-prompt",
+  );
+  expect(url.searchParams.get("flow_id")).toBe("flow");
+  expect(url.searchParams.get("flow_version")).toBe("4");
+  expect(url.searchParams.get("node_id")).toBe("node / one");
+  await client.getAgentEffectivePrompt({
+    agent_id: "profile",
+    version_id: "version",
+  });
+  expect((fetcher.mock.calls[1]?.[0] as unknown as URL).search).toBe("");
+});

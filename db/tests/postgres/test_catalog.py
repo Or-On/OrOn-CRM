@@ -271,7 +271,7 @@ async def test_security_definer_functions_pin_search_path_and_public_has_no_exec
     assert rows
     for row in rows:
         assert any(value.startswith("search_path=") for value in (row["proconfig"] or []))
-        assert not row["public_execute"]
+        assert not row["public_execute"], row["name"]
 
 
 async def test_whatsapp_ai_defaults_archival_and_notification_grants(
@@ -363,7 +363,11 @@ async def test_all_unified_foreign_keys_declare_delete_semantics(pg: asyncpg.Con
     )
 
     assert rows
-    assert all(row["confdeltype"] in {"c", "n", "r"} for row in rows)
+    assert all(row["confdeltype"] in {"c", "n", "r"} for row in rows), [
+        (row["table_name"], row["conname"])
+        for row in rows
+        if row["confdeltype"] not in {"c", "n", "r"}
+    ]
     assert {row["confdeltype"] for row in rows} == {"c", "n", "r"}
 
 

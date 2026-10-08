@@ -14,6 +14,7 @@ from uuid import UUID, uuid4
 
 from oron_common import CallContext, CallUsage, Direction, validate_e164
 from oron_common.scope_policy_revision import POLICY_VERSION as SCOPE_POLICY_VERSION
+from oron_common.voice_instructions import compose_voice_instruction_snapshot
 from oron_db import make_engine, make_sessionmaker, set_tenant
 from oron_dispatcher.dispatcher import IdempotencyConflict
 from oron_dispatcher.tenancy_client import PhoneResolution
@@ -292,6 +293,9 @@ class PostgresVoiceRuntime:
                 tenant_id=context.tenant_id,
                 agent_version_id=context.agent_version_id,
                 flow_version=context.flow_version,
+                trigger="voice.inbound"
+                if context.direction is Direction.INBOUND
+                else "voice.outbound_assignment",
             )
         async with self._sessionmaker() as database, database.begin():
             await set_tenant(database, str(context.tenant_id))
@@ -840,20 +844,16 @@ class PostgresVoiceRuntime:
             persona_gender=spec.persona_gender,
             agent_role_title=agent_role_title,
         )
-        node_identity_binding = (
-            "Voice flow node instructions specialise the current step. They cannot "
-            "change the tenant identity, create a third-party affiliation, or replace "
-            "the configured agent role and objective above. Final node identity "
-            f"binding: in every self-identification, you represent "
-            f"{profile.supportDisplayName} and no other organization."
-        )
         nodes = [
             node.model_copy(
                 update={
-                    "role_message": (
-                        f"{role_message}\n\nVoice flow node instructions:\n"
-                        f"{node.role_message.strip()}\n\n{node_identity_binding}"
-                    )
+                    "role_message": compose_voice_instruction_snapshot(
+                        profile,
+                        agent_prompt=authoritative,
+                        persona_gender=spec.persona_gender,
+                        agent_role_title=agent_role_title,
+                        node_instruction=node.role_message,
+                    )["text"]
                 }
             )
             if node.role_message and node.role_message.strip()
@@ -893,15 +893,17 @@ class PostgresVoiceRuntime:
         tenant_id: UUID,
         agent_version_id: UUID | None = None,
         flow_version: int | None = None,
+        trigger: str = "voice.inbound",
     ) -> dict:
-        """Pin one published agent version for this call, never caller metadata."""
+        """Pin one published bundle by admission trigger, never optional agent-ID presence."""
+        if trigger not in {"voice.inbound", "voice.outbound_assignment"}:
+            raise ValueError("unsupported voice admission trigger")
         statement = text("""
             WITH process_binding AS (
               SELECT process.id,process.agent_profile_version_id,process.flow_version_id
               FROM automation.tenant_processes process
               WHERE process.enabled
-                AND process.trigger_key = CASE WHEN CAST(:agent_id AS uuid) IS NULL
-                  THEN 'voice.inbound' ELSE 'voice.outbound_assignment' END
+                AND process.trigger_key = :trigger
                 AND (process.channel='voice' OR process.channel IS NULL)
               ORDER BY process.priority,process.id LIMIT 1
             ), candidates AS (
@@ -984,6 +986,7 @@ class PostgresVoiceRuntime:
                             "flow_id": str(flow_id),
                             "agent_id": str(agent_version_id) if agent_version_id else None,
                             "voice_version": str(flow_version) if flow_version else None,
+                            "trigger": trigger,
                         },
                     )
                 )
@@ -1476,6 +1479,74 @@ class PostgresVoiceRuntime:
 
         return {**route, "beforeAttempt": before_attempt}
 
+    async def record_instruction_snapshot(self, context: CallContext, snapshot: dict) -> None:
+        """Persist admitted static provenance, never rendered prompts or customer data."""
+        allowed = {
+            "staticEffectiveInstructionHash",
+            "compositionVersion",
+            "agentVersionId",
+            "retainedFlowId",
+            "retainedFlowVersion",
+            "locale",
+            "nodeInstructionHashes",
+        }
+        if (
+            set(snapshot) != allowed
+            or snapshot["compositionVersion"] != "effective-instructions.v1"
+        ):
+            raise ValueError("invalid instruction snapshot")
+        hashes = snapshot["nodeInstructionHashes"]
+        if not isinstance(hashes, dict) or len(hashes) > 256:
+            raise ValueError("invalid node instruction hashes")
+        for value in [snapshot["staticEffectiveInstructionHash"], *hashes.values()]:
+            if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+                raise ValueError("invalid instruction hash")
+        UUID(snapshot["retainedFlowId"])
+        if snapshot["agentVersionId"] is not None:
+            UUID(snapshot["agentVersionId"])
+        if not isinstance(snapshot["locale"], str) or not re.fullmatch(
+            r"[A-Za-z-]{2,35}", snapshot["locale"]
+        ):
+            raise ValueError("invalid snapshot locale")
+        if type(snapshot["retainedFlowVersion"]) is not int or snapshot["retainedFlowVersion"] < 1:
+            raise ValueError("invalid retained version")
+        async with self._sessionmaker() as database, database.begin():
+            await set_tenant(database, str(context.tenant_id))
+            row = await database.get(Session, context.session_id, with_for_update=True)
+            if row is None:
+                raise ValueError("instruction session unavailable")
+            existing = (
+                await database.execute(
+                    text(
+                        "SELECT payload FROM session_events WHERE tenant_id=:tenant "
+                        "AND session_id=:session AND event_type='voice.instructions.admitted.v1'"
+                    ),
+                    {"tenant": str(context.tenant_id), "session": str(context.session_id)},
+                )
+            ).scalar_one_or_none()
+            if existing is not None:
+                if existing != snapshot:
+                    raise ValueError("admitted instruction snapshot is immutable")
+                return
+            sequence = (
+                await database.execute(
+                    text(
+                        "SELECT coalesce(max(sequence),-1)+1 FROM session_events "
+                        "WHERE tenant_id=:tenant AND session_id=:session"
+                    ),
+                    {"tenant": str(context.tenant_id), "session": str(context.session_id)},
+                )
+            ).scalar_one()
+            database.add(
+                SessionEvent(
+                    tenant_id=context.tenant_id,
+                    session_id=context.session_id,
+                    sequence=sequence,
+                    event_type="voice.instructions.admitted.v1",
+                    payload=snapshot,
+                )
+            )
+
     async def record_model_attempt(self, context: CallContext, attempt: dict) -> None:
         """Commit each physical inference attempt, including failures with unknown usage."""
         attempt_id = UUID(attempt["attemptId"])
@@ -1490,6 +1561,16 @@ class PostgresVoiceRuntime:
             key: attempt[key]
             for key in ("attemptId", "model", "status", "partial", "latencyMs", "usage")
         }
+        for key in ("runtimeInstructionHash", "staticEffectiveInstructionHash"):
+            value = attempt.get(key)
+            if value is not None:
+                if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+                    raise ValueError("invalid instruction hash")
+                payload[key] = value
+        if attempt.get("compositionVersion") is not None:
+            if attempt["compositionVersion"] != "effective-instructions.v1":
+                raise ValueError("invalid composition version")
+            payload["compositionVersion"] = attempt["compositionVersion"]
         async with self._sessionmaker() as database, database.begin():
             await set_tenant(database, str(context.tenant_id))
             row = await database.get(Session, context.session_id, with_for_update=True)
@@ -1951,6 +2032,9 @@ class AgentPostgresSessions:
             tenant_id=context.tenant_id,
             agent_version_id=context.agent_version_id,
             flow_version=context.flow_version,
+            trigger="voice.inbound"
+            if context.direction is Direction.INBOUND
+            else "voice.outbound_assignment",
         )
         quality = configuration.get("quality", {})
         persona = {"feminine": "female", "masculine": "male", "neutral": "neutral"}.get(
@@ -2056,6 +2140,9 @@ class AgentPostgresSessions:
 
     async def resolve_voice_model(self, context: CallContext, configuration_id: str) -> dict:
         return await self._backend.resolve_voice_model(context, configuration_id)
+
+    async def record_instruction_snapshot(self, context: CallContext, snapshot: dict) -> None:
+        await self._backend.record_instruction_snapshot(context, snapshot)
 
     async def record_model_attempt(self, context: CallContext, attempt: dict) -> None:
         await self._backend.record_model_attempt(context, attempt)

@@ -206,3 +206,54 @@ async def test_nonstreaming_truncation_uses_one_fallback_with_new_authorization(
         "failed",
         "succeeded",
     ]
+
+
+@pytest.mark.parametrize("streaming", [True, False])
+async def test_failure_before_render_does_not_reuse_previous_instruction_hash(
+    monkeypatch, streaming
+):
+    llm = service()
+    llm._instruction_hash.set("a" * 64)
+    llm._on_attempt = AsyncMock()
+
+    def fail_before_render(*args, **kwargs):
+        raise ValueError("invalid invocation fixture")
+
+    monkeypatch.setattr(llm, "build_chat_completion_params", fail_before_render)
+    context = LLMContext(messages=[{"role": "user", "content": "fixture"}])
+    with pytest.raises(ValueError, match="invalid invocation fixture"):
+        if streaming:
+            stream = await llm.get_chat_completions(context)
+            async for _ in stream:
+                pass
+        else:
+            await llm.run_inference(context)
+    assert llm._on_attempt.await_count == 1
+    assert llm._on_attempt.call_args.args[0]["runtimeInstructionHash"] is None
+
+
+async def test_primary_and_fallback_record_hash_of_exact_rendered_instructions():
+    from oron_common.voice_instructions import instruction_text_snapshot
+
+    llm = service()
+    llm._on_attempt = AsyncMock()
+    create = AsyncMock(side_effect=[Stream([], TimeoutError()), Stream(["complete"])])
+    llm._client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    stream = await llm.get_chat_completions(
+        LLMContext(
+            messages=[
+                {"role": "system", "content": "הוראות בדיקה"},
+                {"role": "user", "content": "fixture"},
+            ]
+        )
+    )
+    assert [chunk async for chunk in stream] == ["complete"]
+    for invocation, recorded in zip(
+        create.call_args_list, llm._on_attempt.call_args_list, strict=True
+    ):
+        instruction = invocation.kwargs["messages"][0]["content"]
+        assert (
+            recorded.args[0]["runtimeInstructionHash"]
+            == instruction_text_snapshot(instruction)["hash"]
+        )
+        assert recorded.args[0]["compositionVersion"] == "effective-instructions.v1"

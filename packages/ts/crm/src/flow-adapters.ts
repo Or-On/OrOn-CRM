@@ -3,7 +3,7 @@ import {
   type CanonicalFlow,
   type CanonicalFlowNode,
   type SupportedChannel,
-} from "./cross-channel.js";
+} from "./canonical-flow-contract.js";
 import type { JsonValue } from "./types.js";
 
 /** Phase 6 supports a single ordered path per channel, not implicit parallelism. */
@@ -57,7 +57,13 @@ export function validateAction(node: CanonicalFlowNode): void {
   const keys: Record<CanonicalFlowNode["type"], readonly string[]> = {
     start: [],
     end: [],
-    "voice.call": ["flowId", "flowVersion", "agentVersionId"],
+    "voice.call": [
+      "flowId",
+      "flowVersion",
+      "agentVersionId",
+      "flowReferencePolicy",
+      "agentReferencePolicy",
+    ],
     "message.send": ["kind", "text", "template_name", "language", "variables"],
     "crm.update": ["field", "value"],
     handoff: ["reason"],
@@ -96,6 +102,15 @@ export function validateAction(node: CanonicalFlowNode): void {
       configurationText(cfg, "reason");
       return;
     case "voice.call":
+      for (const field of ["flowReferencePolicy", "agentReferencePolicy"])
+        if (
+          cfg[field] !== undefined &&
+          cfg[field] !== "pinned" &&
+          cfg[field] !== "follow_published"
+        )
+          throw new TypeError(
+            "voice reference policy must be pinned or follow_published",
+          );
       if (
         !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/iu.test(
           configurationText(cfg, "flowId"),

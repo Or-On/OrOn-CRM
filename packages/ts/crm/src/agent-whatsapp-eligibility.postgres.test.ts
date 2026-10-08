@@ -421,7 +421,7 @@ describe.skipIf(databaseUrl === undefined)(
               record.profileId,
               record.versionId,
             ),
-          ).toEqual({ versionId: record.versionId, rebound: 0 });
+          ).toMatchObject({ versionId: record.versionId, rebound: 0 });
         });
       } finally {
         await database.end({ timeout: 2 });
@@ -449,7 +449,7 @@ describe.skipIf(databaseUrl === undefined)(
               record.profileId,
               record.versionId,
             ),
-          ).toEqual({ versionId: record.versionId, rebound: 0 });
+          ).toMatchObject({ versionId: record.versionId, rebound: 0 });
         });
       } finally {
         await database.end({ timeout: 2 });

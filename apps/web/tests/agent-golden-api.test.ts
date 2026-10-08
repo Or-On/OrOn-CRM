@@ -76,7 +76,18 @@ describe("golden request/status HTTP boundaries (mocked route; PG separately)", 
     expect(result.status).toBe(200);
     expect(result.headers.get("cache-control")).toBe("private, no-store");
     expect(boundary.permission).toHaveBeenCalledWith("flows:manage");
-    expect(boundary.read).toHaveBeenCalledWith({}, profile, version);
+    expect(boundary.read).toHaveBeenCalledWith({}, profile, version, null);
+  });
+  it("passes the exact publication candidate selector to the authorized workspace", async () => {
+    const operation = "50000000-0000-4000-8000-000000000001";
+    const result = await GET(
+      new Request(
+        `http://localhost/golden?versionId=${version}&publicationOperationId=${operation}`,
+      ),
+      context(),
+    );
+    expect(result.status).toBe(200);
+    expect(boundary.read).toHaveBeenCalledWith({}, profile, version, operation);
   });
   it("checks CSRF before requesting any evaluation", async () => {
     boundary.csrf.mockRejectedValue({ code: "42501" });
