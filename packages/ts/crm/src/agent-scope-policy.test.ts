@@ -53,7 +53,7 @@ describe("service agent scope policy", () => {
     ).toBe(false);
     const response = approvedAgentResponse("identity", "he", "טכנו שירות");
     expect(response).toBe(
-      "אני העוזר הווירטואלי של טכנו שירות, ואני כאן כדי לעזור בפניות שירות. איך אפשר לעזור בנושא התקלה?",
+      "אני נציגת ה-AI של טכנו שירות. אשמח לעזור בשירותים שלנו. במה אפשר לעזור?",
     );
     expect(validateAgentOutput(response).allowed).toBe(true);
   });

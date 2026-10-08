@@ -426,6 +426,8 @@ async def test_followup_recipient_is_only_the_pinned_caller_number(pg):
     await _as(pg, "platform_voice", tenant.tenant_id)
     opened = await _json(pg, "SELECT service.open_voice_inquiry($1)", session)
     intake = UUID(opened["intakeId"])
+    # Identity alone does not authorize delivery: obtain fresh, explicit consent.
+    await _json(pg, "SELECT service.request_intake_followup($1,true)", session)
     await _as(pg, "platform_messaging", tenant.tenant_id, role="service")
     prepared = await _json(pg, "SELECT service.prepare_intake_followup_recipient($1)", intake)
     assert prepared["status"] == "ready" and prepared["recipientAddress"] == CALLER

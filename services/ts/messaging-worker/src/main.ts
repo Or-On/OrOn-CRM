@@ -142,6 +142,7 @@ async function main(): Promise<void> {
             ...route.settings,
           }),
       },
+      fieldServiceModelRoutingEnabled: config.enableWhatsAppAi,
       automaticCallsEnabled: config.enableWhatsAppAutoCalls,
       privateObjectStorage,
       ...(config.audioTranscription.enabled &&
@@ -179,9 +180,12 @@ async function main(): Promise<void> {
                 ? {}
                 : { fallbackModel: config.llm.fallbackModel }),
             }),
-            fieldServiceProvider: new OpenAiCompatibleFieldServiceProvider(
-              llmOptions,
-            ),
+            fieldServiceProvider: new OpenAiCompatibleFieldServiceProvider({
+              ...llmOptions,
+              ...(config.llm.fallbackModel === undefined
+                ? {}
+                : { fallbackModel: config.llm.fallbackModel }),
+            }),
             postCallProvider: new OpenAiCompatiblePostCallProvider(llmOptions),
             postCallModel: llmOptions.model,
           }),

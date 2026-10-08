@@ -1,3 +1,7 @@
+import {
+  compatibleModelParameters,
+  assertCompatibleFallback,
+} from "@or-on/config";
 import { randomUUID } from "node:crypto";
 import { budgetUntrustedPromptContext } from "./prompt-context-budget.js";
 import {
@@ -204,6 +208,49 @@ export interface WhatsAppAiUsage {
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly latencyMs: number;
+  readonly tokenDetails?: ProviderTokenDetails;
+}
+
+export interface ProviderTokenDetails {
+  readonly cachedInput: number | null;
+  readonly audioInput: number | null;
+  readonly cachedAudioInput: number | null;
+  readonly reasoningOutput: number | null;
+  readonly audioOutput: number | null;
+}
+
+/** Subsets of the provider totals, never additional billable tokens. Missing means unknown. */
+function providerTokenDetails(
+  usage: object,
+  input: number,
+  output: number,
+): ProviderTokenDetails {
+  const record = usage as Record<string, unknown>;
+  const details = (value: unknown): Record<string, unknown> =>
+    value !== null && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  const prompt = details(record.prompt_tokens_details),
+    completion = details(record.completion_tokens_details);
+  const count = (value: unknown, limit: number): number | null =>
+    typeof value === "number" &&
+    Number.isSafeInteger(value) &&
+    value >= 0 &&
+    value <= limit
+      ? value
+      : null;
+  const cachedInput = count(prompt.cached_tokens, input),
+    audioInput = count(prompt.audio_tokens, input);
+  return {
+    cachedInput,
+    audioInput,
+    cachedAudioInput: count(
+      prompt.cached_audio_tokens,
+      Math.min(cachedInput ?? 0, audioInput ?? 0),
+    ),
+    reasoningOutput: count(completion.reasoning_tokens, output),
+    audioOutput: count(completion.audio_tokens, output),
+  };
 }
 
 export interface WhatsAppAiAttempt {
@@ -215,6 +262,7 @@ export interface WhatsAppAiAttempt {
   readonly latencyMs: number;
   readonly status: "succeeded" | "http_error" | "timeout" | "invalid_response";
   readonly errorCode: string | null;
+  readonly tokenDetails?: ProviderTokenDetails;
 }
 
 export function providerReportedUsage(
@@ -246,6 +294,7 @@ export function providerReportedUsage(
     inputTokens,
     outputTokens,
     latencyMs: Math.min(2147483647, Math.max(0, Math.round(latencyMs))),
+    tokenDetails: providerTokenDetails(usage, inputTokens, outputTokens),
   };
 }
 
@@ -364,7 +413,10 @@ function decisionSchemaFor(
       };
       keys.push("leadObservations");
     }
-    if (capabilities.includes("lead.finalize")) {
+    if (
+      capabilities.includes("lead.finalize") &&
+      lead.missingRequired.length === 0
+    ) {
       actions.push("lead_finalize");
       properties.leadSummary = { type: ["string", "null"], maxLength: 4000 };
       keys.push("leadSummary");
@@ -445,9 +497,11 @@ function envelopeInstruction(
     );
   if (actions.includes("lead_finalize"))
     lines.push(
-      "Choose lead_finalize with leadSummary for an actual enquiry once " +
-        "the required details have been answered, declined or marked not " +
-        "applicable. Missing optional fields are not a reason to keep asking " +
+      "Choose lead_finalize with leadSummary only after the required details " +
+        "have been durably recorded through lead_save and the returned state " +
+        "has no missing required fields. Answered in conversation does not mean " +
+        "saved. This action cannot save observations. Check the configured " +
+        "readiness and consent requirements too. Missing optional fields are not a reason to keep asking " +
         "questions. Read leadCollection.status and actionReceipts: a lead " +
         "in ready_for_review, qualified, disqualified, converted or archived " +
         "state must not be finalized again " +
@@ -679,7 +733,13 @@ export class OpenAiCompatibleChatProvider implements WhatsAppAiProvider {
       readonly temperature?: number;
       readonly maxTokens?: number;
     },
-  ) {}
+  ) {
+    assertCompatibleFallback(
+      options.baseUrl,
+      options.model,
+      options.fallbackModel,
+    );
+  }
 
   public async decide(
     request: WhatsAppAiRequest,
@@ -687,6 +747,14 @@ export class OpenAiCompatibleChatProvider implements WhatsAppAiProvider {
     onAttempt?: (attempt: WhatsAppAiAttempt) => Promise<void>,
     beforeAttempt?: () => Promise<void>,
   ): Promise<WhatsAppAiDecision> {
+    const latestReceipt = request.actionReceipts?.at(-1);
+    if (
+      latestReceipt?.ok === false &&
+      ["lead_save", "lead_finalize", "lead_follow_up"].includes(
+        latestReceipt.action,
+      )
+    )
+      return { action: "reply", replyCode: "action_failed", text: "" };
     if (
       this.unrecordedUsage.length >= 98 ||
       this.unrecordedAttempts.length >= 98
@@ -703,8 +771,14 @@ export class OpenAiCompatibleChatProvider implements WhatsAppAiProvider {
     } catch (error) {
       if (
         !(error instanceof WhatsAppAiProviderError) ||
-        !["ai_invalid_output", "ai_output_truncated", "ai_timeout"].includes(
-          error.code,
+        !(
+          [
+            "ai_invalid_output",
+            "ai_output_truncated",
+            "ai_timeout",
+            "ai_transport_error",
+          ].includes(error.code) ||
+          /^ai_http_(?:408|429|5[0-9]{2})$/u.test(error.code)
         )
       )
         throw error;
@@ -754,7 +828,9 @@ export class OpenAiCompatibleChatProvider implements WhatsAppAiProvider {
       capabilities,
       request.lead,
       {
-        withActions: request.replyOnly !== true,
+        withActions:
+          request.replyOnly !== true &&
+          request.actionReceipts?.at(-1)?.ok !== false,
         digitalServiceFormAvailable:
           request.digitalServiceFormAvailable === true,
       },
@@ -924,8 +1000,11 @@ export class OpenAiCompatibleChatProvider implements WhatsAppAiProvider {
               },
             },
             max_tokens: fallback ? 800 : request.lead === undefined ? 300 : 700,
-            reasoning_effort: "none",
-            temperature: this.options.temperature ?? 0.2,
+            ...compatibleModelParameters(
+              this.options.baseUrl,
+              model,
+              this.options.temperature ?? 0.2,
+            ),
             ...(this.options.maxTokens === undefined
               ? {}
               : { max_tokens: this.options.maxTokens }),
@@ -1155,6 +1234,9 @@ export class OpenAiCompatibleChatProvider implements WhatsAppAiProvider {
         ),
         status: attemptStatus,
         errorCode,
+        ...(reported?.tokenDetails
+          ? { tokenDetails: reported.tokenDetails }
+          : {}),
       };
       if (onAttempt !== undefined) {
         try {

@@ -59,7 +59,7 @@ async function processUntilIdle(
 }
 
 describe.skipIf(sourceUrl === undefined)(
-  "short Or-On enquiry workflow persists each step",
+  "service discovery persists useful facts and receipt-backed completion",
   () => {
     const databaseName = `oron_wa_lead_${randomUUID().replaceAll("-", "")}`;
     const phoneNumberId = `fixture-lead-phone-${randomUUID()}`;
@@ -226,11 +226,12 @@ describe.skipIf(sourceUrl === undefined)(
       return id;
     }
 
-    it("captures only service, name and callback phone before the closing message", async () => {
+    it("does not capture uncertainty; finalizes a useful, permitted enquiry once", async () => {
       const schema = await web.begin(async (tx) => {
         await tx`SELECT set_config('app.current_tenant', ${tenantId}, true), set_config('app.current_user', ${userId}, true)`;
         return createLeadFieldSchema(tx, userId, {
-          name: "Fictional short enquiry",
+          name: "Fictional service discovery",
+          completionPolicy: "service_discovery_v1",
           definition: { schemaVersion: "1.0", fields: manifest.fields },
         });
       });
@@ -272,7 +273,12 @@ describe.skipIf(sourceUrl === undefined)(
         const latest = r.messages.filter((x) => x.role === "user").at(-1)?.text;
         const fields = r.lead?.collected ?? [];
         const values = Object.fromEntries(fields.map((x) => [x.key, x.value]));
-        if (latest === "לא יודע" && !values.service_interest)
+        if (latest === "לא יודע")
+          return {
+            action: "reply",
+            text: "מה היית רוצה לשפר בעסק באמצעות השירותים שלנו?",
+          };
+        if (latest === "אוטומציה לשירות לקוחות" && !values.service_interest)
           return {
             action: "lead_save",
             observations: [
@@ -308,13 +314,49 @@ describe.skipIf(sourceUrl === undefined)(
               },
             ],
           };
-        if (values.contact_phone && r.lead?.status !== "ready_for_review")
+        if (
+          latest === "+12025550199" &&
+          values.contact_phone &&
+          !values.follow_up_allowed
+        )
+          return {
+            action: "reply",
+            text: "אפשר שנציג יחזור אליך לגבי אוטומציה לשירות לקוחות?",
+          };
+        if (
+          latest === "כן, תחזרו אליי לגבי אוטומציה לשירות לקוחות" &&
+          !values.follow_up_allowed
+        )
+          return {
+            action: "lead_save",
+            observations: [
+              {
+                key: "need_summary",
+                state: "known",
+                value: "אוטומציה לשירות לקוחות",
+                confirmed: true,
+              },
+              {
+                key: "follow_up_allowed",
+                state: "known",
+                value: "true",
+                confirmed: true,
+              },
+              {
+                key: "discussion_complete",
+                state: "known",
+                value: "true",
+                confirmed: true,
+              },
+            ],
+          };
+        if (values.follow_up_allowed && r.lead?.status !== "ready_for_review")
           return {
             action: "lead_finalize",
             summary:
-              "שירות: לא יודע. שם: דנה בדיקה. טלפון לחזרה: +12025550199. לחזור ללקוח בהקדם.",
+              "שירות: אוטומציה לשירות לקוחות. שם: דנה בדיקה. טלפון לחזרה: +12025550199. לחזור ללקוח בהקדם.",
           };
-        if (values.contact_phone) {
+        if (values.follow_up_allowed) {
           expect(
             r.actionReceipts?.some((x) => x.action === "lead_finalize" && x.ok),
           ).toBe(true);
@@ -345,9 +387,19 @@ describe.skipIf(sourceUrl === undefined)(
       try {
         for (const [input, expected, count] of [
           ["היי", manifest.messages.opening, 0],
-          ["לא יודע", manifest.messages.name, 1],
+          ["לא יודע", "מה היית רוצה לשפר בעסק באמצעות השירותים שלנו?", 0],
+          ["אוטומציה לשירות לקוחות", manifest.messages.name, 1],
           ["דנה בדיקה", manifest.messages.phone, 2],
-          ["+12025550199", manifest.messages.complete, 3],
+          [
+            "+12025550199",
+            "אפשר שנציג יחזור אליך לגבי אוטומציה לשירות לקוחות?",
+            3,
+          ],
+          [
+            "כן, תחזרו אליי לגבי אוטומציה לשירות לקוחות",
+            manifest.messages.complete,
+            6,
+          ],
         ] as const) {
           const id = `wamid.step-${randomUUID()}`;
           await acceptInbound(id, input, from);

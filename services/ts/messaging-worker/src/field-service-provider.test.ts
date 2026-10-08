@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   FieldServiceAiProviderError,
   OpenAiCompatibleFieldServiceProvider,
+  type FieldServiceAttemptHooks,
 } from "./field-service-provider.js";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -25,6 +26,112 @@ function completion(value: unknown): Response {
 }
 
 describe("field-service AI proposal boundary", () => {
+  it("counts invalid structured output as a failed physical attempt and validates the fallback", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(completion({ summary: 42 }))
+      .mockResolvedValueOnce(
+        Response.json({
+          choices: [
+            {
+              finish_reason: "stop",
+              message: {
+                content: JSON.stringify({
+                  summary: "תקלה שדווחה על ידי הלקוח.",
+                }),
+              },
+            },
+          ],
+          usage: { prompt_tokens: 120, completion_tokens: 20 },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const beforeAttempt = vi
+      .fn<FieldServiceAttemptHooks["beforeAttempt"]>()
+      .mockResolvedValue(undefined);
+    const onAttempt = vi
+      .fn<FieldServiceAttemptHooks["onAttempt"]>()
+      .mockResolvedValue(undefined);
+    const bounded = new OpenAiCompatibleFieldServiceProvider({
+      apiKey: "synthetic",
+      baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
+      model: "gemini-3.5-flash-lite",
+      fallbackModel: "gemini-3.1-flash-lite",
+    });
+    await expect(
+      bounded.summarizeEvidence(
+        { locale: "he", sourceKind: "call", evidence: "המסך מרצד" },
+        { beforeAttempt, onAttempt },
+      ),
+    ).resolves.toContain("תקלה");
+    expect(beforeAttempt).toHaveBeenCalledTimes(2);
+    expect(onAttempt).toHaveBeenCalledTimes(2);
+    expect(onAttempt.mock.calls[0]?.[0]).toMatchObject({
+      model: "gemini-3.5-flash-lite",
+      outcome: "failed",
+      usage: null,
+    });
+    expect(onAttempt.mock.calls[1]?.[0]).toMatchObject({
+      model: "gemini-3.1-flash-lite",
+      outcome: "success",
+      usage: { inputTokens: 120, outputTokens: 20 },
+    });
+    expect(beforeAttempt.mock.calls[0]?.[0].eventId).not.toBe(
+      beforeAttempt.mock.calls[1]?.[0].eventId,
+    );
+  });
+
+  it("does not send a fallback after permission revocation or accounting failure", async () => {
+    for (const failure of ["revoked", "accounting_unavailable"]) {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue(new Response("", { status: 429 }));
+      vi.stubGlobal("fetch", fetchMock);
+      const beforeAttempt = vi
+        .fn()
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValue(new TypeError(failure));
+      const onAttempt =
+        failure === "revoked"
+          ? vi.fn().mockResolvedValue(undefined)
+          : vi.fn().mockRejectedValue(new TypeError(failure));
+      const bounded = new OpenAiCompatibleFieldServiceProvider({
+        apiKey: "synthetic",
+        baseUrl: "https://ai.invalid/v1",
+        model: "primary",
+        fallbackModel: "fallback",
+      });
+      await expect(
+        bounded.summarizeEvidence(
+          { locale: "he", sourceKind: "call", evidence: "fault" },
+          { beforeAttempt, onAttempt },
+        ),
+      ).rejects.toThrow(failure);
+      expect(fetchMock).toHaveBeenCalledOnce();
+    }
+  });
+
+  it("rejects a truncated response even when its JSON happens to be valid", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({
+        choices: [
+          {
+            finish_reason: "length",
+            message: { content: '{"summary":"partial"}' },
+          },
+        ],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(
+      provider().summarizeEvidence({
+        locale: "he",
+        sourceKind: "call",
+        evidence: "fault",
+      }),
+    ).rejects.toMatchObject({ code: "field_ai_invalid_output" });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
   it("keeps intake output structured, bounded, and explicitly untrusted", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       completion({
@@ -82,7 +189,7 @@ describe("field-service AI proposal boundary", () => {
       messages?: { content?: string }[];
     };
     expect(body.response_format?.json_schema?.strict).toBe(true);
-    expect(body.reasoning_effort).toBe("none");
+    expect(body.reasoning_effort).toBeUndefined();
     expect(body.messages?.[0]?.content).toContain(
       "serviceIntent, confirmed, confidence, and fields",
     );

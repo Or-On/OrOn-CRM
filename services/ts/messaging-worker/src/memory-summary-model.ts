@@ -61,7 +61,13 @@ export function createMemorySummaryModelProvider(
             },
             body: JSON.stringify({
               model: projection.model,
-              temperature: settings.temperature ?? 0,
+              ...compatibleModelParameters(
+                projection.provider === "gemini"
+                  ? "https://generativelanguage.googleapis.com"
+                  : "https://api.openai.com",
+                projection.model,
+                settings.temperature ?? 0,
+              ),
               max_tokens: Math.min(settings.maxTokens ?? 1024, 1024),
               messages: [
                 {
@@ -128,3 +134,4 @@ export function createMemorySummaryModelProvider(
     },
   };
 }
+import { compatibleModelParameters } from "@or-on/config";

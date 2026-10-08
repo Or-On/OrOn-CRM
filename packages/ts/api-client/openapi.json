@@ -324,6 +324,16 @@
             "title": "Llm Prompt Tokens",
             "type": "integer"
           },
+          "llm_usage_by_model": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "type": "integer"
+              },
+              "type": "object"
+            },
+            "title": "Llm Usage By Model",
+            "type": "object"
+          },
           "stt_audio_seconds": {
             "default": 0.0,
             "title": "Stt Audio Seconds",

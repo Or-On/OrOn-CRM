@@ -40,6 +40,7 @@ from oron_agent.scope_policy import (
     approved_response,
     approved_responses,
     classify_turn,
+    repeated_scope_redirect,
     scope_notice,
     validate_output,
 )
@@ -139,7 +140,19 @@ class ServiceScopeRouter(FrameProcessor):
             self._event("caller_turn", ",".join(decision.restricted), "routed")
             await self.push_frame(
                 TTSSpeakFrame(
-                    approved_response(decision.route, self._language(), self._business_name),
+                    approved_response(
+                        "pause"
+                        if repeated_scope_redirect(
+                            [
+                                _message_text(message)
+                                for message in messages
+                                if isinstance(message, dict) and message.get("role") == "user"
+                            ]
+                        )
+                        else decision.route,
+                        self._language(),
+                        self._business_name,
+                    ),
                     append_to_context=True,
                 ),
                 direction,

@@ -29,6 +29,7 @@ from dataclasses import dataclass
 import httpx
 import pytest
 from oron_agent.grounding import grounding_instruction, render_reply
+from oron_agent.model_parameters import compatible_parameters
 from oron_agent.provider_context import fold_instructions
 from oron_flows.compose import expand
 from oron_flows.node import FlowNode
@@ -103,11 +104,11 @@ def request(endpoint: Endpoint, case: ExitCase) -> dict:
         "messages": messages,
         "tools": tools,
         "tool_choice": "auto",
-        "temperature": endpoint.temperature,
+        **compatible_parameters(
+            endpoint.base_url, endpoint.model, endpoint.temperature, endpoint.reasoning_effort
+        ),
         "max_tokens": endpoint.max_tokens,
     }
-    if endpoint.reasoning_effort:
-        payload["reasoning_effort"] = endpoint.reasoning_effort
     return payload
 
 

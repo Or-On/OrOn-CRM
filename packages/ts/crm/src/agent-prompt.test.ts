@@ -100,7 +100,7 @@ describe("support assumptions belong to support configuration", () => {
     });
     expect(text).toContain("Prior tickets");
     expect(text).toContain("service intake state");
-    expect(text).toContain("never ask for a phone number merely to search");
+    expect(text).toContain("Never ask for a phone number merely to search");
   });
 
   it("keeps a survey agent free of both lead and support blocks", () => {
@@ -204,7 +204,11 @@ describe("lead collection makes progress without taking over every conversation"
     );
     expect(text).toContain("Optional details are not a checklist");
     expect(text).toContain("silence or an unasked question is not a refusal");
-    expect(text).toContain("use the available finalization action");
+    expect(text).toContain("Use the available finalization action");
+    expect(text).toContain(
+      "no substantive service question remains unanswered",
+    );
+    expect(text).toContain("never a lead-save receipt alone");
     expect(text).toContain("Do not continue an optional discovery interview");
     expect(text).toContain(
       "not qualification, a booking, a scheduled callback",

@@ -211,7 +211,11 @@ export class OpenAiCompatiblePostCallProvider implements PostCallAnalysisProvide
               },
             },
             max_tokens: 1200,
-            temperature: 0.1,
+            ...compatibleModelParameters(
+              this.options.baseUrl,
+              this.options.model,
+              0.1,
+            ),
             stream: false,
           }),
           signal: controller.signal,
@@ -276,3 +280,4 @@ export class OpenAiCompatiblePostCallProvider implements PostCallAnalysisProvide
     }
   }
 }
+import { compatibleModelParameters } from "@or-on/config";

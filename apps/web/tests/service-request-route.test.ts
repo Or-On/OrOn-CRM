@@ -144,7 +144,11 @@ describe("public digital service HTTP boundary", () => {
       new Request(`${origin}/api/service-request`, { headers: headers() }),
     );
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ ...details, intakeId: undefined });
+    expect(await response.json()).toEqual({
+      ...details,
+      intakeId: undefined,
+      formVersion: 1,
+    });
     expect(state.read).toHaveBeenCalledWith(expect.anything(), token);
     expect(state.context.mock.calls[0]?.slice(1)).toEqual([tenant]);
     expect(response.headers.get("cache-control")).toContain("no-store");

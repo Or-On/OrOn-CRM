@@ -1,9 +1,31 @@
 import {
+  compatibleModelParameters,
+  assertCompatibleFallback,
+} from "@or-on/config";
+import {
   fieldServiceIntakeSystemPrompt,
   sanitizeIntakeProposal,
   type ServiceIntakeFields,
   type ServiceWorkflowPolicy,
 } from "@or-on/crm";
+import { randomUUID } from "node:crypto";
+import { providerReportedUsage, type WhatsAppAiUsage } from "./ai-provider.js";
+
+export interface FieldServiceAttempt {
+  readonly eventId: string;
+  readonly model: string;
+  readonly occurredAt: string;
+  readonly latencyMs: number;
+  readonly outcome: "success" | "failed";
+  readonly usage: WhatsAppAiUsage | null;
+}
+
+export interface FieldServiceAttemptHooks {
+  beforeAttempt(
+    attempt: Pick<FieldServiceAttempt, "eventId" | "model" | "occurredAt">,
+  ): Promise<void>;
+  onAttempt(attempt: FieldServiceAttempt): Promise<void>;
+}
 
 export interface FieldServiceIntakeExtractionRequest {
   readonly locale: string;
@@ -47,11 +69,16 @@ export interface FieldServiceSummaryRequest {
 export interface FieldServiceAiProvider {
   extractIntake(
     request: FieldServiceIntakeExtractionRequest,
+    hooks?: FieldServiceAttemptHooks,
   ): Promise<FieldServiceIntakeExtraction>;
   extractProductLabel(
     request: FieldServiceOcrRequest,
+    hooks?: FieldServiceAttemptHooks,
   ): Promise<FieldServiceOcrExtraction>;
-  summarizeEvidence(request: FieldServiceSummaryRequest): Promise<string>;
+  summarizeEvidence(
+    request: FieldServiceSummaryRequest,
+    hooks?: FieldServiceAttemptHooks,
+  ): Promise<string>;
   readonly providerName: string;
   readonly modelName: string;
 }
@@ -184,6 +211,9 @@ function completionText(payload: unknown): string | undefined {
 }
 
 function parseCompletion(payload: unknown): Record<string, unknown> {
+  const choices = object(payload)?.choices;
+  if (Array.isArray(choices) && object(choices[0])?.finish_reason === "length")
+    throw new FieldServiceAiProviderError("field_ai_invalid_output", false);
   const text = completionText(payload)
     ?.trim()
     .replace(/^\uFEFF/u, "");
@@ -232,18 +262,68 @@ export class OpenAiCompatibleFieldServiceProvider implements FieldServiceAiProvi
       readonly apiKey: string;
       readonly baseUrl: string;
       readonly model: string;
+      readonly fallbackModel?: string;
+      readonly onAttempt?: (attempt: {
+        model: string;
+        latencyMs: number;
+        outcome: string;
+      }) => void;
       readonly timeoutMs?: number;
+      readonly maxTokens?: number;
+      readonly temperature?: number;
     },
   ) {
+    assertCompatibleFallback(
+      options.baseUrl,
+      options.model,
+      options.fallbackModel,
+    );
     this.modelName = options.model;
   }
 
-  private async complete(input: {
+  private async complete<T>(input: {
     readonly messages: readonly unknown[];
     readonly schemaName: string;
     readonly schema: unknown;
     readonly maxTokens: number;
-  }): Promise<Record<string, unknown>> {
+    readonly validate: (value: Record<string, unknown>) => T;
+    readonly hooks?: FieldServiceAttemptHooks | undefined;
+  }): Promise<T> {
+    try {
+      return await this.completeAttempt(input, this.options.model);
+    } catch (error) {
+      if (
+        !(error instanceof FieldServiceAiProviderError) ||
+        (!error.retryable && error.code !== "field_ai_invalid_output") ||
+        !this.options.fallbackModel ||
+        this.options.fallbackModel === this.options.model
+      )
+        throw error;
+      return this.completeAttempt(input, this.options.fallbackModel);
+    }
+  }
+
+  private async completeAttempt<T>(
+    input: {
+      readonly messages: readonly unknown[];
+      readonly schemaName: string;
+      readonly schema: unknown;
+      readonly maxTokens: number;
+      readonly validate: (value: Record<string, unknown>) => T;
+      readonly hooks?: FieldServiceAttemptHooks | undefined;
+    },
+    model: string,
+  ): Promise<T> {
+    const identity = {
+      eventId: randomUUID(),
+      model,
+      occurredAt: new Date().toISOString(),
+    };
+    // Authorization/accounting failure is outside the provider retry boundary.
+    await input.hooks?.beforeAttempt(identity);
+    const started = performance.now();
+    let outcome: FieldServiceAttempt["outcome"] = "failed";
+    let usage: WhatsAppAiUsage | null = null;
     const controller = new AbortController();
     const timeout = setTimeout(
       () => controller.abort(),
@@ -259,7 +339,7 @@ export class OpenAiCompatibleFieldServiceProvider implements FieldServiceAiProvi
             "content-type": "application/json",
           },
           body: JSON.stringify({
-            model: this.options.model,
+            model,
             messages: input.messages,
             response_format: {
               type: "json_schema",
@@ -269,9 +349,15 @@ export class OpenAiCompatibleFieldServiceProvider implements FieldServiceAiProvi
                 schema: input.schema,
               },
             },
-            max_tokens: input.maxTokens,
-            reasoning_effort: "none",
-            temperature: 0,
+            max_tokens: Math.min(
+              input.maxTokens,
+              this.options.maxTokens ?? input.maxTokens,
+            ),
+            ...compatibleModelParameters(
+              this.options.baseUrl,
+              model,
+              this.options.temperature ?? 0,
+            ),
             stream: false,
           }),
           signal: controller.signal,
@@ -287,7 +373,17 @@ export class OpenAiCompatibleFieldServiceProvider implements FieldServiceAiProvi
             response.status >= 500,
         );
       }
-      return parseCompletion(await response.json());
+      let payload: unknown;
+      try {
+        payload = await response.json();
+      } catch {
+        throw new FieldServiceAiProviderError("field_ai_invalid_output", false);
+      }
+      usage =
+        providerReportedUsage(payload, performance.now() - started) ?? null;
+      const result = input.validate(parseCompletion(payload));
+      outcome = "success";
+      return result;
     } catch (error) {
       if (error instanceof FieldServiceAiProviderError) throw error;
       if (error instanceof Error && error.name === "AbortError")
@@ -295,13 +391,52 @@ export class OpenAiCompatibleFieldServiceProvider implements FieldServiceAiProvi
       throw new FieldServiceAiProviderError("field_ai_transport_error", true);
     } finally {
       clearTimeout(timeout);
+      await input.hooks?.onAttempt({
+        ...identity,
+        latencyMs: performance.now() - started,
+        outcome,
+        usage,
+      });
+      this.options.onAttempt?.({
+        model,
+        latencyMs: performance.now() - started,
+        outcome,
+      });
     }
   }
 
   public async extractIntake(
     request: FieldServiceIntakeExtractionRequest,
+    hooks?: FieldServiceAttemptHooks,
   ): Promise<FieldServiceIntakeExtraction> {
-    const result = await this.complete({
+    return this.complete({
+      hooks,
+      validate: (result) => {
+        if (
+          typeof result.serviceIntent !== "boolean" ||
+          typeof result.confirmed !== "boolean"
+        )
+          throw new FieldServiceAiProviderError(
+            "field_ai_invalid_output",
+            false,
+          );
+        const fields = object(result.fields);
+        if (fields === undefined)
+          throw new FieldServiceAiProviderError(
+            "field_ai_invalid_output",
+            false,
+          );
+        return {
+          serviceIntent: result.serviceIntent,
+          confirmed: result.confirmed,
+          confidence: confidence(result.confidence),
+          fields: sanitizeIntakeProposal(
+            Object.fromEntries(
+              Object.entries(fields).filter(([, value]) => value !== null),
+            ),
+          ),
+        };
+      },
       schemaName: "field_service_intake",
       schema: intakeSchema,
       maxTokens: 600,
@@ -331,34 +466,28 @@ export class OpenAiCompatibleFieldServiceProvider implements FieldServiceAiProvi
         },
       ],
     });
-    if (
-      typeof result.serviceIntent !== "boolean" ||
-      typeof result.confirmed !== "boolean"
-    )
-      throw new FieldServiceAiProviderError("field_ai_invalid_output", false);
-    const fields = object(result.fields);
-    if (fields === undefined)
-      throw new FieldServiceAiProviderError("field_ai_invalid_output", false);
-    const withoutNulls = Object.fromEntries(
-      Object.entries(fields).filter(([, value]) => value !== null),
-    );
-    return {
-      serviceIntent: result.serviceIntent,
-      confirmed: result.confirmed,
-      confidence: confidence(result.confidence),
-      fields: sanitizeIntakeProposal(withoutNulls),
-    };
   }
 
   public async extractProductLabel(
     request: FieldServiceOcrRequest,
+    hooks?: FieldServiceAttemptHooks,
   ): Promise<FieldServiceOcrExtraction> {
     if (
       request.bytes.byteLength < 1 ||
       request.bytes.byteLength > 12 * 1024 * 1024
     )
       throw new FieldServiceAiProviderError("field_ocr_invalid_image", false);
-    const result = await this.complete({
+    return this.complete({
+      hooks,
+      validate: (result) => ({
+        fields: boundedFields(result),
+        confidence: confidence(result.confidence),
+        fieldConfidence: {
+          productType: confidence(result.productTypeConfidence),
+          productModel: confidence(result.productModelConfidence),
+          serialNumber: confidence(result.serialNumberConfidence),
+        },
+      }),
       schemaName: "field_service_product_label",
       schema: ocrSchema,
       maxTokens: 350,
@@ -382,20 +511,11 @@ export class OpenAiCompatibleFieldServiceProvider implements FieldServiceAiProvi
         },
       ],
     });
-    const fields = boundedFields(result);
-    return {
-      fields,
-      confidence: confidence(result.confidence),
-      fieldConfidence: {
-        productType: confidence(result.productTypeConfidence),
-        productModel: confidence(result.productModelConfidence),
-        serialNumber: confidence(result.serialNumberConfidence),
-      },
-    };
   }
 
   public async summarizeEvidence(
     request: FieldServiceSummaryRequest,
+    hooks?: FieldServiceAttemptHooks,
   ): Promise<string> {
     const evidence = request.evidence.trim();
     if (evidence.length === 0 || evidence.length > 80_000)
@@ -403,7 +523,20 @@ export class OpenAiCompatibleFieldServiceProvider implements FieldServiceAiProvi
         "field_summary_invalid_evidence",
         false,
       );
-    const result = await this.complete({
+    return this.complete({
+      hooks,
+      validate: (result) => {
+        if (
+          typeof result.summary !== "string" ||
+          !result.summary.trim() ||
+          result.summary.trim().length > 4000
+        )
+          throw new FieldServiceAiProviderError(
+            "field_ai_invalid_output",
+            false,
+          );
+        return result.summary.trim();
+      },
       schemaName: "field_service_evidence_summary",
       schema: summarySchema,
       maxTokens: 900,
@@ -425,9 +558,5 @@ export class OpenAiCompatibleFieldServiceProvider implements FieldServiceAiProvi
         },
       ],
     });
-    const summary = result.summary;
-    if (typeof summary !== "string" || summary.trim().length === 0)
-      throw new FieldServiceAiProviderError("field_ai_invalid_output", false);
-    return summary.trim().slice(0, 4000);
   }
 }

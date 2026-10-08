@@ -1,5 +1,7 @@
 "use client";
 
+import { agentRuntimePolicy } from "@or-on/config";
+
 import { useEffect, useState, type SubmitEvent } from "react";
 import { useLocale } from "next-intl";
 import { useRouter } from "next/navigation";
@@ -472,9 +474,9 @@ function QualityForm({
           id={`${id}-grammar`}
           label={copy.grammar}
           name="grammar"
-          defaultValue={quality.agentGrammar}
+          defaultValue={agentRuntimePolicy.voice.agentGrammar}
         >
-          {["feminine", "masculine", "neutral"].map((value) => (
+          {["feminine"].map((value) => (
             <option key={value} value={value}>
               {copy[value as "feminine"]}
             </option>
@@ -494,9 +496,10 @@ function QualityForm({
         </Select>
         <Input
           id={`${id}-voice`}
-          label={copy.voice}
+          label="קול: Harper (נשי)"
           name="voiceId"
-          defaultValue={quality.voiceId}
+          value={agentRuntimePolicy.voice.voice}
+          readOnly
           maxLength={100}
           dir="ltr"
         />

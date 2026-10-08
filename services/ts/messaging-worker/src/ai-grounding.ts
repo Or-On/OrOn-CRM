@@ -4,7 +4,10 @@ import {
   validateAgentOutput,
 } from "@or-on/crm";
 
-import type { WhatsAppAiDecision } from "./ai-provider.js";
+import type {
+  WhatsAppAiDecision,
+  WhatsAppActionReceipt,
+} from "./ai-provider.js";
 
 /** Authenticated repository projection; never construct this from model output. */
 export interface EligibleKnowledgeFact {
@@ -24,6 +27,7 @@ export const conversationReplyCodes = [
   "callback_confirmation",
   "unverified_claim",
   "knowledge_unavailable",
+  "action_failed",
 ] as const;
 export type ConversationReplyCode = (typeof conversationReplyCodes)[number];
 export const recentReplyWindowSize = 8;
@@ -85,6 +89,10 @@ const replies: Readonly<
     "המידע המאושר הזמין לי לא מספיק כדי להשיב בוודאות. האם לבקש בדיקה של נציג?",
     "The approved information available to me is insufficient to answer with certainty. Would you like an operator to review it?",
   ],
+  action_failed: [
+    "לא הצלחתי להשלים את שמירת הפנייה כרגע. אפשר לנסות שוב בהמשך.",
+    "I could not complete saving your enquiry just now. You can try again later.",
+  ],
 };
 
 function localized(locale: string, values: readonly [string, string]): string {
@@ -99,6 +107,27 @@ export function conversationalReply(
     text: localized(locale, replies[code]),
     evidence: { kind: "conversation", code },
   };
+}
+
+/** Failed actions must end truthfully even when a provider ignores its receipt. */
+export function guardFailedLeadReply(
+  decision: WhatsAppAiDecision,
+  receipts: readonly WhatsAppActionReceipt[],
+  locale: string,
+): WhatsAppAiDecision {
+  if (
+    receipts.at(-1)?.ok === false &&
+    decision.action === "reply" &&
+    !safeConversationalReply(decision.text, {
+      locale,
+      committedRecord: receipts.some((receipt) => receipt.ok),
+      finalizedRecord: receipts.some(
+        (receipt) => receipt.ok && receipt.action === "lead_finalize",
+      ),
+    })
+  )
+    return { action: "reply", text: "", replyCode: "action_failed" };
+  return decision;
 }
 
 export function factDigest(value: string): string {
@@ -132,6 +161,7 @@ export interface ConversationalReplyContext {
    * nothing further: an appointment, a refund or a repair remains unsayable.
    */
   readonly committedRecord?: boolean;
+  readonly finalizedRecord?: boolean;
 }
 
 function normalizedReply(value: string): string {
@@ -364,7 +394,7 @@ function nonRepeatingClarification(
 // Outcomes nothing in this conversation can produce. No receipt available on
 // this channel makes them sayable, so they are refused unconditionally.
 const consequentialClaimPattern =
-  /\b(?:booked|refunded|delivered|connected|verified|scheduled|charged|paid|approved|fixed|resolved)\b|(?:קבעתי|תיאמתי|פתחתי|זיכיתי|אימתתי|חיברתי|תוקן|נפתר|בוצע|אישר(?:תי|ה|ו)?|אושר(?:ה)?|שולם|נקבע|נמסר)/iu;
+  /\b(?:booked|refunded|delivered|connected|verified|scheduled|charged|paid|approved|fixed|resolved)\b|(?<!\p{L})(?:קבעתי|תיאמתי|פתחתי|זיכיתי|אימתתי|חיברתי|תוקן|נפתר|בוצע|אישר(?:תי|ה|ו)?|אושר(?:ה)?|שולם|נקבע|נמסר)/iu;
 
 // Claims that a lead write can back — and only a lead write. Without a
 // committed receipt in this turn they are refused exactly like the rest,
@@ -377,9 +407,13 @@ const recordClaimPattern =
 const unsupportedDeliveryPromise =
   /\b(?:will|shall|going to|about to)\s+(?:be\s+)?(?:send|sent|open|opened|create|created)\b|\b(?:I|we)['’]ll\s+(?:send|open|create)\b|(?:אשלח|נשלח|יישלח|ישלח|תישלח|תשלח|אפתח|נפתח)\s+(?:לך|לכם|אליך|אליכם|את|קישור|לינק|טופס|קריא[הת]|בקשה)|(?:שלחתי|שלחנו)|\bsent\b/iu;
 
+const finalizedLeadClaimPattern =
+  /(?:נפתח|פתחתי|נוצר|יצרתי)\s+(?:לך\s+)?ליד|(?:נציג|אדם|אנושי)[^.?!]{0,50}(?:יחזור|יחזרו|ייצור קשר)|\b(?:lead|enquiry|inquiry)\b.{0,25}\b(?:opened|finalized|completed)\b|\b(?:human|representative|team)\b.{0,30}\b(?:will|shall)\b.{0,15}\b(?:contact|call)\b/iu;
+
 function passesConversationalSafety(
   value: string,
   committedRecord = false,
+  finalizedRecord = false,
 ): boolean {
   // Paragraph breaks are ordinary message formatting. Scan their words as
   // one line so a break cannot hide a forbidden claim; all other control
@@ -392,6 +426,17 @@ function passesConversationalSafety(
     !consequentialClaimPattern.test(text) &&
     !unsupportedDeliveryPromise.test(text) &&
     (committedRecord || !recordClaimPattern.test(text)) &&
+    (finalizedRecord ||
+      !text
+        .split(/(?<=[.?!])\s*/u)
+        .some(
+          (sentence) =>
+            finalizedLeadClaimPattern.test(sentence) &&
+            !/^(?:אפשר|האם|תרצה|תרצי|would you like|may|can)\b[^.!?]*\?$/iu.test(
+              sentence.trim(),
+            ) &&
+            !/^(?:אפשר|האם)\s[^.!?]*\?$/u.test(sentence.trim()),
+        )) &&
     text.length > 0 &&
     value.length <= 1000 &&
     !/[\p{Cc}\p{Cf}<>`]/u.test(text) &&
@@ -423,7 +468,11 @@ export function safeConversationalReply(
   const text = value.trim();
   const latestCustomerMessage = context.latestCustomerMessage?.trim();
   return (
-    passesConversationalSafety(text, context.committedRecord === true) &&
+    passesConversationalSafety(
+      text,
+      context.committedRecord === true,
+      context.finalizedRecord === true,
+    ) &&
     !asksMoreThanOneQuestion(text) &&
     (context.locale === undefined ||
       matchesRequestedLocale(text, context.locale)) &&
@@ -612,6 +661,12 @@ export function groundAiReply(
     );
   }
   if (decision.action === "reply") {
+    // Closed grammatical repair preserves the catalog answer and changes no
+    // fact, authorization, or receipt. All safety and delivery checks still run.
+    const replyText = decision.text.replace(
+      /את\s*\/\s*ה\s+מתעניי?ן\s*\/\s*ת/gu,
+      "יש עניין",
+    );
     if (decision.replyCode !== undefined) {
       const selected = conversationalReply(decision.replyCode, locale);
       if (
@@ -622,15 +677,16 @@ export function groundAiReply(
       return nonRepeatingClarification(locale, spokenContext);
     }
     if (
-      safeConversationalReply(decision.text, {
+      safeConversationalReply(replyText, {
         locale,
         recentAssistantMessages,
         latestCustomerMessage,
         committedRecord: committedRecord !== undefined,
+        finalizedRecord: committedRecord?.operation === "lead.finalize",
       })
     ) {
       return {
-        text: decision.text.trim(),
+        text: replyText.trim(),
         // Natural diagnostic questions must retain a distinct evidence code.
         // Treating them as the canned `clarify` reply makes the delivery-time
         // revalidation compare different text and reject every useful answer.
@@ -644,8 +700,9 @@ export function groundAiReply(
       };
     }
     return passesConversationalSafety(
-      decision.text.trim(),
+      replyText.trim(),
       committedRecord !== undefined,
+      committedRecord?.operation === "lead.finalize",
     )
       ? nonRepeatingClarification(locale, spokenContext)
       : nonRepeatingClarification(

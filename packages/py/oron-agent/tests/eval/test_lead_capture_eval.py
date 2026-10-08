@@ -27,6 +27,7 @@ from oron_agent.lead_capture import (
     VoiceLeadTools,
     parse_lead_field_schema,
 )
+from oron_agent.model_parameters import compatible_parameters
 
 CORPUS = json.loads(
     (
@@ -187,13 +188,14 @@ def _reply(endpoint: tuple[str, str, str], messages: list[dict], tools: list[dic
         "messages": messages,
         "tools": tools,
         "tool_choice": "auto",
-        "temperature": float(os.environ.get("LLM_TEMPERATURE", "0.2")),
+        **compatible_parameters(
+            base_url,
+            model,
+            float(os.environ.get("LLM_TEMPERATURE", "0.2")),
+            os.environ.get("ORON_LLM_REASONING_EFFORT") or os.environ.get("LLM_REASONING_EFFORT"),
+        ),
         "max_tokens": int(os.environ.get("LLM_MAX_TOKENS", "512")),
     }
-    if effort := (
-        os.environ.get("ORON_LLM_REASONING_EFFORT") or os.environ.get("LLM_REASONING_EFFORT")
-    ):
-        request["reasoning_effort"] = effort
     response = httpx.post(
         f"{base_url.rstrip('/')}/chat/completions",
         headers={"Authorization": f"Bearer {api_key}"},
@@ -252,7 +254,10 @@ async def test_provider_records_what_the_caller_said(scenario: dict[str, Any]) -
     # A model may also record something else the caller volunteered, so the
     # scenario states the floor: every answer given must be in the record.
     for key, value in expected["fields"].items():
-        assert observed.get(key) == value, f"{scenario['id']}: {observed}"
+        actual = observed.get(key, {})
+        # A caller's explicit statement may additionally be marked confirmed.
+        # Still require every expected value/state/currency/confirmation exactly.
+        assert {name: actual.get(name) for name in value} == value, f"{scenario['id']}: {observed}"
     assert store.lead["status"] == expected["status"], scenario["id"]
     assert turns.receipt_for_current_turn() is expected["saveClaimAllowed"], scenario["id"]
 
@@ -272,6 +277,8 @@ def test_the_eval_covers_both_schemas_and_both_languages() -> None:
 
 
 def test_provider_eval_requires_explicit_opt_in(monkeypatch) -> None:
+    monkeypatch.delenv("ORON_LLM_MODEL", raising=False)
+    monkeypatch.delenv("ORON_LLM_BASE_URL", raising=False)
     monkeypatch.delenv("ORON_RUN_PROVIDER_EVALS", raising=False)
     monkeypatch.setenv("LLM_BASE_URL", "https://example.invalid/v1")
     monkeypatch.setenv("LLM_MODEL", "fixture-model")

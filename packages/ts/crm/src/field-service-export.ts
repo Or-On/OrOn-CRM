@@ -342,6 +342,10 @@ export function createServiceReportWorkbook(
       [labels.nationalId, report.customer.nationalIdMasked],
       [labels.location, report.serviceCase.serviceLocationName],
       [labels.address, report.serviceCase.serviceLocationAddress],
+      [
+        locale.toLowerCase().startsWith("he") ? "עיר" : "City",
+        report.serviceCase.serviceLocationCity ?? null,
+      ],
       [labels.technician, report.technician.fullName],
       [labels.employeeId, report.technician.employeeIdentifier],
       [

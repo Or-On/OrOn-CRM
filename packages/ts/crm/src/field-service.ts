@@ -110,6 +110,7 @@ export interface ServiceCaseSummary {
   readonly serviceLocationId: string | null;
   readonly serviceLocationName: string | null;
   readonly serviceLocationAddress: string | null;
+  readonly serviceLocationCity?: string | null;
   readonly status: ServiceCaseStatus;
   readonly title: string;
   readonly faultDescription: string;
@@ -1364,6 +1365,7 @@ interface ServiceCaseRow {
   readonly service_location_id: string | null;
   readonly service_location_name: string | null;
   readonly service_location_address: string | null;
+  readonly service_location_city: string | null;
   readonly status: ServiceCaseStatus;
   readonly title: string;
   readonly fault_description: string;
@@ -1386,6 +1388,7 @@ function serviceCase(row: ServiceCaseRow): ServiceCaseSummary {
     serviceLocationId: row.service_location_id,
     serviceLocationName: row.service_location_name,
     serviceLocationAddress: row.service_location_address,
+    serviceLocationCity: row.service_location_city,
     status: row.status,
     title: row.title,
     faultDescription: row.fault_description,
@@ -1404,7 +1407,7 @@ const caseProjection = `
          service_case.customer_contact_id, customer.name AS customer_name,
          service_case.service_location_id,
          location.name AS service_location_name,
-         location.address AS service_location_address, service_case.status,
+         location.address AS service_location_address, location.city AS service_location_city, service_case.status,
          service_case.title, service_case.fault_description,
          service_case.warranty_status, service_case.product_type,
          service_case.product_model,
@@ -4002,6 +4005,7 @@ export async function finalizeReportRevision(
             'serviceLocationId', service_case.service_location_id,
             'serviceLocationName', location.name,
             'serviceLocationAddress', location.address,
+            'serviceLocationCity', location.city,
             'status', service_case.status,
             'title', service_case.title,
             'faultDescription', service_case.fault_description,

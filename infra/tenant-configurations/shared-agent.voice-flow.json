@@ -1,0 +1,35 @@
+{
+  "id": "0fc4a19f-347c-4e29-b670-578cb87cf9b0",
+  "version": 1,
+  "entry": "conversation",
+  "language": "he",
+  "persona_gender": "female",
+  "role_message": null,
+  "pronunciations": {},
+  "nodes": [
+    {
+      "name": "conversation",
+      "respond_immediately": true,
+      "task_messages": [
+        {
+          "role": "system",
+          "content": "Follow the pinned published agent instructions and trusted business context. This node supplies no independent business script. Continue the customer's actual discussion, using the available authorized actions and their receipts. Introduce yourself once if no introduction has been given. Do not repeat a successful save or closing. If the caller has asked to end the call, call caller_goodbye silently. A tool result is not a new customer turn."
+        }
+      ],
+      "functions": [
+        {
+          "name": "caller_goodbye",
+          "description": "Only when the caller says goodbye or asks to stop this call. Do not manufacture a completed enquiry. Call silently without an additional closing.",
+          "handler": "goto",
+          "config": { "route": "default" },
+          "routes": { "default": "end" }
+        }
+      ]
+    },
+    {
+      "name": "end",
+      "respond_immediately": false,
+      "post_actions": [{ "type": "end_conversation" }]
+    }
+  ]
+}

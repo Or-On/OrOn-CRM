@@ -35,11 +35,8 @@ from pipecat.services.tts_service import TTSService
 from pipecat.tests.utils import run_test
 
 BUSINESS = "טכנו שירות"
-IDENTITY = (
-    "אני העוזר הווירטואלי של טכנו שירות, ואני כאן כדי לעזור בפניות שירות. "
-    "איך אפשר לעזור בנושא התקלה?"
-)
-FALLBACK = "סליחה, בשיחה הזו אפשר לעזור רק בפניות שירות של טכנו שירות. איך אפשר לעזור בנושא התקלה?"
+IDENTITY = "אני נציגת ה-AI של טכנו שירות. אשמח לעזור בשירותים שלנו. במה אפשר לעזור?"
+FALLBACK = "אשמח לעזור בשירותים של טכנו שירות. במה אפשר לעזור?"
 
 
 class RecordingTTS(TTSService):

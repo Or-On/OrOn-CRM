@@ -729,6 +729,11 @@ export function ServiceCaseWorkspace({
         <div className="technician-briefing__grid">
           <section>
             <h3>{he ? "לקוח ומיקום" : "Customer & site"}</h3>
+            {serviceCase.serviceLocationCity ? (
+              <p dir="auto">
+                {he ? "עיר" : "City"}: {serviceCase.serviceLocationCity}
+              </p>
+            ) : null}
             <strong dir="auto">{briefing.customer.name}</strong>
             <p dir="auto">
               <MapPin aria-hidden="true" size={14} />

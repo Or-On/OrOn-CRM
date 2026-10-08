@@ -52,7 +52,7 @@ afterEach(() => {
 
 describe("persisted agent quality workspace", () => {
   it.each(["en", "he"] as const)(
-    "renders labelled %s controls and saves independent voice/grammar/address values",
+    "renders labelled %s controls with canonical female voice and independent caller address",
     async (locale) => {
       const copy = qualityCopy(locale);
       api.mutate.mockResolvedValue({
@@ -67,13 +67,15 @@ describe("persisted agent quality workspace", () => {
         ),
       );
       const grammar = await screen.findByLabelText(copy.grammar);
-      fireEvent.change(grammar, { target: { value: "masculine" } });
+      expect((grammar as HTMLSelectElement).value).toBe("feminine");
+      expect((grammar as HTMLSelectElement).options).toHaveLength(1);
       fireEvent.change(screen.getByLabelText(copy.caller), {
         target: { value: "feminine" },
       });
-      fireEvent.change(screen.getByLabelText(copy.voice), {
-        target: { value: "FictionalVoice" },
-      });
+      const voice =
+        screen.getByLabelText<HTMLInputElement>("קול: Harper (נשי)");
+      expect(voice.value).toBe("Harper");
+      expect(voice.readOnly).toBe(true);
       fireEvent.click(screen.getByRole("button", { name: copy.save }));
       await waitFor(() => {
         expect(api.mutate.mock.calls[0]?.[0]).toBe(
@@ -81,9 +83,9 @@ describe("persisted agent quality workspace", () => {
         );
         expect(api.mutate.mock.calls[0]?.[1]).toMatchObject({
           quality: {
-            agentGrammar: "masculine",
+            agentGrammar: "feminine",
             callerAddressDefault: "feminine",
-            voiceId: "FictionalVoice",
+            voiceId: "Harper",
           },
           baseVersionId: version.id,
           latestVersionId: version.id,

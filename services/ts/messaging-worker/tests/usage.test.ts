@@ -43,7 +43,18 @@ describe("provider-reported usage", () => {
         { usage: { prompt_tokens: 23, completion_tokens: 0 } },
         123.7,
       ),
-    ).toEqual({ inputTokens: 23, outputTokens: 0, latencyMs: 124 });
+    ).toEqual({
+      inputTokens: 23,
+      outputTokens: 0,
+      latencyMs: 124,
+      tokenDetails: {
+        cachedInput: null,
+        audioInput: null,
+        cachedAudioInput: null,
+        reasoningOutput: null,
+        audioOutput: null,
+      },
+    });
   });
   it("never invents absent counts or accepts malformed billing data", () => {
     for (const payload of [

@@ -43,6 +43,8 @@ export async function issueDigitalServiceForm(
 export interface DigitalServiceForm {
   readonly intakeId: string;
   readonly businessName?: string;
+  readonly businessPhone?: string | null;
+  readonly formVersion?: 1 | 2;
   readonly customerName: string;
   readonly faultDescription: string;
   readonly photoRequired: boolean;
@@ -74,18 +76,30 @@ export async function submitDigitalServiceForm(
   input: {
     readonly customerName: string;
     readonly serviceLocation: string;
+    readonly serviceStreet?: string;
+    readonly serviceCity?: string;
     readonly faultDescription: string;
     readonly confirmed: boolean;
     readonly photos: readonly DigitalServicePhoto[];
   },
 ): Promise<{ readonly reference: string; readonly created: boolean }> {
-  const rows = await sql<
-    { receipt: { reference: string; created: boolean } }[]
-  >`
+  const rows =
+    input.serviceStreet !== undefined || input.serviceCity !== undefined
+      ? await sql<
+          { receipt: { reference: string; created: boolean } }[]
+        >`SELECT service.submit_digital_intake_form_v2(${digitalServiceFormHash(token)},${input.customerName},${input.serviceStreet ?? ""},${input.serviceCity ?? ""},${input.faultDescription},${input.confirmed},${sql.json(input.photos.map((photo) => ({ ...photo })))}) AS receipt`
+      : await sql<{ receipt: { reference: string; created: boolean } }[]>`
     SELECT service.submit_digital_intake_form(${digitalServiceFormHash(token)},${input.customerName},${input.serviceLocation},${input.faultDescription},${input.confirmed},${sql.json(input.photos.map((photo) => ({ contentType: photo.contentType, byteSize: photo.byteSize, checksum: photo.checksum, storageBackend: photo.storageBackend, storageKey: photo.storageKey })))}) AS receipt
   `;
   const receipt = rows[0]?.receipt;
   if (typeof receipt?.reference !== "string")
     throw new Error("Service form submission returned no reference");
   return receipt;
+}
+
+export async function markDigitalServiceFormOpened(
+  sql: postgres.TransactionSql,
+  token: string,
+): Promise<void> {
+  await sql`SELECT service.mark_digital_form_opened(${digitalServiceFormHash(token)})`;
 }

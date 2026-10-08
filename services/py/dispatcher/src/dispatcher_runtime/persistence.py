@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 from oron_common import CallContext, CallUsage, Direction, validate_e164
+from oron_common.scope_policy_revision import POLICY_VERSION as SCOPE_POLICY_VERSION
 from oron_db import make_engine, make_sessionmaker, set_tenant
 from oron_dispatcher.dispatcher import IdempotencyConflict
 from oron_dispatcher.tenancy_client import PhoneResolution
@@ -30,6 +31,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlmodel import col
 
+from dispatcher_runtime.model_route import model_keys, resolve_route
 from dispatcher_runtime.sms import SmsSender, SmsUnavailable, TwilioSmsSender, code_digest
 from dispatcher_runtime.support_context import (
     TenantSupportProfile,
@@ -47,7 +49,6 @@ if TYPE_CHECKING:
 _CALL_CONFIGURATION_EVENT = "voice.call.configuration.v1"
 # Mirrors db/contracts/service-agent-policy.v1.json without importing the
 # optional voice runtime. Categories are policy identifiers, never caller text.
-SCOPE_POLICY_VERSION = "service-agent-policy/1"
 _POLICY_STAGES = frozenset({"caller_turn", "model_output", "synthesis", "tool"})
 _POLICY_ACTIONS = frozenset({"routed", "scope_notice", "rejected", "refused"})
 _POLICY_CATEGORY = re.compile(r"[a-z_]{1,40}(?:,[a-z_]{1,40}){0,7}")
@@ -114,6 +115,12 @@ class VoicePersistenceSettings(BaseSettings):
     database_url: PostgresDsn = Field(validation_alias="VOICE_DATABASE_URL")
     field_cipher_local_key: SecretStr = Field(validation_alias="FIELD_CIPHER_LOCAL_KEY")
     blind_index_key: SecretStr = Field(validation_alias="BLIND_INDEX_KEY")
+    credential_encryption_key: SecretStr | None = Field(
+        default=None, validation_alias="CREDENTIAL_ENCRYPTION_KEY"
+    )
+    credential_encryption_keyring: SecretStr | None = Field(
+        default=None, validation_alias="CREDENTIAL_ENCRYPTION_KEYRING"
+    )
     enable_real_sms: bool = Field(default=False, validation_alias="ENABLE_REAL_SMS")
     sms_otp_pepper: SecretStr | None = Field(default=None, validation_alias="SMS_OTP_PEPPER")
     twilio_account_sid: str | None = Field(default=None, validation_alias="TWILIO_ACCOUNT_SID")
@@ -158,6 +165,9 @@ class PostgresVoiceRuntime:
         self._sessionmaker: async_sessionmaker[AsyncSession] = make_sessionmaker(self._engine)
         self._cipher = LocalFieldCipher(settings.cipher_key())
         self._blind_index_key = settings.index_key()
+        self._model_keys = model_keys(
+            settings.credential_encryption_key, settings.credential_encryption_keyring
+        )
         self._flows = PostgresFlowStore(self._sessionmaker)
         self._sms_pepper = (
             settings.sms_otp_pepper.get_secret_value() if settings.sms_otp_pepper else None
@@ -917,6 +927,7 @@ class PostgresVoiceRuntime:
                 )
             ), eligible AS (
             SELECT agent.id, agent.system_prompt, agent.channel_configuration,
+              agent.model_configuration_id,
               agent.tool_permissions,
               node #>> '{configuration,flowVersion}' AS voice_version,
               binding.id AS binding_id,
@@ -957,7 +968,8 @@ class PostgresVoiceRuntime:
               AND (CAST(:voice_version AS text) IS NULL OR
                    node #>> '{configuration,flowVersion}' = CAST(:voice_version AS text))
             )
-            SELECT DISTINCT id,system_prompt,channel_configuration,tool_permissions,voice_version
+            SELECT DISTINCT id,system_prompt,channel_configuration,tool_permissions,
+              voice_version,model_configuration_id
             FROM eligible
             WHERE binding_id IS NOT NULL OR CAST(:agent_id AS uuid) IS NOT NULL OR latest=1
         """)
@@ -1021,9 +1033,20 @@ class PostgresVoiceRuntime:
             *tenant_quality["pronunciationDictionary"],
         ][:64]
         raw_permissions = row["tool_permissions"]
+        # New revisions carry the immutable output of the shared TypeScript
+        # composeAgentInstructions architecture. Legacy versions retain their
+        # original prompt until explicitly replaced by a reviewed revision.
+        voice_instructions = channel_configuration.get("voiceInstructions")
+        if voice_instructions is not None and (
+            not isinstance(voice_instructions, str) or not voice_instructions.strip()
+        ):
+            raise ValueError("published voice instruction artifact is invalid")
         return {
             "agentVersionId": str(row["id"]),
-            "systemPrompt": row["system_prompt"],
+            "modelConfigurationId": str(row["model_configuration_id"])
+            if row.get("model_configuration_id")
+            else None,
+            "systemPrompt": voice_instructions or row["system_prompt"],
             # The role the operator published. It decides how the agent names
             # itself; the tenant identity block still decides who it works for.
             "roleTitle": normalize_agent_role_title(
@@ -1420,6 +1443,92 @@ class PostgresVoiceRuntime:
                 .all()
             )
         return [row["eligibility_revision"] for row in rows]
+
+    async def resolve_voice_model(self, context: CallContext, configuration_id: str) -> dict:
+        async def project(reserve: bool, expected: dict | None = None):
+            async with self._sessionmaker() as database, database.begin():
+                await set_tenant(database, str(context.tenant_id))
+                return await database.scalar(
+                    text(
+                        "SELECT platform.voice_model_route("
+                        ":session,:reserve,CAST(:expected AS jsonb))"
+                    ),
+                    {
+                        "session": context.session_id,
+                        "reserve": reserve,
+                        "expected": json.dumps(expected) if expected is not None else None,
+                    },
+                )
+
+        snapshot = await project(False)
+        if (
+            not isinstance(snapshot, dict)
+            or snapshot.get("configuration", {}).get("id") != configuration_id
+        ):
+            raise ValueError("explicit voice model route unavailable")
+        route = resolve_route(snapshot, self._model_keys, str(context.tenant_id))
+
+        async def before_attempt() -> None:
+            # Atomic quota plus a fresh active-call, ownership and credential
+            # check for every paid attempt. Rotation never borrows another key.
+            if await project(True, snapshot) != snapshot:
+                raise ValueError("explicit voice model authority changed or quota exhausted")
+
+        return {**route, "beforeAttempt": before_attempt}
+
+    async def record_model_attempt(self, context: CallContext, attempt: dict) -> None:
+        """Commit each physical inference attempt, including failures with unknown usage."""
+        attempt_id = UUID(attempt["attemptId"])
+        if (
+            not re.fullmatch(r"[A-Za-z0-9._:/-]{1,160}", attempt["model"])
+            or attempt["status"] not in {"succeeded", "failed"}
+            or type(attempt["latencyMs"]) is not int
+            or attempt["latencyMs"] < 0
+        ):
+            raise ValueError("invalid model attempt")
+        payload = {
+            key: attempt[key]
+            for key in ("attemptId", "model", "status", "partial", "latencyMs", "usage")
+        }
+        async with self._sessionmaker() as database, database.begin():
+            await set_tenant(database, str(context.tenant_id))
+            row = await database.get(Session, context.session_id, with_for_update=True)
+            if row is None:
+                raise ValueError("model attempt session unavailable")
+            existing = (
+                await database.execute(
+                    text("""
+                SELECT 1 FROM session_events WHERE tenant_id=:tenant AND session_id=:session
+                AND id=:attempt
+            """),
+                    {
+                        "tenant": str(context.tenant_id),
+                        "session": str(context.session_id),
+                        "attempt": str(attempt_id),
+                    },
+                )
+            ).first()
+            if existing:
+                return
+            sequence = (
+                await database.execute(
+                    text("""
+                SELECT coalesce(max(sequence),-1)+1 FROM session_events
+                WHERE tenant_id=:tenant AND session_id=:session
+            """),
+                    {"tenant": str(context.tenant_id), "session": str(context.session_id)},
+                )
+            ).scalar_one()
+            database.add(
+                SessionEvent(
+                    id=attempt_id,
+                    tenant_id=context.tenant_id,
+                    session_id=context.session_id,
+                    sequence=sequence,
+                    event_type="voice.model.attempt.v1",
+                    payload=payload,
+                )
+            )
 
     async def record_voice_quality(
         self,
@@ -1944,6 +2053,12 @@ class AgentPostgresSessions:
 
     async def report_voice_quality_failure(self, context: CallContext, *, reason: str) -> None:
         await self._backend.report_voice_quality_failure(context, reason=reason)
+
+    async def resolve_voice_model(self, context: CallContext, configuration_id: str) -> dict:
+        return await self._backend.resolve_voice_model(context, configuration_id)
+
+    async def record_model_attempt(self, context: CallContext, attempt: dict) -> None:
+        await self._backend.record_model_attempt(context, attempt)
 
     async def record_policy_event(
         self, context: CallContext, *, stage: str, category: str, action: str

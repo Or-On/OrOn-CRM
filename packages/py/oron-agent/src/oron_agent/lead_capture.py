@@ -666,6 +666,8 @@ class AcceptedTurns:
     _count: int = 0
     _ids: list[str] = field(default_factory=list)
     _receipt_turn: str | None = None
+    _finalized_turn: str | None = None
+    _failed_turn: str | None = None
 
     def accept(self) -> str:
         self._count += 1
@@ -682,6 +684,22 @@ class AcceptedTurns:
 
     def record_receipt(self) -> None:
         self._receipt_turn = self.current
+        self._failed_turn = None
+
+    def record_failure(self) -> None:
+        self._failed_turn = self.current
+
+    def failed_for_current_turn(self) -> bool:
+        return self._failed_turn is not None and self._failed_turn == self.current
+
+    def failed_turn_key(self) -> str | None:
+        return self.current if self.failed_for_current_turn() else None
+
+    def record_finalized(self) -> None:
+        self._finalized_turn = self.current
+
+    def finalized_for_current_turn(self) -> bool:
+        return self._finalized_turn is not None and self._finalized_turn == self.current
 
     def receipt_for_current_turn(self) -> bool:
         """Whether a committed lead write answers the caller's latest turn."""
@@ -829,6 +847,14 @@ class VoiceLeadTools:
 
         if tool not in {descriptor.name for descriptor in self.descriptors}:
             return {"ok": False, "error": "this action is not enabled for this agent"}
+        if self._turns.finalized_for_current_turn() and tool != "lead_read_state":
+            return {
+                "ok": True,
+                "saved": True,
+                "status": "ready_for_review",
+                "alreadyFinalized": True,
+                "nextStep": "reply_to_customer_without_another_write",
+            }
         turn = self._turns.current or "before-first-turn"
         canonical = json.dumps(arguments, ensure_ascii=False, sort_keys=True, default=str)
         operation_key = lead_operation_key(self._interaction_key, turn, tool, canonical)
@@ -863,6 +889,19 @@ class VoiceLeadTools:
                 await self._resume_once()
                 if self.lead_id is None:
                     return {"ok": False, "error": "nothing has been saved for this enquiry yet"}
+                state = await self._store.capture_state(self.lead_id)
+                readiness = self._summary(state)
+                if readiness["missingRequired"]:
+                    return {
+                        "ok": False,
+                        "code": "missing_required_fields",
+                        **readiness,
+                        "nextStep": (
+                            "Save the missing facts already supplied by the caller "
+                            "before finalizing; "
+                            "ask only for genuinely missing information."
+                        ),
+                    }
                 next_action = arguments.get("nextAction")
                 lead_id = self.lead_id
                 result = await self._commit(
@@ -874,6 +913,7 @@ class VoiceLeadTools:
                         trim(next_action) if isinstance(next_action, str) else None,
                     ),
                 )
+                self._turns.record_finalized()
             else:
                 note = arguments.get("note")
                 if not isinstance(note, str) or not trim(note):
@@ -897,8 +937,20 @@ class VoiceLeadTools:
         except LeadToolArgumentError as error:
             return {"ok": False, "error": error.reason}
         except LeadStoreRefusal as error:
-            return {"ok": False, "error": "the action was refused", "code": error.code}
+            if tool == "lead_read_state":
+                return {"ok": False, "error": "the action was refused", "code": error.code}
+            self._turns.record_failure()
+            return {
+                "ok": False,
+                "error": "the action was refused",
+                "code": error.code,
+                "nextStep": (
+                    "Explain that the request could not be completed. "
+                    "Do not re-ask granted consent."
+                ),
+            }
         except LeadOutcomeUnknown:
+            self._turns.record_failure()
             # Not a refusal and not a success. Retrying this same call in this
             # turn reuses the operation key, so it cannot write twice.
             return {

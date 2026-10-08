@@ -29,6 +29,8 @@ beforeEach(() => {
   );
   fetcher.mockReset().mockResolvedValue(Response.json(details));
   vi.stubGlobal("fetch", fetcher);
+  URL.createObjectURL = vi.fn(() => "blob:fictional-photo");
+  URL.revokeObjectURL = vi.fn();
 });
 afterEach(() => {
   cleanup();
@@ -38,19 +40,17 @@ afterEach(() => {
 
 async function ready(locale: "en" | "he" = "en") {
   const view = render(localized(<ServiceRequestForm />, locale));
-  await screen.findByLabelText(locale === "he" ? "שם מלא" : "Full name");
+  await screen.findByLabelText("שם מלא");
   return view;
 }
 function complete() {
-  fireEvent.change(screen.getByLabelText("Fault location"), {
+  fireEvent.change(screen.getByLabelText("מיקום התקלה"), {
     target: { value: "Fictional street 12" },
   });
   fireEvent.click(screen.getByRole("checkbox"));
 }
 function submit() {
-  const form = screen
-    .getByRole("textbox", { name: "Full name" })
-    .closest("form");
+  const form = screen.getByRole("textbox", { name: "שם מלא" }).closest("form");
   if (!form) throw new Error("Form missing");
   fireEvent.submit(form);
 }
@@ -86,12 +86,12 @@ describe("public service request form", () => {
       window.dispatchEvent(new HashChangeEvent("hashchange"));
     });
     await waitFor(() =>
-      expect(screen.getByLabelText<HTMLInputElement>("Full name").value).toBe(
+      expect(screen.getByLabelText<HTMLInputElement>("שם מלא").value).toBe(
         "Second fictional customer",
       ),
     );
     expect(
-      screen.getByLabelText<HTMLTextAreaElement>("Fault location").value,
+      screen.getByLabelText<HTMLTextAreaElement>("מיקום התקלה").value,
     ).toBe("");
     expect(screen.getByRole<HTMLInputElement>("checkbox").checked).toBe(false);
     await act(async () => {
@@ -99,7 +99,7 @@ describe("public service request form", () => {
       await Promise.resolve();
     });
     expect(screen.queryByText("OLD-PRIVATE-RECEIPT")).toBeNull();
-    expect(screen.getByLabelText<HTMLInputElement>("Full name").value).toBe(
+    expect(screen.getByLabelText<HTMLInputElement>("שם מלא").value).toBe(
       "Second fictional customer",
     );
   });
@@ -121,9 +121,7 @@ describe("public service request form", () => {
       );
       expect(container.textContent).not.toContain(token);
       expect(container.querySelector("select")).toBeNull();
-      const field = screen.getByLabelText<HTMLTextAreaElement>(
-        locale === "he" ? "תיאור התקלה" : "Fault description",
-      );
+      const field = screen.getByLabelText<HTMLTextAreaElement>("תיאור התקלה");
       expect(field.value).toBe(details.faultDescription);
       fireEvent.change(field, {
         target: { value: "Any customer-described fault" },
@@ -143,20 +141,20 @@ describe("public service request form", () => {
       render(localized(<ServiceRequestForm />));
       expect(await screen.findByRole("alert")).toHaveProperty(
         "textContent",
-        expect.stringContaining("unavailable"),
+        expect.stringContaining("אינו זמין"),
       );
       expect(fetcher).not.toHaveBeenCalled();
     },
   );
   it("never submits until the customer explicitly confirms", async () => {
     await ready();
-    fireEvent.change(screen.getByLabelText("Fault location"), {
+    fireEvent.change(screen.getByLabelText("מיקום התקלה"), {
       target: { value: "Fictional street 12" },
     });
     submit();
     expect(await screen.findByRole("alert")).toHaveProperty(
       "textContent",
-      expect.stringContaining("confirm"),
+      expect.stringContaining("לאשר"),
     );
     expect(fetcher).toHaveBeenCalledOnce();
   });
@@ -164,7 +162,7 @@ describe("public service request form", () => {
     await ready();
     complete();
     const photo = new File(["fictional"], "fault.png", { type: "image/png" });
-    fireEvent.change(screen.getByLabelText("Fault photos"), {
+    fireEvent.change(screen.getByLabelText("הוספת תמונות"), {
       target: { files: [photo] },
     });
     fetcher.mockResolvedValueOnce(
@@ -184,7 +182,7 @@ describe("public service request form", () => {
     expect(body.get("serviceLocation")).toBe("Fictional street 12");
     expect(body.get("confirmed")).toBe("true");
     expect(body.getAll("photos")).toHaveLength(1);
-    expect(screen.queryByRole("button", { name: "Submit request" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "שליחת הפנייה" })).toBeNull();
   });
   it.each([400, 503])(
     "keeps the draft and retries safely after HTTP%s",
@@ -198,7 +196,7 @@ describe("public service request form", () => {
       await screen.findByRole("alert");
       expect(screen.queryByText("private backend details")).toBeNull();
       expect(
-        screen.getByLabelText<HTMLTextAreaElement>("Fault location").value,
+        screen.getByLabelText<HTMLTextAreaElement>("מיקום התקלה").value,
       ).toBe("Fictional street 12");
       fetcher.mockResolvedValueOnce(
         Response.json({ reference: "SVC-SAME-RETRY" }),
@@ -243,7 +241,7 @@ describe("public service request form", () => {
         document.querySelector<HTMLInputElement>('input[type="file"]');
       if (!fileInput) throw new Error("Upload missing");
       fireEvent.change(fileInput, { target: { files: photos } });
-      submit();
+      if (kind === "required") submit();
       await screen.findByRole("alert");
       expect(fetcher).toHaveBeenCalledOnce();
     },
@@ -258,9 +256,9 @@ describe("public service request form", () => {
     fetcher.mockRejectedValueOnce(new Error("Network unavailable"));
     render(localized(<ServiceRequestForm />));
     await screen.findByRole("alert");
-    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    fireEvent.click(screen.getByRole("button", { name: "ניסיון נוסף" }));
     await waitFor(() =>
-      expect(screen.getByLabelText<HTMLInputElement>("Full name").value).toBe(
+      expect(screen.getByLabelText<HTMLInputElement>("שם מלא").value).toBe(
         details.customerName,
       ),
     );
