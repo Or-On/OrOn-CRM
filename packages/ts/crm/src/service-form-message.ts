@@ -2,7 +2,7 @@ import type postgres from "postgres";
 import { digitalServiceFormHash } from "./digital-service-form.js";
 
 export const serviceFormTemplateV2Body =
-  "שלום, כאן {{1}}. כדי לפתוח קריאת שירות מלאו את הטופס בקישור: {{2}}. לשאלות: {{3}}.";
+  "שלום, כאן {{1}}. כדי לפתוח קריאת שירות מלאו את הטופס בקישור: {{2}}. לשאלות: {{3}}. תודה שפניתם אלינו.";
 
 export interface ServiceFormBrand {
   readonly businessName: string;
@@ -36,7 +36,7 @@ export function serviceFormMessage(
   const phone = brand.businessPhone;
   if (phone !== null && !/^\+[1-9][0-9]{7,14}$/u.test(phone))
     throw new TypeError("Invalid service business phone");
-  return `שלום, כאן ${name}. כדי לפתוח קריאת שירות מלאו את הטופס בקישור: ${link}.${phone === null ? "" : ` לשאלות: ${phone}.`}`;
+  return `שלום, כאן ${name}. כדי לפתוח קריאת שירות מלאו את הטופס בקישור: ${link}.${phone === null ? "" : ` לשאלות: ${phone}.`} תודה שפניתם אלינו.`;
 }
 
 function serviceFormBusinessName(value: string): string {

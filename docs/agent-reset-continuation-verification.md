@@ -156,11 +156,13 @@ The candidate targets Gemini 3.5 Flash Lite with 3.1 Flash Lite fallback and
 Harper / `tts-rt-v2`, backed by the separately recorded offline provider evidence.
 Those candidate settings were not activated. No live voice identity was claimed.
 
-Meta v2 was reconciled against the correct ProTouch WABA and submitted once
-using the exact requested Hebrew body. Meta returned HTTP 400, code 100,
-subcode 2388299; there is no template ID or approval. The v2 binding remains
-disabled, and v1 is preserved. A proposed trailing sentence awaits the owner's
-answer; no altered template or repeat POST was sent.
+The original Meta v2 wording was rejected with HTTP 400, code 100, subcode
+2388299. The owner subsequently approved appending “תודה שפניתם אלינו.”.
+After reconciling the correct ProTouch WABA, one new submission created template
+`1419161869672559`, named `protouch_service_request_link_v2`, language `he`,
+category `UTILITY`, with actual status `PENDING`. The three server-owned
+parameters and v1 remain intact; v2 is not activated and no customer message
+was sent. See the [submission receipt](evidence/protouch-service-template-v2-submission.json).
 
 | Remaining gate | Concrete next action |
 | --- | --- |
@@ -168,7 +170,7 @@ answer; no altered template or repeat POST was sent.
 | Physical candidate-specific golden evidence | Have the trusted evaluator execute the exact candidate and submit attested receipts, then reviewed activation |
 | Perceptual voice, live SIP/Meta acceptance | Complete owner-controlled checks using the designated identity after local gates pass |
 | Key escrow and fresh pre-release backup | Verify key recovery and refresh the backup immediately before rollout |
-| Meta v2 rejected | Obtain the narrow wording decision and reconcile before a supported submission |
+| Meta v2 pending review | Read the provider status; activate only after APPROVED and reviewed tenant binding |
 
 Automatic review also rejected deletion of private restore staging files, with
 no detailed reason. The backup and extracted files remain in ignored/private

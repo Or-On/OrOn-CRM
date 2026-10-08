@@ -33,5 +33,10 @@ it("the reviewed three-parameter Meta body exactly matches runtime punctuation a
       "https://dev.or-on.io",
     ),
   ).toBe(rendered);
-  expect(rendered.endsWith(".")).toBe(true);
+  expect(payload.components[0].text.match(/\{\{\d+\}\}/gu)).toEqual([
+    "{{1}}",
+    "{{2}}",
+    "{{3}}",
+  ]);
+  expect(rendered.endsWith(". תודה שפניתם אלינו.")).toBe(true);
 });
