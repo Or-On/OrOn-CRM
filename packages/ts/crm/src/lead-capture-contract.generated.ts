@@ -85,7 +85,9 @@ export const leadCaptureContract = {
   phoneRegions: {
     IL: {
       countryCode: "972",
-      national: "^0([2-9][0-9]{7,8})$",
+      national: "^0(1[0-9]{6}(?:[0-9]{3,5})?|[57][0-9]{8}|[1-489][0-9]{7})$",
+      numberingSource:
+        "phonenumbers 9.0.38 IL general_desc national_number_pattern; ASCII digits; validates possible national shapes, not assigned subscribers",
     },
   },
   booleanTokens: {
@@ -733,6 +735,114 @@ export const leadCaptureContract = {
           key: "phone",
           state: "known",
           value: "12345",
+        },
+        options: {
+          phoneRegion: "IL",
+        },
+        error: "invalid_phone",
+      },
+      {
+        name: "task8 Israeli callback 0501234567",
+        observation: {
+          key: "phone",
+          state: "known",
+          value: "0501234567",
+        },
+        options: {
+          phoneRegion: "IL",
+        },
+        expect: {
+          state: "known",
+          rawValue: "0501234567",
+          normalizedValue: "+972501234567",
+          currency: null,
+          confirmation: "unconfirmed",
+        },
+      },
+      {
+        name: "task8 Israeli callback 050 (123) 4567",
+        observation: {
+          key: "phone",
+          state: "known",
+          value: "050 (123) 4567",
+        },
+        options: {
+          phoneRegion: "IL",
+        },
+        expect: {
+          state: "known",
+          rawValue: "050 (123) 4567",
+          normalizedValue: "+972501234567",
+          currency: null,
+          confirmation: "unconfirmed",
+        },
+      },
+      {
+        name: "task8 Israeli callback 972501234567",
+        observation: {
+          key: "phone",
+          state: "known",
+          value: "972501234567",
+        },
+        options: {
+          phoneRegion: "IL",
+        },
+        expect: {
+          state: "known",
+          rawValue: "972501234567",
+          normalizedValue: "+972501234567",
+          currency: null,
+          confirmation: "unconfirmed",
+        },
+      },
+      {
+        name: "task8 Israeli callback 03-123-4567",
+        observation: {
+          key: "phone",
+          state: "known",
+          value: "03-123-4567",
+        },
+        options: {
+          phoneRegion: "IL",
+        },
+        expect: {
+          state: "known",
+          rawValue: "03-123-4567",
+          normalizedValue: "+97231234567",
+          currency: null,
+          confirmation: "unconfirmed",
+        },
+      },
+      {
+        name: "task8 Israeli callback +9720501234567",
+        observation: {
+          key: "phone",
+          state: "known",
+          value: "+9720501234567",
+        },
+        options: {
+          phoneRegion: "IL",
+        },
+        error: "invalid_phone",
+      },
+      {
+        name: "task8 Israeli callback 9720501234567",
+        observation: {
+          key: "phone",
+          state: "known",
+          value: "9720501234567",
+        },
+        options: {
+          phoneRegion: "IL",
+        },
+        error: "invalid_phone",
+      },
+      {
+        name: "task8 Israeli callback 050",
+        observation: {
+          key: "phone",
+          state: "known",
+          value: "050",
         },
         options: {
           phoneRegion: "IL",

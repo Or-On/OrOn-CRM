@@ -20,3 +20,7 @@ export {
   propertyViewingPreset,
 } from "./lead-field-presets";
 export { orchestrationLocation } from "./location";
+
+export { PublicationResult, type PublicationView } from "./publication-result";
+
+export { EffectivePromptInspector } from "./effective-prompt-inspector";

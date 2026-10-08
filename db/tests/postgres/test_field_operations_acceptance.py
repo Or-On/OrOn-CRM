@@ -359,14 +359,14 @@ async def test_configured_field_operations_end_to_end(acceptance):
         async with connection.begin_nested():
             await _sql(
                 connection,
-                "SELECT service.submit_digital_intake_form(:h,'דנה','רחוב לדוגמה 12','המסך נדלק ואז כבה',false,'[]')",
+                "SELECT service.submit_digital_intake_form_v2(:h,'דנה','רחוב לדוגמה 12','חיפה','המסך נדלק ואז כבה',false,'[]')",
                 h=token_hash,
             )
     assert (await _sql(connection, "SELECT count(*) FROM service.cases")).scalar_one() == 0
     submitted = (
         await _sql(
             connection,
-            "SELECT service.submit_digital_intake_form(:h,'דנה','רחוב לדוגמה 12','המסך נדלק ואז כבה',true,'[]')",
+            "SELECT service.submit_digital_intake_form_v2(:h,'דנה','רחוב לדוגמה 12','חיפה','המסך נדלק ואז כבה',true,'[]')",
             h=token_hash,
         )
     ).scalar_one()
@@ -374,7 +374,7 @@ async def test_configured_field_operations_end_to_end(acceptance):
     repeated = (
         await _sql(
             connection,
-            "SELECT service.submit_digital_intake_form(:h,'דנה','רחוב לדוגמה 12','המסך נדלק ואז כבה',true,'[]')",
+            "SELECT service.submit_digital_intake_form_v2(:h,'דנה','רחוב לדוגמה 12','חיפה','המסך נדלק ואז כבה',true,'[]')",
             h=token_hash,
         )
     ).scalar_one()

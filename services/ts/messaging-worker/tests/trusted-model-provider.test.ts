@@ -28,7 +28,7 @@ it.each([false, true])(
             id,
             tenantId,
             provider: "gemini",
-            model: "trusted-model",
+            model: "gemini-3.1-flash-lite",
             credentialId: id,
             enabled: true,
             settings: { temperature: 0, maxTokens: 512, timeoutMs: 1000 },
@@ -90,7 +90,7 @@ it.each([false, true])(
     expect(fetcher).toHaveBeenCalledOnce();
     expect(bodies).toEqual([
       expect.objectContaining({
-        model: "trusted-model",
+        model: "gemini-3.1-flash-lite",
         temperature: 0,
         max_tokens: 512,
       }),

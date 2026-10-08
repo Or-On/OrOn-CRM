@@ -207,7 +207,7 @@ describe.skipIf(!url)("actual worker trusted model routing", () => {
               await tx`insert into platform.credential_records(id,tenant_id,kind,algorithm,key_version,ciphertext,nonce) values(${credential}::uuid,${tenant}::uuid,${sealed.kind},${sealed.algorithm},${sealed.keyVersion},decode(${sealed.ciphertext},'hex'),decode(${sealed.nonce},'hex'))`;
             } else
               await tx`insert into platform.credential_records(id,tenant_id,kind) values(${credential}::uuid,${tenant}::uuid,'llm_api_key')`;
-            await tx`insert into agents.model_configurations(id,tenant_id,name,provider,model,credential_id,settings,daily_request_limit,is_enabled) values(${configuration}::uuid,${tenant}::uuid,'Synthetic model','gemini','tenant-selected-model',${credential}::uuid,'{}',${scenario === "configuredQuotaExhausted" || scenario === "configuredSealedRotated" ? 1 : 2},${scenario !== "disabled"})`;
+            await tx`insert into agents.model_configurations(id,tenant_id,name,provider,model,credential_id,settings,daily_request_limit,is_enabled) values(${configuration}::uuid,${tenant}::uuid,'Synthetic model','gemini','gemini-3.1-flash-lite',${credential}::uuid,'{}',${scenario === "configuredQuotaExhausted" || scenario === "configuredSealedRotated" ? 1 : 2},${scenario !== "disabled"})`;
             const profile = await createAgentProfileDraft(tx, user, {
               name: "Synthetic fairness agent",
               systemPrompt: "Help customers safely.",
@@ -236,7 +236,7 @@ describe.skipIf(!url)("actual worker trusted model routing", () => {
         }
         expect(globalCalls).toBe(0);
         if (scenario === "configured") {
-          expect(selectedModels).toEqual(["tenant-selected-model"]);
+          expect(selectedModels).toEqual(["gemini-3.1-flash-lite"]);
           expect(quotaReservations).toBe(1);
         } else if (
           scenario === "configuredSealed" ||
@@ -247,7 +247,7 @@ describe.skipIf(!url)("actual worker trusted model routing", () => {
           expect(selectedModels).toEqual(
             Array.from(
               { length: scenario === "configuredRetry" ? 2 : 1 },
-              () => "tenant-selected-model",
+              () => "gemini-3.1-flash-lite",
             ),
           );
           expect(quotaReservations).toBe(0);
@@ -268,7 +268,7 @@ describe.skipIf(!url)("actual worker trusted model routing", () => {
             await firstStore.processAvailable();
             await firstStore.drainReplies();
           }
-          expect(selectedModels).toEqual(["tenant-selected-model"]);
+          expect(selectedModels).toEqual(["gemini-3.1-flash-lite"]);
           expect(globalCalls).toBe(0);
           const after = await admin<
             { reserved_attempts: string }[]

@@ -58,9 +58,55 @@ function canonical(value: BoundModelAttempt): string {
   for (const count of [value.inputTokens, value.outputTokens])
     if (count !== null && (!Number.isSafeInteger(count) || count < 0))
       throw new TypeError("invalid provider token count");
+  const details = value.tokenDetails;
+  let tokenDetails: Record<string, number | null> | undefined;
+  if (details !== undefined) {
+    tokenDetails = {};
+    for (const key of [
+      "cachedInput",
+      "audioInput",
+      "cachedAudioInput",
+      "reasoningOutput",
+      "audioOutput",
+    ] as const) {
+      const count = details[key];
+      const limit = key.endsWith("Output")
+        ? value.outputTokens
+        : value.inputTokens;
+      if (
+        count !== null &&
+        (limit === null ||
+          !Number.isSafeInteger(count) ||
+          count < 0 ||
+          count > limit)
+      )
+        throw new TypeError("invalid provider token detail");
+      tokenDetails[key] = count;
+    }
+  }
+  for (const hash of [
+    value.runtimeInstructionHash,
+    value.staticEffectiveInstructionHash,
+  ])
+    if (hash !== undefined && !/^[a-f0-9]{64}$/u.test(hash))
+      throw new TypeError("invalid instruction hash");
+  if (
+    value.effectiveLocale !== undefined &&
+    !/^[a-zA-Z-]{2,35}$/u.test(value.effectiveLocale)
+  )
+    throw new TypeError("invalid instruction locale");
+  if (
+    value.compositionVersion !== undefined &&
+    value.compositionVersion !== "effective-instructions.v1"
+  )
+    throw new TypeError("invalid instruction composition version");
   // Explicit projection prevents request content, credentials or arbitrary extras
   // from being persisted even when a dynamically typed caller supplies them.
   return JSON.stringify({
+    staticEffectiveInstructionHash: value.staticEffectiveInstructionHash,
+    effectiveLocale: value.effectiveLocale,
+    runtimeInstructionHash: value.runtimeInstructionHash,
+    compositionVersion: value.compositionVersion,
     eventId: value.eventId,
     tenantId: value.tenantId,
     jobId: value.jobId,
@@ -72,6 +118,7 @@ function canonical(value: BoundModelAttempt): string {
     latencyMs: value.latencyMs,
     status: value.status,
     errorCode: value.errorCode,
+    ...(tokenDetails ? { tokenDetails } : {}),
   });
 }
 

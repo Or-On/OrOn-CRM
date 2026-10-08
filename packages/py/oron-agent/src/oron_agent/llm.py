@@ -5,19 +5,27 @@ compatible endpoint — Cohere's `/compatibility/v1`, vLLM, OpenAI itself — so
 provider can be evaluated against a real call without a code change.
 """
 
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
+from contextvars import ContextVar
 from enum import StrEnum
+from time import monotonic
 from typing import Any
+from uuid import uuid4
 
 from google.genai.types import HttpOptions
 from loguru import logger
+from openai import APIConnectionError, APITimeoutError
+from oron_common.voice_instructions import COMPOSITION_VERSION, instruction_text_snapshot
 from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter, GeminiLLMInvocationParams
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.google.vertex.llm import GoogleVertexLLMService
 from pipecat.services.llm_service import LLMService
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.utils.types import assert_given
 
+from oron_agent.model_parameters import compatible_parameters, validate_fallback
 from oron_agent.provider_context import fold_instructions
 
 
@@ -27,6 +35,10 @@ class LlmPreflightError(RuntimeError):
     def __init__(self, public_reason: str) -> None:
         self.public_reason = public_reason
         super().__init__(public_reason)
+
+
+class IncompleteModelResponse(RuntimeError):
+    """The provider ended without a usable, complete reply."""
 
 
 def _provider_error_code(error: Exception) -> tuple[int | None, str | None]:
@@ -76,9 +88,211 @@ class _BoundedOpenAILLMService(OpenAILLMService):
     actually bit: a request accepted with no token ever sent.
     """
 
-    def __init__(self, *args, request_timeout_secs: float, **kwargs):
+    def __init__(
+        self,
+        *args,
+        request_timeout_secs: float,
+        fallback_model: str | None = None,
+        on_attempt: Callable[[dict], Awaitable[None]] | None = None,
+        before_attempt: Callable[[], Awaitable[None]] | None = None,
+        **kwargs,
+    ):
         super().__init__(*args, **kwargs)
         self._request_timeout_secs = request_timeout_secs
+        self._fallback_model = fallback_model
+        self._on_attempt = on_attempt
+        self._before_attempt = before_attempt
+        self._client = self._client.with_options(max_retries=0)
+        self._configured_base_url = str(self._client.base_url)
+        configured_model = self._settings.model
+        if not isinstance(configured_model, str) or not configured_model.strip():
+            raise ValueError("A concrete model is required")
+        self._primary_model: str = configured_model
+        self._attempt_model: ContextVar[str | None] = ContextVar(
+            "voice_attempt_model", default=None
+        )
+        self._instruction_hash: ContextVar[str | None] = ContextVar(
+            "voice_instruction_hash", default=None
+        )
+        validate_fallback(self._configured_base_url, self._primary_model, fallback_model)
+
+    async def get_chat_completions(self, context):
+        """Retry only before any chunk escapes. A partial tool delta is output too.
+
+        SDK retries are disabled: there are at most two physical attempts, using
+        this exact endpoint/credential. Close a failed stream before recovery.
+        After output the caller's existing failure/receipt lifecycle owns recovery;
+        never restart speech or replay a business tool here.
+        """
+
+        async def chunks():
+            models = [self._primary_model]
+            if self._fallback_model and self._fallback_model != self._primary_model:
+                models.append(self._fallback_model)
+            for index, model in enumerate(models):
+                if self._before_attempt is not None:
+                    await self._before_attempt()
+                started = monotonic()
+                emitted = False
+                stream = None
+                status = "failed"
+                reported_usage = None
+                attempt_id = str(uuid4())
+                model_token = self._attempt_model.set(model)
+                hash_token = self._instruction_hash.set(None)
+                self.set_full_model_name(model)
+                try:
+                    stream = await super(_BoundedOpenAILLMService, self).get_chat_completions(
+                        context
+                    )
+                    async for chunk in stream:
+                        usage = getattr(chunk, "usage", None)
+                        if usage is not None:
+                            reported_usage = usage.model_dump()
+                        choices = getattr(chunk, "choices", None)
+                        if choices is not None:
+                            if any(choice.finish_reason == "length" for choice in choices):
+                                raise IncompleteModelResponse("truncated model response")
+                            useful = any(
+                                getattr(choice.delta, "content", None)
+                                or getattr(choice.delta, "tool_calls", None)
+                                or getattr(choice.delta, "refusal", None)
+                                or getattr(choice.delta, "model_extra", None)
+                                for choice in choices
+                            )
+                            # Role-only/usage metadata is not speech or a tool action.
+                            if not emitted and not useful:
+                                continue
+                        emitted = True
+                        yield chunk
+                    if not emitted:
+                        raise IncompleteModelResponse("empty model response")
+                    status = "succeeded"
+                    return
+                except Exception as error:
+                    http_status, _ = _provider_error_code(error)
+                    retryable = (
+                        isinstance(
+                            error,
+                            (
+                                TimeoutError,
+                                APIConnectionError,
+                                APITimeoutError,
+                                IncompleteModelResponse,
+                            ),
+                        )
+                        or http_status == 429
+                        or (http_status is not None and 500 <= http_status < 600)
+                    )
+                    if emitted or not retryable or index + 1 == len(models):
+                        raise
+                finally:
+                    self._attempt_model.reset(model_token)
+                    runtime_hash = self._instruction_hash.get()
+                    self._instruction_hash.reset(hash_token)
+                    if stream is not None:
+                        with suppress(Exception):
+                            await stream.close()
+                    if self._on_attempt is not None:
+                        await self._on_attempt(
+                            {
+                                "runtimeInstructionHash": runtime_hash,
+                                "compositionVersion": COMPOSITION_VERSION,
+                                "attemptId": attempt_id,
+                                "model": model,
+                                "status": status,
+                                "partial": emitted and status != "succeeded",
+                                "latencyMs": round((monotonic() - started) * 1000),
+                                "usage": reported_usage,
+                            }
+                        )
+                    logger.info(
+                        "model_attempt model={} status={} partial={} latency_ms={}",
+                        model,
+                        status,
+                        emitted,
+                        round((monotonic() - started) * 1000),
+                    )
+
+        return chunks()
+
+    async def run_inference(self, context, max_tokens=None, system_instruction=None):
+        """Warm-up/preflight obey the same quota, credential and accounting boundary."""
+        models = [self._primary_model]
+        if self._fallback_model and self._fallback_model != self._primary_model:
+            models.append(self._fallback_model)
+        for index, model in enumerate(models):
+            if self._before_attempt is not None:
+                await self._before_attempt()
+            started, status, usage = monotonic(), "failed", None
+            token = self._attempt_model.set(model)
+            hash_token = self._instruction_hash.set(None)
+            try:
+                invocation = self.get_llm_adapter().get_llm_invocation_params(
+                    context,
+                    system_instruction=system_instruction
+                    or assert_given(self._settings.system_instruction),
+                    convert_developer_to_user=not self.supports_developer_role,
+                )
+                params = self.build_chat_completion_params(invocation)
+                params["stream"] = False
+                params.pop("stream_options", None)
+                if max_tokens is not None:
+                    params[
+                        "max_completion_tokens"
+                        if "max_completion_tokens" in params
+                        else "max_tokens"
+                    ] = max_tokens
+                response = await self._client.chat.completions.create(**params)
+                reported = getattr(response, "usage", None)
+                if reported is not None:
+                    usage = reported.model_dump()
+                choices = getattr(response, "choices", None)
+                if not choices:
+                    raise IncompleteModelResponse("model returned no completion choices")
+                result = choices[0].message.content
+                if (
+                    not isinstance(result, str)
+                    or not result.strip()
+                    or getattr(choices[0], "finish_reason", None) == "length"
+                ):
+                    raise IncompleteModelResponse("empty or truncated model response")
+                status = "succeeded"
+                return result
+            except Exception as error:
+                http_status, _ = _provider_error_code(error)
+                retryable = (
+                    isinstance(
+                        error,
+                        (
+                            TimeoutError,
+                            APIConnectionError,
+                            APITimeoutError,
+                            IncompleteModelResponse,
+                        ),
+                    )
+                    or http_status == 429
+                    or (http_status is not None and http_status >= 500)
+                )
+                if not retryable or index + 1 == len(models):
+                    raise
+            finally:
+                self._attempt_model.reset(token)
+                runtime_hash = self._instruction_hash.get()
+                self._instruction_hash.reset(hash_token)
+                if self._on_attempt is not None:
+                    await self._on_attempt(
+                        {
+                            "runtimeInstructionHash": runtime_hash,
+                            "compositionVersion": COMPOSITION_VERSION,
+                            "attemptId": str(uuid4()),
+                            "model": model,
+                            "status": status,
+                            "partial": False,
+                            "latencyMs": round((monotonic() - started) * 1000),
+                            "usage": usage,
+                        }
+                    )
 
     @staticmethod
     def _without_empty_tool_calls(messages: list[Any]) -> list[Any]:
@@ -156,11 +370,46 @@ class _BoundedOpenAILLMService(OpenAILLMService):
             # identity. An opener with no conversation yet gets an explicit
             # non-customer call-start event; see provider_context.
             instruction, conversation = fold_instructions(self._without_empty_tool_calls(messages))
+            self._instruction_hash.set(instruction_text_snapshot(instruction or "")["hash"])
             params["messages"] = (
                 [{"role": "system", "content": instruction}, *conversation]
                 if instruction
                 else conversation
             )
+        model = self._attempt_model.get() or params.get("model", self._primary_model)
+        params["model"] = model
+        mapped = compatible_parameters(
+            self._configured_base_url,
+            model,
+            self._settings.temperature
+            if isinstance(self._settings.temperature, (int, float))
+            else 0.2,
+            params.get("reasoning_effort"),
+        )
+        for key in ("reasoning_effort", "temperature"):
+            params.pop(key, None)
+        if model == "gemini-3.5-flash-lite" and (
+            "generativelanguage.googleapis.com" in self._configured_base_url
+        ):
+            params.pop("top_p", None)
+            params.pop("top_k", None)
+            history = params.get("messages")
+            if history and isinstance(history[-1], dict) and history[-1].get("role") == "assistant":
+                if history[-1].get("tool_calls"):
+                    raise ValueError("A tool result must be reconciled before the next inference")
+                # Keep prior speech as history; a transport continuation is not
+                # a fabricated customer reply or an assistant response prefill.
+                params["messages"] = [
+                    *history,
+                    {
+                        "role": "user",
+                        "content": (
+                            "Platform continuation event (not customer speech): continue only "
+                            "if the trusted flow requires it; do not repeat prior speech."
+                        ),
+                    },
+                ]
+        params.update(mapped)
         params["timeout"] = self._request_timeout_secs
         return params
 
@@ -205,6 +454,9 @@ def build_llm(
     temperature: float = 0.4,
     max_tokens: int = 256,
     request_timeout_secs: float = 5.0,
+    fallback_model: str | None = None,
+    on_attempt: Callable[[dict], Awaitable[None]] | None = None,
+    before_attempt: Callable[[], Awaitable[None]] | None = None,
 ) -> LLMService[GeminiLLMAdapter] | LLMService[OpenAILLMAdapter]:
     if provider is LlmProvider.OPENAI_COMPAT:
         extra: dict[str, Any] = {}
@@ -220,6 +472,9 @@ def build_llm(
                 extra=extra,
             ),
             request_timeout_secs=request_timeout_secs,
+            fallback_model=fallback_model,
+            on_attempt=on_attempt,
+            before_attempt=before_attempt,
         )
     return _SingleInstructionVertexLLMService(
         project_id=project_id,
@@ -255,6 +510,7 @@ async def verify_llm_access(settings: Any) -> None:
         api_key=settings.llm_api_key.get_secret_value(),
         base_url=settings.llm_base_url,
         model=settings.llm_model,
+        fallback_model=settings.llm_fallback_model,
         reasoning_effort=settings.llm_reasoning_effort,
         temperature=settings.llm_temperature,
         max_tokens=settings.llm_max_tokens,

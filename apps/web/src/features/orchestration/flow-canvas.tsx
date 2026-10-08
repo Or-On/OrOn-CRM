@@ -20,6 +20,7 @@ interface FlowNodeData extends Record<string, unknown> {
   readonly label: string;
   readonly typeLabel: string;
   readonly type: string;
+  readonly editable?: boolean;
 }
 
 type FlowNode = Node<FlowNodeData, "platformFlow">;
@@ -91,6 +92,24 @@ function parseShape(definition: JsonValue | undefined): FlowShape {
   return { nodes, edges };
 }
 
+function savedPosition(
+  definition: JsonValue | undefined,
+  id: string,
+): { x: number; y: number } | undefined {
+  if (
+    !isRecord(definition) ||
+    !isRecord(definition.layout) ||
+    !isRecord(definition.layout.positions)
+  )
+    return undefined;
+  const position = definition.layout.positions[id];
+  return isRecord(position) &&
+    typeof position.x === "number" &&
+    typeof position.y === "number"
+    ? { x: position.x, y: position.y }
+    : undefined;
+}
+
 export function buildFlowElements(
   definition: JsonValue | undefined,
   labelForType: (type: string) => string,
@@ -138,7 +157,7 @@ export function buildFlowElements(
       return {
         id: node.id,
         type: "platformFlow",
-        position: {
+        position: savedPosition(definition, node.id) ?? {
           x: rowIndex * 250 - ((row.length - 1) * 250) / 2,
           y: nodeDepth * 144,
         },
@@ -166,7 +185,7 @@ function PlatformFlowNode({ data }: NodeProps<FlowNode>) {
     <div className={`flow-node flow-node--${visualType}`}>
       <Handle
         aria-hidden="true"
-        isConnectable={false}
+        isConnectable={data.editable ?? false}
         position={Position.Top}
         type="target"
       />
@@ -174,7 +193,7 @@ function PlatformFlowNode({ data }: NodeProps<FlowNode>) {
       <strong>{data.label}</strong>
       <Handle
         aria-hidden="true"
-        isConnectable={false}
+        isConnectable={data.editable ?? false}
         position={Position.Bottom}
         type="source"
       />
@@ -189,7 +208,17 @@ export function FlowCanvas({
   definition,
   emptyLabel,
   labelForType,
+  editable = false,
+  onMove,
+  onConnect,
+  onDisconnect,
+  onRemoveNodes,
 }: {
+  readonly onRemoveNodes?: (ids: readonly string[]) => void;
+  readonly editable?: boolean;
+  readonly onMove?: (id: string, position: { x: number; y: number }) => void;
+  readonly onConnect?: (source: string, target: string) => void;
+  readonly onDisconnect?: (id: string) => void;
   readonly ariaLabel: string;
   readonly definition: JsonValue | undefined;
   readonly emptyLabel: string;
@@ -209,16 +238,37 @@ export function FlowCanvas({
       <div className="flow-canvas__viewport">
         <ReactFlow
           edges={[...elements.edges]}
-          edgesFocusable={false}
-          elementsSelectable={false}
+          edgesFocusable={editable}
+          elementsSelectable={editable}
           fitView
           fitViewOptions={{ padding: 0.28 }}
           maxZoom={1.25}
           minZoom={0.45}
-          nodes={[...elements.nodes]}
-          nodesConnectable={false}
-          nodesDraggable={false}
-          nodesFocusable={false}
+          nodes={elements.nodes.map((node) => ({
+            ...node,
+            data: { ...node.data, editable },
+          }))}
+          nodesConnectable={editable}
+          nodesDraggable={editable}
+          nodesFocusable={editable}
+          onNodesChange={(changes) =>
+            changes.forEach((change) => {
+              if (change.type === "position" && change.position)
+                onMove?.(change.id, change.position);
+            })
+          }
+          onNodeClick={(_, node) => setSelected(node.id)}
+          onNodeDragStop={(_, node) => onMove?.(node.id, node.position)}
+          onConnect={(connection) => {
+            if (connection.source && connection.target)
+              onConnect?.(connection.source, connection.target);
+          }}
+          onNodesDelete={(removed) =>
+            onRemoveNodes?.(removed.map((node) => node.id))
+          }
+          onEdgesDelete={(removed) =>
+            removed.forEach((edge) => onDisconnect?.(edge.id))
+          }
           nodeTypes={nodeTypes}
           panOnDrag
           preventScrolling={false}

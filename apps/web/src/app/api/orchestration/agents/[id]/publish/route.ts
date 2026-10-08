@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import {
   AgentProfileVersionConflictError,
   publishAgentProfile,
+  publishAgentWithBindings,
+  PublicationConflictError,
 } from "@or-on/crm";
 
 import { withFreshCurrentTenant } from "../../../../../../features/auth";
@@ -38,7 +40,37 @@ export async function POST(
 ) {
   try {
     await assertCrmMutation(request);
-    const expectedVersionId = await expectedVersion(request);
+    const content = await request.text();
+    const expectedVersionId = await expectedVersion(
+      new Request(request.url, { method: "POST", body: content }),
+    );
+    const command = content.trim()
+      ? (JSON.parse(content) as Record<string, unknown>)
+      : {};
+    if (command.requestId !== undefined) {
+      if (
+        typeof command.requestId !== "string" ||
+        !expectedVersionId ||
+        typeof command.activate !== "boolean"
+      )
+        throw new TypeError(
+          "requestId, expectedVersionId and activate are required",
+        );
+      const { id } = await context.params;
+      const publication = await withFreshCurrentTenant(
+        "flows:manage",
+        (sql, session) =>
+          publishAgentWithBindings(sql, session.userId, id, {
+            expectedVersionId,
+            requestId: command.requestId as string,
+            activate: command.activate as boolean,
+          }),
+      );
+      return NextResponse.json({
+        published: publication.status !== "blocked_evaluation",
+        publication,
+      });
+    }
     const { id } = await context.params;
     const published = await withFreshCurrentTenant(
       "flows:manage",
@@ -48,7 +80,10 @@ export async function POST(
     if (!published) throw new TypeError("no valid unpublished version exists");
     return NextResponse.json({ published: true });
   } catch (error) {
-    if (error instanceof AgentProfileVersionConflictError)
+    if (
+      error instanceof AgentProfileVersionConflictError ||
+      error instanceof PublicationConflictError
+    )
       return NextResponse.json(
         { error: error.message, code: "AGENT_VERSION_CHANGED" },
         { status: 409 },

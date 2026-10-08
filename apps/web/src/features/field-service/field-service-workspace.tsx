@@ -56,6 +56,7 @@ import {
   technicianIdentityLabel,
 } from "./field-service-labels";
 import { FieldServiceNavigation } from "./field-service-navigation";
+import { IncompleteRequests } from "./incomplete-requests";
 import { TechnicianQueue } from "./technician-queue";
 import { ServiceDirectory } from "./service-directory";
 import {
@@ -765,6 +766,10 @@ export function FieldServiceWorkspace({
             <p className="form-error" role="alert">
               {error}
             </p>
+          ) : null}
+
+          {view === "cases" && !isTechnician ? (
+            <IncompleteRequests canManage={canManage} />
           ) : null}
 
           <div

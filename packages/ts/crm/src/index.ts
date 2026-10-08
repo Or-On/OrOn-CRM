@@ -49,6 +49,7 @@ export * from "./webhook.js";
 export * from "./webhook-store.js";
 export * from "./service-form.js";
 export * from "./digital-service-form.js";
+export * from "./service-form-message.js";
 export * from "./whatsapp-auto-greeting.js";
 export * from "./whatsapp-coexistence.js";
 export * from "./whatsapp-outbound.js";
@@ -60,3 +61,11 @@ export * from "./messaging-memory.js";
 export * from "./memory-human-controls.js";
 
 export * from "./callable-voice-flows.js";
+
+export * from "./incomplete-service-requests.js";
+
+export * from "./whatsapp-instructions.js";
+export * from "./effective-prompt.js";
+export * from "./publication-bindings.js";
+
+export * from "./tenant-business-context.js";

@@ -46,9 +46,6 @@ class CallContext(BaseModel):
     # fetch its flow, so it travels with the call rather than beside it.
     tenant_id: uuid.UUID
     session_id: uuid.UUID = Field(default_factory=new_session_id)
-    # Chosen per call (e.g. to match the caller's gender); falls back to the
-    # GEMINI_TTS_VOICE default in Settings when the transport doesn't set it.
-    tts_voice: str | None = None
     # A trusted operator/contact preference, never an acoustic guess. Hebrew
     # address forms cannot be reliably made neutral in every sentence, so an
     # outbound caller may bind one form for the complete call.

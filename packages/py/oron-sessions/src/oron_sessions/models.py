@@ -85,6 +85,10 @@ class Session(SessionBase, TenantScoped, CallUsage, table=True):
         sa.CheckConstraint("transcript_uri <> ''", name="ck_sessions_transcript_uri_nonempty"),
     )
 
+    llm_usage_by_model: dict[str, dict[str, int]] = Field(
+        default_factory=dict,
+        sa_column=sa.Column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb")),
+    )
     session_id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     status: SessionStatus = Field(
         default=SessionStatus.STARTED,

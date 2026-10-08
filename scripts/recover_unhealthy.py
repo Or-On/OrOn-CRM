@@ -7,11 +7,14 @@ No container logs, inspect documents, credentials or customer status are printed
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import re
 import subprocess
+import sys
 import time
 from pathlib import Path
+from typing import Protocol, TextIO, cast
 
 SERVICES = frozenset({"messaging-worker", "web", "caddy"})
 ROOT = Path("/opt/oron-dev")
@@ -141,12 +144,23 @@ def recover(
             command([*compose, "restart", "--no-deps", "--timeout", grace, service])
 
 
+class LinuxFileLock(Protocol):
+    """The Linux-only boundary; Windows typeshed intentionally omits fcntl members."""
+
+    LOCK_EX: int
+    LOCK_NB: int
+
+    def flock(self, file: TextIO, operation: int, /) -> None: ...
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true", help="Explicitly enable bounded restarts")
     options = parser.parse_args()
+    if sys.platform != "linux":
+        raise RuntimeError("Deployment recovery requires a Linux host")
     # Share the deploy lock: never interfere with migration/rollback/service drain.
-    import fcntl  # Host-only Linux helper; pure eligibility tests remain portable.
+    fcntl = cast(LinuxFileLock, importlib.import_module("fcntl"))
 
     with Path("/run/lock/oron-dev-deploy.lock").open("a") as lock:
         try:

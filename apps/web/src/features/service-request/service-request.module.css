@@ -116,3 +116,50 @@
     padding: 20px 16px;
   }
 }
+
+.upload:focus-within {
+  outline: 2px solid var(--or-focus);
+  outline-offset: 4px;
+}
+.upload label {
+  padding: 16px;
+  border: 2px dashed var(--or-border);
+  border-radius: 12px;
+  cursor: pointer;
+  text-align: center;
+}
+.fileInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+}
+.upload .fileInput {
+  padding: 0;
+}
+.previews {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px;
+  list-style: none;
+  padding: 0;
+}
+.previews li {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.previews img {
+  object-fit: cover;
+  border-radius: 8px;
+}
+.phone {
+  display: block;
+  text-align: center;
+  padding: 14px;
+  margin-top: 24px;
+  color: var(--or-accent);
+  border: 1px solid var(--or-border);
+  border-radius: 10px;
+}

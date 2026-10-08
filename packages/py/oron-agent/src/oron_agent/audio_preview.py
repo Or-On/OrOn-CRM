@@ -39,6 +39,7 @@ from pipecat.utils.asyncio.task_manager import TaskManager
 
 from oron_agent.config import Settings
 from oron_agent.conversation_language import normalize_language, tts_language
+from oron_agent.runtime_policy import VOICE_POLICY
 from oron_agent.tts import TtsProvider, build_tts
 from oron_agent.voice_quality import VoiceQualityConfig, make_speech_transformer
 
@@ -230,13 +231,9 @@ class RealPreviewProvider:
         speech_text = await make_speech_transformer(turn_config, lambda: None)(text, "*")
         if not speech_text.strip() or len(speech_text) > 2000:
             raise ValueError("speech-normalized preview exceeds its bound")
-        voice = config.voiceId or (
-            settings.soniox_tts_voice_default
-            if settings.tts_provider is TtsProvider.SONIOX
-            else settings.gemini_tts_voice_default
-        )
+        voice = VOICE_POLICY["voice"]
         tts = self._tts_factory(
-            settings.tts_provider,
+            TtsProvider(VOICE_POLICY["provider"]),
             language=tts_language(language),
             voice=voice,
             text_filters=[],
@@ -244,7 +241,7 @@ class RealPreviewProvider:
             first_clause=False,
             speed=config.speakingPace,
             soniox_api_key=settings.soniox_api_key.get_secret_value(),
-            soniox_model=settings.soniox_tts_model,
+            soniox_model=VOICE_POLICY["model"],
             gemini_model=settings.gemini_tts_model,
             google_credentials_path=settings.google_application_credentials,
         )
@@ -296,7 +293,7 @@ class RealPreviewProvider:
             output.writeframes(capture.pcm)
         return SynthesizedPreview(
             audio=buffer.getvalue(),
-            provider=settings.tts_provider.value,
+            provider=VOICE_POLICY["provider"],
             model=(
                 settings.soniox_tts_model
                 if settings.tts_provider is TtsProvider.SONIOX

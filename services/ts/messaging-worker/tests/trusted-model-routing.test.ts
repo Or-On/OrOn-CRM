@@ -31,7 +31,7 @@ function fixture() {
     id: configurationId,
     tenantId,
     provider: "gemini",
-    model: "synthetic-model",
+    model: "gemini-3.1-flash-lite",
     credentialId,
     enabled: true,
     settings: { temperature: 0, maxTokens: 512 },

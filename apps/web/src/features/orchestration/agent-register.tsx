@@ -22,6 +22,7 @@ import {
   leadRequestFields,
   type LeadCapabilityConfiguration,
 } from "./lead-capability-fieldset";
+import { EffectivePromptInspector } from "./effective-prompt-inspector";
 import { qualityCopy } from "./quality-copy";
 
 /** The fields a revision sends, built from the operator's explicit choices. */
@@ -193,6 +194,14 @@ export function AgentRegister({
             className="tenant-agent-inspector"
             aria-label={t("tenantOperations.agentConfiguration")}
           >
+            {selected.versionId ? (
+              <EffectivePromptInspector
+                key={selected.versionId}
+                profileId={selected.id}
+                versionId={selected.versionId}
+                publishedVersionId={selected.publishedVersionId}
+              />
+            ) : null}
             <header className="tenant-register-heading">
               <div>
                 <h3 dir="auto">

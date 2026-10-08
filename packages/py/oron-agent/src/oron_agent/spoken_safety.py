@@ -71,6 +71,14 @@ _UNVERIFIED_SAVE_CLAIM_RE = re.compile(
     re.IGNORECASE,
 )
 
+_FINALIZED_LEAD_CLAIM_RE = re.compile(
+    r"(?:נפתח|פתחתי|נוצר|יצרתי)\s+(?:לך\s+)?ליד|"
+    r"(?:נציג|אדם|אנושי)[^.?!]{0,50}(?:יחזור|יחזרו|ייצור קשר)|"
+    r"\b(?:lead|enquiry|inquiry)\b.{0,25}\b(?:opened|finalized|completed)\b|"
+    r"\b(?:human|representative|team)\b.{0,30}\b(?:will|shall)\b.{0,15}\b(?:contact|call)\b",
+    re.IGNORECASE,
+)
+
 _IDENTITY_COLLECTION_RE = re.compile(
     r"(?:אצטרך|צריך|מסור|למסור|תוכל\s+למסור|תוכלי\s+למסור)"
     r"\s+[^.?!]{0,50}(?:מספר\s+)?תעודת\s+הזהות",
@@ -106,6 +114,7 @@ def safe_spoken_text(
     allow_identity_collection: bool = False,
     allow_ticket_claim: bool = False,
     save_claim_receipted: bool | None = None,
+    finalized_claim_receipted: bool = False,
 ) -> tuple[str, bool]:
     """Sanitize speech and replace unverifiable external-system claims.
 
@@ -130,6 +139,16 @@ def safe_spoken_text(
         and not blocked_ticket_claim
         and not blocked_sensitive_readback
         and not unreceipted_save
+        and (
+            finalized_claim_receipted
+            or not any(
+                _FINALIZED_LEAD_CLAIM_RE.search(sentence)
+                and not re.fullmatch(
+                    r"(?:אפשר|האם|Would you like|May|Can)\s[^.!?]*\?", sentence.strip(), re.I
+                )
+                for sentence in re.split(r"(?<=[.?!])\s*", sanitized)
+            )
+        )
         and not blocked_announcement
         and not _UNVERIFIED_BUSINESS_CLAIM_RE.search(sanitized)
     ):
@@ -167,14 +186,30 @@ class BusinessClaimGuardFilter(BaseTextFilter):
         allow_identity_collection: Callable[[], bool] | None = None,
         allow_ticket_claim: Callable[[], bool] | None = None,
         save_claim_receipted: Callable[[], bool] | None = None,
+        finalized_claim_receipted: Callable[[], bool] | None = None,
+        lead_write_failed: Callable[[], str | None] | None = None,
     ):
         self._get_language = get_language
         self._allow_identity_collection = allow_identity_collection
         self._allow_ticket_claim = allow_ticket_claim
         self._save_claim_receipted = save_claim_receipted
+        self._finalized_claim_receipted = finalized_claim_receipted
+        self._lead_write_failed = lead_write_failed
+        self._failure_announced_for: str | None = None
 
     async def filter(self, text: str) -> str:
         language = self._get_language() if self._get_language is not None else "en"
+        failed_turn = self._lead_write_failed() if self._lead_write_failed else None
+        if failed_turn is not None:
+            if self._failure_announced_for == failed_turn:
+                return ""
+            self._failure_announced_for = failed_turn
+            return (
+                "לא הצלחתי לשמור את הפנייה כרגע. אפשר לנסות שוב בעוד רגע."
+                if language.lower().startswith("he")
+                else "I couldn't complete the request just now. Please try again in a moment."
+            )
+        self._failure_announced_for = None
         allowed = (
             self._allow_identity_collection()
             if self._allow_identity_collection is not None
@@ -188,6 +223,9 @@ class BusinessClaimGuardFilter(BaseTextFilter):
             language,
             allow_identity_collection=allowed,
             allow_ticket_claim=ticket_allowed,
+            finalized_claim_receipted=self._finalized_claim_receipted()
+            if self._finalized_claim_receipted
+            else False,
             save_claim_receipted=(
                 self._save_claim_receipted() if self._save_claim_receipted is not None else None
             ),

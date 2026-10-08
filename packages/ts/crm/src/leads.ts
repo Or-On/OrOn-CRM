@@ -462,12 +462,33 @@ export async function createLeadFieldSchema(
     readonly definition: unknown;
     readonly description?: string;
     readonly publish?: boolean;
+    readonly completionPolicy?: string;
   },
 ): Promise<LeadFieldSchemaRecord> {
   const name = input.name.trim();
   if (!name || name.length > 120)
     throw new TypeError("a schema name of 1–120 characters is required");
   const schema = parseLeadFieldSchema(input.definition);
+  if (
+    input.completionPolicy !== undefined &&
+    input.completionPolicy !== "service_discovery_v1"
+  )
+    throw new TypeError("Unsupported completion policy");
+  if (
+    input.completionPolicy === "service_discovery_v1" &&
+    [
+      "service_interest",
+      "need_summary",
+      "contact_name",
+      "contact_phone",
+      "follow_up_allowed",
+      "discussion_complete",
+    ].some(
+      (key) =>
+        !schema.fields.some((field) => field.key === key && field.required),
+    )
+  )
+    throw new TypeError("Service discovery readiness fields are required");
   const existing = await sql<{ version: number }[]>`
     SELECT version FROM crm.lead_field_schemas
     WHERE lower(name)=lower(${name}) ORDER BY version DESC LIMIT 1
@@ -484,12 +505,12 @@ export async function createLeadFieldSchema(
   >`
     INSERT INTO crm.lead_field_schemas
       (tenant_id, name, version, description, definition, published_at,
-       created_by_user_id)
+       created_by_user_id, completion_policy)
     VALUES (platform.current_tenant_id(), ${name}, ${version},
             ${trimmedOrNull(input.description)},
             ${sql.json(databaseJson(leadFieldSchemaJson(schema)))},
             ${input.publish === false ? null : sql`CURRENT_TIMESTAMP`},
-            ${actorUserId}::uuid)
+            ${actorUserId}::uuid, ${input.completionPolicy ?? null})
     RETURNING id, name, version, description, published_at
   `;
   const row = rows[0];

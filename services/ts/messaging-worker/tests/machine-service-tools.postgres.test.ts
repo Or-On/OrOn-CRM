@@ -8,6 +8,7 @@ const url = process.env.MACHINE_TOOLS_TEST_DATABASE_URL;
 describe.skipIf(!url)("owned machine service claim authority", () => {
   it.each([
     "valid",
+    "triggerPending",
     "revokedDuringExtraction",
     "grantMissing",
     "entitlementMissing",
@@ -124,7 +125,7 @@ describe.skipIf(!url)("owned machine service claim authority", () => {
           await tx`INSERT INTO messaging.channels(id,tenant_id,kind,provider,provider_account_id,display_address,status) VALUES(${channel}::uuid,${tenant}::uuid,'whatsapp','simulator',${channel},'Fictional','active')`;
           await tx`INSERT INTO crm.contacts(id,tenant_id,name,created_by_user_id) VALUES(${contact}::uuid,${tenant}::uuid,'Fictional',${user}::uuid)`;
           await tx`INSERT INTO messaging.conversations(id,tenant_id,channel_id,contact_id,status,ownership_mode,ai_agent_profile_version_id,ai_enabled_by_user_id,ai_enabled_at) VALUES(${conversation}::uuid,${tenant}::uuid,${channel}::uuid,${contact}::uuid,'open','ai',${agent}::uuid,${user}::uuid,clock_timestamp())`;
-          await tx`INSERT INTO messaging.messages(id,tenant_id,conversation_id,direction,sender_type,provider,provider_message_id,content_type,content_text) VALUES(${message}::uuid,${tenant}::uuid,${conversation}::uuid,'inbound','contact','simulator',${message},'text','Fictional service request')`;
+          await tx`INSERT INTO messaging.messages(id,tenant_id,conversation_id,direction,sender_type,provider,provider_message_id,content_type,content_text,status) VALUES(${message}::uuid,${tenant}::uuid,${conversation}::uuid,'inbound','contact','simulator',${message},'text','Fictional service request',${scenario === "triggerPending" ? "pending" : "received"})`;
           await tx`INSERT INTO platform.ai_execution_principals(tenant_id,id,role,status,membership_status) VALUES(${tenant}::uuid,${principal}::uuid,'conversation_model_reader_v1','active','active')`;
           await tx`INSERT INTO platform.tenant_ai_execution_bindings(tenant_id,enabled,principal_id) VALUES(${tenant}::uuid,true,${principal}::uuid)`;
           await tx`INSERT INTO platform.machine_tool_grants(tenant_id,principal_id,agent_version_id,flow_version_id,capability,enabled) VALUES(${tenant}::uuid,${principal}::uuid,${agent}::uuid,${flow}::uuid,'service.intake',true)`;

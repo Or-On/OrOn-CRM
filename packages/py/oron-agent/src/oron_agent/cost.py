@@ -45,8 +45,17 @@ class UsageObserver(BaseObserver):
                     # accumulates like the token counts rather than replacing.
                     self._usage.stt_audio_seconds += metric.value.audio_seconds
                 elif isinstance(metric, LLMUsageMetricsData):
+                    if self._usage.has_model_attempt_accounting:
+                        # Physical callbacks include failed/fallback usage already.
+                        continue
                     self._usage.llm_model = metric.model or self._usage.llm_model
                     tokens = metric.value
+                    bucket = self._usage.llm_usage_by_model.setdefault(
+                        self._usage.llm_model, {"prompt": 0, "cached": 0, "completion": 0}
+                    )
+                    bucket["prompt"] += tokens.prompt_tokens or 0
+                    bucket["cached"] += tokens.cache_read_input_tokens or 0
+                    bucket["completion"] += tokens.completion_tokens or 0
                     if tokens.prompt_tokens is not None and tokens.completion_tokens is not None:
                         self._usage.record_model_event(
                             tokens.prompt_tokens, tokens.completion_tokens

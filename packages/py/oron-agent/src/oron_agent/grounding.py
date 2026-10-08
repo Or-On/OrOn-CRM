@@ -295,6 +295,7 @@ def render_reply(
     language: str = "",
     *,
     save_claim_receipted: bool | None = None,
+    finalized_claim_receipted: bool = False,
     allow_ticket_claim: bool = False,
     conflicting_keys: frozenset[str] = frozenset(),
 ) -> GroundedReply:
@@ -346,6 +347,7 @@ def render_reply(
         stripped,
         language,
         save_claim_receipted=save_claim_receipted,
+        finalized_claim_receipted=finalized_claim_receipted,
         allow_ticket_claim=allow_ticket_claim,
     )
     if not safe:
@@ -366,6 +368,7 @@ class VoiceEvidenceGate(FrameProcessor):
         language: str | Callable[[], str],
         load_records: Callable[[], Awaitable[list[dict[str, Any]]]],
         save_claim_receipted: Callable[[], bool] | None = None,
+        finalized_claim_receipted: Callable[[], bool] | None = None,
         allow_ticket_claim: Callable[[], bool] | None = None,
         **kwargs,
     ):
@@ -374,6 +377,7 @@ class VoiceEvidenceGate(FrameProcessor):
         self._language = language
         self._load_records = load_records
         self._save_claim_receipted = save_claim_receipted
+        self._finalized_claim_receipted = finalized_claim_receipted
         self._allow_ticket_claim = allow_ticket_claim
         self._generation = 0
 
@@ -426,6 +430,11 @@ class VoiceEvidenceGate(FrameProcessor):
                 conflicting_keys=conflicts,
                 save_claim_receipted=(
                     self._save_claim_receipted() if self._save_claim_receipted is not None else None
+                ),
+                finalized_claim_receipted=(
+                    self._finalized_claim_receipted()
+                    if self._finalized_claim_receipted is not None
+                    else False
                 ),
                 allow_ticket_claim=(
                     self._allow_ticket_claim() if self._allow_ticket_claim is not None else False

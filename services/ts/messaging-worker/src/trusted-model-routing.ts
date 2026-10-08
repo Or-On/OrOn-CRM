@@ -1,3 +1,4 @@
+import { assertCompatibleFallback } from "@or-on/config";
 /** Ports must be supplied by the server; no request/model-authored routing input. */
 export interface ModelRoutingScope {
   readonly tenantId: string;
@@ -60,6 +61,7 @@ export type TrustedModelRoute<Credential> =
       readonly baseUrl: string;
       readonly credential: Credential;
       readonly settings: Readonly<{
+        fallbackModel?: string;
         temperature?: number;
         maxTokens?: number;
         timeoutMs?: number;
@@ -70,23 +72,38 @@ export type TrustedModelRoute<Credential> =
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/iu;
 class ModelRoutingAttemptError extends Error {}
 
-export function parseTrustedModelSettings(
-  value: unknown,
-): { temperature?: number; maxTokens?: number; timeoutMs?: number } | null {
+export function parseTrustedModelSettings(value: unknown): {
+  fallbackModel?: string;
+  temperature?: number;
+  maxTokens?: number;
+  timeoutMs?: number;
+} | null {
   if (value === null || typeof value !== "object" || Array.isArray(value))
     return null;
   const record = value as Record<string, unknown>;
   if (
     Object.keys(record).some(
-      (key) => !["temperature", "maxTokens", "timeoutMs"].includes(key),
+      (key) =>
+        !["temperature", "maxTokens", "timeoutMs", "fallbackModel"].includes(
+          key,
+        ),
     )
   )
     return null;
   const result: {
+    fallbackModel?: string;
     temperature?: number;
     maxTokens?: number;
     timeoutMs?: number;
   } = {};
+  if (record.fallbackModel !== undefined) {
+    if (
+      typeof record.fallbackModel !== "string" ||
+      !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(record.fallbackModel)
+    )
+      return null;
+    result.fallbackModel = record.fallbackModel;
+  }
   if (record.temperature !== undefined) {
     if (
       typeof record.temperature !== "number" ||
@@ -156,8 +173,21 @@ export async function resolveTrustedModelRoute<Credential>(
       return blocked("provider_unsupported");
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(configuration.model))
       return blocked("model_invalid");
+    if ((provider === "gemini") !== configuration.model.startsWith("gemini-"))
+      return blocked("model_provider_mismatch");
     const settings = parseTrustedModelSettings(configuration.settings);
     if (!settings) return blocked("settings_unsupported");
+    try {
+      assertCompatibleFallback(
+        provider === "gemini"
+          ? "https://generativelanguage.googleapis.com"
+          : "https://api.openai.com",
+        configuration.model,
+        settings.fallbackModel,
+      );
+    } catch {
+      return blocked("fallback_unsupported");
+    }
     const limit = configuration.dailyRequestLimit;
     if (limit !== null && (!Number.isSafeInteger(limit) || limit < 1))
       return blocked("quota_invalid");

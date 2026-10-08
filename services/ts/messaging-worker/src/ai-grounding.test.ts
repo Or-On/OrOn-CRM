@@ -6,11 +6,46 @@ import {
   enforceStandaloneCallbackConsent,
   explicitlyRequestsImmediateCall,
   groundAiReply,
+  guardFailedLeadReply,
   latestMessageLocale,
   safeConversationalReply,
   safeKnowledgeStatement,
   type EligibleKnowledgeFact,
 } from "./ai-grounding.js";
+
+it("preserves an honest lack of approved price without treating מאושר as a completed action", () => {
+  const text =
+    "אין בידיי מחיר מאושר לסוכן טלפוני. סוכן טלפוני מטפל בשיחות ואילו סוכן וואטסאפ מטפל בהודעות.";
+  expect(groundAiReply({ action: "reply", text }, [], "he").text).toBe(text);
+  expect(safeConversationalReply("אושר החזר והכסף שולם.")).toBe(false);
+});
+
+it("delivers an honest failure after a refused lead write despite a model success claim", () => {
+  const proposed = {
+    action: "reply" as const,
+    text: "רשמתי את פרטיך, נציג אנושי יחזור אליך בהקדם.",
+  };
+  const failed = [
+    {
+      action: "lead_save",
+      ok: false,
+      reference: null,
+      detail: "storage unavailable",
+    },
+  ];
+  const guarded = guardFailedLeadReply(proposed, failed, "he");
+  expect(groundAiReply(guarded, [], "he").text).toBe(
+    "לא הצלחתי להשלים את שמירת הפנייה כרגע. אפשר לנסות שוב בהמשך.",
+  );
+  const clarification = {
+    action: "reply" as const,
+    text: "מה המספר המלא לחזרה?",
+  };
+  expect(guardFailedLeadReply(clarification, failed, "he")).toEqual(
+    clarification,
+  );
+  expect(guardFailedLeadReply(proposed, [], "he")).toEqual(proposed);
+});
 
 const fact: EligibleKnowledgeFact = {
   sourceId: "10000000-0000-4000-8000-000000000001",
@@ -180,11 +215,11 @@ describe("WhatsApp deterministic grounding (typed fixtures, no provider evaluati
       text: "",
     });
     expect(groundAiReply(decision, [], "en")).toMatchObject({
-      text: 'To request a call, please reply in a separate message: "Please call me now."',
+      text: 'To request a call, please reply in a separate message: "Please have the AI agent call me now."',
       evidence: { kind: "conversation", code: "callback_confirmation" },
     });
     expect(groundAiReply(decision, [], "he")).toMatchObject({
-      text: 'כדי לבקש שיחה, נא לשלוח בהודעה נפרדת: "תתקשרו אליי עכשיו".',
+      text: 'כדי לבקש שיחה, נא לשלוח בהודעה נפרדת: "שהסוכן AI יתקשר אליי עכשיו".',
       evidence: { kind: "conversation", code: "callback_confirmation" },
     });
     expect(enforceStandaloneCallbackConsent(classified, true)).toBe(classified);
@@ -758,7 +793,7 @@ describe("WhatsApp deterministic grounding (typed fixtures, no provider evaluati
 
   it("keeps the exact callback-confirmation boundary even after an ambiguous repeat", () => {
     const text =
-      'To request a call, please reply in a separate message: "Please call me now."';
+      'To request a call, please reply in a separate message: "Please have the AI agent call me now."';
     expect(
       groundAiReply(
         {
@@ -795,13 +830,13 @@ describe("WhatsApp deterministic grounding (typed fixtures, no provider evaluati
     ["en", "לא עובד Samsung Smart TV", "he"],
     ["en", "המסך של Samsung Smart TV לא עובד", "he"],
     ["he", "Samsung Smart TV is broken", "en"],
-    ["he", "Please Help", "en"],
+    ["he", "Please Help", "he"],
     ["he", "Can You Help?", "en"],
     ["he", "Need Help Now", "en"],
-    ["he", "PLEASE HELP", "en"],
+    ["he", "PLEASE HELP", "he"],
     ["he", "CAN YOU HELP", "en"],
-    ["he", "ERROR", "en"],
-    ["he", "NOT WORKING", "en"],
+    ["he", "ERROR", "he"],
+    ["he", "NOT WORKING", "he"],
   ] as const)(
     "uses only the latest message for locale selection: %s / %s",
     (configured, text, expected) => {
@@ -935,9 +970,12 @@ describe("WhatsApp deterministic grounding (typed fixtures, no provider evaluati
     "אשמח שתחזרו אליי בבקשה",
     "אני רוצה שתתקשרי אליי עכשיו",
     "אפשר לקבל שיחה טלפונית עכשיו?",
-  ])("admits exact current callback intent: %s", (value) => {
-    expect(explicitlyRequestsImmediateCall(value)).toBe(true);
-  });
+  ])(
+    "does not confuse an ordinary callback with an automated AI call: %s",
+    (value) => {
+      expect(explicitlyRequestsImmediateCall(value)).toBe(false);
+    },
+  );
 
   it.each([
     'He said "call me now"',
@@ -1104,4 +1142,19 @@ describe("unexecuted form promises", () => {
       );
     },
   );
+});
+
+it("keeps an approved service answer while repairing a closed neutral-address phrase", () => {
+  const text =
+    "שלום, אני נציגת ה-AI של סטודיו צבע. אצלנו שיעורי ציור וסדנאות קרמיקה. באיזה שירות את/ה מתעניין/ת?";
+  const delivered = groundAiReply({ action: "reply", text }, [], "he");
+  expect(delivered.text).toBe(text.replace("את/ה מתעניין/ת", "יש עניין"));
+  expect(safeConversationalReply(delivered.text, { locale: "he" })).toBe(true);
+  expect(
+    groundAiReply(
+      { action: "reply", text: "אושר החזר. באיזה שירות את/ה מתעניין/ת?" },
+      [],
+      "he",
+    ).text,
+  ).not.toContain("אושר החזר");
 });

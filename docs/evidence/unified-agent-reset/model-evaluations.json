@@ -1,0 +1,152 @@
+{
+  "measurement": "Nearest-rank per physical model attempt, including failures. Not end-to-end customer latency. Synthetic storage; no transport acceptance.",
+  "reports": [
+    {
+      "channel": "whatsapp",
+      "model": "gemini-3.1-flash-lite",
+      "scenarios": 20,
+      "passed": 20,
+      "failures": {},
+      "attempts": 34,
+      "attemptLatencyMsP50": 1543,
+      "attemptLatencyMsP95": 3075,
+      "failedAttempts": 0,
+      "promptSha256": "0936b9f8ba45a34a40fdf67f16ca0d82ce7a6312117f081f9c9ba330f051f9cb",
+      "sourceReportSha256": "b1b856ccc173948ae75910bd536cf06dbf8c46973ea1f11d46fbcf9c562a7615",
+      "environment": {
+        "node": "v24.20.0",
+        "platform": "win32",
+        "startedAt": "2026-10-08T16:15:33.408Z",
+        "sourceHashes": {
+          "infra/tenant-configurations/oron.whatsapp-lead.agent.json": "a170461bb5cd4a51a8482f1d85c67175b1c7759f1876be266237338ceed51f4c",
+          "infra/tenant-configurations/oron.service-catalog.json": "1d1ea92713254bb929c32ba0e094805834655a1878e9834190c842024547f0c1",
+          "db/contracts/service-discovery-scenarios.v1.json": "5d5244e26bf2bb4dbe439ca5656e64df061d6c9f83c3fbacff74bd28238cbfd4",
+          "db/contracts/service-agent-policy.v1.json": "3f6cd4f056e5c8991a7aac03291c1f93c472b4a1bc8512b2f6e35653676be2e2",
+          "db/contracts/agent-runtime-policy.v1.json": "4fc3cd9c588bad0cf15d544c96901531866c69eb971803f6c8d9159d2afcce26",
+          "packages/ts/crm/src/agent-prompt.ts": "b6e96fe5de23c3d8c4be01718cca155829e13af9a8b8eae0fa3f47cfd11bac74",
+          "services/ts/messaging-worker/src/ai-provider.ts": "fa57146269c4d22841632d517d590ca2a0a9539bba976070076aa3b06f84ed0d",
+          "services/ts/messaging-worker/src/ai-grounding.ts": "9218dd5ef0358c52d084f78895e75524518af713c9d5b646eee6dd51cedd8a5b"
+        }
+      }
+    },
+    {
+      "channel": "whatsapp",
+      "model": "gemini-3.5-flash-lite",
+      "scenarios": 20,
+      "passed": 20,
+      "failures": {},
+      "attempts": 36,
+      "attemptLatencyMsP50": 1179,
+      "attemptLatencyMsP95": 1791,
+      "failedAttempts": 0,
+      "promptSha256": "0936b9f8ba45a34a40fdf67f16ca0d82ce7a6312117f081f9c9ba330f051f9cb",
+      "sourceReportSha256": "b1b856ccc173948ae75910bd536cf06dbf8c46973ea1f11d46fbcf9c562a7615",
+      "environment": {
+        "node": "v24.20.0",
+        "platform": "win32",
+        "startedAt": "2026-10-08T16:15:33.408Z",
+        "sourceHashes": {
+          "infra/tenant-configurations/oron.whatsapp-lead.agent.json": "a170461bb5cd4a51a8482f1d85c67175b1c7759f1876be266237338ceed51f4c",
+          "infra/tenant-configurations/oron.service-catalog.json": "1d1ea92713254bb929c32ba0e094805834655a1878e9834190c842024547f0c1",
+          "db/contracts/service-discovery-scenarios.v1.json": "5d5244e26bf2bb4dbe439ca5656e64df061d6c9f83c3fbacff74bd28238cbfd4",
+          "db/contracts/service-agent-policy.v1.json": "3f6cd4f056e5c8991a7aac03291c1f93c472b4a1bc8512b2f6e35653676be2e2",
+          "db/contracts/agent-runtime-policy.v1.json": "4fc3cd9c588bad0cf15d544c96901531866c69eb971803f6c8d9159d2afcce26",
+          "packages/ts/crm/src/agent-prompt.ts": "b6e96fe5de23c3d8c4be01718cca155829e13af9a8b8eae0fa3f47cfd11bac74",
+          "services/ts/messaging-worker/src/ai-provider.ts": "fa57146269c4d22841632d517d590ca2a0a9539bba976070076aa3b06f84ed0d",
+          "services/ts/messaging-worker/src/ai-grounding.ts": "9218dd5ef0358c52d084f78895e75524518af713c9d5b646eee6dd51cedd8a5b"
+        }
+      }
+    },
+    {
+      "channel": "voice",
+      "model": "gemini-3.1-flash-lite",
+      "scenarios": 20,
+      "passed": 20,
+      "failures": {},
+      "attempts": 41,
+      "attemptLatencyMsP50": 1222,
+      "attemptLatencyMsP95": 1723,
+      "failedAttempts": 0,
+      "promptSha256": "6979df2eef709295b833bdb09ee95a932da2aff599783eccd3bd43f959693099",
+      "sourceReportSha256": "9400e5c3925e0210f4dbcddabc0c40a925d5af3a3e8c4bc9a00a08a2da2dcf77",
+      "environment": {
+        "python": "3.14.7 (main, Aug 25 2026, 14:01:25) [MSC v.1944 64 bit (AMD64)]",
+        "platform": "Windows-11-10.0.26300-SP0",
+        "compiledInstructions": {
+          "node": "v24.20.0",
+          "platform": "win32",
+          "startedAt": "2026-10-08T16:15:33.408Z",
+          "sourceHashes": {
+            "infra/tenant-configurations/oron.whatsapp-lead.agent.json": "a170461bb5cd4a51a8482f1d85c67175b1c7759f1876be266237338ceed51f4c",
+            "infra/tenant-configurations/oron.service-catalog.json": "1d1ea92713254bb929c32ba0e094805834655a1878e9834190c842024547f0c1",
+            "db/contracts/service-discovery-scenarios.v1.json": "5d5244e26bf2bb4dbe439ca5656e64df061d6c9f83c3fbacff74bd28238cbfd4",
+            "db/contracts/service-agent-policy.v1.json": "3f6cd4f056e5c8991a7aac03291c1f93c472b4a1bc8512b2f6e35653676be2e2",
+            "db/contracts/agent-runtime-policy.v1.json": "4fc3cd9c588bad0cf15d544c96901531866c69eb971803f6c8d9159d2afcce26",
+            "packages/ts/crm/src/agent-prompt.ts": "b6e96fe5de23c3d8c4be01718cca155829e13af9a8b8eae0fa3f47cfd11bac74",
+            "services/ts/messaging-worker/src/ai-provider.ts": "fa57146269c4d22841632d517d590ca2a0a9539bba976070076aa3b06f84ed0d",
+            "services/ts/messaging-worker/src/ai-grounding.ts": "9218dd5ef0358c52d084f78895e75524518af713c9d5b646eee6dd51cedd8a5b"
+          }
+        },
+        "sourceHashes": {
+          "packages/py/oron-agent/src/oron_agent/llm.py": "3cdd9e1088a2a3133c8e2909d188bdf1f134e2765346d129de694289edc6bd84",
+          "packages/py/oron-agent/src/oron_agent/lead_capture.py": "3f0e661f9e2f5ad5a357c151c0a122d6a862ac3f53baa5485bc35c902ada3b58",
+          "packages/py/oron-agent/src/oron_agent/spoken_safety.py": "cc0735c655b64ea2c9ce97ad26c0bfd3c6b6233262eb69acc783ca452a046d05",
+          "services/py/dispatcher/src/dispatcher_runtime/support_context.py": "cb5787314fc428a63b43ca199e3553a9803b5baca72e8dc96330b0c78c0344f6"
+        }
+      }
+    },
+    {
+      "channel": "voice",
+      "model": "gemini-3.5-flash-lite",
+      "scenarios": 20,
+      "passed": 20,
+      "failures": {},
+      "attempts": 38,
+      "attemptLatencyMsP50": 974,
+      "attemptLatencyMsP95": 1280,
+      "failedAttempts": 0,
+      "promptSha256": "6979df2eef709295b833bdb09ee95a932da2aff599783eccd3bd43f959693099",
+      "sourceReportSha256": "9400e5c3925e0210f4dbcddabc0c40a925d5af3a3e8c4bc9a00a08a2da2dcf77",
+      "environment": {
+        "python": "3.14.7 (main, Aug 25 2026, 14:01:25) [MSC v.1944 64 bit (AMD64)]",
+        "platform": "Windows-11-10.0.26300-SP0",
+        "compiledInstructions": {
+          "node": "v24.20.0",
+          "platform": "win32",
+          "startedAt": "2026-10-08T16:15:33.408Z",
+          "sourceHashes": {
+            "infra/tenant-configurations/oron.whatsapp-lead.agent.json": "a170461bb5cd4a51a8482f1d85c67175b1c7759f1876be266237338ceed51f4c",
+            "infra/tenant-configurations/oron.service-catalog.json": "1d1ea92713254bb929c32ba0e094805834655a1878e9834190c842024547f0c1",
+            "db/contracts/service-discovery-scenarios.v1.json": "5d5244e26bf2bb4dbe439ca5656e64df061d6c9f83c3fbacff74bd28238cbfd4",
+            "db/contracts/service-agent-policy.v1.json": "3f6cd4f056e5c8991a7aac03291c1f93c472b4a1bc8512b2f6e35653676be2e2",
+            "db/contracts/agent-runtime-policy.v1.json": "4fc3cd9c588bad0cf15d544c96901531866c69eb971803f6c8d9159d2afcce26",
+            "packages/ts/crm/src/agent-prompt.ts": "b6e96fe5de23c3d8c4be01718cca155829e13af9a8b8eae0fa3f47cfd11bac74",
+            "services/ts/messaging-worker/src/ai-provider.ts": "fa57146269c4d22841632d517d590ca2a0a9539bba976070076aa3b06f84ed0d",
+            "services/ts/messaging-worker/src/ai-grounding.ts": "9218dd5ef0358c52d084f78895e75524518af713c9d5b646eee6dd51cedd8a5b"
+          }
+        },
+        "sourceHashes": {
+          "packages/py/oron-agent/src/oron_agent/llm.py": "3cdd9e1088a2a3133c8e2909d188bdf1f134e2765346d129de694289edc6bd84",
+          "packages/py/oron-agent/src/oron_agent/lead_capture.py": "3f0e661f9e2f5ad5a357c151c0a122d6a862ac3f53baa5485bc35c902ada3b58",
+          "packages/py/oron-agent/src/oron_agent/spoken_safety.py": "cc0735c655b64ea2c9ce97ad26c0bfd3c6b6233262eb69acc783ca452a046d05",
+          "services/py/dispatcher/src/dispatcher_runtime/support_context.py": "cb5787314fc428a63b43ca199e3553a9803b5baca72e8dc96330b0c78c0344f6"
+        }
+      }
+    }
+  ],
+  "sourceRuns": {
+    "whatsapp": ".artifacts/discovery-r22/whatsapp.json",
+    "voice": ".artifacts/discovery-r22/voice.json"
+  },
+  "inferenceSettings": {
+    "maxTokens": 2048,
+    "requestTimeoutSeconds": 5,
+    "reasoningEffort": "minimal"
+  },
+  "limitations": [
+    "Synthetic tool storage; real PostgreSQL acceptance is separate.",
+    "No STT, TTS, telephone or Meta transport in model evaluation.",
+    "Previous runs and failures remain in local artifacts. r11 repaired the voice oracle to retain text accompanying tool calls before execution; r22 repeats both complete corpora with the deployment token ceiling and five-second request deadline.",
+    "One passing corpus is measured evidence, not a guarantee of deterministic language-model behavior."
+  ]
+}

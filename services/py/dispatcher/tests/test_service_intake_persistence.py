@@ -203,3 +203,27 @@ async def test_retained_voice_flow_cannot_change_and_legacy_proof_is_never_backf
     with patch("dispatcher_runtime.persistence.set_tenant", new=AsyncMock()):
         await runtime.pin_voice_agent(context, agent_id, compiled_flow_version=3)
     database.add.assert_not_called()
+
+
+@pytest.mark.parametrize("trigger", ["voice.inbound", "voice.outbound_assignment"])
+async def test_voice_admission_selects_explicit_trigger_not_optional_agent_pin(trigger):
+    runtime, database, _ = _runtime()
+    context = _context()
+    candidates, governance = MagicMock(), MagicMock()
+    candidates.mappings.return_value.all.return_value = []
+    governance.scalar_one.return_value = True
+    database.execute.side_effect = [candidates, governance]
+    with (
+        patch("dispatcher_runtime.persistence.set_tenant", new=AsyncMock()),
+        pytest.raises(ValueError, match="binding is unavailable"),
+    ):
+        await runtime.get_voice_configuration(
+            context.flow_id,
+            tenant_id=context.tenant_id,
+            agent_version_id=uuid4(),
+            trigger=trigger,
+        )
+    call = database.execute.await_args_list[0]
+    assert call.args[1]["trigger"] == trigger
+    assert "process.trigger_key = :trigger" in str(call.args[0])
+    assert "THEN 'voice.inbound'" not in str(call.args[0])

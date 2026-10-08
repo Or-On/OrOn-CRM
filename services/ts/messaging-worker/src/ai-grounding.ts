@@ -4,7 +4,10 @@ import {
   validateAgentOutput,
 } from "@or-on/crm";
 
-import type { WhatsAppAiDecision } from "./ai-provider.js";
+import type {
+  WhatsAppAiDecision,
+  WhatsAppActionReceipt,
+} from "./ai-provider.js";
 
 /** Authenticated repository projection; never construct this from model output. */
 export interface EligibleKnowledgeFact {
@@ -24,6 +27,8 @@ export const conversationReplyCodes = [
   "callback_confirmation",
   "unverified_claim",
   "knowledge_unavailable",
+  "action_failed",
+  "invalid_callback_phone",
 ] as const;
 export type ConversationReplyCode = (typeof conversationReplyCodes)[number];
 export const recentReplyWindowSize = 8;
@@ -74,8 +79,8 @@ const replies: Readonly<
     "Could you share one detail that would help me understand what you need now?",
   ],
   callback_confirmation: [
-    'כדי לבקש שיחה, נא לשלוח בהודעה נפרדת: "תתקשרו אליי עכשיו".',
-    'To request a call, please reply in a separate message: "Please call me now."',
+    'כדי לבקש שיחה, נא לשלוח בהודעה נפרדת: "שהסוכן AI יתקשר אליי עכשיו".',
+    'To request a call, please reply in a separate message: "Please have the AI agent call me now."',
   ],
   unverified_claim: [
     "הבנתי את הפרטים שמסרת. אין לי כרגע אישור מאומת לכך. האם לבקש בדיקה של נציג?",
@@ -84,6 +89,14 @@ const replies: Readonly<
   knowledge_unavailable: [
     "המידע המאושר הזמין לי לא מספיק כדי להשיב בוודאות. האם לבקש בדיקה של נציג?",
     "The approved information available to me is insufficient to answer with certainty. Would you like an operator to review it?",
+  ],
+  invalid_callback_phone: [
+    "אפשר מספר טלפון תקין לחזרה?",
+    "Could you provide a valid callback phone number?",
+  ],
+  action_failed: [
+    "לא הצלחתי להשלים את שמירת הפנייה כרגע. אפשר לנסות שוב בהמשך.",
+    "I could not complete saving your enquiry just now. You can try again later.",
   ],
 };
 
@@ -99,6 +112,36 @@ export function conversationalReply(
     text: localized(locale, replies[code]),
     evidence: { kind: "conversation", code },
   };
+}
+
+/** Failed actions must end truthfully even when a provider ignores its receipt. */
+export function guardFailedLeadReply(
+  decision: WhatsAppAiDecision,
+  receipts: readonly WhatsAppActionReceipt[],
+  locale: string,
+): WhatsAppAiDecision {
+  if (receipts.at(-1)?.validationError?.recoverable === true)
+    return {
+      action: "reply",
+      text: "",
+      replyCode:
+        receipts.at(-1)?.validationError?.code === "invalid_phone"
+          ? "invalid_callback_phone"
+          : "action_failed",
+    };
+  if (
+    receipts.at(-1)?.ok === false &&
+    decision.action === "reply" &&
+    !safeConversationalReply(decision.text, {
+      locale,
+      committedRecord: receipts.some((receipt) => receipt.ok),
+      finalizedRecord: receipts.some(
+        (receipt) => receipt.ok && receipt.action === "lead_finalize",
+      ),
+    })
+  )
+    return { action: "reply", text: "", replyCode: "action_failed" };
+  return decision;
 }
 
 export function factDigest(value: string): string {
@@ -132,6 +175,7 @@ export interface ConversationalReplyContext {
    * nothing further: an appointment, a refund or a repair remains unsayable.
    */
   readonly committedRecord?: boolean;
+  readonly finalizedRecord?: boolean;
 }
 
 function normalizedReply(value: string): string {
@@ -364,7 +408,7 @@ function nonRepeatingClarification(
 // Outcomes nothing in this conversation can produce. No receipt available on
 // this channel makes them sayable, so they are refused unconditionally.
 const consequentialClaimPattern =
-  /\b(?:booked|refunded|delivered|connected|verified|scheduled|charged|paid|approved|fixed|resolved)\b|(?:קבעתי|תיאמתי|פתחתי|זיכיתי|אימתתי|חיברתי|תוקן|נפתר|בוצע|אישר(?:תי|ה|ו)?|אושר(?:ה)?|שולם|נקבע|נמסר)/iu;
+  /\b(?:booked|refunded|delivered|connected|verified|scheduled|charged|paid|approved|fixed|resolved)\b|(?<!\p{L})(?:קבעתי|תיאמתי|פתחתי|זיכיתי|אימתתי|חיברתי|תוקן|נפתר|בוצע|אישר(?:תי|ה|ו)?|אושר(?:ה)?|שולם|נקבע|נמסר)/iu;
 
 // Claims that a lead write can back — and only a lead write. Without a
 // committed receipt in this turn they are refused exactly like the rest,
@@ -377,9 +421,13 @@ const recordClaimPattern =
 const unsupportedDeliveryPromise =
   /\b(?:will|shall|going to|about to)\s+(?:be\s+)?(?:send|sent|open|opened|create|created)\b|\b(?:I|we)['’]ll\s+(?:send|open|create)\b|(?:אשלח|נשלח|יישלח|ישלח|תישלח|תשלח|אפתח|נפתח)\s+(?:לך|לכם|אליך|אליכם|את|קישור|לינק|טופס|קריא[הת]|בקשה)|(?:שלחתי|שלחנו)|\bsent\b/iu;
 
+const finalizedLeadClaimPattern =
+  /(?:נפתח|פתחתי|נוצר|יצרתי)\s+(?:לך\s+)?ליד|(?:נציג|אדם|אנושי)[^.?!]{0,50}(?:יחזור|יחזרו|ייצור קשר)|\b(?:lead|enquiry|inquiry)\b.{0,25}\b(?:opened|finalized|completed)\b|\b(?:human|representative|team)\b.{0,30}\b(?:will|shall)\b.{0,15}\b(?:contact|call)\b/iu;
+
 function passesConversationalSafety(
   value: string,
   committedRecord = false,
+  finalizedRecord = false,
 ): boolean {
   // Paragraph breaks are ordinary message formatting. Scan their words as
   // one line so a break cannot hide a forbidden claim; all other control
@@ -392,6 +440,17 @@ function passesConversationalSafety(
     !consequentialClaimPattern.test(text) &&
     !unsupportedDeliveryPromise.test(text) &&
     (committedRecord || !recordClaimPattern.test(text)) &&
+    (finalizedRecord ||
+      !text
+        .split(/(?<=[.?!])\s*/u)
+        .some(
+          (sentence) =>
+            finalizedLeadClaimPattern.test(sentence) &&
+            !/^(?:אפשר|האם|תרצה|תרצי|would you like|may|can)\b[^.!?]*\?$/iu.test(
+              sentence.trim(),
+            ) &&
+            !/^(?:אפשר|האם)\s[^.!?]*\?$/u.test(sentence.trim()),
+        )) &&
     text.length > 0 &&
     value.length <= 1000 &&
     !/[\p{Cc}\p{Cf}<>`]/u.test(text) &&
@@ -423,7 +482,11 @@ export function safeConversationalReply(
   const text = value.trim();
   const latestCustomerMessage = context.latestCustomerMessage?.trim();
   return (
-    passesConversationalSafety(text, context.committedRecord === true) &&
+    passesConversationalSafety(
+      text,
+      context.committedRecord === true,
+      context.finalizedRecord === true,
+    ) &&
     !asksMoreThanOneQuestion(text) &&
     (context.locale === undefined ||
       matchesRequestedLocale(text, context.locale)) &&
@@ -435,6 +498,7 @@ export function safeConversationalReply(
 }
 
 const englishLanguageSignals = new Set([
+  "email",
   "a",
   "an",
   "are",
@@ -473,98 +537,114 @@ const englishLanguageSignals = new Set([
   "you",
 ]);
 
-function detectedMessageLocale(latestText: string): "he" | "en" | undefined {
-  // Links, email addresses and machine identifiers are evidence, not a
-  // reliable language signal. In particular, a Hebrew customer pasting a
-  // long support URL must not receive an English reply because the hostname
-  // happens to contain more Latin tokens than the actual sentence.
-  const naturalText = latestText
-    .replace(/https?:\/\/\S+/giu, " ")
-    .replace(/\b[^\s@]+@[^\s@]+\.[^\s@]+\b/giu, " ")
-    .replace(/\b(?=\S*[\p{L}\p{N}])(?=\S*\d)[\p{L}\p{N}._/-]+\b/giu, " ");
-  const words =
-    naturalText.match(/\p{Script=Hebrew}+|\p{Script=Latin}+/gu) ?? [];
-  const containsHebrew = words.some((word) => /\p{Script=Hebrew}/u.test(word));
-  const rawLatinLetters = words.reduce(
-    (count, word) => count + (word.match(/\p{Script=Latin}/gu)?.length ?? 0),
-    0,
-  );
-  // Uppercase is presentation, not proof of a machine identifier. Preserve
-  // clear natural English requests such as "PLEASE HELP" while still treating
-  // an isolated product acronym such as "HDMI" as language-neutral.
-  if (
-    !containsHebrew &&
-    rawLatinLetters >= 2 &&
-    words.some((word) => englishLanguageSignals.has(word.toLowerCase()))
-  )
-    return "en";
-  const technicalIndexes = new Set<number>();
-  for (let index = 0; index < words.length;) {
-    if (!/^[A-Z][\p{Script=Latin}\p{N}]*$/u.test(words[index] ?? "")) {
-      index += 1;
-      continue;
-    }
-    let end = index + 1;
-    while (
-      end < words.length &&
-      /^[A-Z][\p{Script=Latin}\p{N}]*$/u.test(words[end] ?? "")
+/** Neutral fields never establish a language; only the customer's language choice does. */
+export function detectedMessageLocale(
+  latestText: string,
+  collectingName = false,
+): "he" | "en" | undefined {
+  const text = latestText.normalize("NFKC").trim();
+  // A quoted or negated mention of a language is not a request to switch.
+  if (!/["“”״]/u.test(text) && !/^(?:לא|אל|don't|do not)\s/iu.test(text)) {
+    if (
+      /^(?:(?:please|in)\s+)?english(?:\s+please)?[.!?\s]*$|^(?:(?:can|could) you (?:answer|reply|speak)|(?:please )?(?:answer|reply|speak)) in english[.!?\s]*$|^(?:אפשר|בבקשה|תעני|תענה|דברי|דבר|אפשר לדבר)\s+באנגלית[.!?\s]*$/iu.test(
+        text,
+      )
     )
-      end += 1;
-    if (end - index >= 2)
-      for (let item = index; item < end; item += 1) technicalIndexes.add(item);
-    index = end;
+      return "en";
+    if (
+      /^(?:(?:please|in)\s+)?hebrew(?:\s+please)?[.!?\s]*$|^(?:עברית(?: בבקשה)?|(?:אפשר|בבקשה|תעני|תענה|דברי|דבר)\s+בעברית)[.!?\s]*$/iu.test(
+        text,
+      )
+    )
+      return "he";
   }
-  const wordsWithoutTechnicalNames = words.filter(
-    (word, index) =>
-      !technicalIndexes.has(index) &&
-      !/^(?:[A-Z]{2,}[A-Z0-9]*|[A-Za-z]*\d+[A-Za-z0-9]*)$/u.test(word),
+  const natural = text
+    .replace(/https?:\/\/\S+|www\.\S+/giu, " ")
+    .replace(/\b[^\s@]+@[^\s@]+\.[^\s@]+\b/giu, " ")
+    .replace(/\b(?=\S*\d)[\p{L}\p{N}._/-]+\b/giu, " ");
+  if (/\p{Script=Hebrew}{2}/u.test(natural)) return "he";
+  const words = natural.match(/\p{Script=Latin}+/gu) ?? [];
+  const meaningful = words.filter(
+    (word) =>
+      !/^(?:hi|hello|hey|ok|okay|thanks|thank|yes|no|please|yo|bye)$/iu.test(
+        word,
+      ),
   );
-  // Do not erase an ordinary short Title Case English utterance such as
-  // "Please Help". A technical-name exclusion is useful only when at least
-  // two natural-language words remain to establish the surrounding grammar.
-  const languageWords =
-    wordsWithoutTechnicalNames.length >= 2
-      ? wordsWithoutTechnicalNames
-      : words.filter(
-          (word) =>
-            !/^(?:[A-Z]{2,}[A-Z0-9]*|[A-Za-z]*\d+[A-Za-z0-9]*)$/u.test(word),
-        );
-  const hebrewWords = languageWords.filter((word) =>
-    /\p{Script=Hebrew}/u.test(word),
-  ).length;
-  const latinWords = languageWords.length - hebrewWords;
-  const hebrewLetters = languageWords.reduce(
-    (count, word) => count + (word.match(/\p{Script=Hebrew}/gu)?.length ?? 0),
-    0,
-  );
-  const latinLetters = languageWords.reduce(
-    (count, word) => count + (word.match(/\p{Script=Latin}/gu)?.length ?? 0),
-    0,
-  );
-  if (hebrewWords > latinWords && hebrewLetters >= 2) return "he";
-  if (latinWords > hebrewWords && latinLetters >= 2) return "en";
-  return undefined;
+  if (
+    (collectingName &&
+      !/\b(?:i|we|you)\s+(?:need|want|have|would|can|cannot|do|are)|\b(?:the|my|our)\s+\w+\s+(?:is|has|does|needs)/iu.test(
+        natural,
+      )) ||
+    meaningful.length < 3 ||
+    new Set(meaningful.map((word) => word.toLowerCase())).size < 3
+  )
+    return undefined;
+  // Require sentence evidence as well as word count: a brand or multipart name
+  // without a request/predicate remains business data, not a language choice.
+  if (
+    !meaningful.some((word) => englishLanguageSignals.has(word.toLowerCase()))
+  )
+    return undefined;
+  return "en";
 }
 
-/**
- * Choose the response language from the current inbound message. If that turn
- * contains only a number, URL, machine identifier, punctuation or one-letter
- * noise, retain the most recent unambiguous inbound language before falling
- * back to the agent's authored locale. Prior assistant output never decides a
- * customer's language. `recentInboundTexts` must be newest first.
- */
+/** newest-first inbound history; assistant prose never establishes language. */
 export function latestMessageLocale(
   configuredLocale: string,
   latestText: string,
   recentInboundTexts: readonly string[] = [],
+  context: {
+    readonly collectingName?: boolean;
+    readonly previousNameAnswers?: readonly boolean[];
+  } = {},
 ): "he" | "en" {
-  const detected = detectedMessageLocale(latestText);
+  const detected = detectedMessageLocale(latestText, context.collectingName);
   if (detected !== undefined) return detected;
-  for (const previousText of recentInboundTexts.slice(0, 50)) {
-    const previous = detectedMessageLocale(previousText);
+  for (const [index, previousText] of recentInboundTexts
+    .slice(0, 50)
+    .entries()) {
+    const previous = detectedMessageLocale(
+      previousText,
+      context.previousNameAnswers?.[index],
+    );
     if (previous !== undefined) return previous;
   }
   return configuredLocale.toLowerCase().startsWith("he") ? "he" : "en";
+}
+
+/** The prior delivered question supplies field context, never language evidence. */
+export function conversationLocale(
+  configuredLocale: string,
+  messages: readonly {
+    readonly role: "user" | "assistant";
+    readonly text: string;
+  }[],
+): "he" | "en" {
+  let previousAssistant = "";
+  const answers: { text: string; name: boolean }[] = [];
+  for (const message of messages) {
+    if (message.role === "assistant") previousAssistant = message.text;
+    else {
+      answers.push({
+        text: message.text,
+        name: /(?:מה (?:ה)?שם|איך קוראים|(?:your|full|contact|preferred) name)/iu.test(
+          previousAssistant,
+        ),
+      });
+      previousAssistant = "";
+    }
+  }
+  const latest = answers.pop();
+  const history = answers.reverse();
+  return latestMessageLocale(
+    configuredLocale,
+    latest?.text ?? "",
+    history.map((item) => item.text),
+    {
+      collectingName: latest?.name ?? false,
+      previousNameAnswers: history.map((item) => item.name),
+    },
+  );
 }
 
 /** The model selects a key; the repository supplies every delivered business word. */
@@ -612,25 +692,33 @@ export function groundAiReply(
     );
   }
   if (decision.action === "reply") {
+    // Closed grammatical repair preserves the catalog answer and changes no
+    // fact, authorization, or receipt. All safety and delivery checks still run.
+    const replyText = decision.text.replace(
+      /את\s*\/\s*ה\s+מתעניי?ן\s*\/\s*ת/gu,
+      "יש עניין",
+    );
     if (decision.replyCode !== undefined) {
       const selected = conversationalReply(decision.replyCode, locale);
       if (
         decision.replyCode === "callback_confirmation" ||
+        decision.replyCode === "invalid_callback_phone" ||
         !repeatsRecentAssistant(selected.text, spokenContext)
       )
         return selected;
       return nonRepeatingClarification(locale, spokenContext);
     }
     if (
-      safeConversationalReply(decision.text, {
+      safeConversationalReply(replyText, {
         locale,
         recentAssistantMessages,
         latestCustomerMessage,
         committedRecord: committedRecord !== undefined,
+        finalizedRecord: committedRecord?.operation === "lead.finalize",
       })
     ) {
       return {
-        text: decision.text.trim(),
+        text: replyText.trim(),
         // Natural diagnostic questions must retain a distinct evidence code.
         // Treating them as the canned `clarify` reply makes the delivery-time
         // revalidation compare different text and reject every useful answer.
@@ -644,8 +732,9 @@ export function groundAiReply(
       };
     }
     return passesConversationalSafety(
-      decision.text.trim(),
+      replyText.trim(),
       committedRecord !== undefined,
+      committedRecord?.operation === "lead.finalize",
     )
       ? nonRepeatingClarification(locale, spokenContext)
       : nonRepeatingClarification(
@@ -658,6 +747,18 @@ export function groundAiReply(
     locale,
     spokenContext,
     knowledgeFallbackCodes,
+  );
+}
+
+/** An unquoted current refusal withdraws later-contact intent, never language or identity. */
+export function refusesHumanFollowup(text: string): boolean {
+  const value = text.normalize("NFKC").trim();
+  return (
+    !/["“”״]/u.test(value) &&
+    !/^(?:if|אם)\s/iu.test(value) &&
+    /^(?:(?:בבקשה )?אל (?:תחזרו|תחזור|תחזרי|תתקשרו|תתקשר|תתקשרי) אליי?|(?:אני )?לא (?:רוצה|מעוניין|מעוניינת) (?:שיחזרו|שיתקשרו) אליי?|(?:please )?(?:do not|don't|never) call me)[.!?\s]*$/iu.test(
+      value,
+    )
   );
 }
 

@@ -113,13 +113,25 @@ export async function requestAgentGoldenEvaluation(
   const row = qualityObject(input);
   // Scores/receipts/policy/provenance cannot be supplied through this operation.
   if (
-    Object.keys(row).some((key) => key !== "versionId" && key !== "datasetId")
+    Object.keys(row).some(
+      (key) =>
+        key !== "versionId" &&
+        key !== "datasetId" &&
+        key !== "publicationOperationId",
+    )
   )
     throw new TypeError(
       "golden request accepts version and dataset identifiers only",
     );
   const version = await assertVersionBinding(sql, profileId, row.versionId);
   const dataset = qualityId(row.datasetId);
+  if (row.publicationOperationId !== undefined) {
+    const operation = qualityId(row.publicationOperationId);
+    const [result] = await sql<
+      { id: string }[]
+    >`SELECT platform.request_publication_quality_evaluation(${operation}::uuid,${version}::uuid,${dataset}::uuid) AS id`;
+    return qualityId(result?.id);
+  }
   const rows = await sql<{ id: string }[]>`
     SELECT platform.request_agent_quality_evaluation(${version}::uuid,${dataset}::uuid,'manual') AS id
   `;
@@ -130,8 +142,16 @@ export async function listAgentGoldenEvaluations(
   sql: postgres.TransactionSql,
   profileId: unknown,
   versionId: unknown,
+  publicationOperationId?: unknown,
 ): Promise<readonly AgentGoldenEvaluationStatus[]> {
   const version = await assertVersionBinding(sql, profileId, versionId);
+  if (publicationOperationId !== undefined && publicationOperationId !== null) {
+    const operation = qualityId(publicationOperationId);
+    const [row] = await sql<
+      { result: unknown }[]
+    >`SELECT platform.list_publication_quality_evaluations(${operation}::uuid,${version}::uuid) AS result`;
+    return parseAgentGoldenEvaluationStatuses(row?.result);
+  }
   const rows = await sql<{ result: unknown }[]>`
     SELECT platform.list_agent_quality_evaluations(${version}::uuid) AS result
   `;
@@ -142,6 +162,7 @@ export async function getAgentGoldenWorkspace(
   sql: postgres.TransactionSql,
   profileId: unknown,
   versionId: unknown,
+  publicationOperationId?: unknown,
 ): Promise<AgentGoldenWorkspace> {
   const version = await assertVersionBinding(sql, profileId, versionId);
   const gates = await sql<{ enabled: boolean }[]>`
@@ -175,7 +196,12 @@ export async function getAgentGoldenWorkspace(
   return {
     enabled: true,
     datasets,
-    evaluations: await listAgentGoldenEvaluations(sql, profileId, version),
+    evaluations: await listAgentGoldenEvaluations(
+      sql,
+      profileId,
+      version,
+      publicationOperationId,
+    ),
   };
 }
 

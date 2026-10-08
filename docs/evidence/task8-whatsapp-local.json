@@ -1,0 +1,67 @@
+{
+  "schemaVersion": "1.0",
+  "baseCommit": "ac0d00a",
+  "providerTraffic": "none; signed synthetic webhook and fake provider only",
+  "logs": [
+    {
+      "path": ".artifacts/task8-final-checks.log",
+      "sha256": "8788c2878113a0780b53c2a5353eb24c54958c2fc44bcb213b4199773f51a6ba"
+    },
+    {
+      "path": ".artifacts/task8-final-retest.log",
+      "sha256": "4ce501b3764807602731a8347e715ae6e41dbe1bb4faf46aa3548d7a835cc2b0"
+    },
+    {
+      "path": ".artifacts/task8-callback-final.log",
+      "sha256": "1951c50c82a9883481ddf62b6e8a2f0bd330a5a44f2d6deb01662f382288ce34"
+    },
+    {
+      "path": ".artifacts/task8-final-static-r2.log",
+      "sha256": "57016f5ec555334451e14a4aa77d41aacfca5026b695287ee06a749fe852ff36"
+    },
+    {
+      "path": ".artifacts/task8-locale-attempt-final-r2.log",
+      "sha256": "985a20e61e6b434dd733e72993a0ce33091ed4c07d7898633640c622c20bbfb9"
+    },
+    {
+      "path": ".artifacts/task8-locale-attempt-final-r3.log",
+      "sha256": "ce53411527e128165837eb6e9feeddb199c883d805d722328cdedd1ab6d6d958"
+    },
+    {
+      "path": ".artifacts/task8-locale-static.log",
+      "sha256": "5a3973f79ed9becd5f23c4feff467513814de7ea381d75a4d2e339aa8b8edca9"
+    },
+    {
+      "path": ".artifacts/task8-history-regression.log",
+      "sha256": "7e93a6823176c51711e5d7603e6e0544fd62b10036bcd78d5b9561aa8e81b2ba"
+    },
+    {
+      "path": ".artifacts/task8-handoff-regression.log",
+      "sha256": "8232d9df4acca9e92eed1741003a7ea9c096268729e295a2152b42dc22344078"
+    },
+    {
+      "path": ".artifacts/task8-principal-clean-final.log",
+      "sha256": "657e295c11ab66654477ac81c69713ea96bd83bf8e56611e393fcc9e24f49194"
+    },
+    {
+      "path": ".artifacts/task8-handoff-static.log",
+      "sha256": "5a3973f79ed9becd5f23c4feff467513814de7ea381d75a4d2e339aa8b8edca9"
+    }
+  ],
+  "results": {
+    "crmFocused": 252,
+    "groundingAndLocale": 302,
+    "newSignedWebhookPostgres": 16,
+    "existingDiscoveryAndLeadPostgres": 5,
+    "automaticAiCallPostgres": 1,
+    "webBff": 6,
+    "pythonSharedParity": 81,
+    "principalHandoffPostgres": 23,
+    "digitalFormPostgres": 18
+  },
+  "limits": [
+    "Local source checks, not full release CI",
+    "No live Meta delivery or browser inspection",
+    "Historical failed combined runs retained; focused final reruns passed"
+  ]
+}

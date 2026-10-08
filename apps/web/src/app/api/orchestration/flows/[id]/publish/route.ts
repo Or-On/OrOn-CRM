@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
 
-import { publishExecutableFlow } from "@or-on/crm";
+import {
+  publishExecutableFlow,
+  publishCanonicalWithBindings,
+  PublicationConflictError,
+} from "@or-on/crm";
 
-import { withCurrentTenant } from "../../../../../../features/auth";
+import { withFreshCurrentTenant } from "../../../../../../features/auth";
 import {
   assertCrmMutation,
   crmErrorResponse,
@@ -15,8 +19,34 @@ export async function POST(
   try {
     await assertCrmMutation(request);
     const { id } = await context.params;
-    const published = await withCurrentTenant("flows:manage", (sql, session) =>
-      publishExecutableFlow(sql, session.userId, id),
+    const text = await request.text();
+    if (text.trim()) {
+      const body = JSON.parse(text) as Record<string, unknown>;
+      if (
+        typeof body.requestId !== "string" ||
+        typeof body.expectedVersionId !== "string" ||
+        typeof body.activate !== "boolean"
+      )
+        throw new TypeError(
+          "requestId, expectedVersionId and activate are required",
+        );
+      const publication = await withFreshCurrentTenant(
+        "flows:manage",
+        (sql, session) =>
+          publishCanonicalWithBindings(sql, session.userId, id, {
+            requestId: body.requestId as string,
+            expectedVersionId: body.expectedVersionId as string,
+            activate: body.activate as boolean,
+          }),
+      );
+      return NextResponse.json({
+        published: publication.status !== "blocked_evaluation",
+        publication,
+      });
+    }
+    const published = await withFreshCurrentTenant(
+      "flows:manage",
+      (sql, session) => publishExecutableFlow(sql, session.userId, id),
     );
     if (!published)
       throw new TypeError(
@@ -24,6 +54,8 @@ export async function POST(
       );
     return NextResponse.json({ published: true });
   } catch (error) {
+    if (error instanceof PublicationConflictError)
+      return NextResponse.json({ error: error.message }, { status: 409 });
     return crmErrorResponse(error);
   }
 }

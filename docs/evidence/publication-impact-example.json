@@ -1,0 +1,145 @@
+{
+  "scope": "fictional owned PostgreSQL example; not production activation",
+  "sourceTest": "publication-bindings.postgres.test.ts: inbound follower and outbound pin",
+  "fixture": {
+    "tenant": "95ceb40f-9248-4e84-aa31-6903ac2e8f45",
+    "actor": "180c5b35-70fc-49ed-a9f7-e45b44052573",
+    "voice": "b712caca-db2a-4383-9ba5-e69e37ac7ec3",
+    "profile": "aae5a47d-0aff-4907-b8dc-5ea074f0e5fa",
+    "base": "c74a107b-5002-43c9-9f4e-964fac071d39",
+    "definition": "4dadc088-caaa-44f0-ae25-86d4254bdaef",
+    "flowId": "f0137d46-a1b8-450f-8169-d68b55d786a3",
+    "flow": {
+      "schemaVersion": "1.0",
+      "agentReferencePolicy": "follow_published",
+      "channels": [
+        "voice",
+        "whatsapp"
+      ],
+      "nodes": [
+        {
+          "id": "start",
+          "type": "start"
+        },
+        {
+          "id": "call",
+          "type": "voice.call",
+          "configuration": {
+            "flowId": "b712caca-db2a-4383-9ba5-e69e37ac7ec3",
+            "flowVersion": 1,
+            "flowReferencePolicy": "follow_published"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ],
+      "edges": [
+        {
+          "id": "v1",
+          "source": "start",
+          "target": "call",
+          "channels": [
+            "voice"
+          ]
+        },
+        {
+          "id": "v2",
+          "source": "call",
+          "target": "end",
+          "channels": [
+            "voice"
+          ]
+        },
+        {
+          "id": "w1",
+          "source": "start",
+          "target": "end",
+          "channels": [
+            "whatsapp"
+          ]
+        }
+      ]
+    },
+    "newAgent": "79b7d9d6-679a-4be0-949e-f07e6b893f84",
+    "publication": {
+      "status": "active_for_new_interactions",
+      "operationId": "ca76332f-43cb-4c5c-a547-0cb770f20b8d",
+      "releaseId": "82f707cb-f620-4abe-a62a-ac04b6b05b49",
+      "impacts": [
+        {
+          "processName": "Inbound",
+          "trigger": "voice.inbound",
+          "status": "active_for_new_interactions",
+          "reason": "following_publication",
+          "oldAgentVersionId": "c74a107b-5002-43c9-9f4e-964fac071d39",
+          "newAgentVersionId": "79b7d9d6-679a-4be0-949e-f07e6b893f84",
+          "oldFlowVersionId": "f0137d46-a1b8-450f-8169-d68b55d786a3",
+          "newFlowVersionId": "8ab7e7aa-2205-4108-8c04-64c021f0c9e4"
+        },
+        {
+          "processName": "Outbound",
+          "trigger": "voice.outbound_assignment",
+          "status": "unchanged_pinned",
+          "reason": "process_pinned",
+          "oldAgentVersionId": "c74a107b-5002-43c9-9f4e-964fac071d39",
+          "newAgentVersionId": "c74a107b-5002-43c9-9f4e-964fac071d39",
+          "oldFlowVersionId": "f0137d46-a1b8-450f-8169-d68b55d786a3",
+          "newFlowVersionId": "f0137d46-a1b8-450f-8169-d68b55d786a3"
+        },
+        {
+          "processName": "WhatsApp",
+          "trigger": "whatsapp.new_conversation",
+          "status": "active_for_new_interactions",
+          "reason": "following_publication",
+          "oldAgentVersionId": "c74a107b-5002-43c9-9f4e-964fac071d39",
+          "newAgentVersionId": "79b7d9d6-679a-4be0-949e-f07e6b893f84",
+          "oldFlowVersionId": "f0137d46-a1b8-450f-8169-d68b55d786a3",
+          "newFlowVersionId": "8ab7e7aa-2205-4108-8c04-64c021f0c9e4"
+        },
+        {
+          "processName": "Pinned",
+          "trigger": "manual.contact_action",
+          "status": "unchanged_pinned",
+          "reason": "process_pinned",
+          "oldAgentVersionId": "c74a107b-5002-43c9-9f4e-964fac071d39",
+          "newAgentVersionId": "c74a107b-5002-43c9-9f4e-964fac071d39",
+          "oldFlowVersionId": "f0137d46-a1b8-450f-8169-d68b55d786a3",
+          "newFlowVersionId": "f0137d46-a1b8-450f-8169-d68b55d786a3"
+        }
+      ]
+    },
+    "processes": [
+      {
+        "id": "faac486f-f37a-4f50-912d-003cdc9687a3",
+        "trigger_key": "manual.contact_action",
+        "revision": 1,
+        "agent_profile_version_id": "c74a107b-5002-43c9-9f4e-964fac071d39",
+        "flow_version_id": "f0137d46-a1b8-450f-8169-d68b55d786a3"
+      },
+      {
+        "id": "025e3142-f1ac-4fc0-99fe-6b750c3311c0",
+        "trigger_key": "voice.inbound",
+        "revision": 1,
+        "agent_profile_version_id": "79b7d9d6-679a-4be0-949e-f07e6b893f84",
+        "flow_version_id": "8ab7e7aa-2205-4108-8c04-64c021f0c9e4"
+      },
+      {
+        "id": "970ab127-3f9d-4d42-8ab4-210fd129f059",
+        "trigger_key": "voice.outbound_assignment",
+        "revision": 1,
+        "agent_profile_version_id": "c74a107b-5002-43c9-9f4e-964fac071d39",
+        "flow_version_id": "f0137d46-a1b8-450f-8169-d68b55d786a3"
+      },
+      {
+        "id": "b6264145-8f5f-438e-b46e-d4757f8b0cf5",
+        "trigger_key": "whatsapp.new_conversation",
+        "revision": 1,
+        "agent_profile_version_id": "79b7d9d6-679a-4be0-949e-f07e6b893f84",
+        "flow_version_id": "8ab7e7aa-2205-4108-8c04-64c021f0c9e4"
+      }
+    ],
+    "existingConversationCount": 0
+  }
+}

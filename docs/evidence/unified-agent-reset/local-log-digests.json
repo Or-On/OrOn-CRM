@@ -1,0 +1,55 @@
+{
+  "note": "Local raw logs are ignored; hashes identify the exact retained evidence. Passing and earlier failed checkpoints are distinguished in the report.",
+  "logs": {
+    "postgres-r15.log": {
+      "sha256": "5da8696c16bc619c31a29a1cf6853f71f39da8cec10701fc6cae9d99c77efe28",
+      "bytes": 600
+    },
+    "application-role-pg-r12.log": {
+      "sha256": "1e65675478c33ad97476ebea007bbcd45c3a45c6d10123a79ec1e69b083d2541",
+      "bytes": 639
+    },
+    "quality-pg-r15.log": {
+      "sha256": "92bfb691a4cbb338087db4397f05b99bc12cdc1b49a4f64867356a4f084d3a94",
+      "bytes": 23185
+    },
+    "service-form-r16.log": {
+      "sha256": "8e70ff992f8efef9b8b7397bb2dee620aabb70559f95e0078c62a71c4da5aaaa",
+      "bytes": 283
+    },
+    "model-machine-pg-r17.log": {
+      "sha256": "92cf87fc5952150fe7531308d12a1cbd31069d4ae052dc5d367e5da5bf76a842",
+      "bytes": 46117
+    },
+    "messaging-diagnostics-r19.log": {
+      "sha256": "506d2f7343dcbce5d797dba43a1092a2af50b8abf95fdc28be34a38ecce7e20c",
+      "bytes": 278
+    },
+    "worker-readiness-r20.log": {
+      "sha256": "dc97c895e93c079c55b2edfb69ada594d8e2b6ab732616120151fe8b90725ba2",
+      "bytes": 283
+    },
+    "migration-cycle-r15.log": {
+      "sha256": "0f2fc4a2c1aadb918bb0ac87fb9d3f97e34ba2979957afbae9481cd37cf86a4c",
+      "bytes": 5050
+    },
+    "verify-r15.log": {
+      "sha256": "b42ce92cdf2d6a5a6e88ce2e99d54f2502ca21224bfe58564a919b680e8e7744",
+      "bytes": 74883
+    },
+    "verify-continuation-r16.log": {
+      "sha256": "26778c8b4d05b27c02b7bbe66f67b06a3a05343c8d0cda13965636a66c255ed6",
+      "bytes": 14461
+    },
+    "messaging-pg-r18.log": {
+      "sha256": "ba6b98173abade045e127e3e59eebb3135188ff33ae2ebe87359d8eeddf48194",
+      "bytes": 46149
+    },
+    "verify-final-r24.log": {
+      "sha256": "7b3524c526b296188f154bea9bcaf72a227aab40c2d7f04bc2ce918545dd3078",
+      "bytes": 87978,
+      "exitCode": 0,
+      "implementationCommit": "e5937d0"
+    }
+  }
+}

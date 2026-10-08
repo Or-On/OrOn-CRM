@@ -57,6 +57,8 @@ async function main(): Promise<void> {
           apiKey: config.secrets.llmApiKey,
           baseUrl: config.llm.baseUrl,
           model: config.llm.model,
+          maxTokens: config.llm.maxTokens,
+          timeoutMs: config.llm.timeoutMs,
         }
       : undefined;
   const credentialKeys = channelCredentialKeys(process.env);
@@ -139,9 +141,12 @@ async function main(): Promise<void> {
             apiKey: route.credential.apiKey,
             baseUrl: route.baseUrl,
             model: route.model,
+            maxTokens: config.llm.maxTokens,
+            timeoutMs: config.llm.timeoutMs,
             ...route.settings,
           }),
       },
+      fieldServiceModelRoutingEnabled: config.enableWhatsAppAi,
       automaticCallsEnabled: config.enableWhatsAppAutoCalls,
       privateObjectStorage,
       ...(config.audioTranscription.enabled &&
@@ -179,9 +184,12 @@ async function main(): Promise<void> {
                 ? {}
                 : { fallbackModel: config.llm.fallbackModel }),
             }),
-            fieldServiceProvider: new OpenAiCompatibleFieldServiceProvider(
-              llmOptions,
-            ),
+            fieldServiceProvider: new OpenAiCompatibleFieldServiceProvider({
+              ...llmOptions,
+              ...(config.llm.fallbackModel === undefined
+                ? {}
+                : { fallbackModel: config.llm.fallbackModel }),
+            }),
             postCallProvider: new OpenAiCompatiblePostCallProvider(llmOptions),
             postCallModel: llmOptions.model,
           }),

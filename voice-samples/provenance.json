@@ -1,0 +1,24 @@
+{
+  "provider": "soniox",
+  "model": "tts-rt-v2",
+  "voice": "Harper",
+  "generatedAt": "2026-10-08T12:36:52.913633+00:00",
+  "listeningAccepted": false,
+  "artifacts": [
+    {
+      "file": "harper.wav",
+      "voice": "Harper",
+      "text": "היי, אני נציגת השירות. אשמח לעזור ולשלוח את הקישור בוואטסאפ.",
+      "seconds": 4.693375,
+      "sha256": "fc7b52d30edb2a7d93365cea4fce3a0a811af34f31882736a3e441900f8561b9"
+    },
+    {
+      "file": "grace.wav",
+      "voice": "Grace",
+      "text": "היי, אני נציגת השירות. אשמח לעזור ולשלוח את הקישור בוואטסאפ.",
+      "seconds": 4.352,
+      "sha256": "f143106c7fa85a2e2e51520551c8741e303f16f0689c950c22b3fb67d407a99f"
+    }
+  ],
+  "graceAvailable": true
+}

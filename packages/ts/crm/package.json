@@ -23,15 +23,20 @@
     "./tenant-configuration-client": {
       "types": "./src/tenant-configuration-client.ts",
       "default": "./dist/tenant-configuration-client.js"
+    },
+    "./flow-editor-contract": {
+      "types": "./src/flow-editor-contract.ts",
+      "default": "./dist/flow-editor-contract.js"
     }
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
-    "test": "vitest run",
+    "test": "pnpm --filter \"@or-on/crm^...\" build && vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@or-on/config": "workspace:*",
     "postgres": "catalog:"
   },
   "devDependencies": {

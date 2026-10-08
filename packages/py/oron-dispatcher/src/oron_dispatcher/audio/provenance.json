@@ -1,0 +1,40 @@
+{
+  "provider": "soniox",
+  "model": "tts-rt-v2",
+  "voice": "Harper",
+  "generatedAt": "2026-10-08T11:38:27.404565+00:00",
+  "listeningAccepted": false,
+  "artifacts": [
+    {
+      "file": "busy-he.wav",
+      "text": "כל הנציגים עסוקים כרגע. אנא נסו שוב בעוד כמה דקות. תודה.",
+      "seconds": 4.437375,
+      "sha256": "830e77a5eee733cc52c7b891dcd019900e21e2e39fb80ac5e8ded969990135c7"
+    },
+    {
+      "file": "goodbye-he.wav",
+      "text": "אנחנו מסיימים כעת את השיחה. תודה ולהתראות.",
+      "seconds": 3.2426875,
+      "sha256": "c48181664a69f81c5061251b42c0293874d2c0bff80abac932ede1f0de794759"
+    },
+    {
+      "file": "failure-he.wav",
+      "text": "אירעה תקלה בשיחה. אנא נסו שוב מאוחר יותר. תודה.",
+      "seconds": 3.584,
+      "sha256": "369b1d8906ae68140acd0dbf3547723ee116b6362afd75ae9fee6414f8e447e5"
+    },
+    {
+      "file": "unavailable-he.wav",
+      "text": "השירות אינו זמין כעת. אנא נסו שוב מאוחר יותר. תודה.",
+      "seconds": 3.925375,
+      "sha256": "be0999d4bc335b880621e5948f268848dc475f2d7c862e47ace51166acf38a5f"
+    },
+    {
+      "file": "recovery-he.wav",
+      "text": "הייתה הפרעה קצרה בקול. אפשר לחזור על המשפט האחרון?",
+      "seconds": 3.413375,
+      "sha256": "4c0b89ffe016280cf0c56f5212e91f3e9b40c528bca421ca246e7241665ac9b9"
+    }
+  ],
+  "graceAvailable": true
+}

@@ -138,10 +138,23 @@ def approved_response(kind: str, language: str, business_name: str | None) -> st
     return _RESPONSES[kind][key].replace("{business}", name)
 
 
+def repeated_scope_redirect(turns: list[str]) -> bool:
+    count = 0
+    for text in reversed(turns):
+        decision = classify_turn(text)
+        if decision.service_signal:
+            break
+        if decision.route is not None:
+            count += 1
+            if count >= 3:
+                return True
+    return False
+
+
 def approved_responses(business_name: str | None) -> frozenset[str]:
     return frozenset(
         approved_response(kind, language, business_name)
-        for kind in ("identity", "scope", "data", "recipient", "fallback")
+        for kind in ("identity", "scope", "data", "recipient", "fallback", "pause")
         for language in ("he", "en")
     )
 

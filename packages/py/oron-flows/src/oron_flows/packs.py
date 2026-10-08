@@ -185,6 +185,8 @@ INSTRUCTIONS: dict[str, str] = {
     # turns, which read as the agent not listening.
     "converse_exit_description": (
         "Call this ONLY once the stated objective has been accomplished. "
+        "A goodbye or request to stop is NOT objective completion: use the "
+        "matching global exit when one is available, even if some details were collected. "
         "Do NOT call it merely because the customer said something — if the "
         "objective is not yet met, reply and keep the conversation going instead. "
         + _SILENT_TRANSITION

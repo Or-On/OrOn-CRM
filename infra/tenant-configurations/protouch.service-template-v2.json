@@ -1,0 +1,20 @@
+{
+  "name": "protouch_service_request_link_v2",
+  "language": "he",
+  "category": "UTILITY",
+  "components": [
+    {
+      "type": "BODY",
+      "text": "שלום, כאן {{1}}. כדי לפתוח קריאת שירות מלאו את הטופס בקישור: {{2}}. לשאלות: {{3}}. תודה שפניתם אלינו.",
+      "example": {
+        "body_text": [
+          [
+            "פרו טאץ׳",
+            "https://dev.or-on.io/service-request#tenant=10000000-0000-4000-8000-000000000001&token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "+97293764553"
+          ]
+        ]
+      }
+    }
+  ]
+}

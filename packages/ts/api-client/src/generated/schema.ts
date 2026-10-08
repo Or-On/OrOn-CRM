@@ -71,6 +71,7 @@ export interface CallUsage {
   readonly llm_completion_tokens?: number;
   readonly llm_model?: string;
   readonly llm_prompt_tokens?: number;
+  readonly llm_usage_by_model?: Record<string, unknown>;
   readonly stt_audio_seconds?: number;
   readonly tts_audio_seconds?: number;
   readonly tts_characters?: number;
@@ -120,7 +121,21 @@ export interface DependencyStatus {
 
 export type Direction = "inbound" | "outbound" | "browser";
 
+export interface EffectivePromptResult {
+  readonly blocks: Array<Record<string, unknown>>;
+  readonly characterCount: number;
+  readonly compositionVersion: string;
+  readonly exclusions: Array<string>;
+  readonly hash: string;
+  readonly hashScope: string;
+  readonly scriptedOpening?: Record<string, unknown> | null;
+  readonly text: string;
+}
+
 export interface FlowDocumentRequest {
+  readonly expected_base_version?: number | null;
+  readonly expected_revision?: string | null;
+  readonly request_id?: string | null;
   readonly source: Record<string, unknown>;
 }
 
@@ -131,6 +146,19 @@ export interface FlowList {
 export interface FlowPublishResult {
   readonly created: boolean;
   readonly flow: FlowSummary;
+  readonly publication?: VoicePublicationResult;
+}
+
+export interface FlowSourceResult {
+  readonly base_version: number;
+  readonly components_version: string;
+  readonly editable: boolean;
+  readonly flow_id: string;
+  readonly origin: "tenant" | "packaged";
+  readonly revision: string;
+  readonly source: Record<string, unknown>;
+  readonly spec: Record<string, unknown>;
+  readonly version: number;
 }
 
 export interface FlowSummary {
@@ -327,6 +355,13 @@ export interface VoiceControlStatus {
   readonly session_id: string;
   readonly status: "pending" | "applied" | "worker_unavailable";
   readonly worker_mode?: "ai" | "paused" | null;
+}
+
+export interface VoicePublicationResult {
+  readonly impacts?: Array<Record<string, unknown>>;
+  readonly operationId?: string | null;
+  readonly releaseId?: string | null;
+  readonly status?: "published_pending_activation";
 }
 
 export interface VoiceSessionDetail {

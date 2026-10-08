@@ -1,0 +1,21 @@
+{
+  "observedAt": "2026-10-08T18:24:56.043239+00:00",
+  "action": "created",
+  "wabaId": "2492471334563786",
+  "templateId": "1419161869672559",
+  "name": "protouch_service_request_link_v2",
+  "language": "he",
+  "category": "UTILITY",
+  "status": "PENDING",
+  "body": "שלום, כאן {{1}}. כדי לפתוח קריאת שירות מלאו את הטופס בקישור: {{2}}. לשאלות: {{3}}. תודה שפניתם אלינו.",
+  "bindingActivated": false,
+  "customerMessageSent": false,
+  "previousAttempt": {
+    "bodySuffix": "לשאלות: {{3}}.",
+    "httpStatus": 400,
+    "providerCode": 100,
+    "providerSubcode": 2388299
+  },
+  "ownerApprovedChange": "Append תודה שפניתם אלינו. while preserving three server-owned parameters.",
+  "readbackVerified": true
+}

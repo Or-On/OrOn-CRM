@@ -9,6 +9,7 @@ from uuid import UUID
 
 from loguru import logger
 from oron_common import CallContext, CallUsage, Direction, PriceBook, carrier_for
+from oron_common.voice_instructions import COMPOSITION_VERSION, instruction_text_snapshot
 from oron_flows import FlowVoice
 from oron_flows.node import ActionType
 from oron_hebrew import build_g2p, make_hebrew_niqqud_transformer
@@ -88,6 +89,7 @@ from oron_agent.quality_observer import VoiceQualityObserver, component_latency_
 from oron_agent.quality_persistence import persist_quality_summary, stage_quality_snapshot
 from oron_agent.readiness import bind_pipeline_readiness
 from oron_agent.recognition import RecognitionAcceptanceProcessor
+from oron_agent.runtime_policy import VOICE_POLICY
 from oron_agent.runtime_sessions import RuntimeSessions
 from oron_agent.scope_guard import (
     ServiceScopeOutputGate,
@@ -283,6 +285,26 @@ async def run_bot(
             raise StoredFlowUnavailable("published tenant voice flow is unavailable")
     else:
         spec = await resolve_flow_spec(sessions, ctx)
+    static_instruction_hash = instruction_text_snapshot(spec.role_message or "")["hash"]
+    snapshot_writer = getattr(sessions, "record_instruction_snapshot", None)
+    if snapshot_writer is not None:
+        await snapshot_writer(
+            ctx,
+            {
+                "staticEffectiveInstructionHash": static_instruction_hash,
+                "compositionVersion": COMPOSITION_VERSION,
+                "agentVersionId": configuration.get("agentVersionId"),
+                "retainedFlowId": str(spec.id),
+                "retainedFlowVersion": spec.version,
+                "locale": spec.language,
+                "nodeInstructionHashes": {
+                    node.name: instruction_text_snapshot(
+                        node.role_message or spec.role_message or ""
+                    )["hash"]
+                    for node in spec.nodes
+                },
+            },
+        )
     quality = configuration.get("quality", {})
     if not isinstance(quality, dict):
         quality = {}
@@ -406,22 +428,18 @@ async def run_bot(
     )
 
     # Only the versioned database snapshot sets these values, never caller data.
-    persona = {"feminine": "female", "masculine": "male", "neutral": "neutral"}.get(
-        str(quality.get("agentGrammar", ""))
-    )
-    updates: dict[str, object] = {}
-    if persona:
-        updates["persona_gender"] = persona
+    if quality.get("agentGrammar", "feminine") != VOICE_POLICY["agentGrammar"]:
+        logger.warning("Legacy agent grammar overridden by canonical voice policy")
+    updates: dict[str, object] = {"persona_gender": "female"}
     if quality.get("language") in {"he", "en"}:
         updates["language"] = quality["language"]
     spec = spec.model_copy(update=updates)
     quality_config = VoiceQualityConfig.model_validate(
         {
             "language": "he" if spec.language.startswith("he") else "en",
-            "agentGrammar": {"female": "feminine", "male": "masculine", "neutral": "neutral"}[
-                spec.persona_gender
-            ],
             **quality,
+            "agentGrammar": VOICE_POLICY["agentGrammar"],
+            "voiceId": VOICE_POLICY["voice"],
         }
     )
     # Only now is the flow known, so only now can its voice be applied — under
@@ -487,22 +505,45 @@ async def run_bot(
         ),
     )
     token_budget = quality.get("budgets", {}).get("maxResponseTokens", st.llm_max_tokens)
+    attempt_writer = getattr(sessions, "record_model_attempt", None)
+
+    async def record_model_attempt(attempt: dict) -> None:
+        attempt = {**attempt, "staticEffectiveInstructionHash": static_instruction_hash}
+        usage.record_model_attempt(attempt)
+        if attempt_writer is not None:
+            await attempt_writer(ctx, attempt)
+
     if not isinstance(token_budget, int) or isinstance(token_budget, bool):
         token_budget = st.llm_max_tokens
+    model_route = None
+    if configuration.get("modelConfigurationId") is not None:
+        resolver = getattr(sessions, "resolve_voice_model", None)
+        if resolver is None:
+            raise StoredFlowUnavailable("explicit voice model routing is unavailable")
+        model_route = await resolver(ctx, configuration["modelConfigurationId"])
+    model_settings = model_route["settings"] if model_route else {}
     llm = build_llm(
-        st.llm_provider,
+        LlmProvider.OPENAI_COMPAT if model_route else st.llm_provider,
         project_id=st.google_cloud_project,
         location=st.vertex_location,
         credentials_path=st.google_application_credentials,
         vertex_model=st.vertex_llm_model,
         thinking_budget=st.vertex_thinking_budget,
-        api_key=st.llm_api_key.get_secret_value(),
-        base_url=st.llm_base_url,
-        model=st.llm_model,
+        api_key=(model_route["apiKey"] if model_route else st.llm_api_key).get_secret_value(),
+        base_url=model_route["baseUrl"] if model_route else st.llm_base_url,
+        model=model_route["model"] if model_route else st.llm_model,
+        fallback_model=model_settings.get("fallbackModel")
+        if model_route
+        else st.llm_fallback_model,
         reasoning_effort=st.llm_reasoning_effort,
-        temperature=st.llm_temperature,
-        max_tokens=min(st.llm_max_tokens, max(64, min(2048, token_budget))),
-        request_timeout_secs=st.llm_request_timeout_secs,
+        temperature=model_settings.get("temperature", st.llm_temperature),
+        max_tokens=min(
+            model_settings.get("maxTokens", st.llm_max_tokens), max(64, min(2048, token_budget))
+        ),
+        request_timeout_secs=model_settings.get("timeoutMs", st.llm_request_timeout_secs * 1000)
+        / 1000,
+        on_attempt=record_model_attempt,
+        before_attempt=model_route["beforeAttempt"] if model_route else None,
     )
 
     # Hebrew wiring. The G2P sits on the OUTPUT path only: its job is to point
@@ -595,20 +636,16 @@ async def run_bot(
     elif configured_caller_gender is None:
         logger.info("Caller gender classification disabled; using neutral address")
 
+    if (
+        st.tts_provider.value != VOICE_POLICY["provider"]
+        or quality.get("voiceId") not in (None, "", VOICE_POLICY["voice"])
+        or _flow_voice_for(spec.voice, st.tts_provider) not in (None, VOICE_POLICY["voice"])
+    ):
+        logger.warning("Legacy TTS override inactive under canonical voice policy")
     tts = build_tts(
-        st.tts_provider,
+        TtsProvider(VOICE_POLICY["provider"]),
         language=profile.tts_language,
-        # Per-call first, then the flow's own choice, then the provider's
-        # default — the same order the settings merge above follows. The flow's
-        # name is dropped when an override moved the provider away from the one
-        # it named: voice names are per-vendor namespaces, so "Leda" reaching
-        # Soniox is a 400 on the first utterance of a live call.
-        voice=(
-            ctx.tts_voice
-            or quality_config.voiceId
-            or _flow_voice_for(spec.voice, st.tts_provider)
-            or st.tts_voice_default
-        ),
+        voice=VOICE_POLICY["voice"],
         # Markdown first: the model emits **bold** and "* " bullets despite being
         # told not to, and TTS voices the asterisks. Heard live 2026-07-26.
         # HebrewNormalizeFilter then does the spoken-form rules and drops emoji.
@@ -622,6 +659,8 @@ async def run_bot(
                 ),
                 lambda: bool(ticket_receipt_state.get("ticketId")),
                 save_claim_receipted,
+                accepted_turns.finalized_for_current_turn,
+                accepted_turns.failed_turn_key,
             ),
             # Last filter: every utterance, including ones that never passed
             # the model, is checked against the scope policy before synthesis.
@@ -636,7 +675,7 @@ async def run_bot(
         speed=quality_config.speakingPace if "speakingPace" in quality else st.tts_speed,
         reduce_silence=st.tts_reduce_silence,
         soniox_api_key=st.soniox_api_key.get_secret_value(),
-        soniox_model=st.soniox_tts_model,
+        soniox_model=VOICE_POLICY["model"],
         gemini_model=st.gemini_tts_model,
         google_credentials_path=st.google_application_credentials,
     )
@@ -737,6 +776,7 @@ async def run_bot(
         language=lambda: conversation_language.current,
         load_records=turn_knowledge.for_speech,
         save_claim_receipted=save_claim_receipted,
+        finalized_claim_receipted=accepted_turns.finalized_for_current_turn,
         allow_ticket_claim=lambda: bool(ticket_receipt_state.get("ticketId")),
     )
     processors = build_agent_processors(
@@ -812,6 +852,8 @@ async def run_bot(
     # Per-call dispatch (M4): the bot joins when a caller is present and should die
     # when the call ends. agent_idle_timeout_secs is the orphan safety net.
     usage = CallUsage(carrier=carrier_for(ctx))
+    if model_route or st.llm_provider is LlmProvider.OPENAI_COMPAT:
+        usage.enable_model_attempt_accounting()
     turn_taking = TurnTaking()
     call_clock: dict[str, float] = {}
     # An outbound attempt is unanswered until active is observed, including a
