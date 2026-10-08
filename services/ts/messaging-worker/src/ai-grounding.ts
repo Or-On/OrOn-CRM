@@ -28,6 +28,7 @@ export const conversationReplyCodes = [
   "unverified_claim",
   "knowledge_unavailable",
   "action_failed",
+  "invalid_callback_phone",
 ] as const;
 export type ConversationReplyCode = (typeof conversationReplyCodes)[number];
 export const recentReplyWindowSize = 8;
@@ -78,8 +79,8 @@ const replies: Readonly<
     "Could you share one detail that would help me understand what you need now?",
   ],
   callback_confirmation: [
-    'כדי לבקש שיחה, נא לשלוח בהודעה נפרדת: "תתקשרו אליי עכשיו".',
-    'To request a call, please reply in a separate message: "Please call me now."',
+    'כדי לבקש שיחה, נא לשלוח בהודעה נפרדת: "שהסוכן AI יתקשר אליי עכשיו".',
+    'To request a call, please reply in a separate message: "Please have the AI agent call me now."',
   ],
   unverified_claim: [
     "הבנתי את הפרטים שמסרת. אין לי כרגע אישור מאומת לכך. האם לבקש בדיקה של נציג?",
@@ -88,6 +89,10 @@ const replies: Readonly<
   knowledge_unavailable: [
     "המידע המאושר הזמין לי לא מספיק כדי להשיב בוודאות. האם לבקש בדיקה של נציג?",
     "The approved information available to me is insufficient to answer with certainty. Would you like an operator to review it?",
+  ],
+  invalid_callback_phone: [
+    "אפשר מספר טלפון תקין לחזרה?",
+    "Could you provide a valid callback phone number?",
   ],
   action_failed: [
     "לא הצלחתי להשלים את שמירת הפנייה כרגע. אפשר לנסות שוב בהמשך.",
@@ -115,6 +120,15 @@ export function guardFailedLeadReply(
   receipts: readonly WhatsAppActionReceipt[],
   locale: string,
 ): WhatsAppAiDecision {
+  if (receipts.at(-1)?.validationError?.recoverable === true)
+    return {
+      action: "reply",
+      text: "",
+      replyCode:
+        receipts.at(-1)?.validationError?.code === "invalid_phone"
+          ? "invalid_callback_phone"
+          : "action_failed",
+    };
   if (
     receipts.at(-1)?.ok === false &&
     decision.action === "reply" &&
@@ -484,6 +498,7 @@ export function safeConversationalReply(
 }
 
 const englishLanguageSignals = new Set([
+  "email",
   "a",
   "an",
   "are",
@@ -522,98 +537,111 @@ const englishLanguageSignals = new Set([
   "you",
 ]);
 
-function detectedMessageLocale(latestText: string): "he" | "en" | undefined {
-  // Links, email addresses and machine identifiers are evidence, not a
-  // reliable language signal. In particular, a Hebrew customer pasting a
-  // long support URL must not receive an English reply because the hostname
-  // happens to contain more Latin tokens than the actual sentence.
-  const naturalText = latestText
-    .replace(/https?:\/\/\S+/giu, " ")
-    .replace(/\b[^\s@]+@[^\s@]+\.[^\s@]+\b/giu, " ")
-    .replace(/\b(?=\S*[\p{L}\p{N}])(?=\S*\d)[\p{L}\p{N}._/-]+\b/giu, " ");
-  const words =
-    naturalText.match(/\p{Script=Hebrew}+|\p{Script=Latin}+/gu) ?? [];
-  const containsHebrew = words.some((word) => /\p{Script=Hebrew}/u.test(word));
-  const rawLatinLetters = words.reduce(
-    (count, word) => count + (word.match(/\p{Script=Latin}/gu)?.length ?? 0),
-    0,
-  );
-  // Uppercase is presentation, not proof of a machine identifier. Preserve
-  // clear natural English requests such as "PLEASE HELP" while still treating
-  // an isolated product acronym such as "HDMI" as language-neutral.
-  if (
-    !containsHebrew &&
-    rawLatinLetters >= 2 &&
-    words.some((word) => englishLanguageSignals.has(word.toLowerCase()))
-  )
-    return "en";
-  const technicalIndexes = new Set<number>();
-  for (let index = 0; index < words.length;) {
-    if (!/^[A-Z][\p{Script=Latin}\p{N}]*$/u.test(words[index] ?? "")) {
-      index += 1;
-      continue;
-    }
-    let end = index + 1;
-    while (
-      end < words.length &&
-      /^[A-Z][\p{Script=Latin}\p{N}]*$/u.test(words[end] ?? "")
+/** Neutral fields never establish a language; only the customer's language choice does. */
+export function detectedMessageLocale(
+  latestText: string,
+  collectingName = false,
+): "he" | "en" | undefined {
+  const text = latestText.normalize("NFKC").trim();
+  // A quoted or negated mention of a language is not a request to switch.
+  if (!/["“”״]/u.test(text) && !/^(?:לא|אל|don't|do not)\s/iu.test(text)) {
+    if (
+      /^(?:(?:please|in)\s+)?english(?:\s+please)?[.!?\s]*$|^(?:(?:can|could) you (?:answer|reply|speak)|(?:please )?(?:answer|reply|speak)) in english[.!?\s]*$|^(?:אפשר|בבקשה|תעני|תענה|דברי|דבר|אפשר לדבר)\s+באנגלית[.!?\s]*$/iu.test(
+        text,
+      )
     )
-      end += 1;
-    if (end - index >= 2)
-      for (let item = index; item < end; item += 1) technicalIndexes.add(item);
-    index = end;
+      return "en";
+    if (
+      /^(?:(?:please|in)\s+)?hebrew(?:\s+please)?[.!?\s]*$|^(?:עברית(?: בבקשה)?|(?:אפשר|בבקשה|תעני|תענה|דברי|דבר)\s+בעברית)[.!?\s]*$/iu.test(
+        text,
+      )
+    )
+      return "he";
   }
-  const wordsWithoutTechnicalNames = words.filter(
-    (word, index) =>
-      !technicalIndexes.has(index) &&
-      !/^(?:[A-Z]{2,}[A-Z0-9]*|[A-Za-z]*\d+[A-Za-z0-9]*)$/u.test(word),
+  const natural = text
+    .replace(/https?:\/\/\S+|www\.\S+/giu, " ")
+    .replace(/\b[^\s@]+@[^\s@]+\.[^\s@]+\b/giu, " ")
+    .replace(/\b(?=\S*\d)[\p{L}\p{N}._/-]+\b/giu, " ");
+  if (/\p{Script=Hebrew}{2}/u.test(natural)) return "he";
+  const words = natural.match(/\p{Script=Latin}+/gu) ?? [];
+  const meaningful = words.filter(
+    (word) =>
+      !/^(?:hi|hello|hey|ok|okay|thanks|thank|yes|no|please|yo|bye)$/iu.test(
+        word,
+      ),
   );
-  // Do not erase an ordinary short Title Case English utterance such as
-  // "Please Help". A technical-name exclusion is useful only when at least
-  // two natural-language words remain to establish the surrounding grammar.
-  const languageWords =
-    wordsWithoutTechnicalNames.length >= 2
-      ? wordsWithoutTechnicalNames
-      : words.filter(
-          (word) =>
-            !/^(?:[A-Z]{2,}[A-Z0-9]*|[A-Za-z]*\d+[A-Za-z0-9]*)$/u.test(word),
-        );
-  const hebrewWords = languageWords.filter((word) =>
-    /\p{Script=Hebrew}/u.test(word),
-  ).length;
-  const latinWords = languageWords.length - hebrewWords;
-  const hebrewLetters = languageWords.reduce(
-    (count, word) => count + (word.match(/\p{Script=Hebrew}/gu)?.length ?? 0),
-    0,
-  );
-  const latinLetters = languageWords.reduce(
-    (count, word) => count + (word.match(/\p{Script=Latin}/gu)?.length ?? 0),
-    0,
-  );
-  if (hebrewWords > latinWords && hebrewLetters >= 2) return "he";
-  if (latinWords > hebrewWords && latinLetters >= 2) return "en";
-  return undefined;
+  if (
+    collectingName ||
+    meaningful.length < 3 ||
+    new Set(meaningful.map((word) => word.toLowerCase())).size < 3
+  )
+    return undefined;
+  // Require sentence evidence as well as word count: a brand or multipart name
+  // without a request/predicate remains business data, not a language choice.
+  if (
+    !meaningful.some((word) => englishLanguageSignals.has(word.toLowerCase()))
+  )
+    return undefined;
+  return "en";
 }
 
-/**
- * Choose the response language from the current inbound message. If that turn
- * contains only a number, URL, machine identifier, punctuation or one-letter
- * noise, retain the most recent unambiguous inbound language before falling
- * back to the agent's authored locale. Prior assistant output never decides a
- * customer's language. `recentInboundTexts` must be newest first.
- */
+/** newest-first inbound history; assistant prose never establishes language. */
 export function latestMessageLocale(
   configuredLocale: string,
   latestText: string,
   recentInboundTexts: readonly string[] = [],
+  context: {
+    readonly collectingName?: boolean;
+    readonly previousNameAnswers?: readonly boolean[];
+  } = {},
 ): "he" | "en" {
-  const detected = detectedMessageLocale(latestText);
+  const detected = detectedMessageLocale(latestText, context.collectingName);
   if (detected !== undefined) return detected;
-  for (const previousText of recentInboundTexts.slice(0, 50)) {
-    const previous = detectedMessageLocale(previousText);
+  for (const [index, previousText] of recentInboundTexts
+    .slice(0, 50)
+    .entries()) {
+    const previous = detectedMessageLocale(
+      previousText,
+      context.previousNameAnswers?.[index],
+    );
     if (previous !== undefined) return previous;
   }
   return configuredLocale.toLowerCase().startsWith("he") ? "he" : "en";
+}
+
+/** The prior delivered question supplies field context, never language evidence. */
+export function conversationLocale(
+  configuredLocale: string,
+  messages: readonly {
+    readonly role: "user" | "assistant";
+    readonly text: string;
+  }[],
+): "he" | "en" {
+  let previousAssistant = "";
+  const answers: { text: string; name: boolean }[] = [];
+  for (const message of messages) {
+    if (message.role === "assistant") previousAssistant = message.text;
+    else {
+      answers.push({
+        text: message.text,
+        name: /(?:מה (?:ה)?שם|איך קוראים|(?:your|full|contact|preferred) name)/iu.test(
+          previousAssistant,
+        ),
+      });
+      previousAssistant = "";
+    }
+  }
+  const latest = answers.pop();
+  const history = answers.reverse();
+  return latestMessageLocale(
+    configuredLocale,
+    latest?.text ?? "",
+    history.map((item) => item.text),
+    {
+      collectingName: latest?.name ?? false,
+      previousNameAnswers: history.map((item) => item.name),
+    },
+  );
 }
 
 /** The model selects a key; the repository supplies every delivered business word. */
@@ -671,6 +699,7 @@ export function groundAiReply(
       const selected = conversationalReply(decision.replyCode, locale);
       if (
         decision.replyCode === "callback_confirmation" ||
+        decision.replyCode === "invalid_callback_phone" ||
         !repeatsRecentAssistant(selected.text, spokenContext)
       )
         return selected;
@@ -715,6 +744,18 @@ export function groundAiReply(
     locale,
     spokenContext,
     knowledgeFallbackCodes,
+  );
+}
+
+/** An unquoted current refusal withdraws later-contact intent, never language or identity. */
+export function refusesHumanFollowup(text: string): boolean {
+  const value = text.normalize("NFKC").trim();
+  return (
+    !/["“”״]/u.test(value) &&
+    !/^(?:if|אם)\s/iu.test(value) &&
+    /^(?:(?:בבקשה )?אל (?:תחזרו|תחזור|תחזרי|תתקשרו|תתקשר|תתקשרי) אליי?|(?:אני )?לא (?:רוצה|מעוניין|מעוניינת) (?:שיחזרו|שיתקשרו) אליי?|(?:please )?(?:do not|don't|never) call me)[.!?\s]*$/iu.test(
+      value,
+    )
   );
 }
 

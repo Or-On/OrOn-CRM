@@ -280,7 +280,23 @@ function normalizePhone(
   key: string,
 ): string {
   const compact = raw.replace(phoneSeparators, "");
-  const explicit = normalizeE164(compact);
+  // Israeli international numbers must satisfy the same reviewed national
+  // shape before the permissive generic E.164 path. +9720 is never repaired.
+  if (
+    compact.startsWith("+972") ||
+    (options.phoneRegion === "IL" && compact.startsWith("972"))
+  ) {
+    const national = compact.replace(/^\+?972/u, "");
+    if (israeliNationalPattern.test(`0${national}`)) return `+972${national}`;
+    throw new LeadFieldValidationError(
+      key,
+      "invalid Israeli phone number",
+      "invalid_phone",
+    );
+  }
+  const explicit = /^\+[0-9]+$/u.test(compact)
+    ? normalizeE164(compact)
+    : undefined;
   if (explicit !== undefined) return explicit;
   if (options.phoneRegion === "IL") {
     const national = israeliNationalPattern.exec(compact);

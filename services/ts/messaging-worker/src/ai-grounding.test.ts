@@ -215,11 +215,11 @@ describe("WhatsApp deterministic grounding (typed fixtures, no provider evaluati
       text: "",
     });
     expect(groundAiReply(decision, [], "en")).toMatchObject({
-      text: 'To request a call, please reply in a separate message: "Please call me now."',
+      text: 'To request a call, please reply in a separate message: "Please have the AI agent call me now."',
       evidence: { kind: "conversation", code: "callback_confirmation" },
     });
     expect(groundAiReply(decision, [], "he")).toMatchObject({
-      text: 'כדי לבקש שיחה, נא לשלוח בהודעה נפרדת: "תתקשרו אליי עכשיו".',
+      text: 'כדי לבקש שיחה, נא לשלוח בהודעה נפרדת: "שהסוכן AI יתקשר אליי עכשיו".',
       evidence: { kind: "conversation", code: "callback_confirmation" },
     });
     expect(enforceStandaloneCallbackConsent(classified, true)).toBe(classified);
@@ -793,7 +793,7 @@ describe("WhatsApp deterministic grounding (typed fixtures, no provider evaluati
 
   it("keeps the exact callback-confirmation boundary even after an ambiguous repeat", () => {
     const text =
-      'To request a call, please reply in a separate message: "Please call me now."';
+      'To request a call, please reply in a separate message: "Please have the AI agent call me now."';
     expect(
       groundAiReply(
         {
@@ -830,13 +830,13 @@ describe("WhatsApp deterministic grounding (typed fixtures, no provider evaluati
     ["en", "לא עובד Samsung Smart TV", "he"],
     ["en", "המסך של Samsung Smart TV לא עובד", "he"],
     ["he", "Samsung Smart TV is broken", "en"],
-    ["he", "Please Help", "en"],
+    ["he", "Please Help", "he"],
     ["he", "Can You Help?", "en"],
     ["he", "Need Help Now", "en"],
-    ["he", "PLEASE HELP", "en"],
+    ["he", "PLEASE HELP", "he"],
     ["he", "CAN YOU HELP", "en"],
-    ["he", "ERROR", "en"],
-    ["he", "NOT WORKING", "en"],
+    ["he", "ERROR", "he"],
+    ["he", "NOT WORKING", "he"],
   ] as const)(
     "uses only the latest message for locale selection: %s / %s",
     (configured, text, expected) => {
@@ -970,9 +970,12 @@ describe("WhatsApp deterministic grounding (typed fixtures, no provider evaluati
     "אשמח שתחזרו אליי בבקשה",
     "אני רוצה שתתקשרי אליי עכשיו",
     "אפשר לקבל שיחה טלפונית עכשיו?",
-  ])("admits exact current callback intent: %s", (value) => {
-    expect(explicitlyRequestsImmediateCall(value)).toBe(true);
-  });
+  ])(
+    "does not confuse an ordinary callback with an automated AI call: %s",
+    (value) => {
+      expect(explicitlyRequestsImmediateCall(value)).toBe(false);
+    },
+  );
 
   it.each([
     'He said "call me now"',

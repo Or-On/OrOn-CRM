@@ -79,6 +79,7 @@ export interface AgentExecutionContract {
   readonly capabilities: readonly AgentCapability[];
   readonly leadFieldSchema: PinnedLeadFieldSchema | null;
   readonly locale: string;
+  readonly phoneRegion?: "IL";
   readonly flow: {
     readonly definitionId: string;
     readonly version: number;
@@ -249,6 +250,9 @@ export function buildAgentExecutionContract(
     capabilities,
     leadFieldSchema,
     locale: version.locale,
+    ...(version.channelConfiguration?.phoneRegion === "IL"
+      ? { phoneRegion: "IL" as const }
+      : {}),
     flow: input.flow ?? null,
     assignmentSource: input.assignmentSource,
     originatingConversationId: input.originatingConversationId ?? null,
@@ -284,6 +288,7 @@ export function executionConfigurationHash(
     )
     .update("\0")
     .update(contract.locale)
+    .update(contract.phoneRegion ?? "")
     .digest("hex")
     .slice(0, 32);
 }

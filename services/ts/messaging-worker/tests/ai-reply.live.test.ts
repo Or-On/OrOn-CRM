@@ -440,7 +440,7 @@ describe.skipIf(sourceUrl === undefined)(
           providerMessageId: `simulated-${randomUUID()}`,
           from: "+12025550197",
           profileName: "Fictional simulator contact",
-          text: "Please call me now.",
+          text: "Please have the AI agent call me now.",
         });
         const simulatedTrigger = await transaction<
           { id: string; contact_id: string }[]
@@ -566,7 +566,7 @@ describe.skipIf(sourceUrl === undefined)(
         })
         .mockResolvedValueOnce({
           action: "reply",
-          text: "Understood. I will not place a call.",
+          text: "Understood, I will not request a callback.",
         })
         .mockResolvedValueOnce({
           action: "reply",
@@ -702,7 +702,7 @@ describe.skipIf(sourceUrl === undefined)(
         });
         await acceptInbound(
           thirdInbound,
-          "Please call me.",
+          "Please have the AI agent call me now.",
           tiedProviderTimestamp,
         );
         expect(await store.processAvailable()).toBeGreaterThan(0);
@@ -850,8 +850,8 @@ describe.skipIf(sourceUrl === undefined)(
       expect(outboundText.map((row) => row.content_text)).toEqual([
         "Opening hours: 09:00–17:00.",
         "Let us check the connection.\n\nIs the router light steady or blinking?",
-        'To request a call, please reply in a separate message: "Please call me now."',
-        "Understood. I will not place a call.",
+        'To request a call, please reply in a separate message: "Please have the AI agent call me now."',
+        "Understood, I will not request a callback.",
         "I did not understand that. What problem are you seeing?",
         callAcknowledgement,
       ]);
@@ -1017,7 +1017,10 @@ describe.skipIf(sourceUrl === undefined)(
         },
       );
       try {
-        await acceptInbound(mutatedInbound, "Okay, please call me now.");
+        await acceptInbound(
+          mutatedInbound,
+          "Please have the AI agent call me now.",
+        );
         expect(await mutationStore.processAvailable()).toBeGreaterThan(0);
         const triggers = await admin<{ id: string }[]>`
           SELECT id FROM messaging.messages
@@ -1293,7 +1296,7 @@ describe.skipIf(sourceUrl === undefined)(
         ) VALUES (
           ${configurationTriggerId}::uuid, ${tenantId}::uuid,
           ${conversationId}::uuid, 'inbound', 'contact', 'text',
-          'Please call me.', 'meta', 'received',
+          'Please have the AI agent call me now.', 'meta', 'received',
           (SELECT GREATEST(COALESCE(max(created_at), CURRENT_TIMESTAMP),
                            CURRENT_TIMESTAMP) + INTERVAL '1 second'
            FROM messaging.messages
@@ -1415,7 +1418,7 @@ describe.skipIf(sourceUrl === undefined)(
           ) VALUES (
             ${archivedFlowTriggerId}::uuid, ${tenantId}::uuid,
             ${conversationId}::uuid, 'inbound', 'contact', 'text',
-            'Please call me.', 'meta', 'received',
+            'Please have the AI agent call me now.', 'meta', 'received',
             (SELECT GREATEST(COALESCE(max(created_at), CURRENT_TIMESTAMP),
                              CURRENT_TIMESTAMP) + INTERVAL '1 second'
              FROM messaging.messages
@@ -2471,7 +2474,7 @@ describe.skipIf(sourceUrl === undefined)(
         callbackDecide.mockClear();
         await callbackInbound(
           `wamid.callback-no-flag-${randomUUID()}`,
-          "Please call me now.",
+          "Please have the AI agent call me now.",
         );
         expect(
           await admin`SELECT ownership_mode FROM messaging.conversations WHERE id=${conversationId}::uuid`,
@@ -2479,7 +2482,10 @@ describe.skipIf(sourceUrl === undefined)(
         await resetCallbackAi();
         await admin`UPDATE platform.tenant_remediation_flags SET enabled=true WHERE tenant_id=${tenantId}::uuid AND flag_key='handoff_resume'`;
         const callbackId = `wamid.callback-optin-${randomUUID()}`;
-        await callbackInbound(callbackId, "Please call me now.");
+        await callbackInbound(
+          callbackId,
+          "Please have the AI agent call me now.",
+        );
         expect(
           required(
             (
@@ -2496,7 +2502,10 @@ describe.skipIf(sourceUrl === undefined)(
         const before =
           await admin`SELECT id FROM crm.tasks WHERE id IN(SELECT (metadata->>'taskId')::uuid FROM audit.records WHERE target_id=${required(receipt[0]).id}::uuid AND action='conversation.ai_handoff_ticket')`;
         expect(before).toHaveLength(1);
-        await callbackInbound(callbackId, "Please call me now.");
+        await callbackInbound(
+          callbackId,
+          "Please have the AI agent call me now.",
+        );
         expect(
           await admin`SELECT id FROM audit.records WHERE target_id=${required(receipt[0]).id}::uuid AND action='conversation.ai_handoff_ticket'`,
         ).toHaveLength(1);
@@ -2781,7 +2790,7 @@ describe.skipIf(sourceUrl === undefined)(
           >`SELECT extract(epoch FROM GREATEST(clock_timestamp(),(SELECT max(created_at) FROM messaging.messages WHERE conversation_id=${conversationId}::uuid))+interval '2 seconds')::bigint::text timestamp`;
           await acceptInbound(
             `wamid.failed-call-${randomUUID()}`,
-            "Please call me now.",
+            "Please have the AI agent call me now.",
             required(stamp[0]).timestamp,
           );
           await processUntilIdle(failedCallStore);

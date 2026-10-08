@@ -248,7 +248,12 @@ def _normalize_e164(value: str) -> str | None:
 
 def _normalize_phone(raw: str, phone_region: str | None, key: str) -> str:
     compact = _PHONE_SEPARATORS.sub("", raw)
-    explicit = _normalize_e164(compact)
+    if compact.startswith("+972") or (phone_region == "IL" and compact.startswith("972")):
+        national = compact.removeprefix("+").removeprefix("972")
+        if _IL_NATIONAL.fullmatch(f"0{national}"):
+            return f"+972{national}"
+        raise LeadFieldValidationError(key, "invalid Israeli phone number", "invalid_phone")
+    explicit = _normalize_e164(compact) if re.fullmatch(r"\+[0-9]+", compact) else None
     if explicit is not None:
         return explicit
     if phone_region == "IL":

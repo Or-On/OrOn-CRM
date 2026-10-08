@@ -543,6 +543,8 @@ export interface AgentProfileDraftInput {
   readonly roleTitle?: string;
   /** Which reviewed lead field schema a lead-collecting agent is pinned to. */
   readonly leadFieldSchemaId?: string;
+  /** Reviewed region for local-format callback numbers, never inferred from language. */
+  readonly phoneRegion?: "IL";
 }
 
 /** The deterministically checked parts of a proposed agent version. */
@@ -590,6 +592,8 @@ async function reviewAgentConfiguration(
         .map(({ capability, channel }) => `${capability} on ${channel}`)
         .join("; ")}`,
     );
+  if (input.phoneRegion !== undefined && !["IL"].includes(input.phoneRegion))
+    throw new TypeError("unsupported reviewed phone region");
   const roleTitle = input.roleTitle?.trim();
   if (roleTitle !== undefined && roleTitle.length > 60)
     throw new TypeError("role title must be 60 characters or fewer");
@@ -636,6 +640,9 @@ async function reviewAgentConfiguration(
             }),
           }
         : {}),
+      ...(input.phoneRegion === undefined
+        ? {}
+        : { phoneRegion: input.phoneRegion }),
       ...(roleTitle === undefined || roleTitle === "" ? {} : { roleTitle }),
       ...(leadFieldSchemaId === undefined ? {} : { leadFieldSchemaId }),
     },
@@ -1156,11 +1163,11 @@ interface AutomaticCallCandidate {
 }
 
 /**
- * Admit only a standalone, explicit request for an immediate callback.
- * Compound text is never action-scoped consent; the AI must ask the customer
- * to confirm the callback in a separate message before any real-call side effect.
+ * Identify a present customer request for human follow-up. It may accompany
+ * volunteered lead facts, but never authorizes an automatic AI call. Quoted,
+ * negated and conditional wording remains untrusted discussion.
  */
-export function explicitWhatsAppCallbackIntent(text: string): boolean {
+export function explicitWhatsAppHumanFollowupIntent(text: string): boolean {
   const normalized = text.normalize("NFKC").replace(/\s+/gu, " ").trim();
   const request = normalized.replace(
     /^(?:(?:yes|sure|ok(?:ay)?)(?:\s+please)?|(?:כן|בטח|בסדר)(?:\s+בבקשה)?)[,.:;!?،\s]+/iu,
@@ -1174,11 +1181,39 @@ export function explicitWhatsAppCallbackIntent(text: string): boolean {
     /^(?:(?:(?:i(?:\s+would|['’]d)\s+like|i\s+want)\s+(?:a|an)|can\s+(?:a|an))\s+(?:representative|agent)\s+(?:to\s+)?call\s+me|(?:please\s+)?have\s+(?:a\s+)?(?:representative|agent|someone)\s+call\s+me)(?:\s+now)?(?:[,،]\s*please|\s+please)?[.!?\s]*$/iu;
   const hebrewRepresentative =
     /^(?:(?:(?:אני\s+)?(?:רוצה|אשמח)|אפשר)\s+ש(?:נציג|נציגה|מישהו|מישהי)\s+(?:יתקשר|תתקשר|יחזור|תחזור)\s+אליי?)(?:\s+עכשיו)?(?:[,،]\s*בבקשה|\s+בבקשה)?[.!?\s]*$/iu;
+  if (
+    /["“”״]/u.test(request) ||
+    /(?:^|\s)(?:if|unless|don't|not|never|אם|כאשר|אל|לא)(?:\s|$)|(?:said|אמר|אמרה|אמרו)\s/iu.test(
+      request,
+    )
+  )
+    return false;
+  const affirmativeClause =
+    /(?:^|[,;.!?]\s*|\s)(?:(?:בבקשה|אשמח|אני רוצה|כן)\s+)?(?:ש(?:נציג|נציגה)\s+)?(?:ש?תחזרו|ש?תחזור|ש?תחזרי|יחזור|תחזור|יתקשר|תתקשר|ש?תתקשרו|ש?תתקשרי|ש?תתקשר)\s+אליי?(?=\s|[.!?,]|$)/u.test(
+      request,
+    );
   return (
+    affirmativeClause ||
+    /^(?:שנציג|שנציגה) (?:יחזור|תחזור|יתקשר|תתקשר) אליי?(?: בהמשך)?[.!?\s]*$/u.test(
+      request,
+    ) ||
     english.test(request) ||
     hebrew.test(request) ||
     englishRepresentative.test(request) ||
     hebrewRepresentative.test(request)
+  );
+}
+
+/** Automatic telephony requires an explicitly automated/AI call, not human follow-up. */
+export function explicitWhatsAppCallbackIntent(text: string): boolean {
+  const value = text.normalize("NFKC").replace(/\s+/gu, " ").trim();
+  return (
+    /^(?:בבקשה )?(?:שסוכן|שהסוכן|שנציג|שהנציג) (?:AI|הבינה המלאכותית) יתקשר אליי?(?: עכשיו)?[.!?\s]*$/iu.test(
+      value,
+    ) ||
+    /^(?:please )?(?:have the |have an? |let the )?(?:AI|automated) (?:agent|assistant) call me(?: now)?(?: please)?[.!?\s]*$/iu.test(
+      value,
+    )
   );
 }
 
