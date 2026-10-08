@@ -1205,3 +1205,15 @@ it("returns the canonical failed-write reply without another paid inference or c
   expect(fetcher).not.toHaveBeenCalled();
   expect(beforeAttempt).not.toHaveBeenCalled();
 });
+
+it("requests correction for an invalid phone receipt without paying for inference", async () => {
+  const fetcher = vi.fn();
+  vi.stubGlobal("fetch", fetcher);
+  const response = await provider().decide({
+    systemPrompt: "Synthetic", locale: "he", messages: [],
+    actionReceipts: [{ action: "lead_save", ok: false, reference: null,
+      detail: "invalid field", validationError: { code: "invalid_phone", field: "callback_phone", recoverable: true } }],
+  });
+  expect(response).toEqual({ action: "reply", replyCode: "invalid_callback_phone", text: "" });
+  expect(fetcher).not.toHaveBeenCalled();
+});

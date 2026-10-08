@@ -653,7 +653,15 @@ export class OpenAiCompatibleChatProvider implements WhatsAppAiProvider {
         latestReceipt.action,
       )
     )
-      return { action: "reply", replyCode: "action_failed", text: "" };
+      return {
+        action: "reply",
+        replyCode:
+          latestReceipt.validationError?.recoverable === true &&
+          latestReceipt.validationError.code === "invalid_phone"
+            ? "invalid_callback_phone"
+            : "action_failed",
+        text: "",
+      };
     if (
       this.unrecordedUsage.length >= 98 ||
       this.unrecordedAttempts.length >= 98
