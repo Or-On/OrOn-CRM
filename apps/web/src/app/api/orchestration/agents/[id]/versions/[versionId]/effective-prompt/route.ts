@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { loadConfig } from "@or-on/config";
+import { ControlApiClient } from "@or-on/api-client";
 import {
   EffectivePromptContextRequired,
   loadEffectivePromptContext,
@@ -77,25 +78,19 @@ export async function GET(
       if (!loaded.assertion)
         throw new Error("missing authorized read assertion");
       const config = loadConfig(process.env, { service: "web" });
-      const target = new URL(
-        `/api/v1/orchestration/agents/${id}/versions/${versionId}/effective-prompt`,
-        config.controlApiUrl,
-      );
-      if (
-        selection.retainedFlowId !== null &&
-        selection.retainedFlowVersion !== null
-      ) {
-        target.searchParams.set("flow_id", selection.retainedFlowId);
-        target.searchParams.set(
-          "flow_version",
-          String(selection.retainedFlowVersion),
-        );
-      }
-      if (nodeId !== null) target.searchParams.set("node_id", nodeId);
-      const response = await fetch(target, {
-        headers: { authorization: `Bearer ${loaded.assertion}` },
-        cache: "no-store",
-        signal: AbortSignal.any([request.signal, AbortSignal.timeout(10000)]),
+      const client = new ControlApiClient(config.controlApiUrl, (target, init) => {
+        const headers = new Headers(init?.headers);
+        headers.set("authorization", `Bearer ${loaded.assertion}`);
+        return fetch(target, {
+          ...init, headers, cache: "no-store",
+          signal: AbortSignal.any([request.signal, AbortSignal.timeout(10000)]),
+        });
+      });
+      const response = await client.getAgentEffectivePrompt({
+        agent_id: id, version_id: versionId,
+        ...(selection.retainedFlowId === null ? {} : { flow_id: selection.retainedFlowId }),
+        ...(selection.retainedFlowVersion === null ? {} : { flow_version: selection.retainedFlowVersion }),
+        ...(nodeId === null ? {} : { node_id: nodeId }),
       });
       if (!response.ok)
         return privateResponse(
@@ -108,7 +103,7 @@ export async function GET(
             },
           ),
         );
-      instruction = await response.json();
+      instruction = response.data;
       if (
         instruction === null ||
         typeof instruction !== "object" ||
