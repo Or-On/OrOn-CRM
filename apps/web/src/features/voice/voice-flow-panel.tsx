@@ -1,6 +1,11 @@
 "use client";
-
-import type { ComponentCatalog, FlowSummary } from "@or-on/api-client";
+import type {
+  ComponentCatalog,
+  FlowSummary,
+  FlowSourceResult,
+  FlowPublishResult,
+  FlowValidationResult,
+} from "@or-on/api-client";
 import {
   Badge,
   Button,
@@ -13,17 +18,17 @@ import {
 import { Braces, Plus } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
-
+import { useEffect, useRef, useState } from "react";
+import { StructuredVoiceSource } from "./source-editor";
 import { errorMessage } from "../../i18n/error-message";
 import { useCapability } from "../access";
+import { crmMutation } from "../crm";
+import { PublicationResult, type PublicationView } from "../orchestration";
 import { voiceMutation } from "./mutation";
-
 interface FlowFeedback {
   readonly kind: "error" | "success";
   readonly text: string;
 }
-
 export function VoiceFlowPanel({
   catalog,
   flows,
@@ -33,12 +38,26 @@ export function VoiceFlowPanel({
 }) {
   const t = useTranslations();
   const locale = useLocale();
-  const canEdit = useCapability("voice:operate");
+  const canOperate = useCapability("voice:operate");
+  const canManageFlows = useCapability("flows:manage");
+  const canManageCampaigns = useCapability("campaigns:manage");
+  const canEdit = canOperate && canManageFlows && canManageCampaigns;
   const router = useRouter();
   const [editorOpen, setEditorOpen] = useState(false);
   const [source, setSource] = useState("");
   const [feedback, setFeedback] = useState<FlowFeedback>();
   const [pending, setPending] = useState(false);
+  const [publication, setPublication] = useState<PublicationView>();
+  const [publishedSelection, setPublishedSelection] = useState<{
+    flowId: string;
+    version: number;
+  }>();
+  const dirtyRef = useRef(false);
+  const [loaded, setLoaded] = useState<FlowSourceResult>();
+  const [loading, setLoading] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  const [dirty, setDirty] = useState(false);
+  const requestId = useRef(crypto.randomUUID());
   const [query, setQuery] = useState("");
   const [sourceFilter, setSourceFilter] = useState("all");
   const [language, setLanguage] = useState("all");
@@ -54,8 +73,59 @@ export function VoiceFlowPanel({
   );
   const selected =
     visible.find((flow) => flow.flow_id === selectedId) ?? visible[0];
-
+  const sourceVersion =
+    publishedSelection?.flowId === selected?.flow_id
+      ? publishedSelection?.version
+      : selected?.latest_version;
+  useEffect(() => {
+    if (!selected || dirtyRef.current) return;
+    const controller = new AbortController();
+    setLoading(true);
+    setLoaded(undefined);
+    setSource("");
+    setDirty(false);
+    setFeedback(undefined);
+    void fetch(
+      `/api/voice/flows/${selected.flow_id}/versions/${String(sourceVersion)}`,
+      { signal: controller.signal, cache: "no-store" },
+    )
+      .then(async (response) => {
+        if (!response.ok) throw new Error("load_failed");
+        const result = (await response.json()) as NonNullable<typeof loaded>;
+        if (!controller.signal.aborted) {
+          setLoaded(result);
+          setSource(JSON.stringify(result.source, null, 2));
+          requestId.current = crypto.randomUUID();
+        }
+      })
+      .catch(() => {
+        if (!controller.signal.aborted)
+          setFeedback({
+            kind: "error",
+            text: "לא ניתן לטעון את מקור התהליך. נסו שוב.",
+          });
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
+  }, [selected?.flow_id, sourceVersion, attempt]);
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+  function changeSource(value: string) {
+    setSource(value);
+    setDirty(true);
+    dirtyRef.current = true;
+    requestId.current = crypto.randomUUID();
+  }
   async function act(path: string) {
+    if (!loaded?.editable || !canEdit) return;
     setPending(true);
     setFeedback(undefined);
     try {
@@ -66,10 +136,12 @@ export function VoiceFlowPanel({
         Array.isArray(parsed)
       )
         throw new TypeError(t("voice.sourceInvalid"));
-      const result = (await voiceMutation(path, { source: parsed })) as {
-        valid?: boolean;
-        errors?: string[];
-      };
+      const result = (await voiceMutation(path, {
+        source: parsed,
+        expected_base_version: loaded.base_version,
+        expected_revision: loaded.revision,
+        request_id: requestId.current,
+      })) as Partial<FlowPublishResult & FlowValidationResult>;
       if (result.valid === false) {
         setFeedback({
           kind: "error",
@@ -79,10 +151,42 @@ export function VoiceFlowPanel({
         setFeedback({
           kind: "success",
           text: path.endsWith("publish")
-            ? t("voice.published")
+            ? "פורסם, ממתין להפעלה — אין שינוי בשיחות חדשות עד לאישור השיוך"
             : t("voice.valid"),
         });
-        router.refresh();
+        if (path.endsWith("publish")) {
+          const staged = result.publication;
+          setPublication({
+            status: "published_pending_activation",
+            impacts: [],
+            ...(staged?.operationId ? { operationId: staged.operationId } : {}),
+          });
+          if (staged?.operationId) {
+            try {
+              const activated = await crmMutation<{
+                publication: PublicationView;
+              }>(
+                `/api/orchestration/publications/${staged.operationId}/activate`,
+                {},
+              );
+              setPublication(activated.publication);
+            } catch {
+              setFeedback({
+                kind: "error",
+                text: "הגרסה פורסמה אך הפעלתה לא הושלמה. המסלול הקודם נשאר פעיל. אפשר להשלים בבדיקת התצורה.",
+              });
+            }
+          }
+          setDirty(false);
+          dirtyRef.current = false;
+          if (result.flow)
+            setPublishedSelection({
+              flowId: result.flow.flow_id,
+              version: result.flow.latest_version,
+            });
+          router.refresh();
+          setAttempt((value) => value + 1);
+        }
       }
     } catch (error) {
       setFeedback({
@@ -93,9 +197,9 @@ export function VoiceFlowPanel({
       setPending(false);
     }
   }
-
   return (
     <div className="voice-flow-workspace">
+      {publication ? <PublicationResult result={publication} /> : null}
       <Surface className="voice-detail-index" level="raised">
         <header className="voice-detail-index__header">
           <div>
@@ -116,7 +220,7 @@ export function VoiceFlowPanel({
             <Button
               aria-controls="flow-source"
               aria-expanded={editorOpen}
-              disabled={!canEdit}
+              disabled={loading || !loaded}
               onClick={() => setEditorOpen((open) => !open)}
               size="small"
             >
@@ -125,7 +229,6 @@ export function VoiceFlowPanel({
             </Button>
           </div>
         </header>
-
         <Dialog
           title={t("voice.source")}
           closeLabel={t("common.close")}
@@ -140,22 +243,40 @@ export function VoiceFlowPanel({
               <p>{t("voice.adapter")}</p>
             </div>
           </div>
-          <Textarea
-            className="code-editor voice-flow-editor__source"
-            dir="ltr"
-            disabled={pending || !canEdit}
-            id="flow-source"
-            data-dialog-initial-focus
-            label={t("voice.source")}
-            onChange={(event) => setSource(event.target.value)}
-            rows={18}
-            spellCheck={false}
-            value={source}
+          {loaded ? (
+            <p dir="rtl">
+              גרסה {loaded.version} ·{" "}
+              {loaded.origin === "packaged"
+                ? "מקור משותף לקריאה בלבד"
+                : "מקור השייך לטננט"}{" "}
+              · הגרסה האחרונה שפורסמה; אין בכך אישור שזה המסלול הפעיל.
+            </p>
+          ) : null}
+          <StructuredVoiceSource
+            source={source}
+            disabled={pending || !canEdit || !loaded?.editable}
+            onChange={changeSource}
           />
+          <details>
+            <summary>JSON מתקדם — אותו מקור</summary>
+            <Textarea
+              className="code-editor voice-flow-editor__source"
+              dir="ltr"
+              disabled={pending || !canEdit || !loaded?.editable}
+              id="flow-source"
+              data-dialog-initial-focus
+              label={t("voice.source")}
+              onChange={(event) => changeSource(event.target.value)}
+              rows={18}
+              spellCheck={false}
+              value={source}
+            />
+          </details>
+          {dirty ? <p role="status">שינויים לא שמורים</p> : null}
           <div className="voice-flow-editor__actions">
             <Button
               busy={pending}
-              disabled={!canEdit}
+              disabled={!canEdit || !loaded?.editable || loading}
               onClick={() => void act("/api/voice/flows/validate")}
               variant="secondary"
             >
@@ -163,7 +284,7 @@ export function VoiceFlowPanel({
             </Button>
             <Button
               busy={pending}
-              disabled={!canEdit}
+              disabled={!canEdit || !loaded?.editable || loading}
               onClick={() => void act("/api/voice/flows/publish")}
             >
               {t("voice.publish")}
@@ -183,19 +304,27 @@ export function VoiceFlowPanel({
             </p>
           )}
         </Dialog>
-
+        {loading ? <p role="status">טוען מקור…</p> : null}
+        {!loaded && feedback ? (
+          <div role="alert">
+            <p>{feedback.text}</p>
+            <Button onClick={() => setAttempt(attempt + 1)}>ניסיון נוסף</Button>
+          </div>
+        ) : null}
         <div className="tenant-register-toolbar">
           <Input
             id="voice-flow-search"
             type="search"
             label={t("tenantOperations.search")}
             value={query}
+            disabled={dirty || pending}
             onChange={(event) => setQuery(event.target.value)}
           />
           <Select
             id="voice-flow-source"
             label={t("tenantOperations.origin")}
             value={sourceFilter}
+            disabled={dirty || pending}
             onChange={(event) => setSourceFilter(event.target.value)}
           >
             <option value="all">{t("tenantOperations.allSources")}</option>
@@ -206,6 +335,7 @@ export function VoiceFlowPanel({
             id="voice-flow-language"
             label={t("inbox.language")}
             value={language}
+            disabled={dirty || pending}
             onChange={(event) => setLanguage(event.target.value)}
           >
             <option value="all">{t("tenantOperations.allLanguages")}</option>
@@ -229,15 +359,27 @@ export function VoiceFlowPanel({
                 <button
                   type="button"
                   key={flow.flow_id}
+                  disabled={pending}
                   aria-current={
                     selected?.flow_id === flow.flow_id ? "true" : undefined
                   }
-                  onClick={() => setSelectedId(flow.flow_id)}
+                  onClick={() => {
+                    if (
+                      !dirty ||
+                      window.confirm(
+                        "יש שינויים לא שמורים. לעבור לתהליך אחר ולוותר עליהם?",
+                      )
+                    ) {
+                      dirtyRef.current = false;
+                      setDirty(false);
+                      setSelectedId(flow.flow_id);
+                    }
+                  }}
                 >
                   <span>
                     <strong dir="auto">{flow.name}</strong>
                     <small>
-                      <bdi>{flow.language}</bdi> · v{flow.latest_version}
+                      <bdi>{flow.language}</bdi> ֲ· v{flow.latest_version}
                     </small>
                   </span>
                   <Badge

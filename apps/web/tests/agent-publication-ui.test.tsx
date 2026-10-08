@@ -95,7 +95,10 @@ describe("agent publication from the rendered draft", () => {
     await waitFor(() =>
       expect(state.mutation).toHaveBeenCalledWith(
         `/api/orchestration/agents/${selected.id}/publish`,
-        { expectedVersionId: selected.versionId },
+        expect.objectContaining({
+          expectedVersionId: selected.versionId,
+          activate: true,
+        }),
       ),
     );
     await waitFor(() => expect(state.refresh).toHaveBeenCalledTimes(1));
@@ -121,7 +124,10 @@ describe("agent publication from the rendered draft", () => {
       expect(state.mutation).toHaveBeenCalledTimes(1);
       expect(state.mutation).toHaveBeenCalledWith(
         `/api/orchestration/agents/${selected.id}/publish`,
-        { expectedVersionId: selected.versionId },
+        expect.objectContaining({
+          expectedVersionId: selected.versionId,
+          activate: true,
+        }),
       );
       expect(state.refresh).not.toHaveBeenCalled();
     },
@@ -134,4 +140,46 @@ describe("agent publication from the rendered draft", () => {
     fireEvent.click(publish);
     expect(state.mutation).not.toHaveBeenCalled();
   });
+});
+
+it("shows actual rebind and excluded-owner counts for the explicitly selected published version", async () => {
+  const selected = agent(1);
+  const target = "30000000-0000-4000-8000-000000000001";
+  state.mutation.mockResolvedValue({
+    versionId: target,
+    rebound: 2,
+    skipped: 2,
+    skippedHuman: 1,
+    skippedRemoved: 1,
+  });
+  render(
+    panel([
+      {
+        ...selected,
+        whatsAppAssignableVersionId: target,
+        whatsAppAssignableVersion: 2,
+        lifecycle: {
+          ...selected.lifecycle,
+          staleConversations: 2,
+          assignedConversations: 2,
+        },
+      },
+    ]),
+  );
+  fireEvent.click(screen.getByRole("button", { name: /Rebind to v2/ }));
+  await waitFor(() =>
+    expect(state.mutation).toHaveBeenCalledWith(
+      `/api/orchestration/agents/${selected.id}/rebind`,
+      { versionId: target, expectedVersionId: target },
+    ),
+  );
+  await waitFor(() =>
+    expect(screen.getByText(/הועברו: 2/).textContent).toContain("הועברו: 2"),
+  );
+  expect(screen.getByText(/הועברו: 2/).textContent).toContain(
+    "בבעלות אנושית: 1",
+  );
+  expect(screen.getByText(/הועברו: 2/).textContent).toContain(
+    "הוסרו מתיבת הדואר: 1",
+  );
 });

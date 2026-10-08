@@ -12,3 +12,9 @@ export {
   transcriptArtifactEntries,
   transcriptEntries,
 } from "./voice-presentation";
+
+export {
+  editSourceText,
+  sourceCards,
+  StructuredVoiceSource,
+} from "./source-editor";

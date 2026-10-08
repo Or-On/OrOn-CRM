@@ -8,7 +8,7 @@ import { useLocale, useTranslations } from "next-intl";
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, type SyntheticEvent } from "react";
+import { useEffect, useRef, useState, type SyntheticEvent } from "react";
 import { GitBranch, Headphones, Pencil, Plus, Trash2 } from "lucide-react";
 
 import type {
@@ -44,6 +44,7 @@ import { useMutationFocus } from "../keyboard";
 import { AutomationRunHistory } from "../operations";
 import { AgentRegister } from "./agent-register";
 import { CanonicalFlowEditor } from "./canonical-flow-editor";
+import { PublicationResult, type PublicationView } from "./publication-result";
 import { FlowCanvas } from "./flow-canvas";
 import {
   emptyLeadConfiguration,
@@ -116,6 +117,16 @@ export function OrchestrationPanel({
       .toLocaleLowerCase(locale)
       .includes(flowQuery.trim().toLocaleLowerCase(locale)),
   );
+  const [flowDirty, setFlowDirty] = useState(false);
+  const publishRequests = useRef(new Map<string, string>());
+  const [publication, setPublication] = useState<PublicationView>();
+  const [rebindResult, setRebindResult] = useState<{
+    rebound: number;
+    skipped?: number;
+    skippedHuman?: number;
+    skippedRemoved?: number;
+    conflicted?: number;
+  }>();
   const [pending, setPending] = useState(false);
   const rememberMutationFocus = useMutationFocus(pending);
   const [error, setError] = useState<string>();
@@ -262,6 +273,7 @@ export function OrchestrationPanel({
   async function saveFlowDefinition(
     definitionId: string,
     flow: CanonicalFlow,
+    expectedRevision?: number,
   ): Promise<number | undefined> {
     if (pending) return undefined;
     rememberMutationFocus();
@@ -270,7 +282,12 @@ export function OrchestrationPanel({
     try {
       const saved = await crmMutation<{ readonly version: number }>(
         `/api/orchestration/flows/${definitionId}`,
-        { flow },
+        {
+          flow,
+          expectedRevision:
+            expectedRevision ??
+            flows.find((entry) => entry.id === definitionId)?.version,
+        },
         { method: "PATCH" },
       );
       router.refresh();
@@ -281,6 +298,34 @@ export function OrchestrationPanel({
     } finally {
       setPending(false);
     }
+  }
+
+  async function publishVersion(
+    path: string,
+    expectedVersionId: string | undefined,
+  ) {
+    await run(async () => {
+      const result = await crmMutation<{ publication?: PublicationView }>(
+        path,
+        {
+          expectedVersionId,
+          requestId: (() => {
+            const key = `${path}:${expectedVersionId ?? ""}`;
+            const stored =
+              publishRequests.current.get(key) ?? crypto.randomUUID();
+            publishRequests.current.set(key, stored);
+            return stored;
+          })(),
+          activate: true,
+        },
+      );
+      setPublication(
+        result.publication ?? {
+          status: "published_pending_activation",
+          impacts: [],
+        },
+      );
+    });
   }
 
   async function simulate(event: SyntheticEvent<HTMLFormElement>) {
@@ -325,6 +370,25 @@ export function OrchestrationPanel({
 
   return (
     <div className="orchestration-workspace">
+      {publication ? <PublicationResult result={publication} /> : null}
+      {rebindResult ? (
+        <p role="status" dir="rtl">
+          הועברו: {rebindResult.rebound}
+          {rebindResult.skipped === undefined
+            ? ""
+            : ` · דולגו: ${String(rebindResult.skipped)}`}
+          {rebindResult.conflicted === undefined
+            ? ""
+            : ` · התנגשויות: ${String(rebindResult.conflicted)}`}
+          {rebindResult.skippedHuman === undefined
+            ? ""
+            : ` · בבעלות אנושית: ${String(rebindResult.skippedHuman)}`}
+          {rebindResult.skippedRemoved === undefined
+            ? ""
+            : ` · הוסרו מתיבת הדואר: ${String(rebindResult.skippedRemoved)}`}
+          . שיחות בבעלות אנושית לא הועברו.
+        </p>
+      ) : null}
       {insights && (activeTab === "agents" || activeTab === "flows") ? (
         <section
           className="tenant-performance-strip"
@@ -448,10 +512,9 @@ export function OrchestrationPanel({
               canEdit={canEdit}
               pending={pending}
               publish={(id, expectedVersionId) =>
-                void run(() =>
-                  crmMutation(`/api/orchestration/agents/${id}/publish`, {
-                    expectedVersionId,
-                  }),
+                void publishVersion(
+                  `/api/orchestration/agents/${id}/publish`,
+                  expectedVersionId,
                 )
               }
               rename={(id, name) =>
@@ -482,11 +545,19 @@ export function OrchestrationPanel({
                 )
               }
               rebind={(id, versionId) =>
-                run(() =>
-                  crmMutation(`/api/orchestration/agents/${id}/rebind`, {
+                run(async () => {
+                  const result = await crmMutation<{
+                    rebound: number;
+                    skipped?: number;
+                    skippedHuman?: number;
+                    skippedRemoved?: number;
+                    conflicted?: number;
+                  }>(`/api/orchestration/agents/${id}/rebind`, {
                     versionId,
-                  }),
-                )
+                    expectedVersionId: versionId,
+                  });
+                  setRebindResult(result);
+                })
               }
               revise={(id, revision) =>
                 run(() =>
@@ -641,7 +712,17 @@ export function OrchestrationPanel({
                     }
                     className="orchestration-flow-studio__flow"
                     key={flow.id}
-                    onClick={() => setSelectedFlowId(flow.id)}
+                    onClick={() => {
+                      if (
+                        !flowDirty ||
+                        window.confirm(
+                          "יש שינויים לא שמורים. לוותר עליהם ולעבור לתהליך אחר?",
+                        )
+                      ) {
+                        setFlowDirty(false);
+                        setSelectedFlowId(flow.id);
+                      }
+                    }}
                     type="button"
                   >
                     <span>
@@ -686,13 +767,16 @@ export function OrchestrationPanel({
                     ) : !selectedFlow.published ? (
                       <Button
                         busy={pending}
-                        disabled={!canEdit}
+                        disabled={!canEdit || flowDirty}
+                        title={
+                          flowDirty
+                            ? "יש לשמור את הטיוטה לפני פרסום"
+                            : undefined
+                        }
                         onClick={() =>
-                          void run(() =>
-                            crmMutation(
-                              `/api/orchestration/flows/${selectedFlow.id}/publish`,
-                              {},
-                            ),
+                          void publishVersion(
+                            `/api/orchestration/flows/${selectedFlow.id}/publish`,
+                            selectedFlow.versionId ?? undefined,
                           )
                         }
                         size="small"
@@ -736,15 +820,19 @@ export function OrchestrationPanel({
 
                 {canEdit && selectedFlow.executionKind === "canonical" ? (
                   <CanonicalFlowEditor
-                    key={`${selectedFlow.id}:${String(selectedFlow.version)}`}
+                    key={selectedFlow.id}
+                    onDirtyChange={setFlowDirty}
                     definition={selectedFlow.definition}
+                    agents={agents}
                     disabled={pending}
                     flowId={selectedFlow.id}
                     labelForType={(type) => {
                       const key = nodeTypeTranslationKeys[type];
                       return key === undefined ? type : t(key);
                     }}
-                    onSave={(flow) => saveFlowDefinition(selectedFlow.id, flow)}
+                    onSave={(flow, base) =>
+                      saveFlowDefinition(selectedFlow.id, flow, base)
+                    }
                     version={selectedFlow.version}
                   />
                 ) : null}

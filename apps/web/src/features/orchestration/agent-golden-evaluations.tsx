@@ -3,18 +3,22 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgentGoldenWorkspace, AgentGoldenState } from "@or-on/crm";
 import { Button, Select } from "@or-on/ui";
+import { useCapability } from "../access";
 import { crmMutation, crmRead } from "../crm";
 
 export function AgentGoldenEvaluations({
   endpoint,
   versionId,
   locale,
+  publicationOperationId,
 }: {
+  readonly publicationOperationId?: string;
   readonly endpoint: string;
   readonly versionId: string;
   readonly locale: string;
 }) {
   const he = locale === "he";
+  const canRequest = useCapability("flows:manage");
   const title = he
     ? "בדיקת איכות על שיחות אמיתיות"
     : "Real conversation quality evaluation";
@@ -23,7 +27,7 @@ export function AgentGoldenEvaluations({
   const [failed, setFailed] = useState(false);
   const active = useRef(true);
   const request = useRef<AbortController | undefined>(undefined);
-  const url = `${endpoint}/golden-evaluations?versionId=${encodeURIComponent(versionId)}`;
+  const url = `${endpoint}/golden-evaluations?versionId=${encodeURIComponent(versionId)}${publicationOperationId ? `&publicationOperationId=${encodeURIComponent(publicationOperationId)}` : ""}`;
   const labels: Record<AgentGoldenState, string> = he
     ? {
         blocked: "ממתין לסט שיחות אמיתיות ולמדיניות בדיקה שנבדקו",
@@ -84,7 +88,8 @@ export function AgentGoldenEvaluations({
             className="feature-form"
             onSubmit={(event) => {
               event.preventDefault();
-              if (pending || workspace.datasets.length === 0) return;
+              if (!canRequest || pending || workspace.datasets.length === 0)
+                return;
               const form = new FormData(event.currentTarget);
               request.current?.abort();
               const controller = new AbortController();
@@ -93,7 +98,11 @@ export function AgentGoldenEvaluations({
               setFailed(false);
               void crmMutation<{ id: string }>(
                 `${endpoint}/golden-evaluations`,
-                { versionId, datasetId: form.get("datasetId") },
+                {
+                  versionId,
+                  datasetId: form.get("datasetId"),
+                  ...(publicationOperationId ? { publicationOperationId } : {}),
+                },
                 { signal: controller.signal },
               )
                 .then(() =>
@@ -121,7 +130,9 @@ export function AgentGoldenEvaluations({
                   ? "גרסת סט שיחות שאושרה"
                   : "Approved conversation dataset revision"
               }
-              disabled={pending || workspace.datasets.length === 0}
+              disabled={
+                !canRequest || pending || workspace.datasets.length === 0
+              }
               required
             >
               {workspace.datasets.map((dataset) => (
@@ -134,7 +145,7 @@ export function AgentGoldenEvaluations({
             <Button
               type="submit"
               busy={pending}
-              disabled={workspace.datasets.length === 0}
+              disabled={!canRequest || workspace.datasets.length === 0}
             >
               {he
                 ? "בקשת הרצת סט השיחות שאושר"
