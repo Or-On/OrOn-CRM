@@ -8,6 +8,11 @@ import {
   publishCanonicalFlow,
   rebindAgentConversations,
 } from "./cross-channel.js";
+import {
+  parseReferencePolicy,
+  type ReferencePolicy,
+  type CanonicalFlow,
+} from "./canonical-flow-contract.js";
 import { createLeadFieldSchema } from "./leads.js";
 import { parseAgentCapabilities } from "./agent-capabilities.js";
 import {
@@ -22,6 +27,56 @@ import {
   parseAgentQuality,
   qualityObject,
 } from "./agent-quality.js";
+
+const resetTriggers = [
+  "whatsapp.new_conversation",
+  "whatsapp.message",
+  "voice.inbound",
+  "voice.outbound_assignment",
+] as const;
+type ResetTrigger = (typeof resetTriggers)[number];
+export interface ResetPublicationPolicies {
+  readonly canonicalAgent?: ReferencePolicy;
+  readonly retainedVoice?: ReferencePolicy;
+  readonly nodeAgent?: ReferencePolicy;
+  readonly processes?: Partial<Record<ResetTrigger, ReferencePolicy>>;
+}
+/** Strict reviewed opt-in. Absence preserves historical pins. */
+export function parseResetPublicationPolicies(input: unknown): Required<
+  Omit<ResetPublicationPolicies, "processes">
+> & {
+  processes: Record<ResetTrigger, ReferencePolicy>;
+} {
+  const row = input === undefined ? {} : qualityObject(input);
+  if (
+    Object.keys(row).some(
+      (key) =>
+        !["canonicalAgent", "retainedVoice", "nodeAgent", "processes"].includes(
+          key,
+        ),
+    )
+  )
+    throw new TypeError("Unsupported reset publication policy field");
+  const processes =
+    row.processes === undefined ? {} : qualityObject(row.processes);
+  if (
+    Object.keys(processes).some(
+      (key) => !(resetTriggers as readonly string[]).includes(key),
+    )
+  )
+    throw new TypeError("Unsupported reset process trigger");
+  return {
+    canonicalAgent: parseReferencePolicy(row.canonicalAgent),
+    retainedVoice: parseReferencePolicy(row.retainedVoice),
+    nodeAgent: parseReferencePolicy(row.nodeAgent),
+    processes: Object.fromEntries(
+      resetTriggers.map((trigger) => [
+        trigger,
+        parseReferencePolicy(processes[trigger]),
+      ]),
+    ) as Record<ResetTrigger, ReferencePolicy>,
+  };
+}
 
 /** Every identifier comes from a reviewed inventory, never a tenant slug. */
 export interface AgentResetPlan {
@@ -42,6 +97,7 @@ export interface AgentResetPlan {
   readonly maxResponseTokens: number;
   readonly phoneRegion?: "IL";
   readonly reviewedModelConfigurationId?: string;
+  readonly publicationPolicies?: ResetPublicationPolicies;
 }
 
 export function resetDigest(value: unknown): string {
@@ -54,6 +110,7 @@ export async function inspectAgentReset(
   plan: AgentResetPlan,
 ) {
   await assertKnowledgeManager(sql);
+  const policies = parseResetPublicationPolicies(plan.publicationPolicies);
   const tenant = await sql<{ id: string }[]>`
     SELECT platform.current_tenant_id() AS id WHERE platform.current_tenant_id()=${plan.tenantId}::uuid`;
   if (!tenant[0]) throw new TypeError("Resolved reset tenant mismatch");
@@ -80,6 +137,45 @@ export async function inspectAgentReset(
     SELECT spec FROM public.flows WHERE tenant_id=platform.current_tenant_id()
     AND flow_id=${plan.voiceFlowId}::uuid AND version=${plan.voiceFlowVersion}`;
   const configuration = await getTenantConfigurationState(sql);
+  const sources = await sql<
+    { id: string; definition: CanonicalFlow }[]
+  >`SELECT id,definition FROM automation.flow_versions WHERE id=ANY(${configuration.active?.configuration.processes.flatMap((p) => (p.flowVersionId ? [p.flowVersionId] : [])) ?? []}::uuid[])`;
+  const bindingImpacts = resetTriggers.map((trigger) => ({
+    trigger,
+    before: (configuration.active?.configuration.processes ?? [])
+      .filter((p) => p.trigger === trigger)
+      .map((p) => {
+        const definition = sources.find(
+          (source) => source.id === p.flowVersionId,
+        )?.definition;
+        return {
+          name: p.name,
+          agentVersionId: p.agentProfileVersionId ?? null,
+          flowVersionId: p.flowVersionId ?? null,
+          processPolicy: parseReferencePolicy(p.bindingPolicy),
+          canonicalAgentPolicy: parseReferencePolicy(
+            definition?.agentReferencePolicy,
+          ),
+          voiceNodes: (definition?.nodes ?? [])
+            .filter((n) => n.type === "voice.call")
+            .map((n) => ({
+              nodeId: n.id,
+              retainedVoicePolicy: parseReferencePolicy(
+                n.configuration?.flowReferencePolicy,
+              ),
+              nodeAgentPolicy: parseReferencePolicy(
+                n.configuration?.agentReferencePolicy,
+              ),
+            })),
+        };
+      }),
+    after: {
+      processPolicy: policies.processes[trigger],
+      canonicalAgentPolicy: policies.canonicalAgent,
+      retainedVoicePolicy: policies.retainedVoice,
+      nodeAgentPolicy: policies.nodeAgent,
+    },
+  }));
   const owners = await sql<
     { mode: string; version: string | null; count: number }[]
   >`
@@ -107,6 +203,7 @@ export async function inspectAgentReset(
     agent: agents[0] ?? null,
     voiceSpecSha256: retained[0] ? resetDigest(retained[0].spec) : null,
     configuration,
+    bindingImpacts,
     owners,
     activeCalls: calls[0]?.count ?? 0,
     greetings,
@@ -130,6 +227,7 @@ export async function prepareAgentReset(
       throw new TypeError("Reset operation content changed");
     return prior[0].metadata;
   }
+  const policies = parseResetPublicationPolicies(plan.publicationPolicies);
   const before = await inspectAgentReset(sql, plan);
   if (
     before.agent?.id !== plan.expectedAgentVersionId ||
@@ -225,6 +323,7 @@ export async function prepareAgentReset(
     revision.versionId,
     {
       schemaVersion: "1.0",
+      agentReferencePolicy: policies.canonicalAgent,
       channels: ["voice", "whatsapp"],
       nodes: [
         { id: "start", type: "start" },
@@ -235,6 +334,8 @@ export async function prepareAgentReset(
             flowId: plan.voiceFlowId,
             flowVersion: plan.voiceFlowVersion,
             agentVersionId: revision.versionId,
+            flowReferencePolicy: policies.retainedVoice,
+            agentReferencePolicy: policies.nodeAgent,
           },
         },
         { id: "end", type: "end" },
@@ -353,12 +454,8 @@ export async function activatePreparedAgentReset(
   )
     throw new TypeError("Configuration changed before activation");
   const before = state.active?.configuration ?? state.initialConfiguration;
-  const triggers = [
-    "whatsapp.new_conversation",
-    "whatsapp.message",
-    "voice.inbound",
-    "voice.outbound_assignment",
-  ] as const;
+  const triggers = resetTriggers;
+  const policies = parseResetPublicationPolicies(plan.publicationPolicies);
   const configuration = {
     ...before,
     processes: [
@@ -369,6 +466,7 @@ export async function activatePreparedAgentReset(
         name: `${plan.name}: ${trigger}`,
         enabled: true,
         trigger,
+        bindingPolicy: policies.processes[trigger],
         channel: trigger.startsWith("voice.")
           ? ("voice" as const)
           : ("whatsapp" as const),
@@ -411,6 +509,7 @@ export async function activatePreparedAgentReset(
     state: await getTenantConfigurationState(sql),
     rebound,
     rollbackConfiguration: before,
+    bindingImpacts: inventory.bindingImpacts,
   };
   await sql`INSERT INTO audit.records(tenant_id,actor_user_id,action,target_type,target_id,metadata)
     VALUES(platform.current_tenant_id(),${actor}::uuid,'agent.reset.activated','agent_reset',${plan.operationId}::uuid,${sql.json(JSON.parse(JSON.stringify(report)) as JsonValue)})`;
