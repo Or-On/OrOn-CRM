@@ -32,7 +32,6 @@ import {
   parseCanonicalFlow,
   validateCanonicalFlow,
   compileCanonicalFlow,
-  supportedChannels,
   sortedUniqueChannels,
   type CanonicalFlow,
   type SupportedChannel,
@@ -251,6 +250,7 @@ export async function listAgentProfiles(
         ON pinned.id = conversation.ai_agent_profile_version_id
       WHERE pinned.agent_profile_id = profile.id
         AND conversation.ownership_mode = 'ai'
+        AND conversation.removed_from_inbox_at IS NULL
     ) assigned ON true
     LEFT JOIN LATERAL (
       SELECT count(DISTINCT flow.flow_definition_id) AS count
@@ -351,7 +351,13 @@ export async function rebindAgentConversations(
   actorUserId: string,
   profileId: string,
   expectedVersionId: string,
-): Promise<{ readonly versionId: string; readonly rebound: number } | null> {
+): Promise<{
+  readonly versionId: string;
+  readonly rebound: number;
+  readonly skipped: number;
+  readonly skippedHuman: number;
+  readonly skippedRemoved: number;
+} | null> {
   await requireTenantFeature(sql, "agents");
   await requireTenantFeature(sql, "whatsapp");
   await sql`
@@ -374,6 +380,23 @@ export async function rebindAgentConversations(
     throw new TypeError(
       "a newer version was published; review it before rebinding",
     );
+  // Lock this precise candidate set so reported exclusions cannot change between
+  // counting and rebinding. New conversations retain their admission snapshot.
+  const candidates = await sql<
+    { ownership_mode: string; removed_from_inbox_at: Date | null }[]
+  >`
+    SELECT conversation.ownership_mode,conversation.removed_from_inbox_at
+    FROM messaging.conversations conversation
+    JOIN agents.agent_profile_versions pinned ON pinned.id=conversation.ai_agent_profile_version_id
+    WHERE pinned.agent_profile_id=${profileId}::uuid AND pinned.id<>${target}::uuid
+    ORDER BY conversation.id FOR UPDATE OF conversation
+  `;
+  const skippedRemoved = candidates.filter(
+    (row) => row.removed_from_inbox_at !== null,
+  ).length;
+  const skippedHuman = candidates.filter(
+    (row) => row.removed_from_inbox_at === null && row.ownership_mode !== "ai",
+  ).length;
   const rows = await sql<{ id: string }[]>`
     UPDATE messaging.conversations conversation
     SET ai_agent_profile_version_id=${target}::uuid, updated_at=CURRENT_TIMESTAMP
@@ -393,7 +416,13 @@ export async function rebindAgentConversations(
     profileId,
     { versionId: target, conversations: rows.length },
   );
-  return { versionId: target, rebound: rows.length };
+  return {
+    versionId: target,
+    rebound: rows.length,
+    skipped: skippedHuman + skippedRemoved,
+    skippedHuman,
+    skippedRemoved,
+  };
 }
 
 export async function renameAgentProfile(

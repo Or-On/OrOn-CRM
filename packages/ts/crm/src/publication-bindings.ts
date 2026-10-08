@@ -26,7 +26,8 @@ import type { JsonValue } from "./types.js";
 export type PublicationStatus =
   | "active_for_new_interactions"
   | "published_pending_activation"
-  | "unchanged_pinned";
+  | "unchanged_pinned"
+  | "blocked_evaluation";
 export interface PublicationImpact {
   readonly processName: string;
   readonly trigger: string;
@@ -38,6 +39,12 @@ export interface PublicationImpact {
   readonly newFlowVersionId: string | null;
 }
 export interface PublicationResult {
+  readonly evaluationCandidates?: readonly {
+    agentProfileId: string;
+    agentVersionId: string;
+    publicationOperationId: string;
+    candidateDigest: string;
+  }[];
   readonly status: PublicationStatus;
   readonly operationId: string;
   readonly releaseId: string | null;
@@ -71,6 +78,10 @@ function json(value: unknown): postgres.JSONValue {
 function digest(value: unknown) {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
+function requiredCandidate(value: string | null): string {
+  if (value === null) throw new TypeError("Publication candidate ID missing");
+  return value;
+}
 function uuid(value: string) {
   if (!/^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/iu.test(value))
     throw new TypeError("A UUID is required");
@@ -78,6 +89,61 @@ function uuid(value: string) {
 async function lock(sql: postgres.TransactionSql) {
   await assertKnowledgeManager(sql);
   await sql`SELECT pg_advisory_xact_lock(hashtextextended('tenant-configuration:' || platform.current_tenant_id()::text,0))`;
+}
+
+async function candidateEvaluation(
+  sql: postgres.TransactionSql,
+  operationId: string,
+): Promise<PublicationResult | null> {
+  const [gate] = await sql<
+    { enabled: boolean }[]
+  >`SELECT platform.current_agent_quality_gate_enabled() AS enabled`;
+  if (!gate?.enabled) return null;
+  const [prepared] = await sql<
+    {
+      value: {
+        digest: string;
+        agents: { agentProfileId: string; agentVersionId: string }[];
+      };
+    }[]
+  >`SELECT platform.prepare_publication_evaluation(${operationId}::uuid) AS value`;
+  if (!prepared) throw new Error("Publication candidate snapshot missing");
+  const [evidence] = await sql<
+    { allowed: boolean }[]
+  >`SELECT platform.publication_evaluation_satisfied(${operationId}::uuid) AS allowed`;
+  if (evidence?.allowed) return null;
+  const [prior] = await sql<
+    { result: PublicationResult }[]
+  >`SELECT result FROM automation.publication_operations WHERE id=${operationId}::uuid`;
+  const result: PublicationResult = {
+    status: "blocked_evaluation",
+    operationId,
+    releaseId: prior?.result.releaseId ?? null,
+    impacts: [],
+    evaluationCandidates: prepared.value.agents.map((agent) => ({
+      ...agent,
+      publicationOperationId: operationId,
+      candidateDigest: prepared.value.digest,
+    })),
+  };
+  await sql`UPDATE automation.publication_operations SET result=result || ${sql.json(json(result))} WHERE id=${operationId}::uuid`;
+  return result;
+}
+async function stageCandidate(
+  sql: postgres.TransactionSql,
+  actor: string,
+  id: string,
+  kind: "agent" | "canonical",
+  resource: string,
+  candidate: string,
+  hash: string,
+): Promise<PublicationResult | null> {
+  const [gate] = await sql<
+    { enabled: boolean }[]
+  >`SELECT platform.current_agent_quality_gate_enabled() AS enabled`;
+  if (!gate?.enabled) return null;
+  await sql`INSERT INTO automation.publication_operations(tenant_id,id,kind,resource_id,candidate_id,request_hash,result,created_by_user_id) VALUES(platform.current_tenant_id(),${id}::uuid,${kind},${resource}::uuid,${candidate}::uuid,${hash},${sql.json({ status: "blocked_evaluation", operationId: id, releaseId: null, impacts: [] })},${actor}::uuid)`;
+  return candidateEvaluation(sql, id);
 }
 
 /** Caller owns one transaction: publication, follower clones and approved release commit together. */
@@ -102,6 +168,23 @@ export async function publishAgentWithBindings(
       );
     return prior.result;
   }
+  const [latest] = await sql<
+    { id: string; published_at: Date | null }[]
+  >`SELECT v.id,v.published_at FROM agents.agent_profile_versions v JOIN agents.agent_profiles p ON p.id=v.agent_profile_id WHERE p.id=${profileId}::uuid AND p.archived_at IS NULL ORDER BY v.version DESC LIMIT 1 FOR UPDATE OF p`;
+  if (latest?.id !== command.expectedVersionId || latest.published_at !== null)
+    throw new PublicationConflictError(
+      "Agent candidate changed before publication",
+    );
+  const evaluation = await stageCandidate(
+    sql,
+    actor,
+    command.requestId,
+    "agent",
+    profileId,
+    command.expectedVersionId,
+    hash,
+  );
+  if (evaluation) return evaluation;
   const published = await publishAgentProfile(
     sql,
     actor,
@@ -125,7 +208,7 @@ export async function publishAgentWithBindings(
     command.activate,
   );
   await sql`INSERT INTO automation.publication_operations(tenant_id,id,kind,resource_id,candidate_id,request_hash,result,created_by_user_id)
-    VALUES(platform.current_tenant_id(),${command.requestId}::uuid,'agent',${profileId}::uuid,${command.expectedVersionId}::uuid,${hash},${sql.json(json(result))},${actor}::uuid)`;
+    VALUES(platform.current_tenant_id(),${command.requestId}::uuid,'agent',${profileId}::uuid,${command.expectedVersionId}::uuid,${hash},${sql.json(json(result))},${actor}::uuid) ON CONFLICT(tenant_id,id) DO UPDATE SET result=EXCLUDED.result`;
   return result;
 }
 
@@ -156,6 +239,16 @@ export async function publishCanonicalWithBindings(
     throw new PublicationConflictError(
       "Flow version changed; reload before publishing",
     );
+  const evaluation = await stageCandidate(
+    sql,
+    actor,
+    command.requestId,
+    "canonical",
+    definitionId,
+    command.expectedVersionId,
+    hash,
+  );
+  if (evaluation) return evaluation;
   if (!(await publishExecutableFlow(sql, actor, definitionId)))
     throw new TypeError("A valid unpublished canonical flow is required");
   const result = await propagate(
@@ -170,7 +263,7 @@ export async function publishCanonicalWithBindings(
     },
     command.activate,
   );
-  await sql`INSERT INTO automation.publication_operations(tenant_id,id,kind,resource_id,candidate_id,request_hash,result,created_by_user_id) VALUES(platform.current_tenant_id(),${command.requestId}::uuid,'canonical',${definitionId}::uuid,${command.expectedVersionId}::uuid,${hash},${sql.json(json(result))},${actor}::uuid)`;
+  await sql`INSERT INTO automation.publication_operations(tenant_id,id,kind,resource_id,candidate_id,request_hash,result,created_by_user_id) VALUES(platform.current_tenant_id(),${command.requestId}::uuid,'canonical',${definitionId}::uuid,${command.expectedVersionId}::uuid,${hash},${sql.json(json(result))},${actor}::uuid) ON CONFLICT(tenant_id,id) DO UPDATE SET result=EXCLUDED.result`;
   return result;
 }
 
@@ -188,6 +281,14 @@ export async function activateRetainedPublication(
   >`SELECT kind,resource_id,candidate_id,candidate_version,request_hash,result FROM automation.publication_operations WHERE id=${operationId}::uuid FOR UPDATE`;
   if (!operation) throw new TypeError("Publication not found");
   if (operation.result.releaseId) {
+    if (
+      (await getTenantConfigurationState(sql)).active?.id !==
+      operation.result.releaseId
+    ) {
+      const evaluation = await candidateEvaluation(sql, operationId);
+      if (evaluation)
+        return { ...evaluation, releaseId: operation.result.releaseId };
+    }
     const state = await getTenantConfigurationState(sql);
     if (
       activate &&
@@ -218,10 +319,37 @@ export async function activateRetainedPublication(
     return result;
   }
   if (
-    operation.kind !== "retained_voice" ||
-    operation.result.status !== "published_pending_activation"
+    !["published_pending_activation", "blocked_evaluation"].includes(
+      operation.result.status,
+    )
   )
     return operation.result;
+  const evaluation = await candidateEvaluation(sql, operationId);
+  if (evaluation) return evaluation;
+  if (operation.kind === "agent") {
+    if (
+      !(await publishAgentProfile(
+        sql,
+        actor,
+        operation.resource_id,
+        requiredCandidate(operation.candidate_id),
+      ))
+    )
+      throw new PublicationConflictError(
+        "Agent candidate changed before activation",
+      );
+  } else if (operation.kind === "canonical") {
+    const [latest] = await sql<
+      { id: string }[]
+    >`SELECT id FROM automation.flow_versions WHERE flow_definition_id=${operation.resource_id}::uuid ORDER BY version DESC LIMIT 1`;
+    if (
+      latest?.id !== operation.candidate_id ||
+      !(await publishExecutableFlow(sql, actor, operation.resource_id))
+    )
+      throw new PublicationConflictError(
+        "Canonical candidate changed before activation",
+      );
+  }
   const result = await propagate(sql, actor, operationId, operation, activate);
   await sql`UPDATE automation.publication_operations SET result=${sql.json(json({ ...result, retainedResult: operation.result.retainedResult }))} WHERE id=${operationId}::uuid`;
   return result;
@@ -326,12 +454,12 @@ async function propagate(
     }
     const agent =
       candidate.kind === "agent"
-        ? candidate.candidate_id!
+        ? requiredCandidate(candidate.candidate_id)
         : source.agent_profile_version_id;
     const key = `${source.id}:${agent}`;
     let clone = clones.get(key);
     if (candidate.kind === "canonical") {
-      const target = byId.get(candidate.candidate_id!);
+      const target = byId.get(requiredCandidate(candidate.candidate_id));
       if (!target || target.archived_at)
         throw new TypeError("Published canonical candidate unavailable");
       clone = { id: target.id, agent: target.agent_profile_version_id };
@@ -424,6 +552,9 @@ async function propagate(
   const [permission] = await sql<
     { allowed: boolean }[]
   >`SELECT platform.can_activate_publication() AS allowed`;
+  // Persist the proposed release before approval so the DB evidence trigger also
+  // protects direct review-page activation and retries after this transaction.
+  await sql`UPDATE automation.publication_operations SET result=result || ${sql.json({ releaseId: draft.id })} WHERE id=${operationId}::uuid`;
   const active = activate && permission?.allowed === true;
   if (active)
     await transitionTenantConfiguration(
