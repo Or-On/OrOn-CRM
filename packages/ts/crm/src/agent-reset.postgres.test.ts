@@ -48,6 +48,7 @@ describe.skipIf(!databaseUrl)(
         | "capabilities"
         | "name"
         | "maxResponseTokens"
+        | "publicationPolicies"
       >;
       try {
         await db
@@ -107,6 +108,13 @@ describe.skipIf(!databaseUrl)(
             if (!pin) throw new Error("missing synthetic pin");
             let plan: AgentResetPlan = {
               ...manifest,
+              publicationPolicies: {
+                ...manifest.publicationPolicies,
+                processes: {
+                  ...manifest.publicationPolicies?.processes,
+                  "voice.outbound_assignment": "pinned",
+                },
+              },
               tenantId: tenant,
               operationId: randomUUID(),
               profileId: profile,
@@ -119,6 +127,30 @@ describe.skipIf(!databaseUrl)(
               expectedVoiceSpecSha256: "",
             };
             const inventory = await inspectAgentReset(sql, plan);
+            expect(
+              inventory.bindingImpacts.find(
+                (p) => p.trigger === "voice.inbound",
+              )?.after,
+            ).toEqual({
+              processPolicy: "follow_published",
+              canonicalAgentPolicy: "follow_published",
+              retainedVoicePolicy: "follow_published",
+              nodeAgentPolicy: "follow_published",
+            });
+            expect(
+              inventory.bindingImpacts.find(
+                (p) => p.trigger === "voice.outbound_assignment",
+              )?.after.processPolicy,
+            ).toBe("pinned");
+            const conservative = await inspectAgentReset(sql, {
+              ...plan,
+              publicationPolicies: {},
+            });
+            expect(
+              conservative.bindingImpacts.every((p) =>
+                Object.values(p.after).every((value) => value === "pinned"),
+              ),
+            ).toBe(true);
             plan = {
               ...plan,
               expectedCatalogSha256: inventory.catalogSha256,
@@ -208,6 +240,24 @@ describe.skipIf(!databaseUrl)(
               await sql`SELECT DISTINCT agent_profile_version_id FROM automation.tenant_processes WHERE enabled`,
             ).toEqual([{ agent_profile_version_id: version }]);
             const retained = await inspectAgentReset(sql, plan);
+            expect(
+              retained.bindingImpacts.find((p) => p.trigger === "voice.inbound")
+                ?.before[0],
+            ).toMatchObject({
+              processPolicy: "follow_published",
+              canonicalAgentPolicy: "follow_published",
+              voiceNodes: [
+                {
+                  retainedVoicePolicy: "follow_published",
+                  nodeAgentPolicy: "follow_published",
+                },
+              ],
+            });
+            expect(
+              retained.bindingImpacts.find(
+                (p) => p.trigger === "voice.outbound_assignment",
+              )?.before[0]?.processPolicy,
+            ).toBe("pinned");
             expect(retained.activeCalls).toBe(1);
             expect(retained.owners).toContainEqual({
               mode: "ai",

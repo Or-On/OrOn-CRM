@@ -3,6 +3,17 @@
   "capabilities": ["lead.write", "lead.finalize", "lead.follow_up"],
   "locale": "he",
   "maxResponseTokens": 2048,
+  "publicationPolicies": {
+    "canonicalAgent": "follow_published",
+    "retainedVoice": "follow_published",
+    "nodeAgent": "follow_published",
+    "processes": {
+      "whatsapp.new_conversation": "follow_published",
+      "whatsapp.message": "follow_published",
+      "voice.inbound": "follow_published",
+      "voice.outbound_assignment": "follow_published"
+    }
+  },
   "openingMenuEnabled": false,
   "automaticTemplateGreetingEnabled": false,
   "messages": {

@@ -1,6 +1,6 @@
 # Publication bindings: local verification
 
-Task 6 adds explicit `pinned` and `follow_published` references. Historic references default to pinned. Process policy is stored in the reviewed tenant configuration; canonical agent and retained voice-node policies remain in immutable canonical source. No production configuration was changed.
+Task 6 adds explicit `pinned` and `follow_published` references. Historic references default to pinned. Process policy is stored in the reviewed tenant configuration; canonical agent and retained voice-node policies remain in immutable canonical source. No production configuration was changed. The reviewed OrOn reset manifest explicitly opts in at the canonical, retained, node-agent and per-trigger process layers; inspect/prepare/activation audit reports expose the before/after policy impact. Plans without opt-in remain pinned, and individual triggers can stay pinned.
 
 ## Publication and admission
 
