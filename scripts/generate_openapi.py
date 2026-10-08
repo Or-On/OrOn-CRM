@@ -86,7 +86,9 @@ def _method_name(operation_id: str) -> str:
 
 
 def generate_client(document: dict[str, Any]) -> str:
-    operations: list[tuple[str, str, str, str, str | None, list[tuple[str, str]]]] = []
+    operations: list[
+        tuple[str, str, str, str, str | None, list[tuple[str, str]], list[tuple[str, str, bool]]]
+    ] = []
     for path, path_item in sorted(document.get("paths", {}).items()):
         for http_method in ("get", "post"):
             operation = path_item.get(http_method)
