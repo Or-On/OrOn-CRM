@@ -163,9 +163,14 @@ export function parseCanonicalFlow(value: unknown): CanonicalFlow {
   );
   let layout: CanonicalFlow["layout"];
   if (record.layout !== undefined) {
+    if (
+      record.layout === null ||
+      typeof record.layout !== "object" ||
+      Array.isArray(record.layout)
+    )
+      throw new TypeError("layout must be an object");
     const candidate = record.layout as Record<string, unknown>;
     if (
-      !candidate ||
       candidate.version !== 1 ||
       !candidate.positions ||
       typeof candidate.positions !== "object" ||
@@ -174,10 +179,11 @@ export function parseCanonicalFlow(value: unknown): CanonicalFlow {
       throw new TypeError("layout must use version 1 and node positions");
     const positions: Record<string, { x: number; y: number }> = {};
     for (const [id, value] of Object.entries(candidate.positions)) {
+      if (value === null || typeof value !== "object" || Array.isArray(value))
+        throw new TypeError("layout position must be an object");
       const position = value as Record<string, unknown>;
       if (
         !nodes.some((node) => node.id === id) ||
-        !position ||
         typeof position.x !== "number" ||
         typeof position.y !== "number" ||
         !Number.isFinite(position.x) ||
